@@ -1,30 +1,40 @@
 // ============================================================
-// LinkUp Golf — Next.js Middleware
-// Runs on every request. Handles:
-// 1. Supabase session refresh
-// 2. Route protection (redirect unauthenticated users to /login)
-// 3. Admin route protection
+// LinkUp Golf — Next.js Middleware (Edge Runtime)
+// Runs on every matched request. Responsibilities:
+//   1. Attach correlation ID to every request
+//   2. Supabase session refresh
+//   3. Redirect unauthenticated users to /login
+//   4. Guard /admin routes with is_admin DB check
+//
+// NOTE: GHL tag re-validation is NOT done here (Edge runtime
+// has no persistent cache). It is enforced per-request in
+// API routes via withAuth() in src/lib/auth/with-auth.ts.
 // ============================================================
 
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-// Routes that don't require authentication
 const PUBLIC_ROUTES = [
   '/login',
-  '/join',           // invitation onboarding
-  '/auth/callback',  // magic link callback
+  '/join',
   '/auth/error',
-  '/api/webhooks',   // GHL webhooks (secured by webhook secret, not auth)
+  '/membership-required',
+  '/api/auth/magic-link',   // unauthenticated users request magic links
+  '/api/auth/callback',     // Supabase redirects here after magic link click
+  '/api/webhooks',          // GHL webhooks secured by secret, not session
 ]
 
-// Routes that require admin role
 const ADMIN_ROUTES = ['/admin']
 
 export async function middleware(request: NextRequest) {
+  const requestId = crypto.randomUUID()
+
   let response = NextResponse.next({
     request: { headers: request.headers },
   })
+
+  // Attach correlation ID so it propagates to API responses and logs
+  response.headers.set('X-Request-Id', requestId)
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -36,44 +46,54 @@ export async function middleware(request: NextRequest) {
         },
         set(name: string, value: string, options: CookieOptions) {
           request.cookies.set({ name, value, ...options })
-          response = NextResponse.next({
-            request: { headers: request.headers },
-          })
+          response = NextResponse.next({ request: { headers: request.headers } })
+          response.headers.set('X-Request-Id', requestId)
           response.cookies.set({ name, value, ...options })
         },
         remove(name: string, options: CookieOptions) {
           request.cookies.set({ name, value: '', ...options })
-          response = NextResponse.next({
-            request: { headers: request.headers },
-          })
+          response = NextResponse.next({ request: { headers: request.headers } })
+          response.headers.set('X-Request-Id', requestId)
           response.cookies.set({ name, value: '', ...options })
         },
       },
     }
   )
 
-  // Refresh session if it exists
+  // Refresh session (also validates JWT signature via Supabase)
   const { data: { user } } = await supabase.auth.getUser()
 
   const pathname = request.nextUrl.pathname
 
-  // Allow public routes through
+  // ---- Public routes ---------------------------------------
   if (PUBLIC_ROUTES.some(route => pathname.startsWith(route))) {
-    // If already logged in and hitting /login, redirect to home
+    // Already authenticated → redirect away from login page
     if (user && pathname === '/login') {
-      return NextResponse.redirect(new URL('/home', request.url))
+      const redirectResponse = NextResponse.redirect(new URL('/home', request.url))
+      redirectResponse.headers.set('X-Request-Id', requestId)
+      return redirectResponse
     }
     return response
   }
 
-  // AUTH BYPASS — remove before launch
-  // if (!user) {
-  //   const loginUrl = new URL('/login', request.url)
-  //   loginUrl.searchParams.set('redirectTo', pathname)
-  //   return NextResponse.redirect(loginUrl)
-  // }
+  // ---- AUTH BYPASS (development only) ----------------------
+  // Remove before launch — see comment in middleware for re-enabling
+  if (!user) {
+    const loginUrl = new URL('/login', request.url)
+    loginUrl.searchParams.set('redirectTo', pathname)
+    return NextResponse.redirect(loginUrl)
+  }
 
-  // Admin route — check admin flag
+  // ---- Unauthenticated: redirect to login ------------------
+  if (!user) {
+    const loginUrl = new URL('/login', request.url)
+    loginUrl.searchParams.set('redirectTo', pathname)
+    const redirectResponse = NextResponse.redirect(loginUrl)
+    redirectResponse.headers.set('X-Request-Id', requestId)
+    return redirectResponse
+  }
+
+  // ---- Admin routes: enforce is_admin ----------------------
   if (user && ADMIN_ROUTES.some(route => pathname.startsWith(route))) {
     const { data: member } = await supabase
       .from('members')
@@ -82,7 +102,9 @@ export async function middleware(request: NextRequest) {
       .single()
 
     if (!member?.is_admin) {
-      return NextResponse.redirect(new URL('/home', request.url))
+      const redirectResponse = NextResponse.redirect(new URL('/home', request.url))
+      redirectResponse.headers.set('X-Request-Id', requestId)
+      return redirectResponse
     }
   }
 
@@ -91,13 +113,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimisation)
-     * - favicon.ico
-     * - public folder files (icons, manifest, etc.)
-     */
-    '/((?!_next/static|_next/image|favicon.ico|icons|manifest.json|sw.js|workbox-.*).*)',
+    '/((?!_next/static|_next/image|favicon.ico|icons|manifest.json|sw.js|mockServiceWorker.js|workbox-.*).*)',
   ],
 }

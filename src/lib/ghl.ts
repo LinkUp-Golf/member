@@ -1,25 +1,38 @@
 // ============================================================
-// LinkUp Golf — Go High Level API Client
-// All GHL operations go through this file.
+// LinkUp Golf — GoHighLevel API Client
+// Uses the official @gohighlevel/api-client SDK for contacts,
+// tags, and workflows. Raw fetch retained only for calendar
+// free-slot queries which are not yet in the SDK.
 // Server-side only — never import in client components.
 // ============================================================
 
+import { HighLevel } from '@gohighlevel/api-client'
 import type { GHLContact, GHLCalendarEvent, GHLBookingSlot } from '@/types'
+import { GHLError, ErrorCode } from '@/lib/errors/app-error'
+import { logger } from '@/lib/logger'
 
-const GHL_BASE_URL = 'https://services.leadconnectorhq.com'
-const GHL_API_KEY = process.env.GHL_API_KEY!
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID!
+const GHL_BASE_URL = 'https://services.leadconnectorhq.com'
 
-// ---- Base fetch wrapper -------------------------------------
+// ---- SDK client (singleton) ---------------------------------
+// Initialized lazily so the process startup doesn't fail if the
+// env var is missing during tests or build time.
+let _client: HighLevel | null = null
 
-async function ghlFetch<T>(
-  path: string,
-  options: RequestInit = {}
-): Promise<T> {
+function getClient(): HighLevel {
+  if (!_client) {
+    if (!process.env.GHL_API_KEY) throw new GHLError('GHL_API_KEY is not set', ErrorCode.GHL_UNAVAILABLE)
+    _client = new HighLevel({ privateIntegrationToken: process.env.GHL_API_KEY })
+  }
+  return _client
+}
+
+// ---- Raw fetch for endpoints not covered by the SDK ---------
+async function ghlFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${GHL_BASE_URL}${path}`, {
     ...options,
     headers: {
-      Authorization: `Bearer ${GHL_API_KEY}`,
+      Authorization: `Bearer ${process.env.GHL_API_KEY}`,
       'Content-Type': 'application/json',
       Version: '2021-07-28',
       ...options.headers,
@@ -27,117 +40,105 @@ async function ghlFetch<T>(
   })
 
   if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`GHL API error ${res.status}: ${body}`)
+    const body = await res.text().catch(() => '')
+    const code = res.status === 404 ? ErrorCode.GHL_CONTACT_NOT_FOUND : ErrorCode.GHL_UNAVAILABLE
+    logger.error(`GHL ${res.status} ${path}: ${body.slice(0, 200)}`, { action: 'ghl_fetch_error', statusCode: res.status })
+    throw new GHLError(`GHL API error ${res.status}`, code, { path, statusCode: res.status })
   }
 
-  return res.json()
+  return res.json() as Promise<T>
 }
 
 // ---- Contacts -----------------------------------------------
 
-/**
- * Look up a GHL contact by email address.
- * Returns null if not found.
- */
 export async function getContactByEmail(email: string): Promise<GHLContact | null> {
   try {
-    const data = await ghlFetch<{ contacts: GHLContact[] }>(
-      `/contacts/?locationId=${GHL_LOCATION_ID}&email=${encodeURIComponent(email)}`
-    )
-    return data.contacts?.[0] ?? null
-  } catch {
+    const res = await getClient().contacts.getDuplicateContact({ locationId: GHL_LOCATION_ID, email })
+    const contact = (res as { contact?: GHLContact })?.contact
+    return contact ?? null
+  } catch (err) {
+    logger.warn('getContactByEmail failed', { action: 'ghl_contact_lookup', errorMessage: String(err) })
     return null
   }
 }
 
-/**
- * Get a GHL contact by their contact ID.
- */
 export async function getContactById(contactId: string): Promise<GHLContact | null> {
   try {
-    const data = await ghlFetch<{ contact: GHLContact }>(`/contacts/${contactId}`)
-    return data.contact ?? null
-  } catch {
+    const res = await getClient().contacts.getContact({ contactId })
+    const contact = (res as { contact?: GHLContact })?.contact
+    return contact ?? null
+  } catch (err) {
+    logger.warn('getContactById failed', { action: 'ghl_contact_lookup', errorMessage: String(err) })
     return null
   }
 }
 
-/**
- * Update fields on a GHL contact record.
- */
 export async function updateContact(
   contactId: string,
-  fields: Partial<{
-    firstName: string
-    lastName: string
-    phone: string
-    tags: string[]
-  }>
+  fields: Partial<{ firstName: string; lastName: string; phone: string; tags: string[] }>
 ): Promise<boolean> {
   try {
-    await ghlFetch(`/contacts/${contactId}`, {
-      method: 'PUT',
-      body: JSON.stringify(fields),
-    })
+    await getClient().contacts.updateContact({ contactId }, fields)
     return true
-  } catch {
+  } catch (err) {
+    logger.warn('updateContact failed', { action: 'ghl_contact_update', errorMessage: String(err) })
     return false
   }
 }
 
-/**
- * Check whether a contact has a specific GHL tag.
- * Used for access control.
- */
 export function contactHasTag(contact: GHLContact, tag: string): boolean {
   return contact.tags?.includes(tag) ?? false
 }
 
-/**
- * Add a tag to a GHL contact.
- */
 export async function addTagToContact(contactId: string, tag: string): Promise<boolean> {
   try {
-    await ghlFetch(`/contacts/${contactId}/tags`, {
-      method: 'POST',
-      body: JSON.stringify({ tags: [tag] }),
-    })
+    await getClient().contacts.addTags({ contactId }, { tags: [tag] })
     return true
-  } catch {
+  } catch (err) {
+    logger.warn('addTagToContact failed', { action: 'ghl_tag_add', errorMessage: String(err) })
     return false
   }
 }
 
-/**
- * Remove a tag from a GHL contact.
- */
 export async function removeTagFromContact(contactId: string, tag: string): Promise<boolean> {
   try {
-    await ghlFetch(`/contacts/${contactId}/tags`, {
-      method: 'DELETE',
-      body: JSON.stringify({ tags: [tag] }),
-    })
+    await getClient().contacts.removeTags({ contactId }, { tags: [tag] })
     return true
-  } catch {
+  } catch (err) {
+    logger.warn('removeTagFromContact failed', { action: 'ghl_tag_remove', errorMessage: String(err) })
     return false
   }
 }
 
-// ---- Bookings / Calendar ------------------------------------
+// ---- Emails / Notifications (via GHL workflows) -------------
 
-/**
- * Get available tee time slots for a given calendar and date range.
- * calendarId is the GHL calendar ID for the specific course.
- */
+export async function triggerWorkflow(params: {
+  workflowId: string
+  contactId: string
+  customData?: Record<string, string>
+}): Promise<boolean> {
+  try {
+    await getClient().contacts.addContactToWorkflow(
+      { contactId: params.contactId, workflowId: params.workflowId },
+      { eventStartTime: new Date().toISOString(), ...params.customData }
+    )
+    return true
+  } catch (err) {
+    logger.warn('triggerWorkflow failed', { action: 'ghl_workflow_trigger', errorMessage: String(err) })
+    return false
+  }
+}
+
+// ---- Calendar (raw fetch — not yet in SDK) ------------------
+
 export async function getAvailableSlots(
   calendarId: string,
-  startDate: string, // ISO date string: "2026-05-15"
-  endDate: string    // ISO date string: "2026-05-15"
+  startDate: string,
+  endDate: string
 ): Promise<GHLBookingSlot[]> {
   try {
     const start = new Date(startDate).getTime()
-    const end = new Date(endDate).getTime() + 86400000 // end of day
+    const end = new Date(endDate).getTime() + 86400000
     const data = await ghlFetch<{ slots: GHLBookingSlot[] }>(
       `/calendars/${calendarId}/free-slots?startDate=${start}&endDate=${end}&timezone=America/Los_Angeles`
     )
@@ -147,14 +148,10 @@ export async function getAvailableSlots(
   }
 }
 
-/**
- * Create a calendar booking in GHL.
- * Returns the GHL event ID on success, null on failure.
- */
 export async function createBooking(params: {
   calendarId: string
   contactId: string
-  startTime: string   // ISO datetime: "2026-05-15T07:00:00-07:00"
+  startTime: string
   endTime: string
   title: string
   notes?: string
@@ -178,9 +175,6 @@ export async function createBooking(params: {
   }
 }
 
-/**
- * Cancel a booking in GHL by event ID.
- */
 export async function cancelBooking(eventId: string): Promise<boolean> {
   try {
     await ghlFetch(`/calendars/events/${eventId}`, { method: 'DELETE' })
@@ -190,13 +184,10 @@ export async function cancelBooking(eventId: string): Promise<boolean> {
   }
 }
 
-/**
- * Get upcoming bookings for a contact from GHL.
- */
 export async function getContactBookings(contactId: string): Promise<GHLCalendarEvent[]> {
   try {
     const now = Date.now()
-    const future = now + 60 * 24 * 60 * 60 * 1000 // 60 days out
+    const future = now + 60 * 24 * 60 * 60 * 1000
     const data = await ghlFetch<{ events: GHLCalendarEvent[] }>(
       `/calendars/events?locationId=${GHL_LOCATION_ID}&contactId=${contactId}&startTime=${now}&endTime=${future}`
     )
@@ -206,70 +197,32 @@ export async function getContactBookings(contactId: string): Promise<GHLCalendar
   }
 }
 
-// ---- Payments -----------------------------------------------
+// ---- Payments (raw fetch — SDK payment API differs) ---------
 
-/**
- * Charge a member for a booking via GHL/Stripe.
- * Uses the card already on file in their GHL contact record.
- * Returns the Stripe payment intent ID on success, null on failure.
- */
 export async function chargeForBooking(params: {
   contactId: string
-  amountCents: number   // in cents, e.g. 16000 for $160.00
+  amountCents: number
   description: string
 }): Promise<string | null> {
   try {
-    const data = await ghlFetch<{ payment: { id: string; status: string } }>(
-      '/payments/orders',
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          locationId: GHL_LOCATION_ID,
-          contactId: params.contactId,
-          amount: params.amountCents,
-          currency: 'usd',
-          description: params.description,
-          paymentMethod: 'card_on_file', // charges the Stripe card on file
-        }),
-      }
-    )
-    if (data.payment?.status === 'succeeded') {
-      return data.payment.id
-    }
-    return null
-  } catch {
-    return null
-  }
-}
-
-// ---- Emails / Notifications (via GHL workflows) -------------
-
-/**
- * Trigger a GHL workflow by name.
- * Used to send emails (invitation, welcome, referral, etc.)
- * Workflow must be set up in GHL to receive a webhook trigger.
- */
-export async function triggerWorkflow(params: {
-  workflowId: string
-  contactId: string
-  customData?: Record<string, string>
-}): Promise<boolean> {
-  try {
-    await ghlFetch(`/workflows/${params.workflowId}/subscribe`, {
+    const data = await ghlFetch<{ payment: { id: string; status: string } }>('/payments/orders', {
       method: 'POST',
       body: JSON.stringify({
+        locationId: GHL_LOCATION_ID,
         contactId: params.contactId,
-        ...params.customData,
+        amount: params.amountCents,
+        currency: 'usd',
+        description: params.description,
+        paymentMethod: 'card_on_file',
       }),
     })
-    return true
+    return data.payment?.status === 'succeeded' ? data.payment.id : null
   } catch {
-    return false
+    return null
   }
 }
 
-// ---- GHL Workflow IDs (configure these in your GHL account) -
-// Store actual IDs in environment variables for flexibility
+// ---- Workflow ID constants ----------------------------------
 
 export const GHL_WORKFLOWS = {
   SEND_MAGIC_LINK:      process.env.GHL_WORKFLOW_MAGIC_LINK ?? '',

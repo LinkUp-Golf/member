@@ -9,7 +9,7 @@ import { mockCurrentUser, MOCK_COURSE_ID } from '@/mocks/data'
 // layout.tsx excludes this module from production bundles via dead-code elimination.
 // This guard is defence-in-depth only.
 export default function MockProvider({ children }: { children: React.ReactNode }) {
-  if (process.env.NODE_ENV !== 'development') {
+  if (process.env.NODE_ENV !== 'development' || process.env.NEXT_PUBLIC_MOCK === 'false') {
     return <>{children}</>
   }
   const [ready, setReady] = useState(false)

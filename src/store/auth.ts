@@ -5,6 +5,7 @@
 
 import { create } from 'zustand'
 import { createClient } from '@/lib/supabase'
+import { apiClient } from '@/lib/api-client'
 import type { SessionUser, MemberWithProfile } from '@/types'
 
 interface AuthState {
@@ -25,6 +26,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   initialize: async () => {
     const supabase = createClient()
+
+    // Wire the global API interceptor: when any API call returns 403
+    // MEMBERSHIP_REVOKED, sign out and redirect without any per-page handling.
+    apiClient.configure({
+      onMembershipRevoked: async () => {
+        await supabase.auth.signOut()
+        useAuthStore.setState({ user: null, loading: false, initialized: true })
+        window.location.href = '/membership-required'
+      },
+    })
 
     // Get initial session
     const { data: { user } } = await supabase.auth.getUser()

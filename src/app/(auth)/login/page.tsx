@@ -8,6 +8,7 @@ type State = 'idle' | 'loading' | 'sent' | 'error'
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [state, setState] = useState<State>('idle')
+  const [errorMessage, setErrorMessage] = useState('')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -24,9 +25,12 @@ export default function LoginPage() {
       if (res.ok) {
         setState('sent')
       } else {
+        const data = await res.json().catch(() => ({}))
+        setErrorMessage(data.error ?? 'Something went wrong. Please try again.')
         setState('error')
       }
     } catch {
+      setErrorMessage('Unable to connect. Please check your connection and try again.')
       setState('error')
     }
   }
@@ -61,7 +65,7 @@ export default function LoginPage() {
               Didn't receive it? Check your spam folder or contact your LinkUp coordinator.
             </p>
             <button
-              onClick={() => { setState('idle'); setEmail('') }}
+              onClick={() => { setState('idle'); setEmail(''); setErrorMessage('') }}
               className="mt-6 text-xs underline text-white/30"
             >
               Try a different email
@@ -98,7 +102,7 @@ export default function LoginPage() {
 
               {state === 'error' && (
                 <p className="text-xs text-red-400 text-center">
-                  Something went wrong. Please try again.
+                  {errorMessage}
                 </p>
               )}
 

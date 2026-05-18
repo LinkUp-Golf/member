@@ -1,0 +1,14 @@
+// Global test setup — stubs out Next.js environment (NODE_ENV=test set by Vitest)
+process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://test.supabase.co'
+process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'test-anon-key'
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key'
+process.env.GHL_API_KEY = 'test-ghl-api-key'
+process.env.GHL_LOCATION_ID = 'test-location-id'
+process.env.GHL_AVIARA_CALENDAR_ID = 'test-calendar-id'
+process.env.GHL_WEBHOOK_SECRET = 'test-webhook-secret'
+process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000'
+process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY = 'test-vapid-public'
+process.env.VAPID_PRIVATE_KEY = 'test-vapid-private'
+process.env.VAPID_CONTACT_EMAIL = 'test@test.com'
+process.env.CRON_SECRET = 'test-cron-secret-that-is-long-enough-32chars'
+process.env.LOG_LEVEL = 'error' // suppress logs during tests

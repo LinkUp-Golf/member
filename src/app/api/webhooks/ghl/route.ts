@@ -9,12 +9,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase-server'
 import { getContactById } from '@/lib/ghl'
+import { COURSE_TAG_MAP } from '@/lib/ghl-tags'
 import crypto from 'crypto'
-
-// GHL tag → course slug mapping
-const COURSE_TAG_MAP: Record<string, string> = {
-  'avi-active': 'aviara',
-}
 
 export async function POST(request: NextRequest) {
   // Verify webhook signature
