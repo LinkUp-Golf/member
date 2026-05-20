@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/auth";
 import { apiClient } from "@/lib/api-client";
 import { shortCategory, truncate } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
-import AppShell from '@/components/layout/AppShell';
+import AppShell from "@/components/layout/AppShell";
 import { MemberRowSkeleton } from "@/components/ui/Loading";
 import { INDUSTRY_CATEGORIES } from "@/types";
 import type { MemberWithProfile } from "@/types";
@@ -48,7 +48,6 @@ export default function MembersPage() {
   const applyFilters = useCallback(() => {
     let result = members;
 
-    // Search filter
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -62,7 +61,6 @@ export default function MembersPage() {
       );
     }
 
-    // Category filter
     if (activeFilter !== FILTER_ALL) {
       result = result.filter(
         (m) =>
@@ -75,26 +73,33 @@ export default function MembersPage() {
   }, [search, activeFilter, members]);
 
   return (
-    <AppShell
-      title="Members"
-      description={`${members.length} active members`}
-    >
-
+    <AppShell title="Members" description={`${members.length} active members`}>
       {/* Search */}
       <div className="px-5 pt-4">
-        <div className="flex items-center gap-2 bg-green-50 border border-green-900/10 rounded-xl px-3.5 py-2.5">
+        <div
+          className="flex items-center gap-2.5 bg-white rounded-xl px-4 py-3 border"
+          style={{
+            borderColor: "rgba(0,38,105,0.1)",
+            boxShadow: "0 1px 3px rgba(0,38,105,0.05)",
+          }}
+        >
           <SearchIcon />
           <input
             type="search"
             placeholder="Search by name, industry, goals…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 bg-transparent text-sm text-green-900 placeholder-green-900/35 outline-none"
+            className="flex-1 bg-transparent text-sm outline-none"
+            style={{ color: "var(--color-green-900)" }}
           />
           {search && (
             <button
               onClick={() => setSearch("")}
-              className="text-green-900/30 text-lg leading-none"
+              className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0 transition-colors"
+              style={{
+                color: "rgba(0,38,105,0.4)",
+                background: "rgba(0,38,105,0.06)",
+              }}
             >
               ×
             </button>
@@ -103,7 +108,7 @@ export default function MembersPage() {
       </div>
 
       {/* Filter chips */}
-      <div className="flex gap-2 px-5 py-3 overflow-x-auto hide-scrollbar">
+      <div className="flex gap-2 py-3.5 overflow-x-auto hide-scrollbar mx-5">
         {filters.map((f) => (
           <button
             key={f}
@@ -117,7 +122,10 @@ export default function MembersPage() {
 
       {/* Results count */}
       {!loading && search && (
-        <p className="px-5 pb-2 text-xs text-green-900/40">
+        <p
+          className="px-5 pb-2 text-xs"
+          style={{ color: "rgba(0,38,105,0.38)" }}
+        >
           {filtered.length} result{filtered.length !== 1 ? "s" : ""}
         </p>
       )}
@@ -130,8 +138,11 @@ export default function MembersPage() {
           ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="px-5 py-12 text-center">
-          <p className="text-green-900/40 text-sm italic">
+        <div className="px-5 py-14 text-center">
+          <p
+            className="text-sm italic"
+            style={{ color: "rgba(0,38,105,0.35)" }}
+          >
             {search ? "No members match your search." : "No members found."}
           </p>
         </div>
@@ -160,7 +171,7 @@ function MemberRow({
   return (
     <Link
       href={isMe ? "/more/profile" : `/members/${m.id}`}
-      className="member-row flex items-center gap-3"
+      className="member-row"
     >
       <Avatar
         firstName={m.first_name}
@@ -169,28 +180,50 @@ function MemberRow({
         size="md"
       />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <p className="text-sm font-medium text-green-900">
+        <div className="flex items-center gap-2 mb-0.5">
+          <p
+            className="text-sm font-medium"
+            style={{ color: "var(--color-green-900)" }}
+          >
             {m.first_name} {m.last_name}
           </p>
           {isMe && (
-            <span className="text-xs text-gold bg-green-900/10 px-2 py-0.5 rounded-full">
+            <span
+              className="text-[10px] font-medium px-2 py-0.5 rounded-full"
+              style={{
+                color: "var(--color-gold-dark)",
+                background: "rgba(133,187,101,0.12)",
+              }}
+            >
               You
             </span>
           )}
         </div>
-        <p className="text-xs text-green-900/55 mt-0.5 truncate">
+        <p className="text-xs truncate" style={{ color: "rgba(0,38,105,0.5)" }}>
           {[m.profile?.role_title, m.profile?.business_name]
             .filter(Boolean)
             .join(" · ")}
         </p>
         {m.profile?.value_offered && (
-          <span className="tag mt-1.5 text-xs">
+          <span className="tag mt-1.5">
             Offers: {truncate(m.profile.value_offered, 45)}
           </span>
         )}
       </div>
-      <ChevronRight />
+      <svg
+        className="w-4 h-4 flex-shrink-0"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        style={{ color: "rgba(0,38,105,0.2)" }}
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M8.25 4.5l7.5 7.5-7.5 7.5"
+        />
+      </svg>
     </Link>
   );
 }
@@ -200,34 +233,17 @@ function MemberRow({
 function SearchIcon() {
   return (
     <svg
-      className="w-4 h-4 text-green-900/35 flex-shrink-0"
+      className="w-4 h-4 flex-shrink-0"
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
       strokeWidth={1.5}
+      style={{ color: "rgba(0,38,105,0.32)" }}
     >
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
         d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
-      />
-    </svg>
-  );
-}
-
-function ChevronRight() {
-  return (
-    <svg
-      className="w-4 h-4 text-green-900/25 flex-shrink-0"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={1.5}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M8.25 4.5l7.5 7.5-7.5 7.5"
       />
     </svg>
   );

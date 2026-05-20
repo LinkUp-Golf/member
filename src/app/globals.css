@@ -7,51 +7,41 @@
    ============================================================ */
 
 @layer base {
-  /* Fonts are loaded via next/font/local in layout.tsx.
-     Do NOT declare @font-face here — duplicate declarations
-     cause the font to download twice and produce FOUT. */
-
   :root {
-    /* LinkUp Golf brand colours */
     --color-green-950: #001040;
-    --color-green-900: #002669;   /* brand blue — primary */
+    --color-green-900: #002669;
     --color-green-800: #003385;
     --color-green-600: #1A55AD;
     --color-green-300: #88AADE;
     --color-green-50:  #EEF2FA;
-    --color-gold:      #85bb65;   /* brand green — accent */
+    --color-gold:      #85bb65;
     --color-gold-light: #A0CC85;
     --color-charcoal:  #333132;
     --color-cream:     #F8F8FC;
     --color-cream-dark: #EEEEF5;
 
     /* App shell dimensions */
-    --nav-height: 64px;
+    --nav-height: 72px;
     --top-bar-height: 64px;
-    --sidebar-width: 200px;
-    --sidebar-width-lg: 240px;
+    --sidebar-width: 208px;
+    --sidebar-width-lg: 248px;
     --safe-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   html {
-    /* Prevent elastic scroll bounce on iOS */
     overscroll-behavior: none;
     -webkit-overflow-scrolling: touch;
   }
 
   body {
-    /* Prevent text size adjustment on orientation change */
     -webkit-text-size-adjust: 100%;
-    /* Remove tap highlight on mobile */
     -webkit-tap-highlight-color: transparent;
   }
 
-  /* Smooth scrolling for all scroll containers */
   * {
     scroll-behavior: smooth;
   }
 
-  /* Hide scrollbars but keep functionality */
   .hide-scrollbar {
     scrollbar-width: none;
     -ms-overflow-style: none;
@@ -64,20 +54,17 @@
 @layer components {
   /* ---- App shell ----------------------------------------- */
   .app-shell {
-    /* Mobile: single column, full screen */
     @apply flex flex-col h-screen overflow-hidden;
     background: var(--color-cream);
   }
 
   @media (min-width: 768px) {
     .app-shell {
-      /* Tablet+: sidebar on left, content column on right */
       flex-direction: row;
       max-width: none;
     }
   }
 
-  /* Column that wraps main content + mobile bottom nav */
   .app-content-col {
     @apply flex flex-col flex-1 min-w-0 overflow-hidden;
   }
@@ -86,13 +73,11 @@
     @apply flex-1 overflow-y-auto overflow-x-hidden;
     scrollbar-width: none;
     -ms-overflow-style: none;
-    /* Mobile: leave room for bottom nav */
-    padding-bottom: calc(var(--nav-height) + var(--safe-bottom) + 1rem);
+    padding-bottom: calc(var(--nav-height) + var(--safe-bottom) + 0.5rem);
   }
 
   @media (min-width: 768px) {
     .screen-content {
-      /* Tablet+: no bottom nav, use safe area only */
       padding-bottom: calc(var(--safe-bottom) + 1.5rem);
     }
   }
@@ -101,6 +86,7 @@
   .top-bar {
     @apply sticky top-0 z-20 px-5 py-4;
     background: var(--color-green-900);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.06), 0 2px 8px rgba(0,16,64,0.18);
   }
 
   @media (min-width: 1024px) {
@@ -118,14 +104,14 @@
 
   .logo-subtitle {
     @apply text-xs uppercase tracking-widest mt-0.5;
-    color: rgba(255,255,255,0.45);
+    color: rgba(255,255,255,0.3);
   }
 
   /* ---- Bottom navigation (mobile only) ------------------- */
   .bottom-nav {
     @apply w-full z-20;
     background: var(--color-green-950);
-    border-top: 0.5px solid rgba(255,255,255,0.08);
+    border-top: 0.5px solid rgba(255,255,255,0.07);
     padding-bottom: var(--safe-bottom);
   }
 
@@ -134,9 +120,9 @@
   }
 
   .nav-item {
-    @apply flex items-center justify-center flex-1 py-3;
-    color: rgba(255,255,255,0.4);
-    transition: color 0.15s;
+    @apply flex flex-col items-center justify-center flex-1 gap-0.5 pt-2.5 pb-2;
+    color: rgba(255,255,255,0.32);
+    transition: color 0.15s ease;
     border: none;
     background: none;
     cursor: pointer;
@@ -144,6 +130,12 @@
 
   .nav-item.active {
     color: var(--color-gold);
+  }
+
+  .nav-label {
+    font-family: var(--font-lexend), system-ui, sans-serif;
+    @apply text-[10px] font-medium;
+    letter-spacing: 0.04em;
   }
 
   /* ---- Sidebar navigation (tablet+) ---------------------- */
@@ -161,7 +153,7 @@
       position: sticky;
       top: 0;
       background: var(--color-green-900);
-      border-right: 0.5px solid rgba(255,255,255,0.08);
+      border-right: 0.5px solid rgba(255,255,255,0.07);
       overflow-y: auto;
       overflow-x: hidden;
     }
@@ -174,13 +166,13 @@
   }
 
   .sidebar-logo {
-    @apply px-5 py-5 border-b;
-    border-color: rgba(255,255,255,0.08);
+    @apply px-5 py-6 border-b;
+    border-color: rgba(255,255,255,0.07);
   }
 
   .sidebar-nav-item {
-    @apply flex items-center gap-3 px-5 py-3 text-sm transition-colors cursor-pointer w-full;
-    color: rgba(255,255,255,0.5);
+    @apply flex items-center gap-3 px-5 py-3.5 text-sm transition-all duration-150 cursor-pointer w-full;
+    color: rgba(255,255,255,0.42);
     font-family: var(--font-lexend), system-ui, sans-serif;
     letter-spacing: 0.02em;
     border: none;
@@ -189,13 +181,13 @@
   }
 
   .sidebar-nav-item:hover {
-    color: rgba(255,255,255,0.8);
+    color: rgba(255,255,255,0.85);
     background: rgba(255,255,255,0.05);
   }
 
   .sidebar-nav-item.active {
     color: var(--color-gold);
-    background: rgba(133,187,101,0.08);
+    background: rgba(133,187,101,0.1);
     border-right: 2px solid var(--color-gold);
   }
 
@@ -206,43 +198,53 @@
   /* ---- Cards --------------------------------------------- */
   .card {
     @apply bg-white rounded-2xl border overflow-hidden;
-    border-color: rgba(26,46,26,0.1);
+    border-color: rgba(0,38,105,0.08);
+    box-shadow: 0 1px 3px rgba(0,38,105,0.06), 0 1px 2px rgba(0,0,0,0.03);
   }
 
   .card-pad {
-    @apply p-4;
+    @apply p-5;
   }
 
   /* ---- Buttons ------------------------------------------- */
   .btn {
-    @apply inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-medium
+    @apply inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-medium
            transition-all duration-150 cursor-pointer border font-sans;
   }
 
   .btn-primary {
     background: var(--color-green-900);
     color: var(--color-gold);
-    border-color: rgba(201,168,76,0.25);
+    border-color: rgba(133,187,101,0.2);
   }
 
   .btn-primary:hover {
     background: var(--color-green-800);
   }
 
+  .btn-primary:active {
+    transform: scale(0.98);
+  }
+
   .btn-gold {
     background: var(--color-gold);
     color: var(--color-green-950);
     @apply font-semibold border-transparent;
+    box-shadow: 0 1px 4px rgba(133,187,101,0.35);
   }
 
   .btn-gold:hover {
     background: var(--color-gold-light);
   }
 
+  .btn-gold:active {
+    transform: scale(0.98);
+  }
+
   .btn-outline {
     @apply bg-transparent;
     color: var(--color-green-900);
-    border-color: rgba(26,46,26,0.15);
+    border-color: rgba(0,38,105,0.15);
   }
 
   .btn-outline:hover {
@@ -250,7 +252,7 @@
   }
 
   .btn-sm {
-    @apply px-3 py-1.5 text-xs rounded-lg;
+    @apply px-3.5 py-2 text-xs rounded-lg;
   }
 
   .btn-full {
@@ -260,7 +262,7 @@
   /* ---- Section labels ------------------------------------ */
   .section-label {
     @apply text-xs uppercase tracking-widest mb-3;
-    color: rgba(74,122,74,0.7);
+    color: rgba(0,38,105,0.38);
     letter-spacing: 0.14em;
   }
 
@@ -271,7 +273,7 @@
     color: var(--color-gold-light);
     font-family: var(--font-caveat), Georgia, serif;
     font-weight: 600;
-    border: 1.5px solid rgba(201,168,76,0.2);
+    border: 2px solid rgba(133,187,101,0.2);
   }
 
   .avatar-sm  { @apply w-9 h-9 text-sm; }
@@ -281,8 +283,8 @@
 
   /* ---- Member row ---------------------------------------- */
   .member-row {
-    @apply flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors;
-    border-bottom: 0.5px solid rgba(26,46,26,0.08);
+    @apply flex items-center gap-3.5 px-5 py-3.5 cursor-pointer transition-colors;
+    border-bottom: 0.5px solid rgba(0,38,105,0.06);
   }
 
   .member-row:last-child {
@@ -295,73 +297,79 @@
 
   /* ---- Tags / chips -------------------------------------- */
   .tag {
-    @apply text-xs px-2.5 py-1 rounded-full inline-block;
+    @apply text-xs px-2.5 py-0.5 rounded-full inline-block;
     background: var(--color-green-50);
     color: var(--color-green-600);
-    letter-spacing: 0.03em;
+    letter-spacing: 0.02em;
+    border: 0.5px solid rgba(0,38,105,0.08);
   }
 
   .chip {
-    @apply flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium cursor-pointer
+    @apply flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-medium cursor-pointer
            border transition-all duration-150;
-    border-color: rgba(26,46,26,0.12);
+    border-color: rgba(0,38,105,0.1);
     background: white;
-    color: rgba(26,46,26,0.6);
+    color: rgba(0,38,105,0.5);
+    box-shadow: 0 1px 2px rgba(0,38,105,0.04);
   }
 
   .chip.active {
     background: var(--color-green-900);
     color: var(--color-gold);
     border-color: var(--color-green-900);
+    box-shadow: none;
   }
 
   /* ---- Promo card ---------------------------------------- */
   .promo-card {
-    @apply rounded-2xl overflow-hidden mb-3;
+    @apply rounded-3xl overflow-hidden mb-3;
     background: var(--color-green-950);
-    border: 0.5px solid rgba(201,168,76,0.18);
+    border: 0.5px solid rgba(133,187,101,0.15);
+    box-shadow: 0 2px 10px rgba(0,16,64,0.18);
   }
 
   .promo-accent {
-    height: 3px;
-    background: linear-gradient(90deg, var(--color-gold), var(--color-gold-light));
+    height: 2px;
+    background: linear-gradient(90deg, var(--color-gold) 0%, var(--color-gold-light) 60%, transparent 100%);
   }
 
   /* ---- Message bubbles ----------------------------------- */
   .bubble {
-    @apply max-w-xs px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed;
+    @apply max-w-xs px-4 py-3 rounded-2xl text-sm leading-relaxed;
   }
 
   .bubble-in {
     @apply bg-white;
-    border: 0.5px solid rgba(26,46,26,0.1);
-    border-radius: 4px 16px 16px 16px;
+    border: 0.5px solid rgba(0,38,105,0.1);
+    border-radius: 4px 18px 18px 18px;
     color: var(--color-green-900);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
   }
 
   .bubble-out {
     background: var(--color-green-900);
-    color: rgba(255,255,255,0.9);
-    border-radius: 16px 4px 16px 16px;
+    color: rgba(255,255,255,0.92);
+    border-radius: 18px 4px 18px 18px;
   }
 
   /* ---- Hero banner --------------------------------------- */
   .hero-banner {
-    padding: 1.25rem;
-    background: var(--color-green-900);
+    padding: 1.5rem 1.25rem 1.75rem;
+    background: linear-gradient(150deg, var(--color-green-800) 0%, var(--color-green-900) 55%, var(--color-green-950) 100%);
   }
 
   /* ---- Divider with label -------------------------------- */
   .divider-label {
     @apply relative text-center text-xs uppercase tracking-widest py-2;
-    color: rgba(26,46,26,0.4);
+    color: rgba(0,38,105,0.32);
+    letter-spacing: 0.12em;
   }
 
   .divider-label::before,
   .divider-label::after {
     content: '';
     @apply absolute top-1/2 h-px;
-    background: rgba(26,46,26,0.1);
+    background: rgba(0,38,105,0.08);
     width: 35%;
   }
 
@@ -370,33 +378,35 @@
 
   /* ---- Search bar ---------------------------------------- */
   .search-bar {
-    @apply flex items-center gap-2 mx-5 mb-4 px-3.5 py-2.5 rounded-xl text-sm;
-    background: var(--color-green-50);
-    border: 0.5px solid rgba(26,46,26,0.1);
-    color: rgba(26,46,26,0.5);
+    @apply flex items-center gap-2 mx-5 mb-4 px-4 py-3 rounded-xl text-sm;
+    background: white;
+    border: 1px solid rgba(0,38,105,0.1);
+    color: rgba(0,38,105,0.45);
+    box-shadow: 0 1px 3px rgba(0,38,105,0.05);
   }
 
   /* ---- Input -------------------------------------------- */
   .input {
-    @apply w-full px-4 py-3 rounded-xl text-sm border outline-none transition-colors;
+    @apply w-full px-4 py-3 rounded-xl text-sm border outline-none transition-all duration-150;
     background: var(--color-green-50);
-    border-color: rgba(26,46,26,0.12);
+    border-color: rgba(0,38,105,0.1);
     color: var(--color-green-900);
   }
 
   .input:focus {
     border-color: var(--color-green-600);
     background: white;
+    box-shadow: 0 0 0 3px rgba(26,85,173,0.08);
   }
 
   .input::placeholder {
-    color: rgba(26,46,26,0.35);
+    color: rgba(0,38,105,0.28);
   }
 }
 
 /* ---- Animations ------------------------------------------- */
 @keyframes slideUp {
-  from { transform: translateY(20px); opacity: 0; }
+  from { transform: translateY(14px); opacity: 0; }
   to   { transform: translateY(0);    opacity: 1; }
 }
 
@@ -406,9 +416,9 @@
 }
 
 .animate-slide-up {
-  animation: slideUp 0.25s ease forwards;
+  animation: slideUp 0.22s ease-out forwards;
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.2s ease forwards;
+  animation: fadeIn 0.18s ease forwards;
 }

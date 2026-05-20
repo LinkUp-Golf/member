@@ -42,9 +42,9 @@ export function Skeleton({ className }: { className?: string }) {
 // ---- Member row skeleton ------------------------------------
 export function MemberRowSkeleton() {
   return (
-    <div className="flex items-center gap-3 px-4 py-3">
-      <Skeleton className="w-11 h-11 rounded-full" />
-      <div className="flex-1 space-y-2">
+    <div className="flex items-center gap-3.5 px-5 py-3.5 border-b border-green-900/[0.06] last:border-0">
+      <Skeleton className="w-11 h-11 rounded-full flex-shrink-0" />
+      <div className="flex-1 space-y-2 min-w-0">
         <Skeleton className="h-3.5 w-32" />
         <Skeleton className="h-3 w-48" />
         <Skeleton className="h-3 w-24 rounded-full" />
@@ -60,6 +60,20 @@ export function CardSkeleton({ lines = 3 }: { lines?: number }) {
       {Array.from({ length: lines }).map((_, i) => (
         <Skeleton key={i} className={`h-3 ${i === 0 ? 'w-3/4' : i === lines - 1 ? 'w-1/2' : 'w-full'}`} />
       ))}
+    </div>
+  )
+}
+
+// ---- Promo card skeleton ------------------------------------
+export function PromoCardSkeleton() {
+  return (
+    <div className="card card-pad space-y-3 animate-pulse">
+      <Skeleton className="h-2.5 w-16 rounded-full" />
+      <Skeleton className="h-4 w-3/4" />
+      <Skeleton className="h-3 w-full" />
+      <Skeleton className="h-3 w-5/6" />
+      <Skeleton className="h-3 w-1/2" />
+      <Skeleton className="h-8 w-24 rounded-xl mt-1" />
     </div>
   )
 }

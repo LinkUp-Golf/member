@@ -1,63 +1,70 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { useAuthStore } from '@/store/auth'
-import { apiClient } from '@/lib/api-client'
-import AppShell from '@/components/layout/AppShell'
-import { CardSkeleton } from '@/components/ui/Loading'
-import { formatBookingDate } from '@/lib/utils'
-import type { Promotion } from '@/types'
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useAuthStore } from "@/store/auth";
+import { apiClient } from "@/lib/api-client";
+import AppShell from "@/components/layout/AppShell";
+import { PromoCardSkeleton } from "@/components/ui/Loading";
+import { formatBookingDate } from "@/lib/utils";
+import type { Promotion } from "@/types";
 
 export default function PromotionsPage() {
-  const { user } = useAuthStore()
-  const router = useRouter()
-  const [promotions, setPromotions] = useState<Promotion[]>([])
-  const [loading, setLoading] = useState(true)
+  const { user } = useAuthStore();
+  const router = useRouter();
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (user) loadPromotions()
-  }, [user])
+    if (user) loadPromotions();
+  }, [user]);
 
   async function loadPromotions() {
-    const response = await apiClient.get<Promotion[]>('/api/promotions')
-    setPromotions(response.data ?? [])
-    setLoading(false)
+    const response = await apiClient.get<Promotion[]>("/api/promotions");
+    setPromotions(response.data ?? []);
+    setLoading(false);
   }
 
   return (
     <AppShell
       header={
         <div className="top-bar flex items-center gap-3">
-          <button onClick={() => router.push('/more')} className="text-gold text-sm flex items-center gap-1">
-            <BackArrow /> More
-          </button>
           <div className="flex-1">
             <div className="logo-text">Member Offers</div>
             <div className="logo-subtitle">Curated · Exclusive</div>
           </div>
+          <button
+            onClick={() => router.push("/more")}
+            className="text-gold text-sm flex items-center gap-1.5 flex-shrink-0"
+          >
+            Back
+          </button>
         </div>
       }
     >
       <div className="px-5 py-4 pb-8">
         {loading ? (
           <div className="space-y-3">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="promo-card p-4"><CardSkeleton lines={3} /></div>
+            {[1, 2, 3].map((i) => (
+              <PromoCardSkeleton key={i} />
             ))}
           </div>
         ) : promotions.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-3xl mb-3">🎁</p>
-            <p className="font-serif text-xl text-green-900 mb-2">No offers right now</p>
-            <p className="text-sm text-green-900/45">Check back soon — new member offers are added regularly.</p>
+            <p className="font-serif text-xl text-green-900 mb-2">
+              No offers right now
+            </p>
+            <p className="text-sm text-green-900/45">
+              Check back soon — new member offers are added regularly.
+            </p>
           </div>
         ) : (
-          promotions.map(p => <PromoCard key={p.id} promo={p} />)
+          promotions.map((p) => <PromoCard key={p.id} promo={p} />)
         )}
       </div>
     </AppShell>
-  )
+  );
 }
 
 function PromoCard({ promo }: { promo: Promotion }) {
@@ -65,7 +72,10 @@ function PromoCard({ promo }: { promo: Promotion }) {
     <div className="promo-card mb-4">
       <div className="promo-accent" />
       <div className="p-5">
-        <p className="text-xs uppercase tracking-widest mb-2" style={{ color: '#85bb65' }}>
+        <p
+          className="text-xs uppercase tracking-widest mb-2"
+          style={{ color: "#85bb65" }}
+        >
           {promo.badge_label}
         </p>
         <p className="font-serif text-xl text-white font-medium leading-snug mb-2">
@@ -91,13 +101,23 @@ function PromoCard({ promo }: { promo: Promotion }) {
         )}
       </div>
     </div>
-  )
+  );
 }
 
 function BackArrow() {
   return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+    <svg
+      className="w-4 h-4"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"
+      />
     </svg>
-  )
+  );
 }

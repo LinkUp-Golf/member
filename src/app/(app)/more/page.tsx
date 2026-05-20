@@ -40,43 +40,68 @@ export default function MorePage() {
 
       {/* Profile quick-link */}
       {m && (
-        <Link href="/more/profile" className="flex items-center gap-4 px-5 py-5 bg-white border-b border-green-900/08">
+        <Link
+          href="/more/profile"
+          className="flex items-center gap-4 px-5 py-5 bg-white border-b transition-colors hover:bg-green-50/40"
+          style={{ borderColor: 'rgba(0,38,105,0.07)' }}
+        >
           <Avatar
             firstName={m.first_name}
             lastName={m.last_name}
             avatarUrl={m.profile?.avatar_url}
             size="lg"
           />
-          <div className="flex-1">
-            <p className="font-medium text-green-900">{m.first_name} {m.last_name}</p>
-            <p className="text-sm text-green-900/55 mt-0.5">
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-base" style={{ color: 'var(--color-green-900)' }}>
+              {m.first_name} {m.last_name}
+            </p>
+            <p className="text-sm mt-0.5" style={{ color: 'rgba(0,38,105,0.5)' }}>
               {m.profile?.role_title ?? 'Complete your profile'}
             </p>
-            <p className="text-xs text-green-600 mt-1">View & edit profile →</p>
+            <p className="text-xs mt-1.5 font-medium" style={{ color: 'var(--color-green-600)' }}>
+              View &amp; edit profile →
+            </p>
           </div>
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+            strokeWidth={1.5} style={{ color: 'rgba(0,38,105,0.2)' }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+          </svg>
         </Link>
       )}
 
       {/* Navigation groups */}
-      <div className="pb-8 space-y-6 pt-5 px-5">
+      <div className="pb-8 space-y-6 pt-6 px-5">
         {MORE_ITEMS.map(group => (
           <div key={group.group}>
-            <p className="section-label mb-2">{group.group}</p>
+            <p className="section-label mb-2.5">{group.group}</p>
             <div className="card">
               {group.items.map((item, i) => (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex items-center gap-3 px-4 py-3.5 ${
-                    i < group.items.length - 1 ? 'border-b border-green-900/08' : ''
-                  }`}
+                  className="flex items-center gap-3.5 px-4 py-4 transition-colors hover:bg-green-50/60"
+                  style={{
+                    borderBottom: i < group.items.length - 1
+                      ? '0.5px solid rgba(0,38,105,0.06)'
+                      : 'none',
+                  }}
                 >
-                  <span className="text-xl w-8 text-center flex-shrink-0">{item.icon}</span>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-green-900">{item.label}</p>
-                    <p className="text-xs text-green-900/45 mt-0.5">{item.desc}</p>
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
+                    style={{ background: 'rgba(0,38,105,0.05)' }}>
+                    {item.icon}
                   </div>
-                  <ChevronRight />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium" style={{ color: 'var(--color-green-900)' }}>
+                      {item.label}
+                    </p>
+                    <p className="text-xs mt-0.5" style={{ color: 'rgba(0,38,105,0.42)' }}>
+                      {item.desc}
+                    </p>
+                  </div>
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                    strokeWidth={1.5} style={{ color: 'rgba(0,38,105,0.2)' }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                  </svg>
                 </Link>
               ))}
             </div>
@@ -86,23 +111,16 @@ export default function MorePage() {
         {/* Sign out */}
         <button
           onClick={signOut}
-          className="w-full text-center text-sm text-green-900/35 py-2"
+          className="w-full text-center text-sm py-2 transition-colors"
+          style={{ color: 'rgba(0,38,105,0.3)' }}
         >
           Sign out
         </button>
 
-        <p className="text-center text-xs text-green-900/20">
+        <p className="text-center text-xs" style={{ color: 'rgba(0,38,105,0.18)' }}>
           LinkUp Golf · Member Portal · v1.0
         </p>
       </div>
     </AppShell>
-  )
-}
-
-function ChevronRight() {
-  return (
-    <svg className="w-4 h-4 text-green-900/25 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-    </svg>
   )
 }

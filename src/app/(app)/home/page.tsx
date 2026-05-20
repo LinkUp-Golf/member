@@ -7,7 +7,7 @@ import { apiClient } from "@/lib/api-client";
 import { formatBookingDate, formatTeeTime, truncate } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
 import AppShell from '@/components/layout/AppShell';
-import { CardSkeleton, MemberRowSkeleton } from "@/components/ui/Loading";
+import { CardSkeleton, MemberRowSkeleton, PromoCardSkeleton } from "@/components/ui/Loading";
 import type {
   Booking,
   Announcement,
@@ -54,81 +54,90 @@ export default function HomePage() {
 
       {/* Hero banner */}
       <div className="hero-banner">
-        <p className="text-xs uppercase tracking-widest text-white/40 mb-1">
+        <p className="text-[10px] uppercase tracking-[0.16em] mb-2.5" style={{ color: 'rgba(255,255,255,0.32)' }}>
           {greeting}
         </p>
-        <h1 className="font-serif text-3xl text-white font-medium leading-tight">
-          Welcome back,
+        <h1 className="font-serif leading-tight mb-5" style={{ fontSize: '2.1rem', color: 'white', fontWeight: 500 }}>
+          Welcome back,{' '}
           <br />
-          <em className="text-gold">{firstName || "Guest"}.</em>
+          <em style={{ color: 'var(--color-gold)', fontStyle: 'normal' }}>
+            {firstName || "Guest"}.
+          </em>
         </h1>
 
         {/* Next booking card */}
         {loading ? (
-          <div className="mt-4 rounded-xl bg-white/5 p-4 animate-pulse h-16" />
+          <div className="rounded-2xl border p-4 animate-pulse h-[62px]"
+            style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.07)' }} />
         ) : nextBooking ? (
           <Link
             href="/book"
-            className="block mt-4 rounded-xl bg-white/[0.06] border border-gold/20 p-3.5 flex items-center gap-3"
+            className="flex items-center gap-4 rounded-2xl p-4 border transition-all"
+            style={{ background: 'rgba(255,255,255,0.07)', borderColor: 'rgba(133,187,101,0.22)' }}
           >
-            <div className="w-10 h-10 rounded-lg bg-gold/15 flex items-center justify-center text-gold text-xl flex-shrink-0">
-              ⛳
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: 'rgba(133,187,101,0.15)' }}>
+              <GolfIcon />
             </div>
-            <div>
-              <p className="text-xs text-white/40 uppercase tracking-wider mb-0.5">
-                Your next round
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] uppercase tracking-[0.12em] mb-1" style={{ color: 'rgba(255,255,255,0.32)' }}>
+                Next round
               </p>
-              <p className="text-sm text-white font-medium">
-                {formatBookingDate(nextBooking.booking_date)} ·{" "}
-                {formatTeeTime(nextBooking.tee_time)}
+              <p className="text-sm font-medium" style={{ color: 'white' }}>
+                {formatBookingDate(nextBooking.booking_date)} · {formatTeeTime(nextBooking.tee_time)}
               </p>
-              <p className="text-xs text-white/40 mt-0.5">
+              <p className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.35)' }}>
                 Park Hyatt Aviara
-                {nextBooking.guest_name
-                  ? ` · With ${nextBooking.guest_name}`
-                  : ""}
+                {nextBooking.guest_name ? ` · With ${nextBooking.guest_name}` : ""}
               </p>
             </div>
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+              strokeWidth={1.5} style={{ color: 'rgba(133,187,101,0.5)' }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
           </Link>
         ) : (
           <Link
             href="/book"
-            className="block mt-4 rounded-xl bg-white/[0.06] border border-white/10 p-3.5 flex items-center gap-3"
+            className="flex items-center gap-4 rounded-2xl p-4 border transition-all"
+            style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.08)' }}
           >
-            <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center text-white/40 text-xl flex-shrink-0">
-              📅
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: 'rgba(255,255,255,0.07)' }}>
+              <CalendarIcon />
             </div>
             <div>
-              <p className="text-sm text-white/60">No upcoming rounds</p>
-              <p className="text-xs text-gold mt-0.5">Book a tee time →</p>
+              <p className="text-sm" style={{ color: 'rgba(255,255,255,0.55)' }}>No upcoming rounds</p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--color-gold)' }}>Book a tee time →</p>
             </div>
           </Link>
         )}
       </div>
 
       {/* Content */}
-      <div className="px-5 pt-5 space-y-6 pb-6">
+      <div className="px-5 pt-6 space-y-7 pb-6">
+
         {/* Community Announcements */}
         <section>
-          <div className="flex items-center justify-between mb-3">
-            <p className="section-label">Community</p>
-            <Link href="/more/announcements" className="text-xs text-green-600">
+          <div className="flex items-center justify-between mb-3.5">
+            <p className="section-label !mb-0">Community</p>
+            <Link href="/more/announcements" className="text-xs font-medium" style={{ color: 'var(--color-green-600)' }}>
               See all →
             </Link>
           </div>
           {loading ? (
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               <CardSkeleton lines={2} />
               <CardSkeleton lines={2} />
             </div>
           ) : announcements.length > 0 ? (
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               {announcements.map((a) => (
                 <AnnouncementCard key={a.id} announcement={a} />
               ))}
             </div>
           ) : (
-            <p className="text-sm text-green-900/40 italic">
+            <p className="text-sm italic" style={{ color: 'rgba(0,38,105,0.35)' }}>
               No announcements yet.
             </p>
           )}
@@ -136,9 +145,9 @@ export default function HomePage() {
 
         {/* Member Spotlight */}
         <section>
-          <div className="flex items-center justify-between mb-3">
-            <p className="section-label">Member Spotlight</p>
-            <Link href="/members" className="text-xs text-green-600">
+          <div className="flex items-center justify-between mb-3.5">
+            <p className="section-label !mb-0">Member Spotlight</p>
+            <Link href="/members" className="text-xs font-medium" style={{ color: 'var(--color-green-600)' }}>
               All members →
             </Link>
           </div>
@@ -153,37 +162,37 @@ export default function HomePage() {
                 <Link
                   key={m.id}
                   href={`/members/${m.id}`}
-                  className="member-row block"
+                  className="member-row"
                 >
-                  <div className="flex items-center gap-3">
-                    <Avatar
-                      firstName={m.first_name}
-                      lastName={m.last_name}
-                      avatarUrl={m.profile?.avatar_url}
-                      size="md"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-green-900">
-                        {m.first_name} {m.last_name}
-                      </p>
-                      <p className="text-xs text-green-900/60 mt-0.5">
-                        {m.profile?.role_title ?? ""}
-                        {m.profile?.business_name
-                          ? `, ${m.profile.business_name}`
-                          : ""}
-                      </p>
-                      {m.profile?.value_offered && (
-                        <span className="tag mt-1 text-xs">
-                          Offers: {truncate(m.profile.value_offered, 40)}
-                        </span>
-                      )}
-                    </div>
+                  <Avatar
+                    firstName={m.first_name}
+                    lastName={m.last_name}
+                    avatarUrl={m.profile?.avatar_url}
+                    size="md"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium" style={{ color: 'var(--color-green-900)' }}>
+                      {m.first_name} {m.last_name}
+                    </p>
+                    <p className="text-xs mt-0.5" style={{ color: 'rgba(0,38,105,0.55)' }}>
+                      {m.profile?.role_title ?? ""}
+                      {m.profile?.business_name ? `, ${m.profile.business_name}` : ""}
+                    </p>
+                    {m.profile?.value_offered && (
+                      <span className="tag mt-1.5">
+                        Offers: {truncate(m.profile.value_offered, 40)}
+                      </span>
+                    )}
                   </div>
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                    strokeWidth={1.5} style={{ color: 'rgba(0,38,105,0.2)' }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                  </svg>
                 </Link>
               ))}
             </div>
           ) : (
-            <p className="text-sm text-green-900/40 italic">
+            <p className="text-sm italic" style={{ color: 'rgba(0,38,105,0.35)' }}>
               No members to spotlight yet.
             </p>
           )}
@@ -192,16 +201,14 @@ export default function HomePage() {
         {/* Promotions */}
         {(loading || promotions.length > 0) && (
           <section>
-            <div className="flex items-center justify-between mb-3">
-              <p className="section-label">Member Offers</p>
-              <Link href="/more/promotions" className="text-xs text-green-600">
+            <div className="flex items-center justify-between mb-3.5">
+              <p className="section-label !mb-0">Member Offers</p>
+              <Link href="/more/promotions" className="text-xs font-medium" style={{ color: 'var(--color-green-600)' }}>
                 View all →
               </Link>
             </div>
             {loading ? (
-              <div className="promo-card p-4">
-                <CardSkeleton lines={3} />
-              </div>
+              <PromoCardSkeleton />
             ) : (
               promotions.map((p) => <PromoCard key={p.id} promo={p} />)
             )}
@@ -214,26 +221,29 @@ export default function HomePage() {
 
 // ---- Sub-components -----------------------------------------
 
+const ANNOUNCEMENT_TYPES: Record<string, { icon: string; color: string }> = {
+  new_member:      { icon: "👋", color: "rgba(133,187,101,0.12)" },
+  booking:         { icon: "⛳", color: "rgba(0,38,105,0.07)" },
+  visiting_member: { icon: "✈️", color: "rgba(26,85,173,0.08)" },
+  member_event:    { icon: "📅", color: "rgba(0,38,105,0.07)" },
+  admin_broadcast: { icon: "📢", color: "rgba(133,187,101,0.12)" },
+  focus_linkup:    { icon: "🎯", color: "rgba(0,38,105,0.07)" },
+};
+
 function AnnouncementCard({ announcement }: { announcement: Announcement }) {
-  const icons: Record<string, string> = {
-    new_member: "👋",
-    booking: "⛳",
-    visiting_member: "✈️",
-    member_event: "📅",
-    admin_broadcast: "📢",
-    focus_linkup: "🎯",
-  };
+  const meta = ANNOUNCEMENT_TYPES[announcement.type] ?? { icon: "📌", color: "rgba(0,38,105,0.07)" };
 
   return (
-    <div className="card card-pad flex gap-3 items-start">
-      <span className="text-xl mt-0.5 flex-shrink-0">
-        {icons[announcement.type] ?? "📌"}
-      </span>
-      <div>
-        <p className="text-sm font-medium text-green-900">
+    <div className="card flex gap-3.5 p-4">
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0 mt-0.5"
+        style={{ background: meta.color }}>
+        {meta.icon}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium leading-snug" style={{ color: 'var(--color-green-900)' }}>
           {announcement.title}
         </p>
-        <p className="text-xs text-green-900/60 mt-1 leading-relaxed">
+        <p className="text-xs mt-1 leading-relaxed" style={{ color: 'rgba(0,38,105,0.52)' }}>
           {truncate(announcement.body, 120)}
         </p>
       </div>
@@ -243,23 +253,20 @@ function AnnouncementCard({ announcement }: { announcement: Announcement }) {
 
 function PromoCard({ promo }: { promo: Promotion }) {
   return (
-    <div className="promo-card mb-3">
+    <div className="promo-card">
       <div className="promo-accent" />
-      <div className="p-4">
-        <p
-          className="text-xs uppercase tracking-widest mb-2"
-          style={{ color: "#85bb65" }}
-        >
+      <div className="p-5">
+        <p className="text-[10px] uppercase tracking-[0.14em] mb-2" style={{ color: 'var(--color-gold)' }}>
           {promo.badge_label}
         </p>
-        <p className="font-serif text-lg text-white font-medium leading-snug">
+        <p className="font-serif text-lg font-medium leading-snug" style={{ color: 'white' }}>
           {promo.title}
         </p>
-        <p className="text-xs text-white/50 mt-2 leading-relaxed">
+        <p className="text-xs mt-2.5 leading-relaxed" style={{ color: 'rgba(255,255,255,0.45)' }}>
           {truncate(promo.description, 120)}
         </p>
         {promo.expires_at && (
-          <p className="text-xs text-white/30 mt-2">
+          <p className="text-[10px] mt-2" style={{ color: 'rgba(255,255,255,0.25)' }}>
             Expires {formatBookingDate(promo.expires_at)}
           </p>
         )}
@@ -268,13 +275,36 @@ function PromoCard({ promo }: { promo: Promotion }) {
             href={promo.cta_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn btn-gold btn-sm mt-3 inline-flex"
+            className="btn btn-gold btn-sm mt-4 inline-flex"
           >
             {promo.cta_label}
           </a>
         )}
       </div>
     </div>
+  );
+}
+
+function GolfIcon() {
+  return (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+      strokeWidth={1.5} style={{ color: 'var(--color-gold)' }}>
+      <circle cx="12" cy="18" r="3" />
+      <path strokeLinecap="round" d="M12 15V4" />
+      <path strokeLinecap="round" d="M12 4l5 3-5 3" />
+    </svg>
+  );
+}
+
+function CalendarIcon() {
+  return (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+      strokeWidth={1.5} style={{ color: 'rgba(255,255,255,0.35)' }}>
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+    </svg>
   );
 }
 
