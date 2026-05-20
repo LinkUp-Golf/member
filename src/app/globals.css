@@ -364,7 +364,7 @@
 
   /* ---- Hero banner --------------------------------------- */
   .hero-banner {
-    padding: 0 1.25rem 1.75rem;
+    padding: 1.25rem;
     background: var(--color-green-900);
   }
 

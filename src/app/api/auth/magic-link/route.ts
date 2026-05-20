@@ -10,11 +10,11 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
-import { getContactByEmail } from '@/lib/ghl'
+import { getContactByEmail } from '@/lib/ghl/client'
 import { authRateLimit } from '@/lib/rateLimit'
 import { validateEmail } from '@/lib/validation'
 import { logger, auditLog } from '@/lib/logger'
-import { hasAnyAccessTag } from '@/lib/ghl-tags'
+import { hasAnyAccessTag } from '@/lib/ghl/tags'
 
 // Intentionally vague — prevents email enumeration
 const GENERIC_OK = { allowed: true }

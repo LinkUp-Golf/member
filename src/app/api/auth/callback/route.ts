@@ -11,10 +11,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
-import { getContactByEmail, contactHasTag } from '@/lib/ghl'
+import { getContactByEmail } from '@/lib/ghl/client'
+import { hasAnyAccessTag } from '@/lib/ghl/tags'
+import { syncMember } from '@/lib/sync'
 import { cookies } from 'next/headers'
 import { logger, auditLog } from '@/lib/logger'
-import { COURSE_TAG_MAP, hasAnyAccessTag } from '@/lib/ghl-tags'
 
 export async function GET(request: NextRequest) {
   const requestId = randomUUID()
@@ -60,8 +61,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/membership-required', request.url))
   }
 
-  // ---- Sync member record ------------------------------------
-  await syncMemberFromGHL(user.id, user.email, contact, requestId)
+  // ---- Sync member record via shared sync orchestrator -------
+  if (contact) {
+    await syncMember({
+      contact,
+      userId: user.id,
+      ctx: { supabase: createAdminClient(), requestId },
+    })
+  }
 
   auditLog('LOGIN_SUCCESS', {
     requestId,
@@ -71,75 +78,4 @@ export async function GET(request: NextRequest) {
   })
 
   return NextResponse.redirect(new URL(next, request.url))
-}
-
-// ---- Sync GHL contact data into Supabase --------------------
-
-async function syncMemberFromGHL(
-  userId: string,
-  email: string,
-  contact: Awaited<ReturnType<typeof getContactByEmail>>,
-  requestId: string
-) {
-  if (!contact) return
-
-  const log = logger.child({ requestId, userId, action: 'ghl_sync' })
-  const adminSupabase = createAdminClient()
-
-  try {
-    const activeTags = Object.keys(COURSE_TAG_MAP).filter(tag => contactHasTag(contact, tag))
-    if (activeTags.length === 0) return
-
-    const firstTag = activeTags[0]
-    if (!firstTag) return
-    const homeCourseSlug = (COURSE_TAG_MAP as Record<string, string>)[firstTag]
-    if (!homeCourseSlug) return
-
-    const { data: homeCourse } = await adminSupabase
-      .from('courses').select('id').eq('slug', homeCourseSlug).single()
-
-    if (!homeCourse) return
-
-    const { error: memberError } = await adminSupabase
-      .from('members')
-      .upsert({
-        id: userId,
-        ghl_contact_id: contact.id,
-        email: email.toLowerCase(),
-        first_name: contact.firstName ?? '',
-        last_name: contact.lastName ?? '',
-        phone: contact.phone ?? null,
-        home_course_id: homeCourse.id,
-        membership_status: 'active',
-        ghl_tags: contact.tags ?? [],
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'id' })
-
-    if (memberError) {
-      log.error('Member upsert error', { errorMessage: memberError.message })
-      return
-    }
-
-    for (const tag of activeTags) {
-      const courseSlug = (COURSE_TAG_MAP as Record<string, string>)[tag]
-      if (!courseSlug) continue
-      const { data: course } = await adminSupabase
-        .from('courses').select('id').eq('slug', courseSlug).single()
-
-      if (course) {
-        await adminSupabase
-          .from('course_memberships')
-          .upsert({
-            member_id: userId,
-            course_id: course.id,
-            access_type: course.id === homeCourse.id ? 'home' : 'guest',
-            status: 'active',
-          }, { onConflict: 'member_id,course_id,access_type' })
-      }
-    }
-
-    log.info('GHL sync complete')
-  } catch (err) {
-    log.error('GHL sync failed (non-fatal)', { errorMessage: String(err) })
-  }
 }

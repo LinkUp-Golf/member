@@ -13,11 +13,11 @@
 //  - Tag missing                                  → deny + destroy session
 // ============================================================
 
-import { getContactById } from '@/lib/ghl'
+import { getContactById } from '@/lib/ghl/client'
 import { getCache, GHL_AUTH_CACHE_KEY, GHL_AUTH_CACHE_NS, GHL_AUTH_TTL_MS } from '@/lib/cache'
 import { logger, auditLog } from '@/lib/logger'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
-import { hasAnyAccessTag } from '@/lib/ghl-tags'
+import { hasAnyAccessTag } from '@/lib/ghl/tags'
 import type { GHLAuthorizationResult, CachedAuthResult } from './types'
 
 // ---- Main validator -----------------------------------------
@@ -143,4 +143,4 @@ export async function invalidateMembershipCache(userId: string): Promise<void> {
 }
 
 // Tag constants and helpers re-exported from the central source of truth
-export { ALL_ACCESS_TAGS, hasAnyAccessTag, COURSE_TAG_MAP } from '@/lib/ghl-tags'
+export { ALL_ACCESS_TAGS, hasAnyAccessTag, COURSE_TAG_MAP } from '@/lib/ghl/tags'
