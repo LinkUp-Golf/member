@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
 import {
   AdminPageHeader, AdminTable, AdminTr, AdminTd,
-  Badge, AdminButton, AdminCard,
+  Badge, AdminButton,
 } from '@/components/admin/AdminUI'
 import { format } from 'date-fns'
 import type { MemberWithProfile } from '@/types'
@@ -69,7 +69,7 @@ export default function AdminMembersPage() {
 
     await loadMembers()
     if (selected?.id === memberId) {
-      setSelected(prev => prev ? { ...prev, membership_status: status as any } : null)
+      setSelected(prev => prev ? { ...prev, membership_status: status as MemberWithProfile['membership_status'] } : null)
     }
     setSaving(false)
   }
@@ -148,7 +148,7 @@ export default function AdminMembersPage() {
                 </AdminTd>
                 <AdminTd>
                   <StatusBadge status={m.membership_status} />
-                  {(m as any).is_admin && (
+                  {m.is_admin && (
                     <span className="ml-1.5 text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">Admin</span>
                   )}
                 </AdminTd>
@@ -160,7 +160,7 @@ export default function AdminMembersPage() {
                   </span>
                 </AdminTd>
                 <AdminTd>
-                  <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
+                  <div className="flex gap-1.5" role="presentation" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
                     {m.membership_status === 'waitlist' && (
                       <AdminButton
                         label="Activate"
@@ -201,7 +201,9 @@ export default function AdminMembersPage() {
             {/* Mobile backdrop */}
             <div
               className="fixed inset-0 bg-black/40 z-40 lg:hidden"
+              role="presentation"
               onClick={() => setSelected(null)}
+              onKeyDown={e => { if (e.key === 'Escape') setSelected(null) }}
             />
             {/* Sheet / panel */}
             <div className="fixed bottom-0 left-0 right-0 z-50 lg:static lg:z-auto lg:w-72 lg:flex-shrink-0">
@@ -255,8 +257,8 @@ export default function AdminMembersPage() {
                   <AdminButton label="Reinstate membership" onClick={() => updateStatus(selected.id, 'active')} variant="primary" disabled={saving} />
                 )}
                 <AdminButton
-                  label={(selected as any).is_admin ? 'Remove admin access' : 'Grant admin access'}
-                  onClick={() => toggleAdmin(selected.id, (selected as any).is_admin)}
+                  label={selected.is_admin ? 'Remove admin access' : 'Grant admin access'}
+                  onClick={() => toggleAdmin(selected.id, selected.is_admin)}
                   variant="ghost"
                   disabled={saving}
                 />

@@ -7,6 +7,26 @@ import { AdminPageHeader, AdminTable, AdminTr, AdminTd, Badge, AdminButton } fro
 import { formatBookingDate, formatRelativeTime } from '@/lib/utils'
 import type { GuestAccessStatus } from '@/types'
 
+interface GuestAccessRow {
+  id: string
+  status: GuestAccessStatus
+  requesting_member_id: string
+  target_course_id: string
+  reason: string
+  visit_from: string
+  visit_until: string
+  created_at: string
+  reviewed_by: string | null
+  requesting_member: {
+    id: string
+    first_name: string
+    last_name: string
+    email: string
+    profile: { role_title: string | null; business_name: string | null; industry_category: string | null } | null
+  } | null
+  target_course: { name: string; city: string } | null
+}
+
 type FilterTab = GuestAccessStatus | 'all'
 
 const FILTER_TABS: FilterTab[] = ['pending', 'approved', 'revoked', 'denied', 'all']
@@ -20,7 +40,7 @@ const BADGE_MAP: Record<GuestAccessStatus, { label: string; colour: 'yellow' | '
 
 export default function AdminGuestAccessPage() {
   const { user } = useAuthStore()
-  const [requests, setRequests] = useState<any[]>([])
+  const [requests, setRequests] = useState<GuestAccessRow[]>([])
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<string | null>(null)
   const [filter, setFilter] = useState<FilterTab>('pending')
@@ -50,7 +70,7 @@ export default function AdminGuestAccessPage() {
     setLoading(false)
   }
 
-  async function decide(id: string, decision: 'approved' | 'denied', request: any) {
+  async function decide(id: string, decision: 'approved' | 'denied', request: GuestAccessRow) {
     setProcessing(id)
     const supabase = createClient()
 
@@ -71,6 +91,7 @@ export default function AdminGuestAccessPage() {
       }, { onConflict: 'member_id,course_id,access_type' })
 
       const member = request.requesting_member
+      if (!member) { showToast('Access approved.'); return }
       await supabase.from('announcements').insert({
         course_id: request.target_course_id,
         author_id: user?.id,
@@ -206,7 +227,7 @@ export default function AdminGuestAccessPage() {
                 />
               </AdminTd>
               <AdminTd>
-                <div className="flex gap-1.5 flex-wrap" onClick={e => e.stopPropagation()}>
+                <div className="flex gap-1.5 flex-wrap" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()} role="presentation">
                   {r.status === 'pending' && (
                     <>
                       <AdminButton

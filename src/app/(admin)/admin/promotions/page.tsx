@@ -4,13 +4,12 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
 import { AdminPageHeader, AdminTable, AdminTr, AdminTd, AdminButton, AdminCard, Badge } from '@/components/admin/AdminUI'
 import { formatBookingDate } from '@/lib/utils'
-import { Spinner } from '@/components/ui/Loading'
+import type { Promotion } from '@/types'
 
 export default function AdminPromotionsPage() {
-  const [promotions, setPromotions] = useState<any[]>([])
+  const [promotions, setPromotions] = useState<Promotion[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
-  const [saving, setSaving] = useState(false)
   const [courseId, setCourseId] = useState('')
 
   useEffect(() => { loadData() }, [])
@@ -132,38 +131,38 @@ function CreatePromotionForm({ courseId, onCreated, onCancel }: { courseId: stri
     <AdminCard title="Add promotion">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
         <div className="col-span-1 sm:col-span-2">
-          <label className="text-xs text-gray-400 mb-1 block">Title</label>
-          <input className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
+          <label htmlFor="promo-title" className="text-xs text-gray-400 mb-1 block">Title</label>
+          <input id="promo-title" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
             placeholder="Complimentary Club Fitting" value={title} onChange={e => setTitle(e.target.value)} />
         </div>
         <div>
-          <label className="text-xs text-gray-400 mb-1 block">Partner name</label>
-          <input className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
+          <label htmlFor="promo-partner" className="text-xs text-gray-400 mb-1 block">Partner name</label>
+          <input id="promo-partner" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
             placeholder="Aviara Pro Shop" value={partner} onChange={e => setPartner(e.target.value)} />
         </div>
         <div>
-          <label className="text-xs text-gray-400 mb-1 block">Badge label</label>
-          <input className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
+          <label htmlFor="promo-badge" className="text-xs text-gray-400 mb-1 block">Badge label</label>
+          <input id="promo-badge" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
             placeholder="Pro Shop · Aviara" value={badge} onChange={e => setBadge(e.target.value)} />
         </div>
         <div className="col-span-1 sm:col-span-2">
-          <label className="text-xs text-gray-400 mb-1 block">Description</label>
-          <textarea rows={3} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500 resize-none"
+          <label htmlFor="promo-description" className="text-xs text-gray-400 mb-1 block">Description</label>
+          <textarea id="promo-description" rows={3} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500 resize-none"
             value={description} onChange={e => setDescription(e.target.value)} />
         </div>
         <div>
-          <label className="text-xs text-gray-400 mb-1 block">CTA button label</label>
-          <input className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
+          <label htmlFor="promo-cta-label" className="text-xs text-gray-400 mb-1 block">CTA button label</label>
+          <input id="promo-cta-label" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
             value={ctaLabel} onChange={e => setCtaLabel(e.target.value)} />
         </div>
         <div>
-          <label className="text-xs text-gray-400 mb-1 block">CTA URL (optional)</label>
-          <input type="url" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
+          <label htmlFor="promo-cta-url" className="text-xs text-gray-400 mb-1 block">CTA URL (optional)</label>
+          <input id="promo-cta-url" type="url" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
             placeholder="https://…" value={ctaUrl} onChange={e => setCtaUrl(e.target.value)} />
         </div>
         <div>
-          <label className="text-xs text-gray-400 mb-1 block">Expiry date (optional)</label>
-          <input type="date" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
+          <label htmlFor="promo-expires" className="text-xs text-gray-400 mb-1 block">Expiry date (optional)</label>
+          <input id="promo-expires" type="date" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
             value={expires} onChange={e => setExpires(e.target.value)} />
         </div>
         <div className="flex items-center gap-3 mt-4">

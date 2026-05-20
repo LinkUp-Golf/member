@@ -32,19 +32,6 @@ export default function MembersPage() {
     }
   }, [user, initialized]);
 
-  useEffect(() => {
-    applyFilters();
-  }, [search, activeFilter, members]);
-
-  async function loadMembers() {
-    const response = await apiClient.get<MemberWithProfile[]>("/api/members");
-    if (!response.error && response.data) {
-      setMembers(response.data);
-      setFiltered(response.data);
-    }
-    setLoading(false);
-  }
-
   const applyFilters = useCallback(() => {
     let result = members;
 
@@ -71,6 +58,19 @@ export default function MembersPage() {
 
     setFiltered(result);
   }, [search, activeFilter, members]);
+
+  useEffect(() => {
+    applyFilters();
+  }, [applyFilters]);
+
+  async function loadMembers() {
+    const response = await apiClient.get<MemberWithProfile[]>("/api/members");
+    if (!response.error && response.data) {
+      setMembers(response.data);
+      setFiltered(response.data);
+    }
+    setLoading(false);
+  }
 
   return (
     <AppShell title="Members" description={`${members.length} active members`}>

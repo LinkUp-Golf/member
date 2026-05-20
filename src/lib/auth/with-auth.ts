@@ -18,7 +18,8 @@
 //   )
 // ============================================================
 
-import { NextRequest, NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import { createRouteHandlerClient } from '@/lib/supabase-server'
 import { cookies } from 'next/headers'
@@ -27,7 +28,6 @@ import { logger, auditLog } from '@/lib/logger'
 import { apiRateLimit } from '@/lib/rateLimit'
 import {
   AuthError,
-  AuthorizationError,
   RateLimitError,
   toErrorResponse,
   ErrorCode,

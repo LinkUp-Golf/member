@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
@@ -17,6 +17,15 @@ export default function MessagesPage() {
   const router = useRouter()
   const [conversations, setConversations] = useState<ConversationWithDetails[]>([])
   const [loading, setLoading] = useState(true)
+
+  const loadConversations = useCallback(async () => {
+    if (!user) return
+    const response = await apiClient.get<ConversationWithDetails[]>('/api/conversations')
+    if (response.data) {
+      setConversations(response.data)
+    }
+    setLoading(false)
+  }, [user])
 
   useEffect(() => {
     if (!user) return
@@ -35,16 +44,7 @@ export default function MessagesPage() {
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [user])
-
-  async function loadConversations() {
-    if (!user) return
-    const response = await apiClient.get<ConversationWithDetails[]>('/api/conversations')
-    if (response.data) {
-      setConversations(response.data)
-    }
-    setLoading(false)
-  }
+  }, [user, loadConversations])
 
   return (
     <AppShell
@@ -109,16 +109,16 @@ function ConversationRow({
   currentUserId: string
 }) {
   const others = conv.participants
-    ?.filter(p => (p.member as any)?.id !== currentUserId)
-    .map(p => p.member as any)
+    ?.filter(p => p.member?.id !== currentUserId)
+    .map(p => p.member)
     ?? []
 
   const displayName = conv.type === 'group' && conv.name
     ? conv.name
-    : others.map((m: any) => m.first_name).join(', ') || 'Unknown'
+    : others.map(m => m.first_name).join(', ') || 'Unknown'
 
   const hasUnread = (conv.unread_count ?? 0) > 0
-  const lastMsg = conv.last_message as any
+  const lastMsg = conv.last_message
 
   return (
     <Link

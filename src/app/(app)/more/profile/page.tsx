@@ -200,8 +200,9 @@ export default function MyProfilePage() {
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-green-900/50 mb-1 block">Handicap (optional)</label>
+                  <label htmlFor="profile-handicap" className="text-xs text-green-900/50 mb-1 block">Handicap (optional)</label>
                   <input
+                    id="profile-handicap"
                     type="number"
                     step="0.1"
                     min="0"
@@ -213,8 +214,9 @@ export default function MyProfilePage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-green-900/50 mb-1 block">Play frequency</label>
+                  <label htmlFor="profile-play-freq" className="text-xs text-green-900/50 mb-1 block">Play frequency</label>
                   <input
+                    id="profile-play-freq"
                     className="input"
                     placeholder="e.g. 2–3× per month"
                     value={form.play_frequency ?? ''}
@@ -223,8 +225,8 @@ export default function MyProfilePage() {
                 </div>
               </div>
               <div>
-                <label className="text-xs text-green-900/50 mb-1 block">Preferred tee times</label>
-                <input
+                <label htmlFor="profile-tee-times" className="text-xs text-green-900/50 mb-1 block">Preferred tee times</label>
+                <input id="profile-tee-times"
                   className="input"
                   placeholder="e.g. Early mornings, weekdays"
                   value={form.preferred_play_times ?? ''}
@@ -244,8 +246,9 @@ export default function MyProfilePage() {
                 />
               </div>
               <div>
-                <label className="text-xs text-green-900/50 mb-1 block">Family golf details</label>
+                <label htmlFor="profile-family" className="text-xs text-green-900/50 mb-1 block">Family golf details</label>
                 <textarea
+                  id="profile-family"
                   className="input resize-none"
                   rows={2}
                   placeholder="e.g. Wife plays occasionally. Son (14) is learning."
@@ -347,14 +350,19 @@ function GolfStat({ value, label }: { value: string; label: string }) {
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="flex items-center gap-2 cursor-pointer">
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className="flex items-center gap-2 cursor-pointer"
+    >
       <div
-        onClick={() => onChange(!checked)}
         className={`w-10 h-5 rounded-full transition-colors flex-shrink-0 ${checked ? 'bg-green-700' : 'bg-green-900/20'}`}
       >
         <div className={`w-4 h-4 rounded-full bg-white mt-0.5 transition-transform ${checked ? 'translate-x-5' : 'translate-x-0.5'}`} />
       </div>
       <span className="text-sm text-green-900/70">{label}</span>
-    </label>
+    </button>
   )
 }

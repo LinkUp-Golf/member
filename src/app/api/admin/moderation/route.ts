@@ -1,4 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+export const dynamic = 'force-dynamic'
+
+import type { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
@@ -30,7 +33,7 @@ export const POST = withAuth(
         .eq('id', member_id)
         .single()
 
-      const newCount = ((member as any)?.warning_count ?? 0) + 1
+      const newCount = (member?.warning_count ?? 0) + 1
 
       const { error } = await admin
         .from('members')

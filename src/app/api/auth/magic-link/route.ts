@@ -8,7 +8,8 @@
 // (its correct location), not in a server-side cookie.
 // ============================================================
 
-import { NextRequest, NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import { getContactByEmail } from '@/lib/ghl/client'
 import { authRateLimit } from '@/lib/rateLimit'

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { MemoryCache, GHL_AUTH_CACHE_KEY, GHL_AUTH_TTL_MS } from '@/lib/cache'
 
 describe('MemoryCache', () => {

@@ -104,7 +104,7 @@ function PromoCard({ promo }: { promo: Promotion }) {
   );
 }
 
-function BackArrow() {
+function _BackArrow() {
   return (
     <svg
       className="w-4 h-4"

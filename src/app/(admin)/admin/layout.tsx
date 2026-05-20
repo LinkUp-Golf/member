@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuthStore } from '@/store/auth'
+import { createClient } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import { FullScreenLoader } from '@/components/ui/Loading'
 
@@ -130,8 +131,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const { user, initialized, initialize } = useAuthStore()
   const router = useRouter()
   const pathname = usePathname()
-  const [pendingCount] = useState(0)
-  const [guestCount] = useState(0)
+  const [pendingCount, setPendingCount] = useState(0)
+  const [guestCount, setGuestCount] = useState(0)
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   useEffect(() => {
@@ -143,6 +144,28 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       router.push('/home')
     }
   }, [user, initialized, router])
+
+  const fetchCounts = useCallback(async () => {
+    const supabase = createClient()
+    const { data: course } = await supabase
+      .from('courses')
+      .select('id')
+      .eq('slug', 'aviara')
+      .single()
+    if (!course) return
+    const [modRes, guestRes] = await Promise.all([
+      supabase.from('announcements').select('id', { count: 'exact', head: true })
+        .eq('course_id', course.id).eq('status', 'pending_review'),
+      supabase.from('guest_access_requests').select('id', { count: 'exact', head: true })
+        .eq('target_course_id', course.id).eq('status', 'pending'),
+    ])
+    setPendingCount(modRes.count ?? 0)
+    setGuestCount(guestRes.count ?? 0)
+  }, [])
+
+  useEffect(() => {
+    if (user?.isAdmin) fetchCounts()
+  }, [user, fetchCounts])
 
   // Close drawer on route change
   useEffect(() => {
@@ -169,7 +192,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           {/* Backdrop */}
           <div
             className="absolute inset-0 bg-black/50"
+            role="presentation"
             onClick={() => setDrawerOpen(false)}
+            onKeyDown={e => { if (e.key === 'Escape') setDrawerOpen(false) }}
           />
           {/* Drawer panel */}
           <aside className="absolute left-0 top-0 bottom-0 w-72 bg-green-950 flex flex-col shadow-2xl">

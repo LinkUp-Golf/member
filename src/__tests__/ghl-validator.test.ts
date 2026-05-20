@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { MemoryCache } from '@/lib/cache'
+import type * as CacheModuleType from '@/lib/cache'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
 
 // ---- Module mocks ------------------------------------------
@@ -10,7 +10,7 @@ vi.mock('@/lib/ghl/client', () => ({
 
 // Replace the cache singleton for isolation
 vi.mock('@/lib/cache', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/cache')>()
+  const actual = await importOriginal<typeof CacheModuleType>()
   const testCache = new actual.MemoryCache()
   return {
     ...actual,

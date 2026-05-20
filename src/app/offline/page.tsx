@@ -1,3 +1,5 @@
+'use client'
+
 export default function OfflinePage() {
   return (
     <div
@@ -10,9 +12,9 @@ export default function OfflinePage() {
 
       <div className="text-5xl mb-5">📡</div>
 
-      <h1 className="font-serif text-2xl text-green-900 mb-3">You're offline</h1>
+      <h1 className="font-serif text-2xl text-green-900 mb-3">You&apos;re offline</h1>
       <p className="text-sm leading-relaxed max-w-xs mb-8" style={{ color: 'rgba(26,46,26,0.55)' }}>
-        It looks like you've lost your internet connection. Please check your Wi-Fi or mobile data and try again.
+        It looks like you&apos;ve lost your internet connection. Please check your Wi-Fi or mobile data and try again.
       </p>
 
       <button

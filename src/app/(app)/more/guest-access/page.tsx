@@ -186,26 +186,27 @@ function GuestAccessForm({
       <p className="section-label">Request guest access</p>
 
       <div>
-        <label className="text-xs text-green-900/50 mb-1.5 block">Destination community</label>
-        <select className="input" value={courseId} onChange={e => setCourseId(e.target.value)}>
+        <label htmlFor="ga-course" className="text-xs text-green-900/50 mb-1.5 block">Destination community</label>
+        <select id="ga-course" className="input" value={courseId} onChange={e => setCourseId(e.target.value)}>
           {courses.map(c => <option key={c.id} value={c.id}>{c.name} — {c.city}</option>)}
         </select>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-xs text-green-900/50 mb-1.5 block">Arriving</label>
-          <input type="date" className="input" min={today} value={from} onChange={e => setFrom(e.target.value)} />
+          <label htmlFor="ga-arriving" className="text-xs text-green-900/50 mb-1.5 block">Arriving</label>
+          <input id="ga-arriving" type="date" className="input" min={today} value={from} onChange={e => setFrom(e.target.value)} />
         </div>
         <div>
-          <label className="text-xs text-green-900/50 mb-1.5 block">Departing</label>
-          <input type="date" className="input" min={from || today} value={until} onChange={e => setUntil(e.target.value)} />
+          <label htmlFor="ga-departing" className="text-xs text-green-900/50 mb-1.5 block">Departing</label>
+          <input id="ga-departing" type="date" className="input" min={from || today} value={until} onChange={e => setUntil(e.target.value)} />
         </div>
       </div>
 
       <div>
-        <label className="text-xs text-green-900/50 mb-1.5 block">Reason for visit</label>
+        <label htmlFor="ga-reason" className="text-xs text-green-900/50 mb-1.5 block">Reason for visit</label>
         <textarea
+          id="ga-reason"
           className="input resize-none"
           rows={3}
           placeholder="Business trip, vacation, conference…"

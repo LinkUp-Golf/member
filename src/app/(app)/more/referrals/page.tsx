@@ -121,7 +121,7 @@ export default function ReferralsPage() {
 
         {!loading && referrals.length === 0 && !showForm && (
           <p className="text-center text-sm text-green-900/40 italic py-4">
-            You haven't referred anyone yet.
+            You haven&apos;t referred anyone yet.
           </p>
         )}
       </div>
@@ -156,26 +156,27 @@ function ReferralForm({
       <p className="section-label">New referral</p>
 
       <div>
-        <label className="text-xs text-green-900/50 mb-1.5 block">Their full name</label>
-        <input className="input" placeholder="John Smith" value={name} onChange={e => setName(e.target.value)} />
+        <label htmlFor="ref-name" className="text-xs text-green-900/50 mb-1.5 block">Their full name</label>
+        <input id="ref-name" className="input" placeholder="John Smith" value={name} onChange={e => setName(e.target.value)} />
       </div>
 
       <div>
-        <label className="text-xs text-green-900/50 mb-1.5 block">Their email address</label>
-        <input type="email" className="input" placeholder="john@company.com" value={email} onChange={e => setEmail(e.target.value)} />
+        <label htmlFor="ref-email" className="text-xs text-green-900/50 mb-1.5 block">Their email address</label>
+        <input id="ref-email" type="email" className="input" placeholder="john@company.com" value={email} onChange={e => setEmail(e.target.value)} />
       </div>
 
       <div>
-        <label className="text-xs text-green-900/50 mb-1.5 block">Their industry / role</label>
-        <select className="input" value={category} onChange={e => setCategory(e.target.value)}>
+        <label htmlFor="ref-category" className="text-xs text-green-900/50 mb-1.5 block">Their industry / role</label>
+        <select id="ref-category" className="input" value={category} onChange={e => setCategory(e.target.value)}>
           <option value="">Select a category…</option>
           {INDUSTRY_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
 
       <div>
-        <label className="text-xs text-green-900/50 mb-1.5 block">Why you're referring them (optional)</label>
+        <label htmlFor="ref-note" className="text-xs text-green-900/50 mb-1.5 block">Why you&apos;re referring them (optional)</label>
         <textarea
+          id="ref-note"
           className="input resize-none"
           rows={3}
           placeholder="How do you know them? Why would they be a great fit?"

@@ -42,6 +42,31 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  const markAsRead = useCallback(async () => {
+    await apiClient.patch(`/api/conversations/${id}/read`, {})
+  }, [id])
+
+  const loadConversation = useCallback(async () => {
+    const response = await apiClient.get<{ messages: MessageWithSender[]; participants: Participant[]; type: 'direct' | 'group'; name: string | null }>(`/api/conversations/${id}/messages`)
+
+    if (response.error || !response.data) { router.push('/messages'); return }
+
+    const { messages: msgs, participants: parts, type, name } = response.data
+
+    setConvType(type)
+    setParticipants(parts)
+
+    if (type === 'group' && name) {
+      setConvName(name)
+    } else {
+      const others = parts.filter(p => p.id !== user?.id)
+      setConvName(others.map(p => `${p.first_name} ${p.last_name}`).join(', '))
+    }
+
+    setMessages(msgs)
+    setLoading(false)
+  }, [id, user, router])
+
   useEffect(() => {
     if (!user || !id) return
     loadConversation()
@@ -72,37 +97,12 @@ export default function ChatPage() {
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [user, id])
+  }, [user, id, loadConversation, markAsRead])
 
   // Scroll to bottom when messages change
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
-
-  async function loadConversation() {
-    const response = await apiClient.get<{ messages: MessageWithSender[]; participants: Participant[]; type: 'direct' | 'group'; name: string | null }>(`/api/conversations/${id}/messages`)
-
-    if (response.error || !response.data) { router.push('/messages'); return }
-
-    const { messages: msgs, participants: parts, type, name } = response.data
-
-    setConvType(type)
-    setParticipants(parts)
-
-    if (type === 'group' && name) {
-      setConvName(name)
-    } else {
-      const others = parts.filter(p => p.id !== user?.id)
-      setConvName(others.map(p => `${p.first_name} ${p.last_name}`).join(', '))
-    }
-
-    setMessages(msgs)
-    setLoading(false)
-  }
-
-  async function markAsRead() {
-    await apiClient.patch(`/api/conversations/${id}/read`, {})
-  }
 
   async function sendMessage() {
     if (!body.trim() || !user || sending) return

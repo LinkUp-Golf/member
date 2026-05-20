@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 // ============================================================
 // POST /api/bookings/create
 // 1. Verify member has access and booking window is valid
@@ -8,11 +10,12 @@
 // 6. Queue post-booking community announcement
 // ============================================================
 
-import { NextRequest, NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { createBooking, chargeForBooking } from '@/lib/ghl/client'
-import { format, addDays, differenceInDays } from 'date-fns'
+import { format, differenceInDays } from 'date-fns'
 
 const BOOKING_PRICE_CENTS = 16000     // $160.00
 const BOOKING_WINDOW_MIN_DAYS = 3

@@ -7,7 +7,7 @@ import { apiClient } from '@/lib/api-client'
 import { Spinner, CardSkeleton } from '@/components/ui/Loading'
 import AppShell from '@/components/layout/AppShell'
 import { format } from 'date-fns'
-import type { MemberEvent, MemberEventRSVP } from '@/types'
+import type { MemberEvent } from '@/types'
 
 type Tab = 'upcoming' | 'submit'
 

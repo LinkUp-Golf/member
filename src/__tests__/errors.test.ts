@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  AppError, AuthError, AuthorizationError, GHLError,
+  AuthError, AuthorizationError, GHLError,
   ValidationError, RateLimitError,
   ErrorCode, isAppError, toErrorResponse,
 } from '@/lib/errors/app-error'

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import {
   AdminPageHeader, StatCard, AdminTable, AdminTr, AdminTd,
@@ -30,7 +30,7 @@ export default function AdminBookingsPage() {
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [loading, setLoading] = useState(true)
   const [month, setMonth] = useState(new Date())
-  const [courseData, setCourseData] = useState<any>(null)
+  const [courseData, setCourseData] = useState<{ max_rounds_per_month: number; reserved_rounds: number } | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [editingNote, setEditingNote] = useState<string | null>(null)
@@ -38,13 +38,7 @@ export default function AdminBookingsPage() {
   const [savingNote, setSavingNote] = useState<string | null>(null)
   const noteRef = useRef<HTMLTextAreaElement>(null)
 
-  useEffect(() => { loadBookings() }, [month])
-
-  useEffect(() => {
-    if (editingNote && noteRef.current) noteRef.current.focus()
-  }, [editingNote])
-
-  async function loadBookings() {
+  const loadBookings = useCallback(async () => {
     setLoading(true)
     const supabase = createClient()
     const monthStart = format(startOfMonth(month), 'yyyy-MM-dd')
@@ -72,7 +66,13 @@ export default function AdminBookingsPage() {
     rows.forEach(b => { initial[b.id] = b.admin_notes ?? '' })
     setNoteValues(initial)
     setLoading(false)
-  }
+  }, [month])
+
+  useEffect(() => { loadBookings() }, [month, loadBookings])
+
+  useEffect(() => {
+    if (editingNote && noteRef.current) noteRef.current.focus()
+  }, [editingNote])
 
   const filtered = useMemo(() => {
     return bookings.filter(b => {
@@ -232,7 +232,7 @@ export default function AdminBookingsPage() {
             </AdminTd>
             <AdminTd className="max-w-xs">
               {editingNote === b.id ? (
-                <div className="flex flex-col gap-1.5" onClick={e => e.stopPropagation()}>
+                <div className="flex flex-col gap-1.5" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()} role="presentation">
                   <textarea
                     ref={noteRef}
                     rows={2}
@@ -262,7 +262,10 @@ export default function AdminBookingsPage() {
               ) : (
                 <div
                   className="group flex items-start gap-1 cursor-pointer"
+                  role="button"
+                  tabIndex={0}
                   onClick={e => { e.stopPropagation(); setEditingNote(b.id) }}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setEditingNote(b.id) } }}
                 >
                   {b.admin_notes ? (
                     <p className="text-xs text-gray-600 leading-snug">{b.admin_notes}</p>

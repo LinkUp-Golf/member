@@ -3,10 +3,9 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import { useAuthStore } from '@/store/auth'
 import {
   AdminPageHeader, StatCard, AdminCard, AdminButton,
-  AdminTable, AdminTr, AdminTd, Badge, ProgressBar,
+  Badge, ProgressBar,
 } from '@/components/admin/AdminUI'
 import { formatRelativeTime } from '@/lib/utils'
 import { format, startOfMonth, endOfMonth } from 'date-fns'
@@ -26,7 +25,6 @@ interface DashboardData {
 }
 
 export default function AdminDashboard() {
-  const { user } = useAuthStore()
   const router = useRouter()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -87,7 +85,7 @@ export default function AdminDashboard() {
       pendingModeration: moderationRes.count ?? 0,
       pendingGuestAccess: guestRes.count ?? 0,
       recentMembers: recentMembersRes.data ?? [],
-      recentBookings: recentBookingsRes.data as any ?? [],
+      recentBookings: (recentBookingsRes.data ?? []) as unknown as DashboardData['recentBookings'],
     })
     setLoading(false)
   }
@@ -226,7 +224,7 @@ export default function AdminDashboard() {
             <p className="text-sm text-gray-400 italic">No bookings yet.</p>
           ) : (
             <div className="space-y-3">
-              {data.recentBookings.map((b: any) => (
+              {data.recentBookings.map((b) => (
                 <div key={b.id} className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-gray-800">

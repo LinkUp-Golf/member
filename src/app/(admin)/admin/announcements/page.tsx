@@ -5,6 +5,18 @@ import { useAuthStore } from '@/store/auth'
 import { createClient } from '@/lib/supabase'
 import { AdminPageHeader, AdminTable, AdminTr, AdminTd, AdminButton, AdminCard, Badge } from '@/components/admin/AdminUI'
 import { formatRelativeTime } from '@/lib/utils'
+import type { AnnouncementType, ModerationStatus } from '@/types'
+
+interface AnnouncementRow {
+  id: string
+  type: AnnouncementType
+  title: string
+  body: string
+  status: ModerationStatus
+  published_at: string | null
+  created_at: string
+  author: { first_name: string; last_name: string } | null
+}
 
 const TYPE_OPTIONS = [
   { value: 'admin_broadcast', label: 'Admin broadcast' },
@@ -14,7 +26,7 @@ const TYPE_OPTIONS = [
 
 export default function AdminAnnouncementsPage() {
   const { user } = useAuthStore()
-  const [announcements, setAnnouncements] = useState<any[]>([])
+  const [announcements, setAnnouncements] = useState<AnnouncementRow[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [courseId, setCourseId] = useState('')
@@ -142,8 +154,9 @@ function BroadcastForm({
     <AdminCard title="New community broadcast">
       <div className="space-y-4">
         <div>
-          <label className="text-xs text-gray-400 mb-1 block">Announcement type</label>
+          <label htmlFor="broadcast-type" className="text-xs text-gray-400 mb-1 block">Announcement type</label>
           <select
+            id="broadcast-type"
             className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
             value={type}
             onChange={e => setType(e.target.value)}
@@ -152,8 +165,9 @@ function BroadcastForm({
           </select>
         </div>
         <div>
-          <label className="text-xs text-gray-400 mb-1 block">Title</label>
+          <label htmlFor="broadcast-title" className="text-xs text-gray-400 mb-1 block">Title</label>
           <input
+            id="broadcast-title"
             className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
             placeholder="Announcement headline…"
             value={title}
@@ -161,8 +175,9 @@ function BroadcastForm({
           />
         </div>
         <div>
-          <label className="text-xs text-gray-400 mb-1 block">Body</label>
+          <label htmlFor="broadcast-body" className="text-xs text-gray-400 mb-1 block">Body</label>
           <textarea
+            id="broadcast-body"
             className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500 resize-none"
             rows={4}
             placeholder="Write your message to the community…"

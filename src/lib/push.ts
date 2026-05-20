@@ -127,9 +127,10 @@ async function sendToSubscriptions(
           { TTL: 86400 } // 24 hours
         )
         sent++
-      } catch (err: any) {
+      } catch (err: unknown) {
         // 410 Gone = subscription is no longer valid, clean it up
-        if (err.statusCode === 410 || err.statusCode === 404) {
+        const statusCode = (err as { statusCode?: number }).statusCode
+        if (statusCode === 410 || statusCode === 404) {
           staleEndpoints.push(sub.endpoint)
         }
         failed++

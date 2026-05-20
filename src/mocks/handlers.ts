@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw'
 import {
-  mockMembers, mockCurrentUser, mockCourse, mockCourseMemberships,
+  mockMembers, mockCourse, mockCourseMemberships,
   mockBookings, mockAnnouncements, mockPromotions,
   mockConversations, mockParticipants, mockMessages,
   mockReferrals, mockFocusLinkups, mockGuestAccessRequests,
@@ -223,7 +223,7 @@ export const handlers = [
   // ---- Internal Next.js API routes ---------------------------
 
   // Booking slots
-  http.get('/api/bookings/create', ({ request }) => {
+  http.get('/api/bookings/create', () => {
     return HttpResponse.json({ slots: mockBookingSlots })
   }),
 

@@ -88,7 +88,7 @@ export default function SettingsPage() {
               <div>
                 <p className="text-sm text-green-900 font-medium mb-1">Notifications are blocked</p>
                 <p className="text-xs text-green-900/55 leading-relaxed">
-                  You've blocked notifications for this app. To re-enable, go to your browser or device settings and allow notifications for app.linkup.golf.
+                  You&apos;ve blocked notifications for this app. To re-enable, go to your browser or device settings and allow notifications for app.linkup.golf.
                 </p>
               </div>
             ) : subscribed ? (

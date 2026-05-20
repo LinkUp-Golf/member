@@ -9,12 +9,11 @@ import { mockCurrentUser, MOCK_COURSE_ID } from '@/mocks/data'
 // layout.tsx excludes this module from production bundles via dead-code elimination.
 // This guard is defence-in-depth only.
 export default function MockProvider({ children }: { children: React.ReactNode }) {
-  if (process.env.NODE_ENV !== 'development' || process.env.NEXT_PUBLIC_MOCK === 'false') {
-    return <>{children}</>
-  }
   const [ready, setReady] = useState(false)
+  const isMockEnabled = process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_MOCK !== 'false'
 
   useEffect(() => {
+    if (!isMockEnabled) return
     async function init() {
       // Start MSW service worker
       const { worker } = await import('@/mocks/browser')
@@ -41,7 +40,10 @@ export default function MockProvider({ children }: { children: React.ReactNode }
     }
 
     init().catch(console.error)
-  }, [])
+  }, [isMockEnabled])
+
+  // If mock is disabled, render immediately
+  if (!isMockEnabled) return <>{children}</>
 
   // Hold render until MSW is ready so no requests escape before handlers are active
   if (!ready) {

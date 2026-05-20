@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 // ============================================================
 // GET /api/auth/callback
 // Magic link redirect handler — two-phase validation:
@@ -8,7 +10,8 @@
 //             redirect to /membership-required.
 // ============================================================
 
-import { NextRequest, NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { getContactByEmail } from '@/lib/ghl/client'

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuthStore } from '@/store/auth'
@@ -18,11 +18,7 @@ export default function MemberProfilePage() {
   const [playedTogether, setPlayedTogether] = useState(false)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    if (id) loadMember()
-  }, [id])
-
-  async function loadMember() {
+  const loadMember = useCallback(async () => {
     const response = await apiClient.get<{ member: MemberWithProfile; hasPlayedWith: boolean }>(`/api/members/${id}`)
 
     if (response.error || !response.data) {
@@ -33,7 +29,11 @@ export default function MemberProfilePage() {
     setMember(response.data.member)
     setPlayedTogether(response.data.hasPlayedWith)
     setLoading(false)
-  }
+  }, [id, router])
+
+  useEffect(() => {
+    if (id) loadMember()
+  }, [id, loadMember])
 
   async function startConversation() {
     if (!user || !member) return
@@ -92,7 +92,7 @@ export default function MemberProfilePage() {
             <span className="profile-tag">Handicap {p.handicap_index}</span>
           )}
           {!playedTogether && (
-            <span className="profile-tag text-gold/70">Haven't played yet</span>
+            <span className="profile-tag text-gold/70">Haven&apos;t played yet</span>
           )}
           {playedTogether && (
             <span className="profile-tag">⛳ Played together</span>
@@ -119,7 +119,7 @@ export default function MemberProfilePage() {
           <span className="text-lg">💡</span>
           <div>
             <p className="text-sm text-green-900 font-medium">
-              You haven't played with {member.first_name} yet
+              You haven&apos;t played with {member.first_name} yet
             </p>
             <p className="text-xs text-green-900/55 mt-0.5">
               Would you like us to find a date? Start a message to coordinate.

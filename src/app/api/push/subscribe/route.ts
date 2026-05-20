@@ -1,10 +1,13 @@
+export const dynamic = 'force-dynamic'
+
 // ============================================================
 // POST /api/push/subscribe    — register a push subscription
 // DELETE /api/push/subscribe  — unregister a push subscription
 // GET /api/push/vapid-key     — return the public VAPID key
 // ============================================================
 
-import { NextRequest, NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createRouteHandlerClient } from '@/lib/supabase-server'
 

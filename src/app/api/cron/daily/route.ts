@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 // ============================================================
 // GET /api/cron/daily
 // Runs daily at midnight via Vercel Cron.
@@ -6,10 +8,11 @@
 //   2. Send Focus LinkUp notifications (2-week and 1-week)
 // ============================================================
 
-import { NextRequest, NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase-server'
 import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
-import { format, addDays, differenceInDays } from 'date-fns'
+import { format, addDays } from 'date-fns'
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get('authorization')
@@ -22,7 +25,7 @@ export async function GET(request: NextRequest) {
   const results: Record<string, number> = {}
 
   // ---- 1. Expire guest memberships ----------------------------
-  const { data: expiredGuests, error: expireError } = await supabase
+  const { data: expiredGuests } = await supabase
     .from('course_memberships')
     .update({ status: 'expired' })
     .eq('access_type', 'guest')

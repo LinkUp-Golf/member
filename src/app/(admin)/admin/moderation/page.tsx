@@ -8,6 +8,39 @@ import {
 } from '@/components/admin/AdminUI'
 import { formatRelativeTime, formatBookingDate } from '@/lib/utils'
 
+interface RawMember {
+  id: string
+  first_name: string
+  last_name: string
+  membership_status: string
+  warning_count: number
+  home_course_id?: string
+}
+
+interface RawEventRow {
+  id: string
+  title: string
+  description: string
+  event_date: string
+  event_time: string | null
+  location: string
+  status: string
+  created_at: string
+  organizer_id: string
+  organizer: RawMember | null
+}
+
+interface RawAnnouncementRow {
+  id: string
+  title: string
+  body: string
+  type: string
+  status: string
+  created_at: string
+  author_id: string
+  author: RawMember | null
+}
+
 interface ModerationItem {
   id: string
   type: 'event' | 'announcement'
@@ -65,7 +98,7 @@ export default function AdminModerationPage() {
         .order('created_at', { ascending: true }),
     ])
 
-    const eventItems: ModerationItem[] = (eventsRes.data ?? []).map((e: any) => ({
+    const eventItems: ModerationItem[] = ((eventsRes.data ?? []) as unknown as RawEventRow[]).map((e) => ({
       id: e.id,
       type: 'event' as const,
       title: e.title,
@@ -83,7 +116,7 @@ export default function AdminModerationPage() {
       },
     }))
 
-    const announcementItems: ModerationItem[] = (announcementsRes.data ?? []).map((a: any) => ({
+    const announcementItems: ModerationItem[] = ((announcementsRes.data ?? []) as unknown as RawAnnouncementRow[]).map((a) => ({
       id: a.id,
       type: 'announcement' as const,
       title: a.title,
@@ -129,8 +162,8 @@ export default function AdminModerationPage() {
 
       if (event) {
         await supabase.from('announcements').insert({
-          course_id: (event.organizer as any)?.home_course_id,
-          author_id: (event.organizer as any)?.id,
+          course_id: (event.organizer as { id: string; home_course_id: string } | null)?.home_course_id,
+          author_id: (event.organizer as { id: string; home_course_id: string } | null)?.id,
           type: 'member_event',
           title: `New event: ${event.title}`,
           body: `${item.author} has posted a community event on ${formatBookingDate(event.event_date)}. Check the Member Events calendar to RSVP.`,

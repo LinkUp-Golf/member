@@ -1,4 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+export const dynamic = 'force-dynamic'
+
+import type { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
@@ -39,14 +42,14 @@ export const PATCH = withAuth(
       await admin
         .from('course_memberships')
         .update({ status: 'expired' })
-        .eq('member_id', (request as any).requesting_member_id)
-        .eq('course_id', (request as any).target_course_id)
+        .eq('member_id', request.requesting_member_id)
+        .eq('course_id', request.target_course_id)
         .eq('access_type', 'guest')
 
       logger.warn('Admin revoked guest access', {
         action: 'guest_access.revoked',
         userId: ctx.userId,
-        metadata: { request_id: id, member_id: (request as any).requesting_member_id },
+        metadata: { request_id: id, member_id: request.requesting_member_id },
       })
 
       try {
@@ -56,8 +59,8 @@ export const PATCH = withAuth(
           target_type: 'guest_access_request',
           target_id: id,
           payload: {
-            member_id: (request as any).requesting_member_id,
-            course_id: (request as any).target_course_id,
+            member_id: request.requesting_member_id,
+            course_id: request.target_course_id,
           },
         })
       } catch { /* table may not exist yet */ }
@@ -77,8 +80,8 @@ export const PATCH = withAuth(
       await admin
         .from('course_memberships')
         .update({ valid_until: extends_until })
-        .eq('member_id', (request as any).requesting_member_id)
-        .eq('course_id', (request as any).target_course_id)
+        .eq('member_id', request.requesting_member_id)
+        .eq('course_id', request.target_course_id)
         .eq('access_type', 'guest')
 
       logger.info('Admin extended guest access', {
@@ -93,7 +96,7 @@ export const PATCH = withAuth(
           action: 'guest_access.extended',
           target_type: 'guest_access_request',
           target_id: id,
-          payload: { extends_until, previous_until: (request as any).visit_until },
+          payload: { extends_until, previous_until: request.visit_until },
         })
       } catch { /* table may not exist yet */ }
 

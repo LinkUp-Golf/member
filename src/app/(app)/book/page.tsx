@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
 import AppShell from '@/components/layout/AppShell'
@@ -21,8 +20,6 @@ type Step = 'select' | 'confirm' | 'success'
 
 export default function BookPage() {
   const { user } = useAuthStore()
-  const router = useRouter()
-  const searchParams = useSearchParams()
 
   const [dates] = useState(() => getBookingDates())
   const [selectedDate, setSelectedDate] = useState<Date>(dates[0] ?? new Date())
@@ -422,7 +419,7 @@ function SuccessScreen({ booking, onDone }: { booking: { date: string; time: str
         ⛳
       </div>
       <h1 className="font-serif mb-2" style={{ fontSize: '2rem', color: 'var(--color-green-900)', fontWeight: 500 }}>
-        You're booked!
+        You&apos;re booked!
       </h1>
       <p className="text-sm mb-1" style={{ color: 'rgba(0,38,105,0.5)' }}>
         {booking.date} at {booking.time}
@@ -432,7 +429,7 @@ function SuccessScreen({ booking, onDone }: { booking: { date: string; time: str
       </p>
       <div className="card p-5 w-full max-w-sm mb-8 text-left">
         <p className="text-xs uppercase tracking-widest mb-2" style={{ color: 'rgba(0,38,105,0.35)', letterSpacing: '0.14em' }}>
-          What's next
+          What&apos;s next
         </p>
         <p className="text-sm leading-relaxed" style={{ color: 'rgba(0,38,105,0.6)' }}>
           Your community has been notified — fellow members can reach out to join your round.

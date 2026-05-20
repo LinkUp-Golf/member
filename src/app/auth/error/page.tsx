@@ -1,5 +1,6 @@
 'use client'
 
+import { Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 
@@ -18,27 +19,52 @@ const REASONS: Record<string, { title: string; body: string }> = {
   },
   default: {
     title: 'Something went wrong',
-    body: 'We couldn\'t complete your login. Please try again from the login page.',
+    body: "We couldn't complete your login. Please try again from the login page.",
   },
 }
 
-export default function AuthErrorPage() {
+const DEFAULT_REASON = {
+  title: 'Something went wrong',
+  body: "We couldn't complete your login. Please try again from the login page.",
+}
+
+// Inner component isolates useSearchParams() inside the Suspense boundary
+// required by Next.js App Router during static generation.
+function ErrorContent() {
   const searchParams = useSearchParams()
   const reason = searchParams.get('reason') ?? 'default'
-  const DEFAULT_REASON = { title: 'Something went wrong', body: "We couldn't complete your login. Please try again from the login page." }
   const { title, body } = REASONS[reason] ?? DEFAULT_REASON
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-8 text-center"
-      style={{ background: '#002669' }}>
+    <>
+      <h1 className="font-serif text-2xl text-white mb-3">{title}</h1>
+      <p className="text-sm text-white/50 leading-relaxed max-w-xs mb-8">{body}</p>
+    </>
+  )
+}
+
+export default function AuthErrorPage() {
+  return (
+    <div
+      className="min-h-screen flex flex-col items-center justify-center px-8 text-center"
+      style={{ background: '#002669' }}
+    >
       <div className="font-serif text-3xl italic mb-8" style={{ color: '#85bb65' }}>
         LinkUp Golf
       </div>
 
       <div className="text-4xl mb-5">🔒</div>
 
-      <h1 className="font-serif text-2xl text-white mb-3">{title}</h1>
-      <p className="text-sm text-white/50 leading-relaxed max-w-xs mb-8">{body}</p>
+      <Suspense
+        fallback={
+          <>
+            <h1 className="font-serif text-2xl text-white mb-3">{DEFAULT_REASON.title}</h1>
+            <p className="text-sm text-white/50 leading-relaxed max-w-xs mb-8">{DEFAULT_REASON.body}</p>
+          </>
+        }
+      >
+        <ErrorContent />
+      </Suspense>
 
       <Link
         href="/login"

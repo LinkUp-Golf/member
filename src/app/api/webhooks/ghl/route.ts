@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 // ============================================================
 // POST /api/webhooks/ghl
 // Receives GHL webhooks for contact changes.
@@ -5,15 +7,15 @@
 // the shared sync orchestrator in src/lib/sync.
 // ============================================================
 
-import { NextRequest, NextResponse } from 'next/server'
-import { randomUUID } from 'crypto'
+import type { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
+import crypto, { randomUUID } from 'crypto'
 import { createAdminClient } from '@/lib/supabase-server'
 import { getContactById } from '@/lib/ghl/client'
 import { hasAnyAccessTag } from '@/lib/ghl/tags'
 import { syncMemberByContactId, type SyncContext } from '@/lib/sync'
 import { deactivateMember } from '@/lib/sync/member.sync'
 import { logger } from '@/lib/logger'
-import crypto from 'crypto'
 
 export async function POST(request: NextRequest) {
   const requestId = randomUUID()

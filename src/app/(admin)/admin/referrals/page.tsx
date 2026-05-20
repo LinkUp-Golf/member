@@ -8,6 +8,19 @@ import {
 } from '@/components/admin/AdminUI'
 import { formatRelativeTime } from '@/lib/utils'
 import { differenceInDays } from 'date-fns'
+import type { ReferralStatus } from '@/types'
+
+interface ReferralRow {
+  id: string
+  status: ReferralStatus
+  referred_email: string
+  referred_member_industry: string | null
+  first_round_free: boolean
+  created_at: string
+  updated_at: string
+  referring_member: { first_name: string; last_name: string; email: string } | null
+  referred_member: { first_name: string; last_name: string; email: string } | null
+}
 
 const STAGES = ['pending', 'interviewed', 'approved', 'joined', 'declined'] as const
 type Stage = typeof STAGES[number]
@@ -21,7 +34,7 @@ const STAGE_META: Record<Stage, { label: string; colour: 'yellow' | 'blue' | 'gr
 }
 
 export default function AdminReferralsPage() {
-  const [referrals, setReferrals] = useState<any[]>([])
+  const [referrals, setReferrals] = useState<ReferralRow[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | Stage>('all')
   const [processing, setProcessing] = useState<string | null>(null)
@@ -145,7 +158,7 @@ export default function AdminReferralsPage() {
                 <span className="text-xs text-gray-400">{formatRelativeTime(r.created_at)}</span>
               </AdminTd>
               <AdminTd>
-                <div className="flex gap-1.5 flex-wrap" onClick={e => e.stopPropagation()}>
+                <div className="flex gap-1.5 flex-wrap" role="presentation" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
                   {r.status === 'pending' && (
                     <AdminButton
                       label="Mark interviewed"

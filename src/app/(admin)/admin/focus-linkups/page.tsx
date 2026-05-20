@@ -5,10 +5,10 @@ import { createClient } from '@/lib/supabase'
 import { AdminPageHeader, AdminTable, AdminTr, AdminTd, AdminButton, AdminCard } from '@/components/admin/AdminUI'
 import { INDUSTRY_CATEGORIES } from '@/types'
 import { format } from 'date-fns'
-import { Spinner } from '@/components/ui/Loading'
+import type { FocusLinkup } from '@/types'
 
 export default function AdminFocusLinkupsPage() {
-  const [linkups, setLinkups] = useState<any[]>([])
+  const [linkups, setLinkups] = useState<FocusLinkup[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [courseId, setCourseId] = useState('')
@@ -164,27 +164,27 @@ function CreateFocusLinkupForm({ courseId, onCreated, onCancel }: { courseId: st
     <AdminCard title="Create Focus LinkUp">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
         <div className="col-span-1 sm:col-span-2">
-          <label className="text-xs text-gray-400 mb-1 block">Title</label>
-          <input className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
+          <label htmlFor="fl-title" className="text-xs text-gray-400 mb-1 block">Title</label>
+          <input id="fl-title" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
             placeholder="Life Sciences LinkUp" value={title} onChange={e => setTitle(e.target.value)} />
         </div>
         <div>
-          <label className="text-xs text-gray-400 mb-1 block">Date</label>
-          <input type="date" min={today} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
+          <label htmlFor="fl-date" className="text-xs text-gray-400 mb-1 block">Date</label>
+          <input id="fl-date" type="date" min={today} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
             value={date} onChange={e => setDate(e.target.value)} />
         </div>
         <div>
-          <label className="text-xs text-gray-400 mb-1 block">Tee time</label>
-          <input type="time" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
+          <label htmlFor="fl-time" className="text-xs text-gray-400 mb-1 block">Tee time</label>
+          <input id="fl-time" type="time" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
             value={time} onChange={e => setTime(e.target.value)} />
         </div>
         <div className="col-span-1 sm:col-span-2">
-          <label className="text-xs text-gray-400 mb-1 block">Description</label>
-          <textarea rows={2} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500 resize-none"
+          <label htmlFor="fl-description" className="text-xs text-gray-400 mb-1 block">Description</label>
+          <textarea id="fl-description" rows={2} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500 resize-none"
             placeholder="Brief description for notifications…" value={description} onChange={e => setDescription(e.target.value)} />
         </div>
         <div className="col-span-1 sm:col-span-2">
-          <label className="text-xs text-gray-400 mb-2 block">Industry focus (select all that apply)</label>
+          <p className="text-xs text-gray-400 mb-2">Industry focus (select all that apply)</p>
           <div className="flex flex-wrap gap-2">
             {INDUSTRY_CATEGORIES.map(cat => (
               <button

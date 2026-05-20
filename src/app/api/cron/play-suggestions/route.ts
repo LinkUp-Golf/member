@@ -6,7 +6,8 @@
 // Skips pairs that have been dismissed in the last 90 days.
 // ============================================================
 
-import { NextRequest, NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase-server'
 import { sendPushToMember, NotificationTemplates } from '@/lib/push'
 
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest) {
     // For each member, find who they haven't played with
     for (const memberRow of members) {
       const memberId = memberRow.member_id
-      const member = memberRow.members as any
+      const member = memberRow.members as unknown as { first_name: string; last_name: string } | null
 
       // Get list of members this person HAS played with
       const { data: playedWith } = await supabase
@@ -108,7 +109,7 @@ export async function GET(request: NextRequest) {
         suggestionsCreated++
 
         // Get the suggested member's name for the notification
-        const suggested = members.find(m => m.member_id === pick)?.members as any
+        const suggested = members.find(m => m.member_id === pick)?.members as { first_name: string; last_name: string } | null | undefined
         if (suggested && member) {
           const { sent } = await sendPushToMember(
             memberId,

@@ -6,16 +6,15 @@ import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
 import { Spinner } from '@/components/ui/Loading'
 import AppShell from '@/components/layout/AppShell'
-import { INDUSTRY_CATEGORIES, type IndustryCategory } from '@/types'
+import { INDUSTRY_CATEGORIES, type IndustryCategory, type FocusLinkup } from '@/types'
 import { format } from 'date-fns'
-import type { FocusLinkup } from '@/types'
 
 export default function FocusLinkupsPage() {
   const { user } = useAuthStore()
   const router = useRouter()
   const [subscribed, setSubscribed] = useState<Set<string>>(new Set())
   const [upcoming, setUpcoming] = useState<FocusLinkup[]>([])
-  const [loading, setLoading] = useState(true)
+  const [_loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
 
   useEffect(() => {
