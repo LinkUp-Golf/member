@@ -7,7 +7,7 @@ import { useAuthStore } from '@/store/auth'
 import { createClient } from '@/lib/supabase'
 import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
-import TopBar from '@/components/ui/TopBar'
+import AppShell from '@/components/layout/AppShell'
 import { MemberRowSkeleton } from '@/components/ui/Loading'
 import { formatMessageTime, truncate } from '@/lib/utils'
 import type { ConversationWithDetails } from '@/types'
@@ -48,21 +48,19 @@ export default function MessagesPage() {
   }
 
   return (
-    <div>
-      <TopBar
-        title="Messages"
-        subtitle="Private · Members only"
-        right={
-          <button
-            onClick={() => router.push('/messages/new')}
-            className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-white/70"
-            aria-label="New message"
-          >
-            <ComposeIcon />
-          </button>
-        }
-      />
-
+    <AppShell
+      title="Messages"
+      description="Private · Members only"
+      end={
+        <button
+          onClick={() => router.push('/messages/new')}
+          className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-white/70"
+          aria-label="New message"
+        >
+          <ComposeIcon />
+        </button>
+      }
+    >
       {loading ? (
         <div className="space-y-px mt-1">
           {Array.from({ length: 5 }).map((_, i) => <MemberRowSkeleton key={i} />)}
@@ -92,7 +90,7 @@ export default function MessagesPage() {
           ))}
         </div>
       )}
-    </div>
+    </AppShell>
   )
 }
 

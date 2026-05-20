@@ -6,6 +6,7 @@ import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
+import AppShell from '@/components/layout/AppShell'
 import type { MemberWithProfile } from '@/types'
 
 export default function NewConversationPage() {
@@ -66,22 +67,25 @@ export default function NewConversationPage() {
   })
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="top-bar flex items-center gap-3">
-        <button onClick={() => router.push('/messages')} className="text-gold text-sm flex items-center gap-1">
-          <BackArrow /> Cancel
-        </button>
-        <h1 className="flex-1 text-white font-medium text-sm text-center">New Message</h1>
-        <button
-          onClick={startConversation}
-          disabled={selected.length === 0 || creating}
-          className="text-sm font-semibold disabled:opacity-30"
-          style={{ color: '#85bb65' }}
-        >
-          {creating ? <Spinner className="w-4 h-4 text-gold" /> : 'Start'}
-        </button>
-      </div>
+    <AppShell
+      header={
+        <div className="top-bar flex items-center gap-3">
+          <button onClick={() => router.push('/messages')} className="text-gold text-sm flex items-center gap-1">
+            <BackArrow /> Cancel
+          </button>
+          <h1 className="flex-1 text-white font-medium text-sm text-center">New Message</h1>
+          <button
+            onClick={startConversation}
+            disabled={selected.length === 0 || creating}
+            className="text-sm font-semibold disabled:opacity-30"
+            style={{ color: '#85bb65' }}
+          >
+            {creating ? <Spinner className="w-4 h-4 text-gold" /> : 'Start'}
+          </button>
+        </div>
+      }
+    >
+      <div className="flex flex-col h-full">
 
       {/* Selected members */}
       {selected.length > 0 && (
@@ -176,7 +180,8 @@ export default function NewConversationPage() {
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </AppShell>
   )
 }
 

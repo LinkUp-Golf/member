@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
 import { Spinner } from '@/components/ui/Loading'
+import AppShell from '@/components/layout/AppShell'
 import { INDUSTRY_CATEGORIES, type IndustryCategory } from '@/types'
 import { format } from 'date-fns'
 import type { FocusLinkup } from '@/types'
@@ -45,17 +46,19 @@ export default function FocusLinkupsPage() {
   }
 
   return (
-    <div>
-      <div className="top-bar flex items-center gap-3">
-        <button onClick={() => router.push('/more')} className="text-gold text-sm flex items-center gap-1">
-          <BackArrow /> More
-        </button>
-        <div className="flex-1">
-          <div className="logo-text">Focus LinkUps</div>
-          <div className="logo-subtitle">Manage notifications</div>
+    <AppShell
+      header={
+        <div className="top-bar flex items-center gap-3">
+          <button onClick={() => router.push('/more')} className="text-gold text-sm flex items-center gap-1">
+            <BackArrow /> More
+          </button>
+          <div className="flex-1">
+            <div className="logo-text">Focus LinkUps</div>
+            <div className="logo-subtitle">Manage notifications</div>
+          </div>
         </div>
-      </div>
-
+      }
+    >
       <div className="px-5 py-5 pb-8">
         {/* Explainer */}
         <div className="card card-pad mb-5">
@@ -132,7 +135,7 @@ export default function FocusLinkupsPage() {
           </>
         )}
       </div>
-    </div>
+    </AppShell>
   )
 }
 

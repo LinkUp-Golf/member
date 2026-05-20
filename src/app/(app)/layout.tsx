@@ -2,7 +2,6 @@
 
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { useAuthStore } from '@/store/auth'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
@@ -69,9 +68,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-shell">
 
-      {/* ---- Sidebar (tablet+) ---- */}
+      {/* Sidebar — tablet+ */}
       <aside className="app-sidebar">
-        {/* Logo */}
         <div className="sidebar-logo">
           <div className="font-display text-2xl" style={{ color: 'var(--color-gold)' }}>
             LinkUp Golf
@@ -81,7 +79,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </p>
         </div>
 
-        {/* Nav items */}
         <nav className="flex flex-col gap-0.5 py-3 flex-1">
           {NAV_ITEMS.map(item => {
             const active = pathname.startsWith(item.href)
@@ -99,7 +96,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        {/* Bottom of sidebar */}
         <div className="px-5 py-4 border-t" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
           <p className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>
             Park Hyatt Aviara
@@ -107,13 +103,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      {/* ---- Content column ---- */}
+      {/* Content column */}
       <div className="app-content-col">
         <main className="screen-content">
           {children}
         </main>
 
-        {/* Bottom navigation (mobile only — hidden on md+) */}
+        {/* Bottom nav — mobile only */}
         <nav className="bottom-nav">
           <div className="flex">
             {NAV_ITEMS.map(item => {

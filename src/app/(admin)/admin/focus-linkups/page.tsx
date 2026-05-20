@@ -52,7 +52,7 @@ export default function AdminFocusLinkupsPage() {
     <div className="p-8 max-w-5xl">
       <AdminPageHeader
         title="Focus LinkUps"
-        subtitle={`${upcoming.length} upcoming · ${past.length} past`}
+        description={`${upcoming.length} upcoming · ${past.length} past`}
         action={<AdminButton label="+ Create Focus LinkUp" onClick={() => setShowForm(true)} variant="gold" />}
       />
 

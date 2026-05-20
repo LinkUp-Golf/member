@@ -41,7 +41,7 @@ export default function AdminPromotionsPage() {
     <div className="p-8 max-w-5xl">
       <AdminPageHeader
         title="Promotions"
-        subtitle={`${promotions.filter(p => p.active).length} active · ${promotions.filter(p => !p.active).length} inactive`}
+        description={`${promotions.filter(p => p.active).length} active · ${promotions.filter(p => !p.active).length} inactive`}
         action={<AdminButton label="+ Add promotion" onClick={() => setShowForm(true)} variant="gold" />}
       />
 

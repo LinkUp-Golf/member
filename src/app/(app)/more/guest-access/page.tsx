@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
 import { Spinner } from '@/components/ui/Loading'
+import AppShell from '@/components/layout/AppShell'
 import { formatBookingDate, formatRelativeTime } from '@/lib/utils'
 import type { Course, GuestAccessRequest } from '@/types'
 
@@ -36,17 +37,19 @@ export default function GuestAccessPage() {
   }
 
   return (
-    <div>
-      <div className="top-bar flex items-center gap-3">
-        <button onClick={() => router.push('/more')} className="text-gold text-sm flex items-center gap-1">
-          <BackArrow /> More
-        </button>
-        <div className="flex-1">
-          <div className="logo-text">Guest Access</div>
-          <div className="logo-subtitle">Visit another community</div>
+    <AppShell
+      header={
+        <div className="top-bar flex items-center gap-3">
+          <button onClick={() => router.push('/more')} className="text-gold text-sm flex items-center gap-1">
+            <BackArrow /> More
+          </button>
+          <div className="flex-1">
+            <div className="logo-text">Guest Access</div>
+            <div className="logo-subtitle">Visit another community</div>
+          </div>
         </div>
-      </div>
-
+      }
+    >
       <div className="px-5 py-5 pb-8">
         {/* Explainer */}
         <div className="card card-pad mb-5">
@@ -149,7 +152,7 @@ export default function GuestAccessPage() {
           </>
         )}
       </div>
-    </div>
+    </AppShell>
   )
 }
 

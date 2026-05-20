@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
-import TopBar from '@/components/ui/TopBar'
+import AppShell from '@/components/layout/AppShell'
 import { CardSkeleton } from '@/components/ui/Loading'
 import { formatRelativeTime } from '@/lib/utils'
 import type { Announcement } from '@/types'
@@ -44,17 +44,19 @@ export default function AnnouncementsPage() {
   }
 
   return (
-    <div>
-      <div className="top-bar flex items-center gap-3">
-        <button onClick={() => router.push('/more')} className="text-gold text-sm flex items-center gap-1">
-          <BackArrow /> More
-        </button>
-        <div className="flex-1">
-          <div className="logo-text">Announcements</div>
-          <div className="logo-subtitle">Community updates</div>
+    <AppShell
+      header={
+        <div className="top-bar flex items-center gap-3">
+          <button onClick={() => router.push('/more')} className="text-gold text-sm flex items-center gap-1">
+            <BackArrow /> More
+          </button>
+          <div className="flex-1">
+            <div className="logo-text">Announcements</div>
+            <div className="logo-subtitle">Community updates</div>
+          </div>
         </div>
-      </div>
-
+      }
+    >
       <div className="pb-8">
         {loading ? (
           <div className="px-5 py-4 space-y-3">
@@ -91,7 +93,7 @@ export default function AnnouncementsPage() {
           </div>
         )}
       </div>
-    </div>
+    </AppShell>
   )
 }
 

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
 import { Spinner } from '@/components/ui/Loading'
+import AppShell from '@/components/layout/AppShell'
 import { INDUSTRY_CATEGORIES } from '@/types'
 import { formatRelativeTime } from '@/lib/utils'
 import type { Referral } from '@/types'
@@ -35,17 +36,19 @@ export default function ReferralsPage() {
   }
 
   return (
-    <div>
-      <div className="top-bar flex items-center gap-3">
-        <button onClick={() => router.push('/more')} className="text-gold text-sm flex items-center gap-1">
-          <BackArrow /> More
-        </button>
-        <div className="flex-1">
-          <div className="logo-text">Refer a Member</div>
-          <div className="logo-subtitle">Grow the community</div>
+    <AppShell
+      header={
+        <div className="top-bar flex items-center gap-3">
+          <button onClick={() => router.push('/more')} className="text-gold text-sm flex items-center gap-1">
+            <BackArrow /> More
+          </button>
+          <div className="flex-1">
+            <div className="logo-text">Refer a Member</div>
+            <div className="logo-subtitle">Grow the community</div>
+          </div>
         </div>
-      </div>
-
+      }
+    >
       <div className="px-5 py-5 pb-8">
         {/* How it works */}
         <div className="card card-pad mb-5 space-y-3">
@@ -122,7 +125,7 @@ export default function ReferralsPage() {
           </p>
         )}
       </div>
-    </div>
+    </AppShell>
   )
 }
 

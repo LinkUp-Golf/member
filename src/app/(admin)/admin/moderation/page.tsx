@@ -120,7 +120,7 @@ export default function AdminModerationPage() {
     <div className="p-8 max-w-4xl">
       <AdminPageHeader
         title="Moderation Queue"
-        subtitle={loading ? '' : `${items.length} item${items.length !== 1 ? 's' : ''} awaiting review`}
+        description={loading ? '' : `${items.length} item${items.length !== 1 ? 's' : ''} awaiting review`}
       />
 
       {loading ? (

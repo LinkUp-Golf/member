@@ -67,7 +67,7 @@ export default function AdminAnnouncementsPage() {
     <div className="p-8 max-w-5xl">
       <AdminPageHeader
         title="Announcements"
-        subtitle="Broadcast messages to the community"
+        description="Broadcast messages to the community"
         action={<AdminButton label="+ New broadcast" onClick={() => setShowForm(true)} variant="gold" />}
       />
 

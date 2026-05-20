@@ -1,11 +1,11 @@
-import { Skeleton, TopBarSkeleton } from '@/components/ui/Loading'
+import Header from '@/components/ui/Header'
+import { Skeleton } from '@/components/ui/Loading'
 
 export default function MoreLoading() {
   return (
-    <div>
-      <TopBarSkeleton hasSubtitle={false} />
+    <>
+      <Header title="More" description="Settings & account" />
 
-      {/* Profile card */}
       <div className="px-5 py-4">
         <div className="card card-pad flex items-center gap-4">
           <Skeleton className="w-16 h-16 rounded-full flex-shrink-0" />
@@ -17,7 +17,6 @@ export default function MoreLoading() {
         </div>
       </div>
 
-      {/* Menu sections */}
       {[4, 3].map((count, si) => (
         <div key={si} className="px-5 mb-4">
           <Skeleton className="h-3 w-20 mb-2" />
@@ -34,6 +33,6 @@ export default function MoreLoading() {
           </div>
         </div>
       ))}
-    </div>
+    </>
   )
 }

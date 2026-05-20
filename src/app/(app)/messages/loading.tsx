@@ -1,9 +1,10 @@
-import { Skeleton, TopBarSkeleton } from '@/components/ui/Loading'
+import Header from '@/components/ui/Header'
+import { Skeleton } from '@/components/ui/Loading'
 
 export default function MessagesLoading() {
   return (
-    <div>
-      <TopBarSkeleton />
+    <>
+      <Header title="Messages" description="Private · Members only" />
 
       <div className="divide-y divide-green-900/08">
         {Array.from({ length: 6 }).map((_, i) => (
@@ -19,6 +20,6 @@ export default function MessagesLoading() {
           </div>
         ))}
       </div>
-    </div>
+    </>
   )
 }

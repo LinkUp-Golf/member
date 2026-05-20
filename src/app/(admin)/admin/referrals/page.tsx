@@ -45,7 +45,7 @@ export default function AdminReferralsPage() {
     <div className="p-8 max-w-6xl">
       <AdminPageHeader
         title="Referral Pipeline"
-        subtitle={`${counts.pending ?? 0} pending · ${counts.interviewed ?? 0} interviewed · ${counts.joined ?? 0} joined`}
+        description={`${counts.pending ?? 0} pending · ${counts.interviewed ?? 0} interviewed · ${counts.joined ?? 0} joined`}
       />
 
       {/* Status filter */}

@@ -7,6 +7,7 @@ import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
+import AppShell from '@/components/layout/AppShell'
 import type { MemberWithProfile } from '@/types'
 
 export default function MemberProfilePage() {
@@ -52,7 +53,7 @@ export default function MemberProfilePage() {
   const p = member.profile
 
   return (
-    <div>
+    <AppShell title={`${member.first_name} ${member.last_name}`} description={p?.role_title ?? 'Member'}>
       {/* Back button */}
       <div className="bg-green-900 px-5 pt-4 pb-0">
         <button
@@ -176,7 +177,7 @@ export default function MemberProfilePage() {
           )}
         </div>
       </div>
-    </div>
+    </AppShell>
   )
 }
 

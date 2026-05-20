@@ -94,7 +94,7 @@ export default function AdminMembersPage() {
     <div className="p-8 max-w-7xl">
       <AdminPageHeader
         title="Members"
-        subtitle={`${statusCounts.active} active · ${statusCounts.waitlist} waitlisted · ${statusCounts.pending} pending`}
+        description={`${statusCounts.active} active · ${statusCounts.waitlist} waitlisted · ${statusCounts.pending} pending`}
       />
 
       <div className="flex gap-6">

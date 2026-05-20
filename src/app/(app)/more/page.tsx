@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useAuthStore } from '@/store/auth'
 import Avatar from '@/components/ui/Avatar'
-import TopBar from '@/components/ui/TopBar'
+import AppShell from '@/components/layout/AppShell'
 
 const MORE_ITEMS = [
   {
@@ -36,8 +36,7 @@ export default function MorePage() {
   const m = user?.member
 
   return (
-    <div>
-      <TopBar title="More" />
+    <AppShell title="More" description="Settings &amp; account">
 
       {/* Profile quick-link */}
       {m && (
@@ -96,7 +95,7 @@ export default function MorePage() {
           LinkUp Golf · Member Portal · v1.0
         </p>
       </div>
-    </div>
+    </AppShell>
   )
 }
 

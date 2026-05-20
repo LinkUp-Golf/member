@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
 import { Spinner, CardSkeleton } from '@/components/ui/Loading'
+import AppShell from '@/components/layout/AppShell'
 import { format } from 'date-fns'
 import type { MemberEvent, MemberEventRSVP } from '@/types'
 
@@ -40,17 +41,19 @@ export default function MemberEventsPage() {
   }
 
   return (
-    <div>
-      <div className="top-bar flex items-center gap-3">
-        <button onClick={() => router.push('/more')} className="text-gold text-sm flex items-center gap-1">
-          <BackArrow /> More
-        </button>
-        <div className="flex-1">
-          <div className="logo-text">Member Events</div>
-          <div className="logo-subtitle">Community calendar</div>
+    <AppShell
+      header={
+        <div className="top-bar flex items-center gap-3">
+          <button onClick={() => router.push('/more')} className="text-gold text-sm flex items-center gap-1">
+            <BackArrow /> More
+          </button>
+          <div className="flex-1">
+            <div className="logo-text">Member Events</div>
+            <div className="logo-subtitle">Community calendar</div>
+          </div>
         </div>
-      </div>
-
+      }
+    >
       {/* Tabs */}
       <div className="flex border-b border-green-900/08 bg-white">
         {(['upcoming', 'submit'] as Tab[]).map(t => (
@@ -99,7 +102,7 @@ export default function MemberEventsPage() {
           onSubmitted={() => { setTab('upcoming'); loadEvents() }}
         />
       )}
-    </div>
+    </AppShell>
   )
 }
 

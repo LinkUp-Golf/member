@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/auth";
 import { apiClient } from "@/lib/api-client";
 import { shortCategory, truncate } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
-import TopBar from "@/components/ui/TopBar";
+import AppShell from '@/components/layout/AppShell';
 import { MemberRowSkeleton } from "@/components/ui/Loading";
 import { INDUSTRY_CATEGORIES } from "@/types";
 import type { MemberWithProfile } from "@/types";
@@ -75,11 +75,10 @@ export default function MembersPage() {
   }, [search, activeFilter, members]);
 
   return (
-    <div>
-      <TopBar
-        title="Members"
-        subtitle={loading ? "" : `${members.length} active members`}
-      />
+    <AppShell
+      title="Members"
+      description={`${members.length} active members`}
+    >
 
       {/* Search */}
       <div className="px-5 pt-4">
@@ -143,7 +142,7 @@ export default function MembersPage() {
           ))}
         </div>
       )}
-    </div>
+    </AppShell>
   );
 }
 

@@ -5,6 +5,7 @@ import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
+import AppShell from '@/components/layout/AppShell'
 import { INDUSTRY_CATEGORIES } from '@/types'
 import type { MemberProfile } from '@/types'
 
@@ -57,7 +58,7 @@ export default function MyProfilePage() {
   const m = user.member
 
   return (
-    <div>
+    <AppShell title="Profile" description="Your member details">
       {/* Header */}
       <div className="bg-green-900 px-5 pt-5 pb-6 text-center">
         <div className="flex justify-center mb-3">
@@ -281,7 +282,7 @@ export default function MyProfilePage() {
           </div>
         )}
       </div>
-    </div>
+    </AppShell>
   )
 }
 

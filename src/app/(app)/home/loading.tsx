@@ -1,16 +1,11 @@
+import Header from '@/components/ui/Header'
 import { Skeleton, MemberRowSkeleton } from '@/components/ui/Loading'
 
 export default function HomeLoading() {
   return (
-    <div>
-      {/* Top bar */}
-      <div className="top-bar">
-        <div className="flex items-center justify-between">
-          <Skeleton className="h-5 w-28 bg-white/10" />
-        </div>
-      </div>
+    <>
+      <Header title="LinkUp Golf" description="Member Portal" />
 
-      {/* Hero banner */}
       <div className="hero-banner space-y-3">
         <Skeleton className="h-3 w-20 bg-white/10" />
         <Skeleton className="h-8 w-48 bg-white/10" />
@@ -19,7 +14,6 @@ export default function HomeLoading() {
       </div>
 
       <div className="px-5 pt-5 space-y-6 pb-6">
-        {/* Community section */}
         <section>
           <Skeleton className="h-3 w-24 mb-3" />
           <div className="space-y-2">
@@ -36,7 +30,6 @@ export default function HomeLoading() {
           </div>
         </section>
 
-        {/* Member spotlight */}
         <section>
           <Skeleton className="h-3 w-32 mb-3" />
           <div className="card">
@@ -45,7 +38,6 @@ export default function HomeLoading() {
           </div>
         </section>
 
-        {/* Promotions */}
         <section>
           <Skeleton className="h-3 w-24 mb-3" />
           <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--color-green-950)' }}>
@@ -59,6 +51,6 @@ export default function HomeLoading() {
           </div>
         </section>
       </div>
-    </div>
+    </>
   )
 }

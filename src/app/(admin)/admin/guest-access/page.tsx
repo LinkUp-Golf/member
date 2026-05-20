@@ -80,7 +80,7 @@ export default function AdminGuestAccessPage() {
     <div className="p-8 max-w-6xl">
       <AdminPageHeader
         title="Guest Access"
-        subtitle={`${pendingCount} request${pendingCount !== 1 ? 's' : ''} pending review`}
+        description={`${pendingCount} request${pendingCount !== 1 ? 's' : ''} pending review`}
       />
 
       {/* Filter */}

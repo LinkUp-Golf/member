@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
-import TopBar from '@/components/ui/TopBar'
+import AppShell from '@/components/layout/AppShell'
 import { CardSkeleton } from '@/components/ui/Loading'
 import { formatBookingDate } from '@/lib/utils'
 import type { Promotion } from '@/types'
@@ -26,17 +26,19 @@ export default function PromotionsPage() {
   }
 
   return (
-    <div>
-      <div className="top-bar flex items-center gap-3">
-        <button onClick={() => router.push('/more')} className="text-gold text-sm flex items-center gap-1">
-          <BackArrow /> More
-        </button>
-        <div className="flex-1">
-          <div className="logo-text">Member Offers</div>
-          <div className="logo-subtitle">Curated · Exclusive</div>
+    <AppShell
+      header={
+        <div className="top-bar flex items-center gap-3">
+          <button onClick={() => router.push('/more')} className="text-gold text-sm flex items-center gap-1">
+            <BackArrow /> More
+          </button>
+          <div className="flex-1">
+            <div className="logo-text">Member Offers</div>
+            <div className="logo-subtitle">Curated · Exclusive</div>
+          </div>
         </div>
-      </div>
-
+      }
+    >
       <div className="px-5 py-4 pb-8">
         {loading ? (
           <div className="space-y-3">
@@ -54,7 +56,7 @@ export default function PromotionsPage() {
           promotions.map(p => <PromoCard key={p.id} promo={p} />)
         )}
       </div>
-    </div>
+    </AppShell>
   )
 }
 

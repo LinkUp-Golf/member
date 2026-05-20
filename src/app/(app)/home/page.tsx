@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/auth";
 import { apiClient } from "@/lib/api-client";
 import { formatBookingDate, formatTeeTime, truncate } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
-import TopBar from "@/components/ui/TopBar";
+import AppShell from '@/components/layout/AppShell';
 import { CardSkeleton, MemberRowSkeleton } from "@/components/ui/Loading";
 import type {
   Booking,
@@ -50,8 +50,7 @@ export default function HomePage() {
   }
 
   return (
-    <div>
-      <TopBar title="LinkUp Golf" subtitle="Member Portal" />
+    <AppShell title="LinkUp Golf" description="Member Portal">
 
       {/* Hero banner */}
       <div className="hero-banner">
@@ -209,7 +208,7 @@ export default function HomePage() {
           </section>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }
 

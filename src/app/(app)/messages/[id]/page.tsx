@@ -6,6 +6,7 @@ import { useAuthStore } from '@/store/auth'
 import { createClient } from '@/lib/supabase'
 import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
+import AppShell from '@/components/layout/AppShell'
 import { Spinner } from '@/components/ui/Loading'
 import { formatMessageTime } from '@/lib/utils'
 import type { Message } from '@/types'
@@ -130,50 +131,52 @@ export default function ChatPage() {
   const headerParticipant = convType === 'direct' ? otherParticipants[0] : null
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="top-bar flex items-center gap-3">
-        <button
-          onClick={() => router.push('/messages')}
-          className="flex items-center gap-1 text-gold text-sm"
-        >
-          <BackArrow />
-        </button>
+    <AppShell
+      header={
+        <div className="top-bar flex items-center gap-3">
+          <button
+            onClick={() => router.push('/messages')}
+            className="flex items-center gap-1 text-gold text-sm"
+          >
+            <BackArrow />
+          </button>
 
-        {headerParticipant ? (
-          <Avatar
-            firstName={headerParticipant.first_name}
-            lastName={headerParticipant.last_name}
-            avatarUrl={headerParticipant.profile?.avatar_url}
-            size="sm"
-          />
-        ) : (
-          <div className="w-9 h-9 rounded-full bg-green-700 flex items-center justify-center text-gold text-sm">#</div>
-        )}
-
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-white truncate">{convName}</p>
-          {convType === 'group' && (
-            <p className="text-xs text-white/40">
-              {participants.length} members
-            </p>
+          {headerParticipant ? (
+            <Avatar
+              firstName={headerParticipant.first_name}
+              lastName={headerParticipant.last_name}
+              avatarUrl={headerParticipant.profile?.avatar_url}
+              size="sm"
+            />
+          ) : (
+            <div className="w-9 h-9 rounded-full bg-green-700 flex items-center justify-center text-gold text-sm">#</div>
           )}
+
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-white truncate">{convName}</p>
+            {convType === 'group' && (
+              <p className="text-xs text-white/40">
+                {participants.length} members
+              </p>
+            )}
+            {convType === 'direct' && headerParticipant && (
+              <p className="text-xs text-white/40">Active member</p>
+            )}
+          </div>
+
+          {/* View profile shortcut for direct messages */}
           {convType === 'direct' && headerParticipant && (
-            <p className="text-xs text-white/40">Active member</p>
+            <button
+              onClick={() => router.push(`/members/${headerParticipant.id}`)}
+              className="text-white/40 text-xs"
+            >
+              Profile
+            </button>
           )}
         </div>
-
-        {/* View profile shortcut for direct messages */}
-        {convType === 'direct' && headerParticipant && (
-          <button
-            onClick={() => router.push(`/members/${headerParticipant.id}`)}
-            className="text-white/40 text-xs"
-          >
-            Profile
-          </button>
-        )}
-      </div>
-
+      }
+    >
+      <div className="flex flex-col h-full">
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={{ background: '#F4F1E8' }}>
         {loading ? (
@@ -221,7 +224,8 @@ export default function ChatPage() {
           )}
         </button>
       </div>
-    </div>
+      </div>
+    </AppShell>
   )
 }
 

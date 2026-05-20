@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
-import TopBar from '@/components/ui/TopBar'
+import AppShell from '@/components/layout/AppShell'
 import { Spinner } from '@/components/ui/Loading'
 import { getBookingDates, formatTeeTime, cn } from '@/lib/utils'
 import { format, isSameDay } from 'date-fns'
@@ -121,8 +121,7 @@ export default function BookPage() {
   }
 
   return (
-    <div>
-      <TopBar title="Book" subtitle="Park Hyatt Aviara" />
+    <AppShell title="Book" description="Park Hyatt Aviara">
 
       {/* Tabs */}
       <div className="flex border-b border-green-900/08 bg-white">
@@ -243,7 +242,7 @@ export default function BookPage() {
       ) : (
         <MyBookingsTab bookings={myBookings} onRefresh={loadMyBookings} />
       )}
-    </div>
+    </AppShell>
   )
 }
 

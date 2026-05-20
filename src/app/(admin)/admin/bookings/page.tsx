@@ -50,7 +50,7 @@ export default function AdminBookingsPage() {
     <div className="p-8 max-w-6xl">
       <AdminPageHeader
         title="Booking Overview"
-        subtitle="Park Hyatt Aviara"
+        description="Park Hyatt Aviara"
         action={
           <div className="flex items-center gap-2">
             <button

@@ -111,7 +111,7 @@ export default function AdminDashboard() {
     <div className="p-8 max-w-7xl">
       <AdminPageHeader
         title="Dashboard"
-        subtitle={`Park Hyatt Aviara · ${format(new Date(), 'MMMM yyyy')}`}
+        description={`Park Hyatt Aviara · ${format(new Date(), 'MMMM yyyy')}`}
       />
 
       {/* Pending action alert */}
