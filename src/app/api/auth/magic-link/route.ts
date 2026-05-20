@@ -1,7 +1,15 @@
+// ============================================================
+// POST /api/auth/magic-link
+// GHL membership gate only — does NOT send the magic link.
+//
+// Returns { allowed: true } when the email has an active GHL
+// membership tag. The login page then calls Supabase signInWithOtp
+// client-side so the PKCE code_verifier is stored in the browser
+// (its correct location), not in a server-side cookie.
+// ============================================================
+
 import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
-import { cookies } from 'next/headers'
-import { createRouteHandlerClient } from '@/lib/supabase-server'
 import { getContactByEmail } from '@/lib/ghl'
 import { authRateLimit } from '@/lib/rateLimit'
 import { validateEmail } from '@/lib/validation'
@@ -9,13 +17,12 @@ import { logger, auditLog } from '@/lib/logger'
 import { hasAnyAccessTag } from '@/lib/ghl-tags'
 
 // Intentionally vague — prevents email enumeration
-const GENERIC_RESPONSE = {
-  message: 'If that email is registered with LinkUp Golf, you will receive a login link shortly.',
-}
+const GENERIC_OK = { allowed: true }
+const GENERIC_DENY = { allowed: false }
 
 export async function POST(request: NextRequest) {
   const requestId = randomUUID()
-  const reqLog = logger.child({ requestId, action: 'magic_link_request' })
+  const reqLog = logger.child({ requestId, action: 'magic_link_gate' })
 
   const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
     ?? request.headers.get('x-real-ip')
@@ -53,31 +60,12 @@ export async function POST(request: NextRequest) {
 
     if (!hasAccess) {
       auditLog('LOGIN_DENIED', { requestId, metadata: { reason: 'no_ghl_tag' } })
-      return NextResponse.json(GENERIC_RESPONSE, { headers: { 'X-Request-Id': requestId } })
+      // Return same shape as success to prevent email enumeration
+      return NextResponse.json(GENERIC_DENY, { headers: { 'X-Request-Id': requestId } })
     }
 
-    // Use route handler client (not admin) so Supabase can store the
-    // PKCE code_verifier in a cookie — required for exchangeCodeForSession
-    // in the callback route.
-    const supabase = createRouteHandlerClient(cookies())
-    const { error: otpError } = await supabase.auth.signInWithOtp({
-      email: normalizedEmail,
-      options: {
-        emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/callback`,
-        shouldCreateUser: true,
-      },
-    })
-
-    if (otpError) {
-      reqLog.error('Failed to send magic link', { errorMessage: otpError.message })
-      return NextResponse.json(
-        { error: 'Failed to send login link. Please try again.' },
-        { status: 500, headers: { 'X-Request-Id': requestId } }
-      )
-    }
-
-    auditLog('LOGIN_SUCCESS', { requestId, ghlContactId: contact?.id, metadata: { method: 'magic_link' } })
-    return NextResponse.json(GENERIC_RESPONSE, { headers: { 'X-Request-Id': requestId } })
+    auditLog('LOGIN_SUCCESS', { requestId, ghlContactId: contact?.id, metadata: { method: 'magic_link_gate' } })
+    return NextResponse.json(GENERIC_OK, { headers: { 'X-Request-Id': requestId } })
   } catch (err) {
     reqLog.error('Unexpected error', { errorMessage: String(err) })
     return NextResponse.json(

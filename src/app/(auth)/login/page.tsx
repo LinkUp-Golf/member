@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Spinner } from '@/components/ui/Loading'
+import { createClient } from '@/lib/supabase'
 
 type State = 'idle' | 'loading' | 'sent' | 'error'
 
@@ -15,20 +16,52 @@ export default function LoginPage() {
     if (!email.trim()) return
     setState('loading')
 
+    const normalizedEmail = email.trim().toLowerCase()
+
     try {
-      const res = await fetch('/api/auth/magic-link', {
+      // Step 1: Server-side GHL membership gate
+      const gateRes = await fetch('/api/auth/magic-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+        body: JSON.stringify({ email: normalizedEmail }),
       })
 
-      if (res.ok) {
-        setState('sent')
-      } else {
-        const data = await res.json().catch(() => ({}))
-        setErrorMessage(data.error ?? 'Something went wrong. Please try again.')
+      if (!gateRes.ok) {
+        const data = await gateRes.json().catch(() => ({}))
+        setErrorMessage((data as { error?: string }).error ?? 'Something went wrong. Please try again.')
         setState('error')
+        return
       }
+
+      const gate = await gateRes.json() as { allowed: boolean }
+
+      if (!gate.allowed) {
+        // Generic message — do not reveal whether email exists in GHL
+        setState('sent')
+        return
+      }
+
+      // Step 2: Client-side OTP — browser stores the PKCE code_verifier
+      const supabase = createClient()
+      const { error: otpError } = await supabase.auth.signInWithOtp({
+        email: normalizedEmail,
+        options: {
+          emailRedirectTo: `${window.location.origin}/api/auth/callback`,
+          shouldCreateUser: true,
+        },
+      })
+
+      if (otpError) {
+        setErrorMessage(
+          otpError.message === 'email rate limit exceeded'
+            ? 'Too many requests. Please wait a moment and try again.'
+            : 'Failed to send login link. Please try again.'
+        )
+        setState('error')
+        return
+      }
+
+      setState('sent')
     } catch {
       setErrorMessage('Unable to connect. Please check your connection and try again.')
       setState('error')
@@ -37,9 +70,8 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: '#002669' }}>
-      {/* Top section */}
       <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
-        {/* Logo — replace with <Image> once logo file is provided */}
+        {/* Logo */}
         <div className="mb-2 text-center">
           <div className="font-display text-5xl mb-1" style={{ color: '#85bb65' }}>
             LinkUp Golf
@@ -49,20 +81,18 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Divider */}
-        <div className="w-12 h-px my-8" style={{ background: 'rgba(201,168,76,0.3)' }} />
+        <div className="w-12 h-px my-8" style={{ background: 'rgba(133,187,101,0.3)' }} />
 
         {state === 'sent' ? (
-          // Success state
           <div className="text-center animate-fade-in">
             <div className="text-4xl mb-4">✉️</div>
             <h2 className="font-serif text-2xl text-white mb-3">Check your email</h2>
             <p className="text-sm text-white/50 leading-relaxed max-w-xs">
-              If your email address is registered with LinkUp Golf, you'll receive a
+              If your email address is registered with LinkUp Golf, you&apos;ll receive a
               login link shortly. Tap it to access your member portal.
             </p>
             <p className="text-xs text-white/25 mt-6">
-              Didn't receive it? Check your spam folder or contact your LinkUp coordinator.
+              Didn&apos;t receive it? Check your spam folder or contact your LinkUp coordinator.
             </p>
             <button
               onClick={() => { setState('idle'); setEmail(''); setErrorMessage('') }}
@@ -72,7 +102,6 @@ export default function LoginPage() {
             </button>
           </div>
         ) : (
-          // Login form
           <div className="w-full max-w-sm animate-fade-in">
             <h2 className="font-serif text-2xl text-white text-center mb-2">
               Sign in
@@ -101,9 +130,7 @@ export default function LoginPage() {
               />
 
               {state === 'error' && (
-                <p className="text-xs text-red-400 text-center">
-                  {errorMessage}
-                </p>
+                <p className="text-xs text-red-400 text-center">{errorMessage}</p>
               )}
 
               <button
@@ -112,18 +139,13 @@ export default function LoginPage() {
                 className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
                 style={{ background: '#85bb65', color: '#002669' }}
               >
-                {state === 'loading' ? (
-                  <Spinner className="text-green-900" />
-                ) : (
-                  'Send login link'
-                )}
+                {state === 'loading' ? <Spinner className="text-green-900" /> : 'Send login link'}
               </button>
             </form>
           </div>
         )}
       </div>
 
-      {/* Footer */}
       <div className="px-8 pb-10 text-center">
         <p className="text-xs text-white/15 leading-relaxed">
           LinkUp Golf is a private, invitation-only community.
