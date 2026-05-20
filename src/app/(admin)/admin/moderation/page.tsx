@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useAuthStore } from '@/store/auth'
 import { createClient } from '@/lib/supabase'
 import {
@@ -14,9 +14,20 @@ interface ModerationItem {
   title: string
   body: string
   author: string
+  authorId: string
+  authorStatus: string
+  warningCount: number
   submittedAt: string
   status: string
   extra?: Record<string, string>
+}
+
+const STATUS_COLOURS: Record<string, string> = {
+  active:    'bg-green-50 text-green-700',
+  suspended: 'bg-red-50 text-red-600',
+  waitlist:  'bg-yellow-50 text-yellow-700',
+  pending:   'bg-gray-100 text-gray-500',
+  cancelled: 'bg-gray-100 text-gray-400',
 }
 
 export default function AdminModerationPage() {
@@ -24,21 +35,32 @@ export default function AdminModerationPage() {
   const [items, setItems] = useState<ModerationItem[]>([])
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
-  useEffect(() => { loadQueue() }, [])
+  const showToast = (msg: string, ok = true) => {
+    setToast({ msg, ok })
+    setTimeout(() => setToast(null), 3000)
+  }
 
-  async function loadQueue() {
+  const loadQueue = useCallback(async () => {
     const supabase = createClient()
 
     const [eventsRes, announcementsRes] = await Promise.all([
       supabase
         .from('member_events')
-        .select('id, title, description, event_date, event_time, location, status, created_at, organizer:members(first_name, last_name)')
+        .select(`
+          id, title, description, event_date, event_time, location,
+          status, created_at, organizer_id,
+          organizer:members!organizer_id(id, first_name, last_name, membership_status, warning_count)
+        `)
         .eq('status', 'pending_review')
         .order('created_at', { ascending: true }),
       supabase
         .from('announcements')
-        .select('id, title, body, type, status, created_at, author:members(first_name, last_name)')
+        .select(`
+          id, title, body, type, status, created_at, author_id,
+          author:members!author_id(id, first_name, last_name, membership_status, warning_count)
+        `)
         .eq('status', 'pending_review')
         .order('created_at', { ascending: true }),
     ])
@@ -49,6 +71,9 @@ export default function AdminModerationPage() {
       title: e.title,
       body: e.description,
       author: e.organizer ? `${e.organizer.first_name} ${e.organizer.last_name}` : 'Unknown',
+      authorId: e.organizer?.id ?? e.organizer_id,
+      authorStatus: e.organizer?.membership_status ?? 'active',
+      warningCount: e.organizer?.warning_count ?? 0,
       submittedAt: e.created_at,
       status: e.status,
       extra: {
@@ -64,6 +89,9 @@ export default function AdminModerationPage() {
       title: a.title,
       body: a.body,
       author: a.author ? `${a.author.first_name} ${a.author.last_name}` : 'Unknown',
+      authorId: a.author?.id ?? a.author_id,
+      authorStatus: a.author?.membership_status ?? 'active',
+      warningCount: a.author?.warning_count ?? 0,
       submittedAt: a.created_at,
       status: a.status,
     }))
@@ -72,7 +100,9 @@ export default function AdminModerationPage() {
       (a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime()
     ))
     setLoading(false)
-  }
+  }, [])
+
+  useEffect(() => { loadQueue() }, [loadQueue])
 
   async function decide(item: ModerationItem, decision: 'published' | 'rejected') {
     setProcessing(item.id)
@@ -90,7 +120,6 @@ export default function AdminModerationPage() {
 
     await supabase.from(table).update(update).eq('id', item.id)
 
-    // If approving a member event, create an announcement for it
     if (decision === 'published' && item.type === 'event') {
       const { data: event } = await supabase
         .from('member_events')
@@ -112,20 +141,62 @@ export default function AdminModerationPage() {
       }
     }
 
+    showToast(decision === 'published' ? 'Approved and published.' : 'Rejected.')
     await loadQueue()
     setProcessing(null)
   }
 
+  async function memberAction(item: ModerationItem, action: 'warn' | 'suspend' | 'unsuspend') {
+    if (!item.authorId) return
+    setProcessing(`${item.id}-${action}`)
+
+    const res = await fetch('/api/admin/moderation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action,
+        member_id: item.authorId,
+        item_id: item.id,
+        item_type: item.type,
+      }),
+    })
+
+    if (res.ok) {
+      const msgs: Record<string, string> = {
+        warn:      `Warning issued to ${item.author}.`,
+        suspend:   `${item.author} has been suspended.`,
+        unsuspend: `${item.author} has been reinstated.`,
+      }
+      showToast(msgs[action] ?? 'Done.')
+      await loadQueue()
+    } else {
+      showToast('Action failed. Please try again.', false)
+    }
+
+    setProcessing(null)
+  }
+
+  const isProcessing = (key: string) => processing === key || processing === `${key}-warn` || processing === `${key}-suspend` || processing === `${key}-unsuspend`
+
   return (
-    <div className="p-8 max-w-4xl">
+    <div className="p-4 sm:p-8 max-w-4xl">
       <AdminPageHeader
         title="Moderation Queue"
         description={loading ? '' : `${items.length} item${items.length !== 1 ? 's' : ''} awaiting review`}
       />
 
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed top-6 right-6 z-50 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all ${
+          toast.ok ? 'bg-green-900 text-white' : 'bg-red-600 text-white'
+        }`}>
+          {toast.msg}
+        </div>
+      )}
+
       {loading ? (
         <div className="space-y-4">
-          {[1,2,3].map(i => <div key={i} className="h-40 bg-gray-100 rounded-xl animate-pulse" />)}
+          {[1,2,3].map(i => <div key={i} className="h-48 bg-gray-100 rounded-xl animate-pulse" />)}
         </div>
       ) : items.length === 0 ? (
         <div className="text-center py-20">
@@ -135,53 +206,95 @@ export default function AdminModerationPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {items.map(item => (
-            <AdminCard key={item.id}>
-              <div className="flex items-start gap-4">
-                <div className="flex-1 min-w-0">
-                  {/* Header */}
-                  <div className="flex items-center gap-2 mb-2">
-                    <Badge
-                      label={item.type === 'event' ? '📅 Member event' : '📢 Announcement'}
-                      colour={item.type === 'event' ? 'blue' : 'gold'}
-                    />
-                    <span className="text-xs text-gray-400">
-                      by {item.author} · {formatRelativeTime(item.submittedAt)}
-                    </span>
+          {items.map(item => {
+            const suspended = item.authorStatus === 'suspended'
+            return (
+              <AdminCard key={item.id}>
+                <div className="flex flex-col gap-4">
+                  {/* Header row */}
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-center flex-wrap gap-2">
+                      <Badge
+                        label={item.type === 'event' ? '📅 Member event' : '📢 Announcement'}
+                        colour={item.type === 'event' ? 'blue' : 'gold'}
+                      />
+                      <span className="text-xs text-gray-500 font-medium">{item.author}</span>
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${STATUS_COLOURS[item.authorStatus] ?? 'bg-gray-100 text-gray-500'}`}>
+                        {item.authorStatus}
+                      </span>
+                      {item.warningCount > 0 && (
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-orange-50 text-orange-600">
+                          ⚠ {item.warningCount} warning{item.warningCount !== 1 ? 's' : ''}
+                        </span>
+                      )}
+                      <span className="text-xs text-gray-400">{formatRelativeTime(item.submittedAt)}</span>
+                    </div>
                   </div>
 
                   {/* Content */}
-                  <h3 className="font-semibold text-gray-900 mb-1.5">{item.title}</h3>
-                  <p className="text-sm text-gray-600 leading-relaxed mb-3">{item.body}</p>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-1.5">{item.title}</h3>
+                    <p className="text-sm text-gray-600 leading-relaxed mb-3">{item.body}</p>
+                    {item.extra && (
+                      <div className="flex gap-4 text-xs text-gray-400">
+                        {Object.entries(item.extra).map(([k, v]) =>
+                          v ? <span key={k}><span className="font-medium text-gray-500">{k}:</span> {v}</span> : null
+                        )}
+                      </div>
+                    )}
+                  </div>
 
-                  {/* Extra details for events */}
-                  {item.extra && (
-                    <div className="flex gap-4 text-xs text-gray-400">
-                      {Object.entries(item.extra).map(([k, v]) => (
-                        v && <span key={k}><span className="font-medium text-gray-500">{k}:</span> {v}</span>
-                      ))}
+                  {/* Action row */}
+                  <div className="flex items-center gap-2 pt-1 border-t border-gray-50 flex-wrap">
+                    {/* Content actions */}
+                    <div className="flex gap-2 flex-1">
+                      <AdminButton
+                        label="✓ Approve"
+                        onClick={() => decide(item, 'published')}
+                        variant="gold"
+                        disabled={isProcessing(item.id)}
+                      />
+                      <AdminButton
+                        label="✕ Reject"
+                        onClick={() => decide(item, 'rejected')}
+                        variant="danger"
+                        disabled={isProcessing(item.id)}
+                      />
                     </div>
-                  )}
-                </div>
 
-                {/* Actions */}
-                <div className="flex flex-col gap-2 flex-shrink-0 pt-1">
-                  <AdminButton
-                    label="✓ Approve"
-                    onClick={() => decide(item, 'published')}
-                    variant="gold"
-                    disabled={processing === item.id}
-                  />
-                  <AdminButton
-                    label="✕ Reject"
-                    onClick={() => decide(item, 'rejected')}
-                    variant="danger"
-                    disabled={processing === item.id}
-                  />
+                    {/* Author actions (separated) */}
+                    <div className="flex gap-2 border-l border-gray-100 pl-3">
+                      <span className="text-xs text-gray-400 self-center">Author:</span>
+                      <AdminButton
+                        label="⚠ Warn"
+                        onClick={() => memberAction(item, 'warn')}
+                        variant="ghost"
+                        size="sm"
+                        disabled={isProcessing(item.id)}
+                      />
+                      {suspended ? (
+                        <AdminButton
+                          label="↩ Reinstate"
+                          onClick={() => memberAction(item, 'unsuspend')}
+                          variant="ghost"
+                          size="sm"
+                          disabled={isProcessing(item.id)}
+                        />
+                      ) : (
+                        <AdminButton
+                          label="🚫 Suspend"
+                          onClick={() => memberAction(item, 'suspend')}
+                          variant="danger"
+                          size="sm"
+                          disabled={isProcessing(item.id)}
+                        />
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </AdminCard>
-          ))}
+              </AdminCard>
+            )
+          })}
         </div>
       )}
     </div>

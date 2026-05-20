@@ -49,7 +49,7 @@ export default function AdminFocusLinkupsPage() {
   const past = linkups.filter(l => l.focus_date < todayISO)
 
   return (
-    <div className="p-8 max-w-5xl">
+    <div className="p-4 sm:p-8 max-w-5xl">
       <AdminPageHeader
         title="Focus LinkUps"
         description={`${upcoming.length} upcoming · ${past.length} past`}
@@ -162,8 +162,8 @@ function CreateFocusLinkupForm({ courseId, onCreated, onCancel }: { courseId: st
 
   return (
     <AdminCard title="Create Focus LinkUp">
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        <div className="col-span-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <div className="col-span-1 sm:col-span-2">
           <label className="text-xs text-gray-400 mb-1 block">Title</label>
           <input className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
             placeholder="Life Sciences LinkUp" value={title} onChange={e => setTitle(e.target.value)} />
@@ -178,12 +178,12 @@ function CreateFocusLinkupForm({ courseId, onCreated, onCancel }: { courseId: st
           <input type="time" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
             value={time} onChange={e => setTime(e.target.value)} />
         </div>
-        <div className="col-span-2">
+        <div className="col-span-1 sm:col-span-2">
           <label className="text-xs text-gray-400 mb-1 block">Description</label>
           <textarea rows={2} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500 resize-none"
             placeholder="Brief description for notifications…" value={description} onChange={e => setDescription(e.target.value)} />
         </div>
-        <div className="col-span-2">
+        <div className="col-span-1 sm:col-span-2">
           <label className="text-xs text-gray-400 mb-2 block">Industry focus (select all that apply)</label>
           <div className="flex flex-wrap gap-2">
             {INDUSTRY_CATEGORIES.map(cat => (

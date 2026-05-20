@@ -97,8 +97,8 @@ export default function AdminDashboard() {
       <div className="p-8">
         <div className="animate-pulse space-y-6">
           <div className="h-8 w-48 bg-gray-200 rounded" />
-          <div className="grid grid-cols-4 gap-4">
-            {[1,2,3,4].map(i => <div key={i} className="h-28 bg-gray-100 rounded-xl" />)}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            {[1,2,3,4].map(i => <div key={i} className="h-24 sm:h-28 bg-gray-100 rounded-xl" />)}
           </div>
         </div>
       </div>
@@ -108,7 +108,7 @@ export default function AdminDashboard() {
   const pendingActions = data.pendingModeration + data.pendingGuestAccess + data.pendingCount
 
   return (
-    <div className="p-8 max-w-7xl">
+    <div className="p-4 sm:p-8 max-w-7xl">
       <AdminPageHeader
         title="Dashboard"
         description={`Park Hyatt Aviara · ${format(new Date(), 'MMMM yyyy')}`}
@@ -116,7 +116,7 @@ export default function AdminDashboard() {
 
       {/* Pending action alert */}
       {pendingActions > 0 && (
-        <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-xl px-5 py-4 flex items-center justify-between">
+        <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
           <div>
             <p className="text-sm font-medium text-yellow-800">
               {pendingActions} item{pendingActions !== 1 ? 's' : ''} require your attention

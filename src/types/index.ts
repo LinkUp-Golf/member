@@ -17,7 +17,7 @@ export type AnnouncementType =
   | 'focus_linkup'
 export type ModerationStatus = 'pending_review' | 'published' | 'rejected'
 export type ReferralStatus = 'pending' | 'interviewed' | 'approved' | 'declined' | 'joined'
-export type GuestAccessStatus = 'pending' | 'approved' | 'denied'
+export type GuestAccessStatus = 'pending' | 'approved' | 'denied' | 'revoked'
 export type ConversationType = 'direct' | 'group'
 export type RSVPStatus = 'attending' | 'maybe' | 'declined'
 
@@ -86,6 +86,8 @@ export interface Member {
   referred_by: string | null
   ghl_tags: string[]
   is_admin: boolean
+  warning_count?: number
+  suspended_until?: string | null
   created_at: string
   updated_at: string
 }
@@ -136,6 +138,7 @@ export interface Booking {
   amount_charged: number
   stripe_payment_id: string | null
   focus_linkup_id: string | null
+  admin_notes?: string | null
   created_at: string
 }
 
@@ -259,6 +262,16 @@ export interface Promotion {
   cta_url: string | null
   active: boolean
   sort_order: number
+  created_at: string
+}
+
+export interface AdminAuditLog {
+  id: string
+  admin_id: string
+  action: string
+  target_type: string
+  target_id: string
+  payload: Record<string, unknown>
   created_at: string
 }
 

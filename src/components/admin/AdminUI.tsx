@@ -14,12 +14,12 @@ export function AdminPageHeader({
   action?: React.ReactNode
 }) {
   return (
-    <div className="flex items-start justify-between mb-8">
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-900">{title}</h1>
+    <div className="flex items-start justify-between gap-4 mb-6 sm:mb-8">
+      <div className="min-w-0">
+        <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">{title}</h1>
         {description && <p className="text-sm text-gray-500 mt-1">{description}</p>}
       </div>
-      {action && <div>{action}</div>}
+      {action && <div className="flex-shrink-0">{action}</div>}
     </div>
   )
 }
@@ -46,12 +46,12 @@ export function StatCard({
     gray:  'text-gray-500',
   }
   return (
-    <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
-      <p className="text-xs uppercase tracking-wider text-gray-400 mb-2">{label}</p>
-      <p className={cn('font-bold', large ? 'text-4xl' : 'text-3xl', colours[colour])}>
+    <div className="bg-white rounded-xl border border-gray-100 p-4 sm:p-5 shadow-sm">
+      <p className="text-xs uppercase tracking-wider text-gray-400 mb-1.5">{label}</p>
+      <p className={cn('font-bold', large ? 'text-3xl sm:text-4xl' : 'text-2xl sm:text-3xl', colours[colour])}>
         {value}
       </p>
-      {sub && <p className="text-xs text-gray-400 mt-1.5">{sub}</p>}
+      {sub && <p className="text-xs text-gray-400 mt-1.5 leading-snug">{sub}</p>}
     </div>
   )
 }
@@ -68,20 +68,23 @@ export function AdminTable({
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-100">
-            {headers.map(h => (
-              <th key={h} className="text-left px-5 py-3 text-xs uppercase tracking-wider text-gray-400 font-medium">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {children}
-        </tbody>
-      </table>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm" style={{ minWidth: '520px' }}>
+          <thead>
+            <tr className="border-b border-gray-100">
+              {headers.map(h => (
+                <th
+                  key={h}
+                  className="text-left px-4 sm:px-5 py-3 text-xs uppercase tracking-wider text-gray-400 font-medium whitespace-nowrap"
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>{children}</tbody>
+        </table>
+      </div>
       {empty && (
         <div className="px-5 py-10 text-center text-sm text-gray-400 italic">{empty}</div>
       )}
@@ -101,7 +104,7 @@ export function AdminTr({
       onClick={onClick}
       className={cn(
         'border-b border-gray-50 last:border-0',
-        onClick && 'cursor-pointer hover:bg-gray-50'
+        onClick && 'cursor-pointer hover:bg-gray-50 active:bg-gray-100'
       )}
     >
       {children}
@@ -117,7 +120,7 @@ export function AdminTd({
   className?: string
 }) {
   return (
-    <td className={cn('px-5 py-3.5 text-gray-700', className)}>
+    <td className={cn('px-4 sm:px-5 py-3.5 text-gray-700', className)}>
       {children}
     </td>
   )
@@ -140,7 +143,7 @@ export function Badge({
     gray:   'bg-gray-100 text-gray-600',
   }
   return (
-    <span className={cn('text-xs font-medium px-2.5 py-1 rounded-full', colours[colour])}>
+    <span className={cn('text-xs font-medium px-2.5 py-1 rounded-full whitespace-nowrap', colours[colour])}>
       {label}
     </span>
   )
@@ -159,12 +162,12 @@ export function AdminCard({
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
       {title && (
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+        <div className="flex items-center justify-between px-4 sm:px-5 py-4 border-b border-gray-100">
           <h2 className="font-semibold text-gray-800 text-sm">{title}</h2>
           {action}
         </div>
       )}
-      <div className="p-5">{children}</div>
+      <div className="p-4 sm:p-5">{children}</div>
     </div>
   )
 }
@@ -199,7 +202,7 @@ export function AdminButton({
       disabled={disabled}
       style={variant === 'gold' ? { background: '#85bb65' } : undefined}
       className={cn(
-        'inline-flex items-center gap-1.5 font-medium transition-colors disabled:opacity-40',
+        'inline-flex items-center gap-1.5 font-medium transition-colors whitespace-nowrap disabled:opacity-40',
         variants[variant],
         sizes[size]
       )}

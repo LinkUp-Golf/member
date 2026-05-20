@@ -64,7 +64,7 @@ export default function AdminAnnouncementsPage() {
   }
 
   return (
-    <div className="p-8 max-w-5xl">
+    <div className="p-4 sm:p-8 max-w-5xl">
       <AdminPageHeader
         title="Announcements"
         description="Broadcast messages to the community"

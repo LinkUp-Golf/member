@@ -1,17 +1,35 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useAuthStore } from '@/store/auth'
 import { createClient } from '@/lib/supabase'
 import { AdminPageHeader, AdminTable, AdminTr, AdminTd, Badge, AdminButton } from '@/components/admin/AdminUI'
 import { formatBookingDate, formatRelativeTime } from '@/lib/utils'
+import type { GuestAccessStatus } from '@/types'
+
+type FilterTab = GuestAccessStatus | 'all'
+
+const FILTER_TABS: FilterTab[] = ['pending', 'approved', 'revoked', 'denied', 'all']
+
+const BADGE_MAP: Record<GuestAccessStatus, { label: string; colour: 'yellow' | 'green' | 'red' | 'gray' }> = {
+  pending:  { label: 'Pending',  colour: 'yellow' },
+  approved: { label: 'Approved', colour: 'green' },
+  denied:   { label: 'Denied',   colour: 'red' },
+  revoked:  { label: 'Revoked',  colour: 'gray' },
+}
 
 export default function AdminGuestAccessPage() {
   const { user } = useAuthStore()
   const [requests, setRequests] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'pending' | 'approved' | 'denied' | 'all'>('pending')
+  const [filter, setFilter] = useState<FilterTab>('pending')
+  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
+
+  const showToast = (msg: string, ok = true) => {
+    setToast({ msg, ok })
+    setTimeout(() => setToast(null), 3000)
+  }
 
   useEffect(() => { loadRequests() }, [])
 
@@ -21,8 +39,10 @@ export default function AdminGuestAccessPage() {
       .from('guest_access_requests')
       .select(`
         *,
-        requesting_member:members(first_name, last_name, email,
-          profile:member_profiles(business_name, role_title, industry_category)),
+        requesting_member:members!requesting_member_id(
+          id, first_name, last_name, email,
+          profile:member_profiles(business_name, role_title, industry_category)
+        ),
         target_course:courses(name, city)
       `)
       .order('created_at', { ascending: false })
@@ -40,7 +60,6 @@ export default function AdminGuestAccessPage() {
       .eq('id', id)
 
     if (decision === 'approved') {
-      // Create temporary course membership
       await supabase.from('course_memberships').upsert({
         member_id: request.requesting_member_id,
         course_id: request.target_course_id,
@@ -51,7 +70,6 @@ export default function AdminGuestAccessPage() {
         valid_until: request.visit_until,
       }, { onConflict: 'member_id,course_id,access_type' })
 
-      // Fire visiting member announcement to target community
       const member = request.requesting_member
       await supabase.from('announcements').insert({
         course_id: request.target_course_id,
@@ -67,25 +85,71 @@ export default function AdminGuestAccessPage() {
         status: 'published',
         published_at: new Date().toISOString(),
       })
+
+      showToast('Access approved and visiting member announcement posted.')
+    } else {
+      showToast('Request denied.')
     }
 
     await loadRequests()
     setProcessing(null)
   }
 
+  async function revoke(id: string) {
+    setProcessing(`revoke-${id}`)
+    const res = await fetch(`/api/admin/guest-access/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'revoke' }),
+    })
+    if (res.ok) {
+      showToast('Access revoked.')
+      await loadRequests()
+    } else {
+      showToast('Revoke failed. Please try again.', false)
+    }
+    setProcessing(null)
+  }
+
   const filtered = filter === 'all' ? requests : requests.filter(r => r.status === filter)
-  const pendingCount = requests.filter(r => r.status === 'pending').length
+
+  const counts: Record<FilterTab, number> = {
+    all: requests.length,
+    pending:  requests.filter(r => r.status === 'pending').length,
+    approved: requests.filter(r => r.status === 'approved').length,
+    revoked:  requests.filter(r => r.status === 'revoked').length,
+    denied:   requests.filter(r => r.status === 'denied').length,
+  }
+
+  // Hosting history: count of all requests per member id
+  const hostingCounts = useMemo(() => {
+    const map: Record<string, number> = {}
+    requests.forEach(r => {
+      const id = r.requesting_member_id
+      map[id] = (map[id] ?? 0) + 1
+    })
+    return map
+  }, [requests])
 
   return (
-    <div className="p-8 max-w-6xl">
+    <div className="p-4 sm:p-8 max-w-6xl">
       <AdminPageHeader
         title="Guest Access"
-        description={`${pendingCount} request${pendingCount !== 1 ? 's' : ''} pending review`}
+        description={`${counts.pending} request${counts.pending !== 1 ? 's' : ''} pending review · ${counts.approved} active`}
       />
 
-      {/* Filter */}
-      <div className="flex gap-2 mb-5">
-        {(['pending', 'approved', 'denied', 'all'] as const).map(s => (
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed top-6 right-6 z-50 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all ${
+          toast.ok ? 'bg-green-900 text-white' : 'bg-red-600 text-white'
+        }`}>
+          {toast.msg}
+        </div>
+      )}
+
+      {/* Filter tabs */}
+      <div className="flex gap-2 mb-5 flex-wrap">
+        {FILTER_TABS.map(s => (
           <button
             key={s}
             onClick={() => setFilter(s)}
@@ -95,7 +159,7 @@ export default function AdminGuestAccessPage() {
                 : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
             }`}
           >
-            {s} <span className="opacity-60">({requests.filter(r => s === 'all' || r.status === s).length})</span>
+            {s} <span className="opacity-60">({counts[s]})</span>
           </button>
         ))}
       </div>
@@ -104,66 +168,78 @@ export default function AdminGuestAccessPage() {
         headers={['Member', 'Destination', 'Visit dates', 'Reason', 'Submitted', 'Status', 'Actions']}
         empty={loading ? 'Loading…' : filtered.length === 0 ? 'No requests in this category.' : undefined}
       >
-        {filtered.map(r => (
-          <AdminTr key={r.id}>
-            <AdminTd>
-              <p className="font-medium text-gray-900">
-                {r.requesting_member?.first_name} {r.requesting_member?.last_name}
-              </p>
-              <p className="text-xs text-gray-400">{r.requesting_member?.profile?.role_title}</p>
-              <p className="text-xs text-gray-400">{r.requesting_member?.profile?.business_name}</p>
-            </AdminTd>
-            <AdminTd>
-              <p className="text-sm text-gray-700">{r.target_course?.name}</p>
-              <p className="text-xs text-gray-400">{r.target_course?.city}</p>
-            </AdminTd>
-            <AdminTd>
-              <p className="text-xs text-gray-600">
-                {formatBookingDate(r.visit_from)}<br />→ {formatBookingDate(r.visit_until)}
-              </p>
-            </AdminTd>
-            <AdminTd>
-              <p className="text-xs text-gray-600 max-w-xs">{r.reason}</p>
-            </AdminTd>
-            <AdminTd>
-              <span className="text-xs text-gray-400">{formatRelativeTime(r.created_at)}</span>
-            </AdminTd>
-            <AdminTd>
-              <GuestBadge status={r.status} />
-            </AdminTd>
-            <AdminTd>
-              {r.status === 'pending' && (
-                <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
-                  <AdminButton
-                    label="✓ Approve"
-                    onClick={() => decide(r.id, 'approved', r)}
-                    variant="gold"
-                    size="sm"
-                    disabled={processing === r.id}
-                  />
-                  <AdminButton
-                    label="✕ Deny"
-                    onClick={() => decide(r.id, 'denied', r)}
-                    variant="danger"
-                    size="sm"
-                    disabled={processing === r.id}
-                  />
+        {filtered.map(r => {
+          const totalRequests = hostingCounts[r.requesting_member_id] ?? 1
+          const isProcessingThis = processing === r.id || processing === `revoke-${r.id}`
+
+          return (
+            <AdminTr key={r.id}>
+              <AdminTd>
+                <p className="font-medium text-gray-900">
+                  {r.requesting_member?.first_name} {r.requesting_member?.last_name}
+                </p>
+                <p className="text-xs text-gray-400">{r.requesting_member?.profile?.role_title}</p>
+                <p className="text-xs text-gray-400">{r.requesting_member?.profile?.business_name}</p>
+                {totalRequests > 1 && (
+                  <p className="text-xs text-blue-500 mt-0.5">{totalRequests} total requests</p>
+                )}
+              </AdminTd>
+              <AdminTd>
+                <p className="text-sm text-gray-700">{r.target_course?.name}</p>
+                <p className="text-xs text-gray-400">{r.target_course?.city}</p>
+              </AdminTd>
+              <AdminTd>
+                <p className="text-xs text-gray-600">
+                  {formatBookingDate(r.visit_from)}<br />→ {formatBookingDate(r.visit_until)}
+                </p>
+              </AdminTd>
+              <AdminTd>
+                <p className="text-xs text-gray-600 max-w-xs line-clamp-3">{r.reason}</p>
+              </AdminTd>
+              <AdminTd>
+                <span className="text-xs text-gray-400">{formatRelativeTime(r.created_at)}</span>
+              </AdminTd>
+              <AdminTd>
+                <Badge
+                  label={BADGE_MAP[r.status as GuestAccessStatus]?.label ?? r.status}
+                  colour={BADGE_MAP[r.status as GuestAccessStatus]?.colour ?? 'gray'}
+                />
+              </AdminTd>
+              <AdminTd>
+                <div className="flex gap-1.5 flex-wrap" onClick={e => e.stopPropagation()}>
+                  {r.status === 'pending' && (
+                    <>
+                      <AdminButton
+                        label="✓ Approve"
+                        onClick={() => decide(r.id, 'approved', r)}
+                        variant="gold"
+                        size="sm"
+                        disabled={isProcessingThis}
+                      />
+                      <AdminButton
+                        label="✕ Deny"
+                        onClick={() => decide(r.id, 'denied', r)}
+                        variant="danger"
+                        size="sm"
+                        disabled={isProcessingThis}
+                      />
+                    </>
+                  )}
+                  {r.status === 'approved' && (
+                    <AdminButton
+                      label="Revoke"
+                      onClick={() => revoke(r.id)}
+                      variant="danger"
+                      size="sm"
+                      disabled={isProcessingThis}
+                    />
+                  )}
                 </div>
-              )}
-            </AdminTd>
-          </AdminTr>
-        ))}
+              </AdminTd>
+            </AdminTr>
+          )
+        })}
       </AdminTable>
     </div>
   )
-}
-
-function GuestBadge({ status }: { status: string }) {
-  const map: Record<string, { label: string; colour: 'yellow' | 'green' | 'red' | 'gray' }> = {
-    pending:  { label: 'Pending',  colour: 'yellow' },
-    approved: { label: 'Approved', colour: 'green' },
-    denied:   { label: 'Denied',   colour: 'red' },
-  }
-  const s = map[status] ?? { label: status, colour: 'gray' as const }
-  return <Badge label={s.label} colour={s.colour} />
 }

@@ -38,7 +38,7 @@ export default function AdminPromotionsPage() {
   }
 
   return (
-    <div className="p-8 max-w-5xl">
+    <div className="p-4 sm:p-8 max-w-5xl">
       <AdminPageHeader
         title="Promotions"
         description={`${promotions.filter(p => p.active).length} active · ${promotions.filter(p => !p.active).length} inactive`}
@@ -130,8 +130,8 @@ function CreatePromotionForm({ courseId, onCreated, onCancel }: { courseId: stri
 
   return (
     <AdminCard title="Add promotion">
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        <div className="col-span-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <div className="col-span-1 sm:col-span-2">
           <label className="text-xs text-gray-400 mb-1 block">Title</label>
           <input className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
             placeholder="Complimentary Club Fitting" value={title} onChange={e => setTitle(e.target.value)} />
@@ -146,7 +146,7 @@ function CreatePromotionForm({ courseId, onCreated, onCancel }: { courseId: stri
           <input className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
             placeholder="Pro Shop · Aviara" value={badge} onChange={e => setBadge(e.target.value)} />
         </div>
-        <div className="col-span-2">
+        <div className="col-span-1 sm:col-span-2">
           <label className="text-xs text-gray-400 mb-1 block">Description</label>
           <textarea rows={3} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500 resize-none"
             value={description} onChange={e => setDescription(e.target.value)} />
