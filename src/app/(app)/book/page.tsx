@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
-import { createClient } from '@/lib/supabase'
+import { apiClient } from '@/lib/api-client'
 import TopBar from '@/components/ui/TopBar'
 import { Spinner } from '@/components/ui/Loading'
 import { getBookingDates, formatTeeTime, cn } from '@/lib/utils'
@@ -61,15 +61,8 @@ export default function BookPage() {
   }
 
   async function loadMyBookings() {
-    const supabase = createClient()
-    const today = format(new Date(), 'yyyy-MM-dd')
-    const { data } = await supabase
-      .from('bookings')
-      .select('*')
-      .eq('member_id', user!.id)
-      .neq('status', 'cancelled')
-      .order('booking_date', { ascending: true })
-    setMyBookings((data ?? []) as Booking[])
+    const response = await apiClient.get<Booking[]>('/api/bookings')
+    setMyBookings(response.data ?? [])
   }
 
   async function confirmBooking() {
@@ -417,7 +410,6 @@ function SuccessScreen({ booking, onDone }: { booking: { date: string; time: str
 // ---- My bookings tab ----------------------------------------
 
 function MyBookingsTab({ bookings, onRefresh }: { bookings: Booking[]; onRefresh: () => void }) {
-  const supabase = createClient()
   const [cancelling, setCancelling] = useState<string | null>(null)
 
   const upcoming = bookings.filter(b =>
@@ -430,10 +422,7 @@ function MyBookingsTab({ bookings, onRefresh }: { bookings: Booking[]; onRefresh
   async function cancelBooking(bookingId: string) {
     if (!confirm('Cancel this booking? This action cannot be undone.')) return
     setCancelling(bookingId)
-    await supabase
-      .from('bookings')
-      .update({ status: 'cancelled' })
-      .eq('id', bookingId)
+    await apiClient.patch(`/api/bookings/${bookingId}`, {})
     onRefresh()
     setCancelling(null)
   }

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useAuthStore } from '@/store/auth'
-import { createClient } from '@/lib/supabase'
+import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
 import { INDUSTRY_CATEGORIES } from '@/types'
@@ -27,31 +27,26 @@ export default function MyProfilePage() {
   async function save() {
     if (!user) return
     setSaving(true)
-    const supabase = createClient()
 
-    const { error } = await supabase
-      .from('member_profiles')
-      .update({
-        display_name: form.display_name,
-        business_name: form.business_name,
-        business_description: form.business_description,
-        role_title: form.role_title,
-        industry_category: form.industry_category,
-        value_offered: form.value_offered,
-        value_sought: form.value_sought,
-        non_golf_hobbies: form.non_golf_hobbies,
-        handicap_index: form.handicap_index ?? null,
-        show_handicap: form.show_handicap ?? false,
-        preferred_play_times: form.preferred_play_times,
-        play_frequency: form.play_frequency,
-        open_to_golf_travel: form.open_to_golf_travel ?? false,
-        family_golfers: form.family_golfers,
-        profile_visible: form.profile_visible ?? true,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', user.id)
+    const response = await apiClient.patch('/api/profile', {
+      display_name: form.display_name,
+      business_name: form.business_name,
+      business_description: form.business_description,
+      role_title: form.role_title,
+      industry_category: form.industry_category,
+      value_offered: form.value_offered,
+      value_sought: form.value_sought,
+      non_golf_hobbies: form.non_golf_hobbies,
+      handicap_index: form.handicap_index ?? null,
+      show_handicap: form.show_handicap ?? false,
+      preferred_play_times: form.preferred_play_times,
+      play_frequency: form.play_frequency,
+      open_to_golf_travel: form.open_to_golf_travel ?? false,
+      family_golfers: form.family_golfers,
+      profile_visible: form.profile_visible ?? true,
+    })
 
-    if (!error) {
+    if (!response.error) {
       await refreshMember()
       setEditing(false)
     }

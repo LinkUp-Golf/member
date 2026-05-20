@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
-import { createClient } from '@/lib/supabase'
+import { apiClient } from '@/lib/api-client'
 import { Spinner } from '@/components/ui/Loading'
 import { INDUSTRY_CATEGORIES } from '@/types'
 import { formatRelativeTime } from '@/lib/utils'
@@ -29,13 +29,8 @@ export default function ReferralsPage() {
   }, [user])
 
   async function loadReferrals() {
-    const supabase = createClient()
-    const { data } = await supabase
-      .from('referrals')
-      .select('*')
-      .eq('referring_member_id', user!.id)
-      .order('created_at', { ascending: false })
-    setReferrals((data ?? []) as Referral[])
+    const response = await apiClient.get<Referral[]>('/api/referrals')
+    setReferrals(response.data ?? [])
     setLoading(false)
   }
 
@@ -72,13 +67,7 @@ export default function ReferralsPage() {
         {showForm && (
           <ReferralForm
             onSubmit={async (data) => {
-              const supabase = createClient()
-              await supabase.from('referrals').insert({
-                referring_member_id: user!.id,
-                referred_email: data.email,
-                status: 'pending',
-              })
-              // In production, also trigger GHL workflow to send referral email
+              await apiClient.post('/api/referrals', { email: data.email, name: data.name })
               setShowForm(false)
               loadReferrals()
             }}

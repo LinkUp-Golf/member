@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
-import { createClient } from '@/lib/supabase'
+import { apiClient } from '@/lib/api-client'
 import TopBar from '@/components/ui/TopBar'
 import { CardSkeleton } from '@/components/ui/Loading'
 import { formatRelativeTime } from '@/lib/utils'
@@ -38,16 +38,8 @@ export default function AnnouncementsPage() {
   }, [user])
 
   async function loadAnnouncements() {
-    const supabase = createClient()
-    const courseId = user?.member?.home_course_id
-    const { data } = await supabase
-      .from('announcements')
-      .select('*')
-      .eq('course_id', courseId)
-      .eq('status', 'published')
-      .order('published_at', { ascending: false })
-      .limit(50)
-    setAnnouncements((data ?? []) as Announcement[])
+    const response = await apiClient.get<Announcement[]>('/api/announcements')
+    setAnnouncements(response.data ?? [])
     setLoading(false)
   }
 

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { createClient } from '@/lib/supabase'
+import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
 import { formatMessageTime } from '@/lib/utils'
@@ -78,55 +79,28 @@ export default function ChatPage() {
   }, [messages])
 
   async function loadConversation() {
-    const supabase = createClient()
+    const response = await apiClient.get<{ messages: MessageWithSender[]; participants: Participant[]; type: 'direct' | 'group'; name: string | null }>(`/api/conversations/${id}/messages`)
 
-    // Load conversation details
-    const { data: conv } = await supabase
-      .from('conversations')
-      .select(`
-        id, type, name,
-        participants:conversation_participants(
-          member:members(id, first_name, last_name, profile:member_profiles(avatar_url))
-        )
-      `)
-      .eq('id', id)
-      .single()
+    if (response.error || !response.data) { router.push('/messages'); return }
 
-    if (!conv) { router.push('/messages'); return }
+    const { messages: msgs, participants: parts, type, name } = response.data
 
-    setConvType(conv.type as 'direct' | 'group')
-    const parts = conv.participants?.map((p: any) => p.member).filter(Boolean) as Participant[]
+    setConvType(type)
     setParticipants(parts)
 
-    // Derive display name
-    if (conv.type === 'group' && conv.name) {
-      setConvName(conv.name)
+    if (type === 'group' && name) {
+      setConvName(name)
     } else {
       const others = parts.filter(p => p.id !== user?.id)
       setConvName(others.map(p => `${p.first_name} ${p.last_name}`).join(', '))
     }
 
-    // Load messages
-    const { data: msgs } = await supabase
-      .from('messages')
-      .select('*, sender:members(id, first_name, last_name, profile:member_profiles(avatar_url))')
-      .eq('conversation_id', id)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: true })
-      .limit(100)
-
-    setMessages((msgs ?? []) as MessageWithSender[])
+    setMessages(msgs)
     setLoading(false)
   }
 
   async function markAsRead() {
-    if (!user) return
-    const supabase = createClient()
-    await supabase
-      .from('conversation_participants')
-      .update({ last_read_at: new Date().toISOString() })
-      .eq('conversation_id', id)
-      .eq('member_id', user.id)
+    await apiClient.patch(`/api/conversations/${id}/read`, {})
   }
 
   async function sendMessage() {
@@ -135,17 +109,10 @@ export default function ChatPage() {
     setBody('')
     setSending(true)
 
-    const supabase = createClient()
-    const { error } = await supabase
-      .from('messages')
-      .insert({
-        conversation_id: id,
-        sender_id: user.id,
-        body: text,
-      })
+    const response = await apiClient.post(`/api/conversations/${id}/messages`, { body: text })
 
-    if (error) {
-      console.error('Send error:', error)
+    if (response.error) {
+      console.error('Send error:', response.error)
       setBody(text) // restore on error
     }
     setSending(false)

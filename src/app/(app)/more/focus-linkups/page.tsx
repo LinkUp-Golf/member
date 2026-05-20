@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
-import { createClient } from '@/lib/supabase'
+import { apiClient } from '@/lib/api-client'
 import { Spinner } from '@/components/ui/Loading'
 import { INDUSTRY_CATEGORIES, type IndustryCategory } from '@/types'
 import { format } from 'date-fns'
@@ -22,44 +22,23 @@ export default function FocusLinkupsPage() {
   }, [user])
 
   async function loadData() {
-    const supabase = createClient()
-    const courseId = user?.member?.home_course_id
-
-    const [subRes, linkupRes] = await Promise.all([
-      supabase
-        .from('focus_linkup_subscriptions')
-        .select('industry_focus')
-        .eq('member_id', user!.id),
-      supabase
-        .from('focus_linkups')
-        .select('*')
-        .eq('course_id', courseId)
-        .gte('focus_date', new Date().toISOString().split('T')[0])
-        .order('focus_date', { ascending: true })
-        .limit(10),
-    ])
-
-    setSubscribed(new Set(subRes.data?.map(s => s.industry_focus) ?? []))
-    setUpcoming((linkupRes.data ?? []) as FocusLinkup[])
+    const response = await apiClient.get<{ linkups: FocusLinkup[]; subscriptions: string[] }>('/api/focus-linkups')
+    if (response.data) {
+      setSubscribed(new Set(response.data.subscriptions))
+      setUpcoming(response.data.linkups)
+    }
     setLoading(false)
   }
 
   async function toggleSubscription(category: IndustryCategory) {
     if (!user || toggling) return
     setToggling(category)
-    const supabase = createClient()
 
     if (subscribed.has(category)) {
-      await supabase
-        .from('focus_linkup_subscriptions')
-        .delete()
-        .eq('member_id', user.id)
-        .eq('industry_focus', category)
+      await apiClient.delete('/api/focus-linkups/subscriptions', { industry_focus: category })
       setSubscribed(prev => { const s = new Set(prev); s.delete(category); return s })
     } else {
-      await supabase
-        .from('focus_linkup_subscriptions')
-        .insert({ member_id: user.id, industry_focus: category })
+      await apiClient.post('/api/focus-linkups/subscriptions', { industry_focus: category })
       setSubscribed(prev => new Set([...prev, category]))
     }
     setToggling(null)

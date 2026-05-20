@@ -43,16 +43,19 @@ interface WithAuthOptions {
   rateLimit?: number
 }
 
+type RouteContext = { params: Record<string, string> }
+
 type RouteHandler = (
   req: NextRequest,
-  ctx: AuthContext
+  ctx: AuthContext,
+  routeCtx?: RouteContext
 ) => Promise<NextResponse>
 
 export function withAuth(
   handler: RouteHandler,
   options: WithAuthOptions = {}
-): (req: NextRequest) => Promise<NextResponse> {
-  return async (req: NextRequest): Promise<NextResponse> => {
+): (req: NextRequest, routeCtx?: RouteContext) => Promise<NextResponse> {
+  return async (req: NextRequest, routeCtx?: RouteContext): Promise<NextResponse> => {
     const requestId = randomUUID()
     const reqLog = logger.child({ requestId, path: req.nextUrl.pathname, method: req.method })
 
@@ -158,7 +161,7 @@ export function withAuth(
     }
 
     try {
-      const response = await handler(req, ctx)
+      const response = await handler(req, ctx, routeCtx)
       // Attach correlation ID to every response
       response.headers.set('X-Request-Id', requestId)
       return response

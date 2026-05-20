@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
-import { createClient } from '@/lib/supabase'
+import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
 import type { MemberWithProfile } from '@/types'
@@ -29,16 +29,8 @@ export default function NewConversationPage() {
   }, [user])
 
   async function loadMembers() {
-    const supabase = createClient()
-    const { data } = await supabase
-      .from('members')
-      .select('*, profile:member_profiles(*), home_course:courses(*)')
-      .eq('home_course_id', user?.member?.home_course_id)
-      .eq('membership_status', 'active')
-      .neq('id', user?.id)
-      .order('first_name')
-
-    setMembers((data ?? []) as MemberWithProfile[])
+    const response = await apiClient.get<MemberWithProfile[]>('/api/members?exclude_self=true')
+    setMembers(response.data ?? [])
     setLoading(false)
   }
 
@@ -52,62 +44,18 @@ export default function NewConversationPage() {
     if (selected.length === 0 || !user || creating) return
     setCreating(true)
 
-    const supabase = createClient()
+    const response = await apiClient.post<{ id: string }>('/api/conversations', {
+      type: isGroup ? 'group' : 'direct',
+      name: isGroup ? (groupName.trim() || null) : null,
+      participant_ids: selected,
+    })
 
-    // For direct messages, check if a conversation already exists
-    if (selected.length === 1) {
-      const otherId = selected[0]
-
-      // Find existing direct conversation between these two
-      const { data: myConvs } = await supabase
-        .from('conversation_participants')
-        .select('conversation_id')
-        .eq('member_id', user.id)
-
-      if (myConvs && myConvs.length > 0) {
-        const myConvIds = myConvs.map(r => r.conversation_id)
-
-        const { data: shared } = await supabase
-          .from('conversation_participants')
-          .select('conversation_id, conversations!inner(type)')
-          .eq('member_id', otherId)
-          .in('conversation_id', myConvIds)
-
-        const existingDirect = (shared ?? []).find((r: any) => r.conversations?.type === 'direct')
-        if (existingDirect) {
-          router.push(`/messages/${existingDirect.conversation_id}`)
-          return
-        }
-      }
-    }
-
-    // Create new conversation
-    const { data: conv, error: convError } = await supabase
-      .from('conversations')
-      .insert({
-        course_id: user.member.home_course_id,
-        type: isGroup ? 'group' : 'direct',
-        name: isGroup ? (groupName.trim() || null) : null,
-        created_by: user.id,
-      })
-      .select('id')
-      .single()
-
-    if (convError || !conv) {
+    if (response.error || !response.data) {
       setCreating(false)
       return
     }
 
-    // Add participants (including the creator)
-    const allParticipants = [user.id, ...selected]
-    await supabase
-      .from('conversation_participants')
-      .insert(allParticipants.map(memberId => ({
-        conversation_id: conv.id,
-        member_id: memberId,
-      })))
-
-    router.push(`/messages/${conv.id}`)
+    router.push(`/messages/${response.data.id}`)
   }
 
   const filtered = members.filter(m => {

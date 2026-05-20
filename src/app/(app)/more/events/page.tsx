@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
-import { createClient } from '@/lib/supabase'
+import { apiClient } from '@/lib/api-client'
 import { Spinner, CardSkeleton } from '@/components/ui/Loading'
 import { format } from 'date-fns'
 import type { MemberEvent, MemberEventRSVP } from '@/types'
@@ -23,37 +23,19 @@ export default function MemberEventsPage() {
   }, [user])
 
   async function loadEvents() {
-    const supabase = createClient()
-    const courseId = user?.member?.home_course_id
-    const today = new Date().toISOString().split('T')[0]
-
-    const [eventsRes, rsvpRes] = await Promise.all([
-      supabase
-        .from('member_events')
-        .select('*')
-        .eq('course_id', courseId)
-        .eq('status', 'published')
-        .gte('event_date', today)
-        .order('event_date', { ascending: true }),
-      supabase
-        .from('member_event_rsvps')
-        .select('event_id, status')
-        .eq('member_id', user!.id),
-    ])
-
-    setEvents((eventsRes.data ?? []) as MemberEvent[])
-    const rsvpMap: Record<string, string> = {}
-    ;(rsvpRes.data ?? []).forEach(r => { rsvpMap[r.event_id] = r.status })
-    setRsvps(rsvpMap)
+    const response = await apiClient.get<{ events: MemberEvent[]; rsvps: Array<{ event_id: string; status: string }> }>('/api/events')
+    if (response.data) {
+      setEvents(response.data.events)
+      const rsvpMap: Record<string, string> = {}
+      response.data.rsvps.forEach(r => { rsvpMap[r.event_id] = r.status })
+      setRsvps(rsvpMap)
+    }
     setLoading(false)
   }
 
   async function rsvp(eventId: string, status: 'attending' | 'maybe' | 'declined') {
     if (!user) return
-    const supabase = createClient()
-    await supabase
-      .from('member_event_rsvps')
-      .upsert({ event_id: eventId, member_id: user.id, status }, { onConflict: 'event_id,member_id' })
+    await apiClient.post(`/api/events/${eventId}/rsvp`, { status })
     setRsvps(prev => ({ ...prev, [eventId]: status }))
   }
 
@@ -114,8 +96,6 @@ export default function MemberEventsPage() {
         </div>
       ) : (
         <SubmitEventForm
-          courseId={user?.member?.home_course_id ?? ''}
-          memberId={user?.id ?? ''}
           onSubmitted={() => { setTab('upcoming'); loadEvents() }}
         />
       )}
@@ -186,12 +166,8 @@ function EventCard({
 // ---- Submit event form --------------------------------------
 
 function SubmitEventForm({
-  courseId,
-  memberId,
   onSubmitted,
 }: {
-  courseId: string
-  memberId: string
   onSubmitted: () => void
 }) {
   const today = new Date().toISOString().split('T')[0]
@@ -207,17 +183,13 @@ function SubmitEventForm({
   async function handleSubmit() {
     if (!title || !description || !date || !time || !location) return
     setSubmitting(true)
-    const supabase = createClient()
-    await supabase.from('member_events').insert({
-      course_id: courseId,
-      organizer_id: memberId,
+    await apiClient.post('/api/events', {
       title,
       description,
       event_date: date,
       event_time: time + ':00',
       location,
       external_url: url.trim() || null,
-      status: 'pending_review',
     })
     setSubmitting(false)
     setSubmitted(true)

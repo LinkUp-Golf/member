@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
-import { createClient } from '@/lib/supabase'
+import { apiClient } from '@/lib/api-client'
 import { Spinner } from '@/components/ui/Loading'
 import { formatBookingDate, formatRelativeTime } from '@/lib/utils'
 import type { Course, GuestAccessRequest } from '@/types'
@@ -27,26 +27,11 @@ export default function GuestAccessPage() {
   }, [user])
 
   async function loadData() {
-    const supabase = createClient()
-
-    const [coursesRes, requestsRes] = await Promise.all([
-      // Other active courses (not the member's home course)
-      supabase
-        .from('courses')
-        .select('*')
-        .eq('active', true)
-        .neq('id', user!.member.home_course_id),
-
-      // Member's guest access requests
-      supabase
-        .from('guest_access_requests')
-        .select('*')
-        .eq('requesting_member_id', user!.id)
-        .order('created_at', { ascending: false }),
-    ])
-
-    setCourses((coursesRes.data ?? []) as Course[])
-    setRequests((requestsRes.data ?? []) as GuestAccessRequest[])
+    const response = await apiClient.get<{ courses: Course[]; requests: GuestAccessRequest[] }>('/api/guest-access')
+    if (response.data) {
+      setCourses(response.data.courses)
+      setRequests(response.data.requests)
+    }
     setLoading(false)
   }
 
@@ -115,14 +100,11 @@ export default function GuestAccessPage() {
           <GuestAccessForm
             courses={courses}
             onSubmit={async (data) => {
-              const supabase = createClient()
-              await supabase.from('guest_access_requests').insert({
-                requesting_member_id: user!.id,
+              await apiClient.post('/api/guest-access', {
                 target_course_id: data.courseId,
                 reason: data.reason,
                 visit_from: data.from,
                 visit_until: data.until,
-                status: 'pending',
               })
               setShowForm(false)
               loadData()

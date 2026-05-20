@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuthStore } from "@/store/auth";
-import { createClient } from "@/lib/supabase";
+import { apiClient } from "@/lib/api-client";
 import { formatBookingDate, formatTeeTime, truncate } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
 import TopBar from "@/components/ui/TopBar";
@@ -32,55 +32,20 @@ export default function HomePage() {
   }, [user]);
 
   async function loadHomeData() {
-    const supabase = createClient();
-    const courseId = user?.member?.home_course_id;
-    if (!courseId) return;
-
     const [bookingRes, announcementRes, promoRes, memberRes] =
       await Promise.all([
-        // Next upcoming booking
-        supabase
-          .from("bookings")
-          .select("*")
-          .eq("member_id", user!.id)
-          .eq("status", "confirmed")
-          .gte("booking_date", new Date().toISOString().split("T")[0])
-          .order("booking_date", { ascending: true })
-          .limit(1),
-
-        // Latest 3 published announcements for home course
-        supabase
-          .from("announcements")
-          .select("*")
-          .eq("course_id", courseId)
-          .eq("status", "published")
-          .order("published_at", { ascending: false })
-          .limit(3),
-
-        // Active promotions
-        supabase
-          .from("promotions")
-          .select("*")
-          .eq("active", true)
-          .or(`course_id.is.null,course_id.eq.${courseId}`)
-          .order("sort_order", { ascending: true })
-          .limit(2),
-
-        // Newest members (spotlight)
-        supabase
-          .from("members")
-          .select("*, profile:member_profiles(*), home_course:courses(*)")
-          .eq("home_course_id", courseId)
-          .eq("membership_status", "active")
-          .neq("id", user!.id)
-          .order("created_at", { ascending: false })
-          .limit(2),
+        apiClient.get<Booking[]>("/api/bookings?upcoming=true&limit=1"),
+        apiClient.get<Announcement[]>("/api/announcements?limit=3"),
+        apiClient.get<Promotion[]>("/api/promotions?limit=2"),
+        apiClient.get<MemberWithProfile[]>(
+          "/api/members?limit=2&exclude_self=true&order=created_at"
+        ),
       ]);
 
     setNextBooking(bookingRes.data?.[0] ?? null);
     setAnnouncements(announcementRes.data ?? []);
     setPromotions(promoRes.data ?? []);
-    setNewMembers((memberRes.data as MemberWithProfile[]) ?? []);
+    setNewMembers(memberRes.data ?? []);
     setLoading(false);
   }
 

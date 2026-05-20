@@ -3,9 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useAuthStore } from "@/store/auth";
-import { createClient } from "@/lib/supabase";
+import { apiClient } from "@/lib/api-client";
 import { shortCategory, truncate } from "@/lib/utils";
-import { ALL_ACCESS_TAGS } from "@/lib/ghl-tags";
 import Avatar from "@/components/ui/Avatar";
 import TopBar from "@/components/ui/TopBar";
 import { MemberRowSkeleton } from "@/components/ui/Loading";
@@ -38,24 +37,10 @@ export default function MembersPage() {
   }, [search, activeFilter, members]);
 
   async function loadMembers() {
-    const supabase = createClient();
-    const courseId = user?.member?.home_course_id;
-    if (!courseId) {
-      setLoading(false);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("members")
-      .select("*, profile:member_profiles(*), home_course:courses(*)")
-      .eq("home_course_id", courseId)
-      .eq("membership_status", "active")
-      .contains("ghl_tags", ALL_ACCESS_TAGS)
-      .order("first_name", { ascending: true });
-
-    if (!error && data) {
-      setMembers(data as MemberWithProfile[]);
-      setFiltered(data as MemberWithProfile[]);
+    const response = await apiClient.get<MemberWithProfile[]>("/api/members");
+    if (!response.error && response.data) {
+      setMembers(response.data);
+      setFiltered(response.data);
     }
     setLoading(false);
   }

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
-import { createClient } from '@/lib/supabase'
+import { apiClient } from '@/lib/api-client'
 import TopBar from '@/components/ui/TopBar'
 import { CardSkeleton } from '@/components/ui/Loading'
 import { formatBookingDate } from '@/lib/utils'
@@ -20,15 +20,8 @@ export default function PromotionsPage() {
   }, [user])
 
   async function loadPromotions() {
-    const supabase = createClient()
-    const courseId = user?.member?.home_course_id
-    const { data } = await supabase
-      .from('promotions')
-      .select('*')
-      .eq('active', true)
-      .or(`course_id.is.null,course_id.eq.${courseId}`)
-      .order('sort_order', { ascending: true })
-    setPromotions((data ?? []) as Promotion[])
+    const response = await apiClient.get<Promotion[]>('/api/promotions')
+    setPromotions(response.data ?? [])
     setLoading(false)
   }
 

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { createClient } from '@/lib/supabase'
+import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
 import TopBar from '@/components/ui/TopBar'
 import { MemberRowSkeleton } from '@/components/ui/Loading'
@@ -39,69 +40,10 @@ export default function MessagesPage() {
 
   async function loadConversations() {
     if (!user) return
-    const supabase = createClient()
-
-    // Get all conversations the user participates in
-    const { data: participantRows } = await supabase
-      .from('conversation_participants')
-      .select(`
-        last_read_at,
-        conversation:conversations(
-          id, type, name, created_at, course_id,
-          participants:conversation_participants(
-            last_read_at,
-            member:members(id, first_name, last_name,
-              profile:member_profiles(avatar_url)
-            )
-          )
-        )
-      `)
-      .eq('member_id', user.id)
-      .order('joined_at', { ascending: false })
-
-    if (!participantRows) { setLoading(false); return }
-
-    // For each conversation, get the last message and unread count
-    const enriched = await Promise.all(
-      participantRows.map(async row => {
-        const conv = row.conversation as any
-        if (!conv) return null
-
-        const [lastMsgRes, unreadRes] = await Promise.all([
-          supabase
-            .from('messages')
-            .select('id, body, created_at, sender_id, sender:members(first_name, last_name, profile:member_profiles(avatar_url))')
-            .eq('conversation_id', conv.id)
-            .is('deleted_at', null)
-            .order('created_at', { ascending: false })
-            .limit(1),
-
-          supabase
-            .from('messages')
-            .select('id', { count: 'exact' })
-            .eq('conversation_id', conv.id)
-            .is('deleted_at', null)
-            .gt('created_at', row.last_read_at ?? '1970-01-01'),
-        ])
-
-        return {
-          ...conv,
-          last_message: lastMsgRes.data?.[0] ?? null,
-          unread_count: unreadRes.count ?? 0,
-          my_last_read: row.last_read_at,
-        } as ConversationWithDetails
-      })
-    )
-
-    const valid = enriched
-      .filter(Boolean)
-      .sort((a, b) => {
-        const aTime = a!.last_message?.created_at ?? a!.created_at
-        const bTime = b!.last_message?.created_at ?? b!.created_at
-        return new Date(bTime).getTime() - new Date(aTime).getTime()
-      }) as ConversationWithDetails[]
-
-    setConversations(valid)
+    const response = await apiClient.get<ConversationWithDetails[]>('/api/conversations')
+    if (response.data) {
+      setConversations(response.data)
+    }
     setLoading(false)
   }
 

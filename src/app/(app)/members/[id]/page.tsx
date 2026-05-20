@@ -4,10 +4,10 @@ import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuthStore } from '@/store/auth'
-import { createClient } from '@/lib/supabase'
+import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
-import type { MemberWithProfile, PlayHistory } from '@/types'
+import type { MemberWithProfile } from '@/types'
 
 export default function MemberProfilePage() {
   const { id } = useParams<{ id: string }>()
@@ -22,48 +22,20 @@ export default function MemberProfilePage() {
   }, [id])
 
   async function loadMember() {
-    const supabase = createClient()
+    const response = await apiClient.get<{ member: MemberWithProfile; hasPlayedWith: boolean }>(`/api/members/${id}`)
 
-    const { data, error } = await supabase
-      .from('members')
-      .select('*, profile:member_profiles(*), home_course:courses(*)')
-      .eq('id', id)
-      .single()
-
-    if (error || !data) {
+    if (response.error || !response.data) {
       router.push('/members')
       return
     }
 
-    setMember(data as MemberWithProfile)
-
-    // Check if current user has played with this member
-    if (user) {
-      const { data: history } = await supabase
-        .from('play_history')
-        .select('id')
-        .eq('member_id', user.id)
-        .contains('played_with', [id])
-        .limit(1)
-
-      setPlayedTogether((history?.length ?? 0) > 0)
-    }
-
+    setMember(response.data.member)
+    setPlayedTogether(response.data.hasPlayedWith)
     setLoading(false)
   }
 
   async function startConversation() {
     if (!user || !member) return
-    const supabase = createClient()
-
-    // Check for existing direct conversation
-    const { data: existing } = await supabase
-      .from('conversation_participants')
-      .select('conversation_id, conversations!inner(type)')
-      .eq('member_id', user.id)
-
-    // Find a direct conversation that includes both members
-    // (simplified — full logic in API route)
     router.push(`/messages/new?with=${member.id}`)
   }
 
