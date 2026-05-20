@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import localFont from 'next/font/local'
 import dynamic from 'next/dynamic'
+import SessionProvider from '@/components/providers/SessionProvider'
 import './globals.css'
 
 // process.env.NODE_ENV is a compile-time constant — webpack replaces it with
@@ -59,7 +60,11 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </head>
       <body className="font-sans bg-cream antialiased">
-        <MockProvider>{children}</MockProvider>
+        <MockProvider>
+          <SessionProvider>
+            {children}
+          </SessionProvider>
+        </MockProvider>
       </body>
     </html>
   )

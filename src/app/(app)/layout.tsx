@@ -1,6 +1,5 @@
 'use client'
 
-import { useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useAuthStore } from '@/store/auth'
@@ -66,11 +65,6 @@ const NAV_ITEMS = [
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const { initialize, initialized } = useAuthStore()
-
-  useEffect(() => {
-    if (!initialized) initialize()
-  }, [initialize, initialized])
 
   return (
     <div className="app-shell">
