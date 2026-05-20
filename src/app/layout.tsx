@@ -12,16 +12,29 @@ const MockProvider = process.env.NODE_ENV === 'development'
   ? dynamic(() => import('@/components/dev/MockProvider'), { ssr: false })
   : ({ children }: { children: React.ReactNode }) => <>{children}</>
 
+// Body font — variable weight 100–900.
+// display:'swap' lets text render immediately in the fallback font,
+// then swaps when LexendDeca is ready. The fallback array lets
+// next/font generate size-adjusted @font-face metrics so the
+// layout barely shifts when the real font loads.
 const lexendDeca = localFont({
   src: '../../public/fonts/LexendDeca-VariableFont_wght.ttf',
   variable: '--font-lexend',
   display: 'swap',
+  fallback: ['system-ui', 'arial'],
+  adjustFontFallback: false,
 })
 
+// Display/logo font — fixed weight 400.
+// display:'block' suppresses the fallback flash on the logo text.
+// The logo is small enough that invisible-for-<100ms is preferable
+// to showing "LinkUp Golf" in Georgia briefly.
 const caveatBrush = localFont({
   src: '../../public/fonts/CaveatBrush-Regular.ttf',
   variable: '--font-caveat',
-  display: 'swap',
+  display: 'block',
+  fallback: ['Georgia', 'serif'],
+  adjustFontFallback: false,
 })
 
 export const metadata: Metadata = {

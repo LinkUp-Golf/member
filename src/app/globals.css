@@ -7,22 +7,9 @@
    ============================================================ */
 
 @layer base {
-  /* ---- Brand fonts ----------------------------------------- */
-  @font-face {
-    font-family: 'CaveatBrush';
-    src: url('/fonts/CaveatBrush-Regular.ttf') format('truetype');
-    font-weight: 400;
-    font-style: normal;
-    font-display: swap;
-  }
-
-  @font-face {
-    font-family: 'LexendDeca';
-    src: url('/fonts/LexendDeca-VariableFont_wght.ttf') format('truetype');
-    font-weight: 100 900;
-    font-style: normal;
-    font-display: swap;
-  }
+  /* Fonts are loaded via next/font/local in layout.tsx.
+     Do NOT declare @font-face here — duplicate declarations
+     cause the font to download twice and produce FOUT. */
 
   :root {
     /* LinkUp Golf brand colours */
@@ -123,7 +110,7 @@
   }
 
   .logo-text {
-    font-family: 'CaveatBrush', Georgia, serif;
+    font-family: var(--font-caveat), Georgia, serif;
     @apply text-2xl;
     color: var(--color-gold);
     letter-spacing: 0.02em;
@@ -147,16 +134,12 @@
   }
 
   .nav-item {
-    @apply flex items-center justify-center flex-1 py-4;
-    color: rgba(255,255,255,0.35);
+    @apply flex items-center justify-center flex-1 py-3;
+    color: rgba(255,255,255,0.4);
     transition: color 0.15s;
     border: none;
     background: none;
     cursor: pointer;
-  }
-
-  .nav-item svg {
-    @apply w-6 h-6;
   }
 
   .nav-item.active {
@@ -286,7 +269,7 @@
     @apply rounded-full flex items-center justify-center flex-shrink-0;
     background: var(--color-green-800);
     color: var(--color-gold-light);
-    font-family: var(--font-cormorant);
+    font-family: var(--font-caveat), Georgia, serif;
     font-weight: 600;
     border: 1.5px solid rgba(201,168,76,0.2);
   }

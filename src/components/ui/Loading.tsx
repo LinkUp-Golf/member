@@ -53,20 +53,6 @@ export function MemberRowSkeleton() {
   )
 }
 
-// ---- Top bar skeleton ---------------------------------------
-export function TopBarSkeleton({ hasSubtitle = true }: { hasSubtitle?: boolean }) {
-  return (
-    <div className="top-bar">
-      <div className="flex items-center justify-between">
-        <div className="space-y-1.5">
-          <Skeleton className="h-5 w-28 bg-white/10" />
-          {hasSubtitle && <Skeleton className="h-3 w-20 bg-white/10" />}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ---- Card skeleton ------------------------------------------
 export function CardSkeleton({ lines = 3 }: { lines?: number }) {
   return (
