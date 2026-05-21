@@ -31,7 +31,7 @@ export async function upsertMember({
       {
         id: userId,
         ghl_contact_id: contact.id,
-        email: contact.email.toLowerCase(),
+        email: (contact.email ?? '').toLowerCase(),
         first_name: contact.firstName ?? '',
         last_name: contact.lastName ?? '',
         phone: contact.phone ?? null,

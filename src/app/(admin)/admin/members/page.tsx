@@ -6,7 +6,7 @@ import {
   AdminPageHeader, AdminTable, AdminTr, AdminTd,
   Badge, AdminButton,
 } from '@/components/admin/AdminUI'
-import { format } from 'date-fns'
+import { format, formatDistanceToNow } from 'date-fns'
 import type { MemberWithProfile } from '@/types'
 
 type FilterStatus = 'all' | 'active' | 'waitlist' | 'pending' | 'cancelled'
@@ -19,6 +19,8 @@ export default function AdminMembersPage() {
   const [statusFilter, setStatusFilter] = useState<FilterStatus>('all')
   const [selected, setSelected] = useState<MemberWithProfile | null>(null)
   const [saving, setSaving] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<{ total: number; synced: number; skipped: number; errors: string[] } | null>(null)
 
   useEffect(() => { loadMembers() }, [])
 
@@ -74,6 +76,21 @@ export default function AdminMembersPage() {
     setSaving(false)
   }
 
+  async function bulkSyncFromGHL() {
+    setSyncing(true)
+    setSyncResult(null)
+    try {
+      const res = await fetch('/api/admin/sync', { method: 'POST' })
+      const json = await res.json()
+      setSyncResult(json)
+      await loadMembers()
+    } catch {
+      setSyncResult({ total: 0, synced: 0, skipped: 0, errors: ['Request failed'] })
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   async function toggleAdmin(memberId: string, isAdmin: boolean) {
     setSaving(true)
     const supabase = createClient()
@@ -92,10 +109,28 @@ export default function AdminMembersPage() {
 
   return (
     <div className="p-4 sm:p-8 max-w-7xl">
-      <AdminPageHeader
-        title="Members"
-        description={`${statusCounts.active} active · ${statusCounts.waitlist} waitlisted · ${statusCounts.pending} pending`}
-      />
+      <div className="flex items-start justify-between gap-4 mb-6 sm:mb-8">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">Members</h1>
+          <p className="text-sm text-gray-500 mt-1">{statusCounts.active} active · {statusCounts.waitlist} waitlisted · {statusCounts.pending} pending</p>
+        </div>
+        <button
+          onClick={bulkSyncFromGHL}
+          disabled={syncing}
+          className="flex-shrink-0 px-3 py-2 text-sm font-medium rounded-xl bg-green-900 text-white hover:bg-green-800 disabled:opacity-60 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+        >
+          {syncing ? 'Syncing…' : 'Sync from GHL'}
+        </button>
+      </div>
+
+      {syncResult && (
+        <div className={`mb-4 p-3 rounded-xl text-sm border ${syncResult.errors.length > 0 ? 'bg-yellow-50 border-yellow-200 text-yellow-800' : 'bg-green-50 border-green-200 text-green-800'}`}>
+          <span className="font-medium">Sync complete:</span> {syncResult.synced} synced, {syncResult.skipped} skipped
+          {syncResult.errors.length > 0 && (
+            <div className="mt-1 text-xs text-yellow-700">{syncResult.errors.slice(0, 3).join(' · ')}{syncResult.errors.length > 3 ? ` +${syncResult.errors.length - 3} more` : ''}</div>
+          )}
+        </div>
+      )}
 
       <div className="flex gap-6">
         {/* Main list */}
@@ -127,7 +162,7 @@ export default function AdminMembersPage() {
           </div>
 
           <AdminTable
-            headers={['Member', 'Category', 'Status', 'Joined', 'Actions']}
+            headers={['Member', 'Category', 'Status', 'Last Sign In', 'Joined', 'Actions']}
             empty={loading ? 'Loading…' : filtered.length === 0 ? 'No members match your search.' : undefined}
           >
             {filtered.map(m => (
@@ -151,6 +186,13 @@ export default function AdminMembersPage() {
                   {m.is_admin && (
                     <span className="ml-1.5 text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">Admin</span>
                   )}
+                </AdminTd>
+                <AdminTd>
+                  <span className="text-xs text-gray-400">
+                    {m.last_sign_in
+                      ? formatDistanceToNow(new Date(m.last_sign_in), { addSuffix: true })
+                      : <span className="text-gray-300">Never</span>}
+                  </span>
                 </AdminTd>
                 <AdminTd>
                   <span className="text-xs text-gray-400">
@@ -222,6 +264,11 @@ export default function AdminMembersPage() {
                 <DetailRow label="Category">{selected.profile?.industry_category ?? '—'}</DetailRow>
                 <DetailRow label="Business">{selected.profile?.business_name ?? '—'}</DetailRow>
                 <DetailRow label="Role">{selected.profile?.role_title ?? '—'}</DetailRow>
+                <DetailRow label="Last sign in">
+                  {selected.last_sign_in
+                    ? formatDistanceToNow(new Date(selected.last_sign_in), { addSuffix: true })
+                    : 'Never'}
+                </DetailRow>
                 <DetailRow label="GHL ID">
                   <span className="font-mono text-xs text-gray-400">{selected.ghl_contact_id}</span>
                 </DetailRow>

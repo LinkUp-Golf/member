@@ -222,6 +222,31 @@ export async function chargeForBooking(params: {
   }
 }
 
+// ---- Contacts list (paginated, by tag) ----------------------
+
+export async function listContactsByTag(tag: string): Promise<GHLContact[]> {
+  const all: GHLContact[] = []
+  let startAfterId: string | undefined
+
+  for (;;) {
+    const qs = new URLSearchParams({ locationId: GHL_LOCATION_ID, tag, limit: '100' })
+    if (startAfterId) qs.set('startAfterId', startAfterId)
+
+    const data = await ghlFetch<{
+      contacts?: GHLContact[]
+      meta?: { startAfterId?: string; nextPage?: boolean }
+    }>(`/contacts?${qs}`)
+
+    const page = data.contacts ?? []
+    all.push(...page)
+
+    if (!data.meta?.nextPage || page.length === 0) break
+    startAfterId = data.meta.startAfterId
+  }
+
+  return all
+}
+
 // ---- Workflow ID constants ----------------------------------
 
 export const GHL_WORKFLOWS = {

@@ -7,7 +7,8 @@
 // ---- Active member tags per course --------------------------
 // Keys are GHL contact tags; values are Supabase course slugs.
 export const COURSE_TAG_MAP = {
-  'avi-active': 'aviara',
+  'avi member':          'aviara',
+  'avi member - active': 'aviara',
 } as const satisfies Record<string, string>
 
 export type CourseTag = keyof typeof COURSE_TAG_MAP

@@ -43,14 +43,14 @@ export default function MemberEventsPage() {
   return (
     <AppShell
       header={
-        <div className="top-bar flex items-center gap-3">
-          <button onClick={() => router.push('/more')} className="text-gold text-sm flex items-center gap-1">
-            <BackArrow /> More
-          </button>
-          <div className="flex-1">
+        <div className="top-bar flex items-center justify-between">
+          <div>
             <div className="logo-text">Member Events</div>
             <div className="logo-subtitle">Community calendar</div>
           </div>
+          <button onClick={() => router.push('/more')} className="text-gold">
+            <BackArrow />
+          </button>
         </div>
       }
     >

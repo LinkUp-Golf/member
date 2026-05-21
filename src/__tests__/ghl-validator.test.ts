@@ -30,7 +30,7 @@ const VALID_CONTACT = {
   firstName: 'Test',
   lastName: 'Member',
   phone: '',
-  tags: ['avi-active', 'other-tag'],
+  tags: ['avi member', 'avi member - active', 'other-tag'],
   customFields: [],
 }
 
@@ -53,7 +53,7 @@ describe('validateGHLMembership — authorized path', () => {
     const result = await validateGHLMembership(PARAMS)
     expect(result.authorized).toBe(true)
     expect(result.fromCache).toBe(false)
-    expect(result.tags).toContain('avi-active')
+    expect(result.tags).toContain('avi member')
   })
 
   it('caches a positive result (second call does not hit GHL)', async () => {

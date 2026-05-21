@@ -64,14 +64,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/membership-required', request.url))
   }
 
-  // ---- Sync member record via shared sync orchestrator -------
+  // ---- Sync member record + stamp last_sign_in ---------------
+  const adminClient = createAdminClient()
   if (contact) {
     await syncMember({
       contact,
       userId: user.id,
-      ctx: { supabase: createAdminClient(), requestId },
+      ctx: { supabase: adminClient, requestId },
     })
   }
+  await adminClient
+    .from('members')
+    .update({ last_sign_in: new Date().toISOString() })
+    .eq('id', user.id)
 
   auditLog('LOGIN_SUCCESS', {
     requestId,

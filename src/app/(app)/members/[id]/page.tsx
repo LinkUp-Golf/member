@@ -53,16 +53,15 @@ export default function MemberProfilePage() {
   const p = member.profile
 
   return (
-    <AppShell title={`${member.first_name} ${member.last_name}`} description={p?.role_title ?? 'Member'}>
-      {/* Back button */}
-      <div className="bg-green-900 px-5 pt-4 pb-0">
-        <button
-          onClick={() => router.back()}
-          className="flex items-center gap-1.5 text-gold text-sm mb-4"
-        >
-          <BackArrow /> Members
+    <AppShell
+      title={`${member.first_name} ${member.last_name}`}
+      description={p?.role_title ?? 'Member'}
+      end={
+        <button onClick={() => router.back()} className="text-gold">
+          <BackArrow />
         </button>
-      </div>
+      }
+    >
 
       {/* Profile header */}
       <div className="bg-green-900 px-5 pb-6 text-center">

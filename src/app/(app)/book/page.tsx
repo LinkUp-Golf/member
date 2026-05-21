@@ -323,15 +323,13 @@ function ConfirmScreen({
 
   return (
     <div>
-      <div className="top-bar flex items-center gap-3">
-        <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium"
-          style={{ color: 'var(--color-gold)' }}>
-          <BackArrow /> Back
-        </button>
-        <h1 className="flex-1 text-center text-sm font-medium" style={{ color: 'white' }}>
+      <div className="top-bar flex items-center justify-between">
+        <h1 className="text-sm font-medium" style={{ color: 'white' }}>
           Confirm Booking
         </h1>
-        <div className="w-16" />
+        <button onClick={onBack} style={{ color: 'var(--color-gold)' }}>
+          <BackArrow />
+        </button>
       </div>
 
       <div className="px-5 py-6 space-y-4">

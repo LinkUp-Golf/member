@@ -133,46 +133,34 @@ export default function ChatPage() {
   return (
     <AppShell
       header={
-        <div className="top-bar flex items-center gap-3">
+        <div className="top-bar flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            {headerParticipant ? (
+              <Avatar
+                firstName={headerParticipant.first_name}
+                lastName={headerParticipant.last_name}
+                avatarUrl={headerParticipant.profile?.avatar_url}
+                size="sm"
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-full bg-green-700 flex items-center justify-center text-gold text-sm">#</div>
+            )}
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-white truncate">{convName}</p>
+              {convType === 'group' && (
+                <p className="text-xs text-white/40">{participants.length} members</p>
+              )}
+              {convType === 'direct' && headerParticipant && (
+                <p className="text-xs text-white/40">Active member</p>
+              )}
+            </div>
+          </div>
           <button
             onClick={() => router.push('/messages')}
-            className="flex items-center gap-1 text-gold text-sm"
+            className="flex-shrink-0 text-gold"
           >
             <BackArrow />
           </button>
-
-          {headerParticipant ? (
-            <Avatar
-              firstName={headerParticipant.first_name}
-              lastName={headerParticipant.last_name}
-              avatarUrl={headerParticipant.profile?.avatar_url}
-              size="sm"
-            />
-          ) : (
-            <div className="w-9 h-9 rounded-full bg-green-700 flex items-center justify-center text-gold text-sm">#</div>
-          )}
-
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-white truncate">{convName}</p>
-            {convType === 'group' && (
-              <p className="text-xs text-white/40">
-                {participants.length} members
-              </p>
-            )}
-            {convType === 'direct' && headerParticipant && (
-              <p className="text-xs text-white/40">Active member</p>
-            )}
-          </div>
-
-          {/* View profile shortcut for direct messages */}
-          {convType === 'direct' && headerParticipant && (
-            <button
-              onClick={() => router.push(`/members/${headerParticipant.id}`)}
-              className="text-white/40 text-xs"
-            >
-              Profile
-            </button>
-          )}
         </div>
       }
     >

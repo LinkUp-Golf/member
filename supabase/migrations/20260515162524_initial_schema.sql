@@ -36,7 +36,7 @@ create table courses (
   city                 text not null,
   state                text not null,
   country              text not null default 'US',
-  access_tag           text not null,     -- GHL tag, e.g. "avi-active"
+  access_tag           text not null,     -- primary GHL tag, e.g. "avi-member"
   max_members          integer not null default 200,
   max_rounds_per_month integer not null default 300,
   reserved_rounds      integer not null default 100,
@@ -47,7 +47,7 @@ create table courses (
 
 -- Seed the first course
 insert into courses (name, slug, city, state, access_tag, max_members, max_rounds_per_month, reserved_rounds, timezone)
-values ('Park Hyatt Aviara Golf Club', 'aviara', 'Carlsbad', 'CA', 'avi-active', 200, 300, 100, 'America/Los_Angeles');
+values ('Park Hyatt Aviara Golf Club', 'aviara', 'Carlsbad', 'CA', 'avi member', 200, 300, 100, 'America/Los_Angeles');
 
 -- ============================================================
 -- TABLE: members

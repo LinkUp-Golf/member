@@ -69,19 +69,21 @@ export default function NewConversationPage() {
   return (
     <AppShell
       header={
-        <div className="top-bar flex items-center gap-3">
-          <button onClick={() => router.push('/messages')} className="text-gold text-sm flex items-center gap-1">
-            <BackArrow /> Cancel
-          </button>
-          <h1 className="flex-1 text-white font-medium text-sm text-center">New Message</h1>
-          <button
-            onClick={startConversation}
-            disabled={selected.length === 0 || creating}
-            className="text-sm font-semibold disabled:opacity-30"
-            style={{ color: '#85bb65' }}
-          >
-            {creating ? <Spinner className="w-4 h-4 text-gold" /> : 'Start'}
-          </button>
+        <div className="top-bar flex items-center justify-between">
+          <h1 className="text-white font-medium text-sm">New Message</h1>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={startConversation}
+              disabled={selected.length === 0 || creating}
+              className="text-sm font-semibold disabled:opacity-30"
+              style={{ color: '#85bb65' }}
+            >
+              {creating ? <Spinner className="w-4 h-4 text-gold" /> : 'Start'}
+            </button>
+            <button onClick={() => router.push('/messages')} className="text-gold">
+              <BackArrow />
+            </button>
+          </div>
         </div>
       }
     >

@@ -65,13 +65,11 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <div className="top-bar flex items-center gap-3">
-        <button onClick={() => router.push('/more')} className="text-gold text-sm flex items-center gap-1">
-          <BackArrow /> More
+      <div className="top-bar flex items-center justify-between">
+        <div className="logo-text">Settings</div>
+        <button onClick={() => router.push('/more')} className="text-gold">
+          <BackArrow />
         </button>
-        <div className="flex-1">
-          <div className="logo-text">Settings</div>
-        </div>
       </div>
 
       <div className="px-5 py-5 pb-8 space-y-6">
