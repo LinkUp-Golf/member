@@ -7,6 +7,7 @@ import { apiClient } from "@/lib/api-client";
 import { formatBookingDate, formatTeeTime, truncate } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
 import AppShell from '@/components/layout/AppShell';
+import InstallBanner from '@/components/ui/InstallBanner';
 import { CardSkeleton, MemberRowSkeleton, PromoCardSkeleton } from "@/components/ui/Loading";
 import type {
   Booking,
@@ -23,8 +24,12 @@ export default function HomePage() {
   const [newMembers, setNewMembers] = useState<MemberWithProfile[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const greeting = getGreeting();
+  const [greeting, setGreeting] = useState('');
   const firstName = user?.member?.first_name ?? "";
+
+  useEffect(() => {
+    setGreeting(getGreeting());
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -113,6 +118,8 @@ export default function HomePage() {
           </Link>
         )}
       </div>
+
+      <InstallBanner />
 
       {/* Content */}
       <div className="px-5 pt-6 space-y-7 pb-6">

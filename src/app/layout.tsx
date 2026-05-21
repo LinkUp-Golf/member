@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import localFont from 'next/font/local'
 import dynamic from 'next/dynamic'
 import SessionProvider from '@/components/providers/SessionProvider'
+import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration'
 import './globals.css'
 
 // process.env.NODE_ENV is a compile-time constant — webpack replaces it with
@@ -67,12 +68,13 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${lexendDeca.variable} ${caveatBrush.variable}`}>
       <head>
-        <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </head>
       <body className="font-sans bg-cream antialiased">
+        <ServiceWorkerRegistration />
         <MockProvider>
           <SessionProvider>
             {children}

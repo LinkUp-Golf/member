@@ -17,6 +17,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 const PUBLIC_ROUTES = [
   '/login',
   '/join',
+  '/install',
   '/auth/error',
   '/membership-required',
   '/api/auth/magic-link',   // unauthenticated users request magic links
@@ -27,6 +28,15 @@ const PUBLIC_ROUTES = [
 const ADMIN_ROUTES = ['/admin']
 
 export async function middleware(request: NextRequest) {
+  const pathname = request.nextUrl.pathname
+
+  // Service-worker assets: importScripts() cannot follow redirects, so pass
+  // these through before any auth logic runs. The matcher already excludes
+  // them, but this guards against edge cases (e.g. cached middleware bundle).
+  if (/^\/(sw\.js|worker-|workbox-)/.test(pathname)) {
+    return NextResponse.next()
+  }
+
   const requestId = crypto.randomUUID()
 
   let response = NextResponse.next({
@@ -63,8 +73,6 @@ export async function middleware(request: NextRequest) {
   // Refresh session (also validates JWT signature via Supabase)
   const { data: { user } } = await supabase.auth.getUser()
 
-  const pathname = request.nextUrl.pathname
-
   // ---- Public routes ---------------------------------------
   if (PUBLIC_ROUTES.some(route => pathname.startsWith(route))) {
     // Already authenticated → redirect away from login page
@@ -74,14 +82,6 @@ export async function middleware(request: NextRequest) {
       return redirectResponse
     }
     return response
-  }
-
-  // ---- AUTH BYPASS (development only) ----------------------
-  // Remove before launch — see comment in middleware for re-enabling
-  if (!user) {
-    const loginUrl = new URL('/login', request.url)
-    loginUrl.searchParams.set('redirectTo', pathname)
-    return NextResponse.redirect(loginUrl)
   }
 
   // ---- Unauthenticated: redirect to login ------------------
@@ -113,6 +113,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|icons|manifest.json|sw.js|mockServiceWorker.js|workbox-.*).*)',
+    '/((?!_next/static|_next/image|favicon.ico|icons|manifest.json|sw.js|worker-|mockServiceWorker.js|workbox-.*).*)',
   ],
 }

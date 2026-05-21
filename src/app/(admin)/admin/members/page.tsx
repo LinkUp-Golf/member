@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
 import {
-  AdminPageHeader, AdminTable, AdminTr, AdminTd,
+  AdminTable, AdminTr, AdminTd,
   Badge, AdminButton,
 } from '@/components/admin/AdminUI'
 import { format, formatDistanceToNow } from 'date-fns'
