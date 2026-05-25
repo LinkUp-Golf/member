@@ -1,12 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Spinner } from "@/components/ui/Loading";
 import { createClient } from "@/lib/supabase";
 
 type State = "idle" | "loading" | "sent" | "error";
 
+type GateResponse =
+  | { returning: true; token_hash: string }
+  | { allowed: boolean };
+
 export default function LoginPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [state, setState] = useState<State>("idle");
   const [errorMessage, setErrorMessage] = useState("");
@@ -19,7 +26,6 @@ export default function LoginPage() {
     const normalizedEmail = email.trim().toLowerCase();
 
     try {
-      // Step 1: Server-side GHL membership gate
       const gateRes = await fetch("/api/auth/magic-link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -36,15 +42,34 @@ export default function LoginPage() {
         return;
       }
 
-      const gate = (await gateRes.json()) as { allowed: boolean };
+      const gate = (await gateRes.json()) as GateResponse;
 
+      // Returning member — server generated a token silently, no email sent.
+      // Verify it client-side to establish a session, then redirect.
+      if ("returning" in gate && gate.returning) {
+        const supabase = createClient();
+        const { error: verifyError } = await supabase.auth.verifyOtp({
+          token_hash: gate.token_hash,
+          type: "email",
+        });
+        if (verifyError) {
+          setErrorMessage("Could not sign you in. Please try again.");
+          setState("error");
+          return;
+        }
+        router.replace(searchParams.get("redirectTo") ?? "/home");
+        return;
+      }
+
+      // New user — not yet in members table.
       if (!gate.allowed) {
-        // Generic message — do not reveal whether email exists in GHL
+        // Generic response — do not reveal whether email exists in GHL.
         setState("sent");
         return;
       }
 
-      // Step 2: Client-side OTP — browser stores the PKCE code_verifier
+      // New member passed GHL gate — send magic link email.
+      // Browser stores the PKCE code_verifier for the callback exchange.
       const supabase = createClient();
       const { error: otpError } = await supabase.auth.signInWithOtp({
         email: normalizedEmail,

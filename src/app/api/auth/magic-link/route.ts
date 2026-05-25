@@ -16,6 +16,7 @@ import { authRateLimit } from '@/lib/rateLimit'
 import { validateEmail } from '@/lib/validation'
 import { logger, auditLog } from '@/lib/logger'
 import { hasAnyAccessTag } from '@/lib/ghl/tags'
+import { createAdminClient } from '@/lib/supabase-server'
 
 // Intentionally vague — prevents email enumeration
 const GENERIC_OK = { allowed: true }
@@ -54,6 +55,37 @@ export async function POST(request: NextRequest) {
   const normalizedEmail = (email as string).toLowerCase().trim()
 
   try {
+    const adminClient = createAdminClient()
+
+    // ---- Returning member check ---------------------------------
+    // A row in members means this email has completed the full auth
+    // flow at least once (magic link click → callback → syncMember).
+    // Skip the GHL gate and generate a silent OTP — no email sent.
+    const { data: existingMember } = await adminClient
+      .from('members')
+      .select('id')
+      .eq('email', normalizedEmail)
+      .maybeSingle()
+
+    if (existingMember) {
+      const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+        type: 'magiclink',
+        email: normalizedEmail,
+      })
+
+      if (!linkError && linkData?.properties?.hashed_token) {
+        auditLog('SILENT_LOGIN', { requestId, metadata: { method: 'returning_member' } })
+        return NextResponse.json(
+          { returning: true, token_hash: linkData.properties.hashed_token },
+          { headers: { 'X-Request-Id': requestId } }
+        )
+      }
+
+      // generateLink failed unexpectedly — fall through to normal flow
+      reqLog.warn('generateLink failed for returning member, falling through', { errorMessage: linkError?.message })
+    }
+
+    // ---- New user: GHL membership gate -------------------------
     const contact = await getContactByEmail(normalizedEmail)
     const hasAccess = contact ? hasAnyAccessTag(contact.tags ?? []) : false
 
@@ -61,7 +93,6 @@ export async function POST(request: NextRequest) {
 
     if (!hasAccess) {
       auditLog('LOGIN_DENIED', { requestId, metadata: { reason: 'no_ghl_tag' } })
-      // Return same shape as success to prevent email enumeration
       return NextResponse.json(GENERIC_DENY, { headers: { 'X-Request-Id': requestId } })
     }
 
