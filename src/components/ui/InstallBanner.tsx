@@ -38,7 +38,7 @@ export default function InstallBanner() {
       style={{ borderColor: "rgba(133,187,101,0.25)", background: "#f9f8f3" }}
     >
       <Image
-        src="/icons/icon-192.png"
+        src="/linkup-golf.webp"
         alt="LinkUp Golf"
         width={38}
         height={38}

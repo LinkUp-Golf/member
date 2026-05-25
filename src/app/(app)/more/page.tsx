@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useAuthStore } from '@/store/auth'
+import { capitalizeName } from '@/lib/utils'
 import Avatar from '@/components/ui/Avatar'
 import AppShell from '@/components/layout/AppShell'
 
@@ -53,7 +54,7 @@ export default function MorePage() {
           />
           <div className="flex-1 min-w-0">
             <p className="font-semibold text-base" style={{ color: 'var(--color-green-900)' }}>
-              {m.first_name} {m.last_name}
+              {capitalizeName(m.first_name)} {capitalizeName(m.last_name)}
             </p>
             <p className="text-sm mt-0.5" style={{ color: 'rgba(0,38,105,0.5)' }}>
               {m.profile?.role_title ?? 'Complete your profile'}

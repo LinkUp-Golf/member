@@ -7,7 +7,7 @@ import {
   AdminPageHeader, StatCard, AdminCard, AdminButton,
   Badge, ProgressBar,
 } from '@/components/admin/AdminUI'
-import { formatRelativeTime } from '@/lib/utils'
+import { formatRelativeTime, capitalizeName } from '@/lib/utils'
 import { format, startOfMonth, endOfMonth } from 'date-fns'
 
 interface DashboardData {
@@ -206,7 +206,7 @@ export default function AdminDashboard() {
               {data.recentMembers.map(m => (
                 <div key={m.id} className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-800">{m.first_name} {m.last_name}</p>
+                    <p className="text-sm font-medium text-gray-800">{capitalizeName(m.first_name)} {capitalizeName(m.last_name)}</p>
                     <p className="text-xs text-gray-400">{formatRelativeTime(m.created_at)}</p>
                   </div>
                   <StatusBadge status={m.membership_status} />
@@ -228,7 +228,7 @@ export default function AdminDashboard() {
                 <div key={b.id} className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-gray-800">
-                      {b.member?.first_name} {b.member?.last_name}
+                      {capitalizeName(b.member?.first_name ?? '')} {capitalizeName(b.member?.last_name ?? '')}
                     </p>
                     <p className="text-xs text-gray-400">
                       {format(new Date(b.booking_date + 'T12:00:00'), 'MMM d')} · {b.tee_time?.slice(0, 5)}

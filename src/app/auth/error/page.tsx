@@ -3,6 +3,7 @@
 import { Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import Logo from '@/components/ui/Logo'
 
 const REASONS: Record<string, { title: string; body: string }> = {
   no_code: {
@@ -49,9 +50,7 @@ export default function AuthErrorPage() {
       className="min-h-screen flex flex-col items-center justify-center px-8 text-center"
       style={{ background: '#002669' }}
     >
-      <div className="font-serif text-3xl italic mb-8" style={{ color: '#85bb65' }}>
-        LinkUp Golf
-      </div>
+      <Logo size={72} className="mb-8" />
 
       <div className="text-4xl mb-5">🔒</div>
 

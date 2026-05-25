@@ -9,7 +9,7 @@ import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
 import AppShell from '@/components/layout/AppShell'
 import { MemberRowSkeleton } from '@/components/ui/Loading'
-import { formatMessageTime, truncate } from '@/lib/utils'
+import { formatMessageTime, truncate, capitalizeName } from '@/lib/utils'
 import type { ConversationWithDetails } from '@/types'
 
 export default function MessagesPage() {
@@ -115,7 +115,7 @@ function ConversationRow({
 
   const displayName = conv.type === 'group' && conv.name
     ? conv.name
-    : others.map(m => m.first_name).join(', ') || 'Unknown'
+    : others.map(m => capitalizeName(m.first_name)).join(', ') || 'Unknown'
 
   const hasUnread = (conv.unread_count ?? 0) > 0
   const lastMsg = conv.last_message

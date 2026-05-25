@@ -7,6 +7,7 @@ import {
   Badge, AdminButton,
 } from '@/components/admin/AdminUI'
 import { format, formatDistanceToNow } from 'date-fns'
+import { capitalizeName } from '@/lib/utils'
 import type { MemberWithProfile } from '@/types'
 
 type FilterStatus = 'all' | 'active' | 'waitlist' | 'pending' | 'cancelled'
@@ -169,7 +170,7 @@ export default function AdminMembersPage() {
               <AdminTr key={m.id} onClick={() => setSelected(m)}>
                 <AdminTd>
                   <div>
-                    <p className="font-medium text-gray-900">{m.first_name} {m.last_name}</p>
+                    <p className="font-medium text-gray-900">{capitalizeName(m.first_name)} {capitalizeName(m.last_name)}</p>
                     <p className="text-xs text-gray-400">{m.email}</p>
                     {m.profile?.business_name && (
                       <p className="text-xs text-gray-400">{m.profile.business_name}</p>
@@ -253,7 +254,7 @@ export default function AdminMembersPage() {
               <div className="p-4 sm:p-5">
               <div className="flex items-start justify-between mb-4">
                 <div>
-                  <p className="font-semibold text-gray-900">{selected.first_name} {selected.last_name}</p>
+                  <p className="font-semibold text-gray-900">{capitalizeName(selected.first_name)} {capitalizeName(selected.last_name)}</p>
                   <p className="text-xs text-gray-400 mt-0.5">{selected.email}</p>
                 </div>
                 <button onClick={() => setSelected(null)} className="text-gray-300 hover:text-gray-500 text-lg">×</button>

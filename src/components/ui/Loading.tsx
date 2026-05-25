@@ -1,3 +1,4 @@
+import Image from 'next/image'
 import { cn } from '@/lib/utils'
 
 // ---- Spinner ------------------------------------------------
@@ -19,9 +20,14 @@ export function FullScreenLoader() {
   return (
     <div className="flex items-center justify-center h-screen bg-cream">
       <div className="flex flex-col items-center gap-4">
-        <div className="font-serif text-2xl italic text-green-900" style={{ color: '#85bb65' }}>
-          LinkUp Golf
-        </div>
+        <Image
+          src="/linkup-golf.webp"
+          alt="LinkUp Golf"
+          width={56}
+          height={56}
+          className="rounded-xl"
+          priority
+        />
         <Spinner className="text-green-700" />
       </div>
     </div>

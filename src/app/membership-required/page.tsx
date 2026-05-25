@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Logo from '@/components/ui/Logo'
 
 // Shown when:
 //  - GHL tag missing at callback (membership revoked after link was sent)
@@ -11,9 +12,7 @@ export default function MembershipRequiredPage() {
       className="min-h-screen flex flex-col items-center justify-center px-8 text-center"
       style={{ background: '#002669' }}
     >
-      <div className="font-display text-4xl mb-8" style={{ color: '#85bb65' }}>
-        LinkUp Golf
-      </div>
+      <Logo size={72} className="mb-8" />
 
       <div className="text-5xl mb-6">🔒</div>
 

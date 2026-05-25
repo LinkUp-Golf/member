@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import { useAuthStore } from '@/store/auth'
 import { createClient } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
@@ -56,12 +57,22 @@ function NavContent({
   return (
     <>
       {/* Logo */}
-      <div className="px-5 py-6 border-b border-white/[0.08]">
-        <div className="font-serif text-xl italic" style={{ color: '#85bb65' }}>
-          LinkUp Golf
-        </div>
-        <div className="text-xs uppercase tracking-widest text-white/30 mt-1">
-          Admin Panel
+      <div className="px-5 py-5 border-b border-white/[0.08] flex items-center gap-3">
+        <Image
+          src="/linkup-golf.webp"
+          alt="LinkUp Golf"
+          width={36}
+          height={36}
+          className="rounded-lg flex-shrink-0"
+          priority
+        />
+        <div>
+          <div className="font-serif text-base font-medium" style={{ color: '#85bb65' }}>
+            LinkUp Golf
+          </div>
+          <div className="text-[10px] uppercase tracking-widest text-white/30 mt-0.5">
+            Admin Panel
+          </div>
         </div>
       </div>
 

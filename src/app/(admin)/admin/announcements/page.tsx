@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useAuthStore } from '@/store/auth'
 import { createClient } from '@/lib/supabase'
 import { AdminPageHeader, AdminTable, AdminTr, AdminTd, AdminButton, AdminCard, Badge } from '@/components/admin/AdminUI'
-import { formatRelativeTime } from '@/lib/utils'
+import { formatRelativeTime, capitalizeName } from '@/lib/utils'
 import type { AnnouncementType, ModerationStatus } from '@/types'
 
 interface AnnouncementRow {
@@ -107,7 +107,7 @@ export default function AdminAnnouncementsPage() {
             </AdminTd>
             <AdminTd>
               <span className="text-sm text-gray-600">
-                {a.author?.first_name} {a.author?.last_name}
+                {capitalizeName(a.author?.first_name ?? '')} {capitalizeName(a.author?.last_name ?? '')}
               </span>
             </AdminTd>
             <AdminTd>

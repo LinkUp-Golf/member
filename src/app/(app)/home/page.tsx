@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuthStore } from "@/store/auth";
 import { apiClient } from "@/lib/api-client";
-import { formatBookingDate, formatTeeTime, truncate } from "@/lib/utils";
+import { formatBookingDate, formatTeeTime, truncate, capitalizeName } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
 import AppShell from '@/components/layout/AppShell';
 import InstallBanner from '@/components/ui/InstallBanner';
@@ -25,7 +25,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
 
   const [greeting, setGreeting] = useState('');
-  const firstName = user?.member?.first_name ?? "";
+  const firstName = capitalizeName(user?.member?.first_name ?? "");
 
   useEffect(() => {
     setGreeting(getGreeting());
@@ -179,7 +179,7 @@ export default function HomePage() {
                   />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium" style={{ color: 'var(--color-green-900)' }}>
-                      {m.first_name} {m.last_name}
+                      {capitalizeName(m.first_name)} {capitalizeName(m.last_name)}
                     </p>
                     <p className="text-xs mt-0.5" style={{ color: 'rgba(0,38,105,0.55)' }}>
                       {m.profile?.role_title ?? ""}

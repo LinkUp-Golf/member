@@ -8,7 +8,7 @@ import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
 import AppShell from '@/components/layout/AppShell'
 import { Spinner } from '@/components/ui/Loading'
-import { formatMessageTime } from '@/lib/utils'
+import { formatMessageTime, capitalizeName } from '@/lib/utils'
 import type { Message } from '@/types'
 
 interface MessageWithSender extends Message {
@@ -60,7 +60,7 @@ export default function ChatPage() {
       setConvName(name)
     } else {
       const others = parts.filter(p => p.id !== user?.id)
-      setConvName(others.map(p => `${p.first_name} ${p.last_name}`).join(', '))
+      setConvName(others.map(p => `${capitalizeName(p.first_name)} ${capitalizeName(p.last_name)}`).join(', '))
     }
 
     setMessages(msgs)
@@ -191,7 +191,7 @@ export default function ChatPage() {
         <input
           ref={inputRef}
           type="text"
-          placeholder={`Message ${convType === 'group' ? 'group' : headerParticipant?.first_name ?? ''}…`}
+          placeholder={`Message ${convType === 'group' ? 'group' : capitalizeName(headerParticipant?.first_name ?? '')}…`}
           value={body}
           onChange={e => setBody(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -274,7 +274,7 @@ function MessageBubble({
       <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[75%]`}>
         {showAvatar && !isMe && (
           <p className="text-xs text-green-900/40 mb-1 ml-1">
-            {msg.sender.first_name}
+            {capitalizeName(msg.sender.first_name)}
           </p>
         )}
         <div className={`bubble ${isMe ? 'bubble-out' : 'bubble-in'}`}>

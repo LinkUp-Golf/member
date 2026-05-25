@@ -21,7 +21,7 @@ export default function InstallPage() {
       >
         <div className="flex justify-center mb-4">
           <Image
-            src="/icons/icon-192.png"
+            src="/linkup-golf.webp"
             alt="LinkUp Golf"
             width={80}
             height={80}

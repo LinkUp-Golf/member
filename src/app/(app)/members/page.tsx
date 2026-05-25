@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useAuthStore } from "@/store/auth";
 import { apiClient } from "@/lib/api-client";
-import { shortCategory, truncate } from "@/lib/utils";
+import { shortCategory, truncate, capitalizeName } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
 import AppShell from "@/components/layout/AppShell";
 import { MemberRowSkeleton } from "@/components/ui/Loading";
@@ -185,7 +185,7 @@ function MemberRow({
             className="text-sm font-medium"
             style={{ color: "var(--color-green-900)" }}
           >
-            {m.first_name} {m.last_name}
+            {capitalizeName(m.first_name)} {capitalizeName(m.last_name)}
           </p>
           {isMe && (
             <span

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Spinner } from "@/components/ui/Loading";
+import Logo from "@/components/ui/Logo";
 import { createClient } from "@/lib/supabase";
 
 type State = "idle" | "loading" | "sent" | "error";
@@ -62,7 +63,7 @@ export default function LoginPage() {
       }
 
       // New user — not yet in members table.
-      if (!gate.allowed) {
+      if (!("allowed" in gate && gate.allowed)) {
         // Generic response — do not reveal whether email exists in GHL.
         setState("sent");
         return;
@@ -105,13 +106,8 @@ export default function LoginPage() {
     >
       <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
         {/* Logo */}
-        <div className="mb-2 text-center">
-          <div
-            className="font-display text-5xl mb-1"
-            style={{ color: "#85bb65" }}
-          >
-            LinkUp Golf
-          </div>
+        <div className="mb-2 flex flex-col items-center">
+          <Logo size={80} className="mb-3" />
           <div className="text-xs uppercase tracking-[0.2em] text-white/30">
             Member Portal
           </div>

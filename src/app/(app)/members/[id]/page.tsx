@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
+import { capitalizeName } from '@/lib/utils'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
 import AppShell from '@/components/layout/AppShell'
@@ -54,7 +55,7 @@ export default function MemberProfilePage() {
 
   return (
     <AppShell
-      title={`${member.first_name} ${member.last_name}`}
+      title={`${capitalizeName(member.first_name)} ${capitalizeName(member.last_name)}`}
       description={p?.role_title ?? 'Member'}
       end={
         <button onClick={() => router.back()} className="text-gold">
@@ -74,7 +75,7 @@ export default function MemberProfilePage() {
           />
         </div>
         <h1 className="font-serif text-2xl text-white font-medium">
-          {member.first_name} {member.last_name}
+          {capitalizeName(member.first_name)} {capitalizeName(member.last_name)}
         </h1>
         {p?.role_title && (
           <p className="text-sm text-white/50 mt-1">
@@ -118,7 +119,7 @@ export default function MemberProfilePage() {
           <span className="text-lg">💡</span>
           <div>
             <p className="text-sm text-green-900 font-medium">
-              You haven&apos;t played with {member.first_name} yet
+              You haven&apos;t played with {capitalizeName(member.first_name)} yet
             </p>
             <p className="text-xs text-green-900/55 mt-0.5">
               Would you like us to find a date? Start a message to coordinate.

@@ -7,7 +7,7 @@ import {
   ProgressBar, AdminCard, AdminButton,
 } from '@/components/admin/AdminUI'
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns'
-import { formatTeeTime } from '@/lib/utils'
+import { formatTeeTime, capitalizeName } from '@/lib/utils'
 
 type BookingStatus = 'confirmed' | 'pending' | 'cancelled' | 'waitlist'
 
@@ -213,7 +213,7 @@ export default function AdminBookingsPage() {
         {filtered.map(b => (
           <AdminTr key={b.id}>
             <AdminTd>
-              <p className="font-medium text-gray-900">{b.member?.first_name} {b.member?.last_name}</p>
+              <p className="font-medium text-gray-900">{capitalizeName(b.member?.first_name ?? '')} {capitalizeName(b.member?.last_name ?? '')}</p>
               <p className="text-xs text-gray-400">{b.member?.email}</p>
             </AdminTd>
             <AdminTd>{format(new Date(b.booking_date + 'T12:00:00'), 'EEE, MMM d')}</AdminTd>

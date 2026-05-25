@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
@@ -75,13 +76,23 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
     <div className="app-shell">
       {/* Sidebar — tablet+ */}
       <aside className="app-sidebar">
-        <div className="sidebar-logo">
-          <div className="font-display text-2xl leading-none" style={{ color: 'var(--color-gold)' }}>
-            LinkUp Golf
+        <div className="sidebar-logo flex items-center gap-3">
+          <Image
+            src="/linkup-golf.webp"
+            alt="LinkUp Golf"
+            width={40}
+            height={40}
+            className="rounded-xl flex-shrink-0"
+            priority
+          />
+          <div>
+            <div className="font-display text-xl leading-none" style={{ color: 'var(--color-gold)' }}>
+              LinkUp Golf
+            </div>
+            <p className="text-[11px] uppercase tracking-widest mt-1" style={{ color: 'rgba(255,255,255,0.28)' }}>
+              Member Portal
+            </p>
           </div>
-          <p className="text-[11px] uppercase tracking-widest mt-1.5" style={{ color: 'rgba(255,255,255,0.28)' }}>
-            Member Portal
-          </p>
         </div>
 
         <nav className="flex flex-col gap-px py-4 flex-1">

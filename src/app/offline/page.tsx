@@ -1,14 +1,14 @@
 'use client'
 
+import Logo from '@/components/ui/Logo'
+
 export default function OfflinePage() {
   return (
     <div
       className="min-h-screen flex flex-col items-center justify-center px-8 text-center"
       style={{ background: '#F4F1E8' }}
     >
-      <div className="font-serif text-3xl italic mb-6" style={{ color: '#002669' }}>
-        LinkUp Golf
-      </div>
+      <Logo size={72} className="mb-6" />
 
       <div className="text-5xl mb-5">📡</div>
 
