@@ -149,9 +149,9 @@ export function validateMessagePayload(body: unknown): ValidationResult {
 // ---- Sanitise text (strip HTML tags) ------------------------
 export function sanitiseText(input: string): string {
   return input
+    .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#x27;')
     .trim()

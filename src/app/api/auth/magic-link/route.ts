@@ -68,6 +68,19 @@ export async function POST(request: NextRequest) {
       .maybeSingle()
 
     if (existingMember) {
+      // Re-validate GHL tags even for returning members — their membership
+      // may have been revoked since their last login.
+      const contact = await getContactByEmail(normalizedEmail)
+      const hasAccess = contact ? hasAnyAccessTag(contact.tags ?? []) : false
+
+      if (!hasAccess) {
+        auditLog('LOGIN_DENIED', { requestId, metadata: { reason: 'ghl_tag_missing_returning_member' } })
+        return NextResponse.json(
+          { allowed: false, revoked: true },
+          { headers: { 'X-Request-Id': requestId } }
+        )
+      }
+
       const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
         type: 'magiclink',
         email: normalizedEmail,

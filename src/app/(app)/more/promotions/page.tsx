@@ -60,17 +60,32 @@ export default function PromotionsPage() {
             </p>
           </div>
         ) : (
-          promotions.map((p) => <PromoCard key={p.id} promo={p} />)
+          promotions.map((p) => <PromoCard key={p.id} promo={p} onTap={() => router.push(`/more/promotions/${p.id}`)} />)
         )}
       </div>
     </AppShell>
   );
 }
 
-function PromoCard({ promo }: { promo: Promotion }) {
+function PromoCard({ promo, onTap }: { promo: Promotion; onTap?: () => void }) {
   return (
-    <div className="promo-card mb-4">
+    <div className="promo-card mb-4 cursor-pointer" onClick={onTap}>
       <div className="promo-accent" />
+      {promo.image_url && (
+        <img
+          src={promo.image_url}
+          alt=""
+          className="w-full max-h-56 object-cover rounded-t-2xl"
+        />
+      )}
+      {!promo.image_url && promo.video_url && (
+        <video
+          src={promo.video_url}
+          controls
+          playsInline
+          className="w-full max-h-56 bg-black rounded-t-2xl"
+        />
+      )}
       <div className="p-5">
         <p
           className="text-xs uppercase tracking-widest mb-2"

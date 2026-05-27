@@ -237,6 +237,8 @@ export const mockAnnouncements: Announcement[] = [
     status: 'published',
     reviewed_by: null,
     published_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    image_url: null,
+    video_url: null,
     created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
   },
   {
@@ -250,6 +252,8 @@ export const mockAnnouncements: Announcement[] = [
     status: 'published',
     reviewed_by: null,
     published_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+    image_url: null,
+    video_url: null,
     created_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
   },
   {
@@ -263,6 +267,8 @@ export const mockAnnouncements: Announcement[] = [
     status: 'published',
     reviewed_by: null,
     published_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+    image_url: null,
+    video_url: null,
     created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
   },
 ]
@@ -281,6 +287,8 @@ export const mockPromotions: Promotion[] = [
     cta_url: null,
     active: true,
     sort_order: 1,
+    image_url: null,
+    video_url: null,
     created_at: '2024-01-01T00:00:00Z',
   },
   {
@@ -295,6 +303,8 @@ export const mockPromotions: Promotion[] = [
     cta_url: null,
     active: true,
     sort_order: 2,
+    image_url: null,
+    video_url: null,
     created_at: '2024-01-01T00:00:00Z',
   },
 ]

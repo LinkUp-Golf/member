@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuthStore } from "@/store/auth";
 import { apiClient } from "@/lib/api-client";
-import { formatBookingDate, formatTeeTime, truncate, capitalizeName } from "@/lib/utils";
+import { formatBookingDate, formatTeeTime, truncate, capitalizeName, formatRelativeTime } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
 import AppShell from '@/components/layout/AppShell';
 import InstallBanner from '@/components/ui/InstallBanner';
@@ -228,6 +228,46 @@ export default function HomePage() {
 
 // ---- Sub-components -----------------------------------------
 
+function announcementFirstMedia(a: Announcement): { url: string; isVideo: boolean } | null {
+  const url = a.media_urls?.[0] ?? a.image_url ?? a.video_url ?? null
+  if (!url) return null
+  const ext = url.split('?')[0]?.split('.').pop()?.toLowerCase() ?? ''
+  return { url, isVideo: ['mp4', 'webm', 'mov', 'quicktime'].includes(ext) }
+}
+
+function AnnouncementThumbnail({ announcement }: { announcement: Announcement }) {
+  const first = announcementFirstMedia(announcement)
+  if (!first) return null
+  const count = announcement.media_urls?.length
+    ?? ((announcement.image_url ? 1 : 0) + (announcement.video_url ? 1 : 0))
+  return (
+    <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 bg-black">
+      {first.isVideo ? (
+        <video src={first.url} className="w-full h-full object-cover" muted playsInline />
+      ) : (
+        <img src={first.url} alt="" className="w-full h-full object-cover" />
+      )}
+      {count > 1 && (
+        <div className="absolute bottom-1 right-1 flex items-center gap-0.5 text-[9px] font-semibold text-white px-1.5 py-0.5 rounded-full leading-none"
+          style={{ background: 'rgba(0,0,0,0.65)' }}>
+          <StackIcon />
+          {count}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StackIcon() {
+  return (
+    <svg className="w-2.5 h-2.5" viewBox="0 0 16 16" fill="currentColor">
+      <rect x="3" y="6" width="10" height="8" rx="1.5" opacity="0.6" />
+      <rect x="1" y="4" width="10" height="8" rx="1.5" opacity="0.4" />
+      <rect x="5" y="2" width="10" height="8" rx="1.5" />
+    </svg>
+  )
+}
+
 const ANNOUNCEMENT_TYPES: Record<string, { icon: string; color: string }> = {
   new_member:      { icon: "👋", color: "rgba(133,187,101,0.12)" },
   booking:         { icon: "⛳", color: "rgba(0,38,105,0.07)" },
@@ -241,20 +281,32 @@ function AnnouncementCard({ announcement }: { announcement: Announcement }) {
   const meta = ANNOUNCEMENT_TYPES[announcement.type] ?? { icon: "📌", color: "rgba(0,38,105,0.07)" };
 
   return (
-    <div className="card flex gap-3.5 p-4">
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0 mt-0.5"
-        style={{ background: meta.color }}>
+    <Link href={`/more/announcements/${announcement.id}`} className="card p-4 flex gap-3 items-start">
+      <div
+        className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0 mt-0.5"
+        style={{ background: meta.color }}
+      >
         {meta.icon}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium leading-snug" style={{ color: 'var(--color-green-900)' }}>
+        <p
+          className="text-sm font-medium leading-snug line-clamp-2"
+          style={{ color: 'var(--color-green-900)' }}
+        >
           {announcement.title}
         </p>
-        <p className="text-xs mt-1 leading-relaxed" style={{ color: 'rgba(0,38,105,0.52)' }}>
-          {truncate(announcement.body, 120)}
+        <p
+          className="text-xs mt-1 leading-relaxed line-clamp-2"
+          style={{ color: 'rgba(0,38,105,0.52)' }}
+        >
+          {announcement.body}
+        </p>
+        <p className="text-[10px] mt-1.5" style={{ color: 'rgba(0,38,105,0.3)' }}>
+          {formatRelativeTime(announcement.published_at ?? announcement.created_at)}
         </p>
       </div>
-    </div>
+      <AnnouncementThumbnail announcement={announcement} />
+    </Link>
   );
 }
 
@@ -262,6 +314,21 @@ function PromoCard({ promo }: { promo: Promotion }) {
   return (
     <div className="promo-card">
       <div className="promo-accent" />
+      {promo.image_url && (
+        <img
+          src={promo.image_url}
+          alt=""
+          className="w-full max-h-48 object-cover rounded-t-2xl"
+        />
+      )}
+      {!promo.image_url && promo.video_url && (
+        <video
+          src={promo.video_url}
+          controls
+          playsInline
+          className="w-full max-h-48 bg-black rounded-t-2xl"
+        />
+      )}
       <div className="p-5">
         <p className="text-[10px] uppercase tracking-[0.14em] mb-2" style={{ color: 'var(--color-gold)' }}>
           {promo.badge_label}

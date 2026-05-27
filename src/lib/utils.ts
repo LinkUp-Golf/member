@@ -77,8 +77,9 @@ export function capitalizeName(name: string): string {
 
 // ---- Truncate text -----------------------------------------
 export function truncate(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text
-  return text.slice(0, maxLength).trim() + '…'
+  const chars = [...text]
+  if (chars.length <= maxLength) return text
+  return chars.slice(0, maxLength).join('').trimEnd() + '…'
 }
 
 // ---- Industry category short label -------------------------

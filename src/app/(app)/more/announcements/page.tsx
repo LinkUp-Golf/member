@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
 import AppShell from '@/components/layout/AppShell'
@@ -57,7 +58,7 @@ export default function AnnouncementsPage() {
         </div>
       }
     >
-      <div className="pb-8">
+      <div className="pt-4 pb-8">
         {loading ? (
           <div className="px-5 py-4 space-y-3">
             {[1, 2, 3, 4].map(i => <CardSkeleton key={i} lines={2} />)}
@@ -69,31 +70,67 @@ export default function AnnouncementsPage() {
             <p className="text-sm text-green-900/45">Community announcements will appear here.</p>
           </div>
         ) : (
-          <div className="divide-y divide-green-900/06">
+          <div className="px-5 space-y-2.5">
             {announcements.map(a => (
-              <div key={a.id} className="px-5 py-4 flex gap-3 items-start">
+              <Link key={a.id} href={`/more/announcements/${a.id}`} className="card p-4 flex gap-3 items-start active:opacity-75 transition-opacity">
                 <span className="text-2xl flex-shrink-0 mt-0.5">
                   {TYPE_ICONS[a.type] ?? '📌'}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs uppercase tracking-wider text-green-900/35">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="text-[10px] uppercase tracking-wider text-green-900/35">
                       {TYPE_LABELS[a.type] ?? a.type}
                     </span>
-                    <span className="text-xs text-green-900/25">·</span>
-                    <span className="text-xs text-green-900/35">
-                      {a.published_at ? formatRelativeTime(a.published_at) : ''}
+                    <span className="text-[10px] text-green-900/25">·</span>
+                    <span className="text-[10px] text-green-900/35">
+                      {formatRelativeTime(a.published_at ?? a.created_at)}
                     </span>
                   </div>
-                  <p className="text-sm font-medium text-green-900 mb-1">{a.title}</p>
-                  <p className="text-sm text-green-900/60 leading-relaxed">{a.body}</p>
+                  <p className="text-sm font-medium text-green-900 leading-snug line-clamp-2">{a.title}</p>
+                  <p className="text-xs mt-1 text-green-900/55 leading-relaxed line-clamp-2">{a.body}</p>
                 </div>
-              </div>
+                <AnnouncementThumbnail announcement={a} />
+              </Link>
             ))}
           </div>
         )}
       </div>
     </AppShell>
+  )
+}
+
+function AnnouncementThumbnail({ announcement }: { announcement: Announcement }) {
+  const url = announcement.media_urls?.[0] ?? announcement.image_url ?? announcement.video_url
+  if (!url) return null
+  const ext = url.split('?')[0]?.split('.').pop()?.toLowerCase() ?? ''
+  const isVideo = ['mp4', 'webm', 'mov', 'quicktime'].includes(ext)
+  const count = announcement.media_urls?.length
+    ?? ((announcement.image_url ? 1 : 0) + (announcement.video_url ? 1 : 0))
+  return (
+    <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 bg-black">
+      {isVideo ? (
+        <video src={url} className="w-full h-full object-cover" muted playsInline />
+      ) : (
+        <img src={url} alt="" className="w-full h-full object-cover" />
+      )}
+      {count > 1 && (
+        <div className="absolute bottom-1 right-1 flex items-center gap-0.5 text-[9px] font-semibold text-white px-1.5 py-0.5 rounded-full leading-none"
+          style={{ background: 'rgba(0,0,0,0.65)' }}>
+          <StackIcon />
+          {count}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StackIcon() {
+  return (
+    <svg className="w-2.5 h-2.5" viewBox="0 0 16 16" fill="currentColor">
+      <rect x="3" y="6" width="10" height="8" rx="1.5" opacity="0.6" />
+      <rect x="1" y="4" width="10" height="8" rx="1.5" opacity="0.4" />
+      <rect x="5" y="2" width="10" height="8" rx="1.5" />
+    </svg>
   )
 }
 

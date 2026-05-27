@@ -204,6 +204,9 @@ export interface Announcement {
   status: ModerationStatus
   reviewed_by: string | null
   published_at: string | null
+  image_url: string | null
+  video_url: string | null
+  media_urls: string[]
   created_at: string
 }
 
@@ -263,6 +266,8 @@ export interface Promotion {
   cta_url: string | null
   active: boolean
   sort_order: number
+  image_url: string | null
+  video_url: string | null
   created_at: string
 }
 

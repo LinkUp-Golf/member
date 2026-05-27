@@ -145,7 +145,7 @@ export const auditLogger = new Logger({ metadata: { audit: true } })
 export function auditLog(
   action: 'LOGIN_ATTEMPT' | 'LOGIN_SUCCESS' | 'LOGIN_DENIED' | 'LOGOUT' |
           'AUTH_TAG_VALID' | 'AUTH_TAG_REVOKED' | 'AUTH_GHL_UNAVAILABLE' |
-          'SESSION_EXPIRED' | 'ADMIN_ACCESS_DENIED',
+          'SESSION_EXPIRED' | 'ADMIN_ACCESS_DENIED' | 'SILENT_LOGIN',
   fields: LogFields
 ): void {
   const level: LogLevel = action.includes('DENIED') || action.includes('REVOKED') || action.includes('EXPIRED')

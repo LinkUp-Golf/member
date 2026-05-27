@@ -39,8 +39,12 @@ const nextConfig = {
   // next/image will auto-negotiate based on the Accept header.
   images: {
     formats: ['image/avif', 'image/webp'],
-    domains: [
-      'your-supabase-project.supabase.co', // replace with your Supabase project URL
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '*.supabase.co',
+        pathname: '/storage/v1/object/public/**',
+      },
     ],
   },
 

@@ -10,7 +10,7 @@ type State = "idle" | "loading" | "sent" | "error";
 
 type GateResponse =
   | { returning: true; token_hash: string }
-  | { allowed: boolean };
+  | { allowed: boolean; revoked?: true };
 
 export default function LoginPage() {
   const router = useRouter();
@@ -44,6 +44,12 @@ export default function LoginPage() {
       }
 
       const gate = (await gateRes.json()) as GateResponse;
+
+      // Membership revoked — redirect before attempting sign-in.
+      if ("revoked" in gate && gate.revoked) {
+        router.replace("/membership-required");
+        return;
+      }
 
       // Returning member — server generated a token silently, no email sent.
       // Verify it client-side to establish a session, then redirect.
