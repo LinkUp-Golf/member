@@ -71,21 +71,15 @@ function PromoCard({ promo, onTap }: { promo: Promotion; onTap?: () => void }) {
   return (
     <div className="promo-card mb-4 cursor-pointer" onClick={onTap}>
       <div className="promo-accent" />
-      {promo.image_url && (
-        <img
-          src={promo.image_url}
-          alt=""
-          className="w-full max-h-56 object-cover rounded-t-2xl"
-        />
-      )}
-      {!promo.image_url && promo.video_url && (
-        <video
-          src={promo.video_url}
-          controls
-          playsInline
-          className="w-full max-h-56 bg-black rounded-t-2xl"
-        />
-      )}
+      {(() => {
+        const url = promo.media_urls?.[0] ?? promo.image_url ?? promo.video_url
+        if (!url) return null
+        const ext = url.split('?')[0]?.split('.').pop()?.toLowerCase() ?? ''
+        const isVideo = ['mp4', 'webm', 'mov', 'quicktime'].includes(ext)
+        return isVideo
+          ? <video src={url} muted playsInline className="w-full max-h-56 object-contain bg-black rounded-t-2xl" />
+          : <img src={url} alt="" className="w-full max-h-56 object-contain bg-black rounded-t-2xl" />
+      })()}
       <div className="p-5">
         <p
           className="text-xs uppercase tracking-widest mb-2"

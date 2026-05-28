@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
+import { useForm, Controller } from "react-hook-form";
 import { createClient } from "@/lib/supabase";
 import {
   AdminPageHeader,
@@ -12,6 +13,7 @@ import {
   AdminCard,
   Badge,
 } from "@/components/admin/AdminUI";
+import FormField from "@/components/admin/FormField";
 import { formatRelativeTime, capitalizeName } from "@/lib/utils";
 import MultiMediaUpload, { type MediaFile } from "@/components/ui/MultiMediaUpload";
 import type { AnnouncementType, ModerationStatus } from "@/types";
@@ -266,6 +268,12 @@ function mediaTypeFromUrl(url: string): 'image' | 'video' {
   return ['mp4', 'webm', 'mov', 'quicktime'].includes(ext) ? 'video' : 'image'
 }
 
+interface AnnouncementFormValues {
+  type: string
+  title: string
+  body: string
+}
+
 function AnnouncementForm({
   initial,
   onSubmit,
@@ -275,15 +283,25 @@ function AnnouncementForm({
   onSubmit: (payload: AnnouncementPayload) => Promise<string | null>
   onCancel: () => void
 }) {
-  const [title, setTitle] = useState(initial?.title ?? '')
-  const [body, setBody] = useState(initial?.body ?? '')
-  const [type, setType] = useState<string>(initial?.type ?? 'admin_broadcast')
+  const {
+    register,
+    handleSubmit: rhfSubmit,
+    formState: { errors, isSubmitting },
+    setError: setFieldError,
+  } = useForm<AnnouncementFormValues>({
+    defaultValues: {
+      type: initial?.type ?? 'admin_broadcast',
+      title: initial?.title ?? '',
+      body: initial?.body ?? '',
+    },
+  })
+
   const [mediaFiles, setMediaFiles] = useState<MediaFile[]>(() => initial ? initMediaFiles(initial) : [])
-  const [saving, setSaving] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [serverError, setServerError] = useState<string | null>(null)
 
   const isEditing = !!initial
+  const saving = isSubmitting
 
   function handleCancel() {
     mediaFiles.forEach(f => { if (f.file) URL.revokeObjectURL(f.previewUrl) })
@@ -297,14 +315,11 @@ function AnnouncementForm({
     if (idx !== -1) await supabase.storage.from('post-media').remove([url.slice(idx + marker.length)])
   }
 
-  async function handleSubmit() {
-    if (!title.trim() || !body.trim()) return
-    setSaving(true)
-    setError(null)
+  async function onValid(values: AnnouncementFormValues) {
+    setServerError(null)
     setUploadStatus(null)
 
     const uploadedPaths: string[] = []
-
     async function cleanup() {
       if (uploadedPaths.length === 0) return
       const supabase = createClient()
@@ -314,19 +329,11 @@ function AnnouncementForm({
     try {
       const staged = mediaFiles.filter((f): f is MediaFile & { file: File } => !!f.file)
       const existing = mediaFiles.filter(f => !f.file)
-
-      const resolved: { url: string; mediaType: 'image' | 'video' }[] = existing.map(f => ({
-        url: f.previewUrl,
-        mediaType: f.mediaType,
-      }))
+      const resolved: { url: string; mediaType: 'image' | 'video' }[] = existing.map(f => ({ url: f.previewUrl, mediaType: f.mediaType }))
 
       let i = 0
       for (const f of staged) {
-        setUploadStatus(
-          staged.length > 1
-            ? `Uploading ${f.mediaType} (${++i}/${staged.length})…`
-            : `Uploading ${f.mediaType}…`
-        )
+        setUploadStatus(staged.length > 1 ? `Uploading ${f.mediaType} (${++i}/${staged.length})…` : `Uploading ${f.mediaType}…`)
         const { url, path } = await uploadMedia(f.file, 'announcements')
         uploadedPaths.push(path)
         URL.revokeObjectURL(f.previewUrl)
@@ -334,98 +341,106 @@ function AnnouncementForm({
       }
 
       setUploadStatus(isEditing ? 'Saving…' : 'Publishing…')
-      const finalImageUrl = resolved.find(m => m.mediaType === 'image')?.url ?? null
-      const finalVideoUrl = resolved.find(m => m.mediaType === 'video')?.url ?? null
       const err = await onSubmit({
-        type, title, body,
-        image_url: finalImageUrl,
-        video_url: finalVideoUrl,
+        type: values.type,
+        title: values.title.trim(),
+        body: values.body.trim(),
+        image_url: resolved.find(m => m.mediaType === 'image')?.url ?? null,
+        video_url: resolved.find(m => m.mediaType === 'video')?.url ?? null,
         media_urls: resolved.map(m => m.url),
       })
-      if (err) {
-        await cleanup()
-        setError(err)
-      }
+      if (err) { await cleanup(); setServerError(err) }
     } catch (e) {
       await cleanup()
-      setError(e instanceof Error ? e.message : 'Unexpected error. Please try again.')
+      setServerError(e instanceof Error ? e.message : 'Unexpected error. Please try again.')
     } finally {
-      setSaving(false)
       setUploadStatus(null)
     }
   }
 
+  const inputCls = (hasError: boolean) =>
+    `w-full px-3 py-2 text-sm border rounded-lg outline-none transition-colors ${hasError ? 'border-red-300 focus:border-red-400 bg-red-50/30' : 'border-gray-200 focus:border-green-500'}`
+
   return (
     <AdminCard title={isEditing ? 'Edit announcement' : 'New community broadcast'}>
-      <div className="space-y-4">
-        <div>
-          <label htmlFor="broadcast-type" className="text-xs text-gray-400 mb-1 block">
-            Announcement type
-          </label>
-          <select
-            id="broadcast-type"
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
-            value={type}
-            onChange={e => setType(e.target.value)}
-          >
-            {TYPE_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
-        </div>
-        <div>
-          <label htmlFor="broadcast-title" className="text-xs text-gray-400 mb-1 block">Title</label>
-          <input
-            id="broadcast-title"
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500"
-            placeholder="Announcement headline…"
-            value={title}
-            onChange={e => setTitle(e.target.value)}
+      <form onSubmit={rhfSubmit(onValid)} noValidate>
+        <div className="space-y-4">
+          <FormField label="Announcement type" htmlFor="broadcast-type" required>
+            <select
+              id="broadcast-type"
+              className={inputCls(false)}
+              {...register('type', { required: true })}
+            >
+              {TYPE_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </FormField>
+
+          <FormField label="Title" htmlFor="broadcast-title" required error={errors.title?.message}>
+            <input
+              id="broadcast-title"
+              placeholder="Announcement headline…"
+              className={inputCls(!!errors.title)}
+              {...register('title', {
+                required: 'Title is required',
+                minLength: { value: 3, message: 'At least 3 characters' },
+                maxLength: { value: 120, message: 'Max 120 characters' },
+              })}
+            />
+          </FormField>
+
+          <FormField label="Body" htmlFor="broadcast-body" required error={errors.body?.message}>
+            <textarea
+              id="broadcast-body"
+              rows={4}
+              placeholder="Write your message to the community…"
+              className={`${inputCls(!!errors.body)} resize-none`}
+              {...register('body', {
+                required: 'Body is required',
+                minLength: { value: 10, message: 'At least 10 characters' },
+                maxLength: { value: 3000, message: 'Max 3000 characters' },
+              })}
+            />
+          </FormField>
+
+          <MultiMediaUpload
+            label="Media (optional)"
+            value={mediaFiles}
+            onChange={setMediaFiles}
+            onRemoveExisting={handleRemoveExisting}
+            maxFiles={5}
+            disabled={saving}
           />
-        </div>
-        <div>
-          <label htmlFor="broadcast-body" className="text-xs text-gray-400 mb-1 block">Body</label>
-          <textarea
-            id="broadcast-body"
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-green-500 resize-none"
-            rows={4}
-            placeholder="Write your message to the community…"
-            value={body}
-            onChange={e => setBody(e.target.value)}
-          />
-        </div>
-        <MultiMediaUpload
-          label="Media (optional)"
-          value={mediaFiles}
-          onChange={setMediaFiles}
-          onRemoveExisting={handleRemoveExisting}
-          maxFiles={5}
-          disabled={saving}
-        />
-        {!isEditing && (
-          <p className="text-xs text-gray-400">
-            This will be published immediately and visible to all Aviara members.
-          </p>
-        )}
-        {saving && uploadStatus && (
-          <div className="space-y-1.5">
-            <div className="h-1 w-full bg-gray-100 rounded-full overflow-hidden">
-              <div className="h-full bg-green-500 rounded-full animate-pulse w-full" />
+
+          {!isEditing && (
+            <p className="text-xs text-gray-400">
+              This will be published immediately and visible to all Aviara members.
+            </p>
+          )}
+
+          {saving && uploadStatus && (
+            <div className="space-y-1.5">
+              <div className="h-1 w-full bg-gray-100 rounded-full overflow-hidden">
+                <div className="h-full bg-green-500 rounded-full animate-pulse w-full" />
+              </div>
+              <p className="text-xs text-gray-400">{uploadStatus}</p>
             </div>
-            <p className="text-xs text-gray-400">{uploadStatus}</p>
+          )}
+
+          {serverError && (
+            <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{serverError}</p>
+          )}
+
+          <div className="flex gap-3 justify-end">
+            <AdminButton label="Cancel" onClick={handleCancel} variant="ghost" disabled={saving} />
+            <AdminButton
+              label={saving ? (uploadStatus ?? '…') : isEditing ? 'Save changes' : 'Publish broadcast'}
+              type="submit"
+              variant="gold"
+              disabled={saving}
+            />
           </div>
-        )}
-        {error && (
-          <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</p>
-        )}
-        <div className="flex gap-3 justify-end">
-          <AdminButton label="Cancel" onClick={handleCancel} variant="ghost" disabled={saving} />
-          <AdminButton
-            label={saving ? (uploadStatus ?? '…') : isEditing ? 'Save changes' : 'Publish broadcast'}
-            onClick={handleSubmit}
-            variant="gold"
-            disabled={!title.trim() || !body.trim() || saving}
-          />
         </div>
-      </div>
+      </form>
     </AdminCard>
   )
 }

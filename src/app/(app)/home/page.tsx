@@ -8,7 +8,7 @@ import { formatBookingDate, formatTeeTime, truncate, capitalizeName, formatRelat
 import Avatar from "@/components/ui/Avatar";
 import AppShell from '@/components/layout/AppShell';
 import InstallBanner from '@/components/ui/InstallBanner';
-import { CardSkeleton, MemberRowSkeleton, PromoCardSkeleton } from "@/components/ui/Loading";
+import { CardSkeleton, MemberRowSkeleton } from "@/components/ui/Loading";
 import type {
   Booking,
   Announcement,
@@ -215,9 +215,14 @@ export default function HomePage() {
               </Link>
             </div>
             {loading ? (
-              <PromoCardSkeleton />
+              <div className="space-y-2.5">
+                <CardSkeleton lines={2} />
+                <CardSkeleton lines={2} />
+              </div>
             ) : (
-              promotions.map((p) => <PromoCard key={p.id} promo={p} />)
+              <div className="space-y-2.5">
+                {promotions.map((p) => <PromoCard key={p.id} promo={p} />)}
+              </div>
             )}
           </section>
         )}
@@ -311,52 +316,57 @@ function AnnouncementCard({ announcement }: { announcement: Announcement }) {
 }
 
 function PromoCard({ promo }: { promo: Promotion }) {
+  const mediaUrl = promo.media_urls?.[0] ?? promo.image_url ?? promo.video_url ?? null
+  const mediaCount = promo.media_urls?.length ?? ((promo.image_url ? 1 : 0) + (promo.video_url ? 1 : 0))
+  const isVideo = mediaUrl
+    ? ['mp4', 'webm', 'mov', 'quicktime'].includes(mediaUrl.split('?')[0]?.split('.').pop()?.toLowerCase() ?? '')
+    : false
+
   return (
-    <div className="promo-card">
+    <Link href={`/more/promotions/${promo.id}`} className="card flex flex-col overflow-hidden">
       <div className="promo-accent" />
-      {promo.image_url && (
-        <img
-          src={promo.image_url}
-          alt=""
-          className="w-full max-h-48 object-cover rounded-t-2xl"
-        />
-      )}
-      {!promo.image_url && promo.video_url && (
-        <video
-          src={promo.video_url}
-          controls
-          playsInline
-          className="w-full max-h-48 bg-black rounded-t-2xl"
-        />
-      )}
-      <div className="p-5">
-        <p className="text-[10px] uppercase tracking-[0.14em] mb-2" style={{ color: 'var(--color-gold)' }}>
-          {promo.badge_label}
-        </p>
-        <p className="font-serif text-lg font-medium leading-snug" style={{ color: 'white' }}>
-          {promo.title}
-        </p>
-        <p className="text-xs mt-2.5 leading-relaxed" style={{ color: 'rgba(255,255,255,0.45)' }}>
-          {truncate(promo.description, 120)}
-        </p>
-        {promo.expires_at && (
-          <p className="text-[10px] mt-2" style={{ color: 'rgba(255,255,255,0.25)' }}>
-            Expires {formatBookingDate(promo.expires_at)}
+      <div className="p-4 flex gap-3 items-start">
+        <div
+          className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0 mt-0.5"
+          style={{ background: 'rgba(133,187,101,0.12)' }}
+        >
+          🎁
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] uppercase tracking-[0.12em] mb-0.5" style={{ color: 'var(--color-gold)' }}>
+            {promo.badge_label}
           </p>
-        )}
-        {promo.cta_url && (
-          <a
-            href={promo.cta_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn-gold btn-sm mt-4 inline-flex"
-          >
-            {promo.cta_label}
-          </a>
+          <p className="text-sm font-medium leading-snug line-clamp-2" style={{ color: 'var(--color-green-900)' }}>
+            {promo.title}
+          </p>
+          <p className="text-xs mt-1 leading-relaxed line-clamp-2" style={{ color: 'rgba(0,38,105,0.52)' }}>
+            {promo.description}
+          </p>
+          {promo.expires_at && (
+            <p className="text-[10px] mt-1.5" style={{ color: 'rgba(0,38,105,0.3)' }}>
+              Expires {formatBookingDate(promo.expires_at)}
+            </p>
+          )}
+        </div>
+        {mediaUrl && (
+          <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 bg-black">
+            {isVideo ? (
+              <video src={mediaUrl} className="w-full h-full object-cover" muted playsInline />
+            ) : (
+              <img src={mediaUrl} alt="" className="w-full h-full object-cover" />
+            )}
+            {mediaCount > 1 && (
+              <div className="absolute bottom-1 right-1 flex items-center gap-0.5 text-[9px] font-semibold text-white px-1.5 py-0.5 rounded-full leading-none"
+                style={{ background: 'rgba(0,0,0,0.65)' }}>
+                <StackIcon />
+                {mediaCount}
+              </div>
+            )}
+          </div>
         )}
       </div>
-    </div>
-  );
+    </Link>
+  )
 }
 
 function GolfIcon() {

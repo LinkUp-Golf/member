@@ -179,12 +179,14 @@ export function AdminButton({
   variant = 'primary',
   size = 'md',
   disabled = false,
+  type = 'button',
 }: {
   label: string
   onClick?: () => void
   variant?: 'primary' | 'danger' | 'ghost' | 'gold'
   size?: 'sm' | 'md'
   disabled?: boolean
+  type?: 'button' | 'submit'
 }) {
   const variants = {
     primary: 'bg-green-900 text-white hover:bg-green-800',
@@ -198,6 +200,7 @@ export function AdminButton({
   }
   return (
     <button
+      type={type}
       onClick={onClick}
       disabled={disabled}
       style={variant === 'gold' ? { background: '#85bb65' } : undefined}

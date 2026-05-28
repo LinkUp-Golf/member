@@ -268,6 +268,7 @@ export interface Promotion {
   sort_order: number
   image_url: string | null
   video_url: string | null
+  media_urls: string[]
   created_at: string
 }
 

@@ -25,6 +25,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   initialized: false,
 
   initialize: async () => {
+    // Guard against concurrent calls (React Strict Mode double-invoke, etc.)
+    if (get().initialized) return
+
     const supabase = createClient()
 
     // Wire the global API interceptor: when any API call returns 403
@@ -37,25 +40,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       },
     })
 
-    // Get initial session
-    const { data: { user } } = await supabase.auth.getUser()
+    try {
+      const { data: { user }, error } = await supabase.auth.getUser()
 
-    if (user) {
-      const member = await fetchMemberWithProfile(user.id)
-      if (member) {
+      if (error || !user) {
+        set({ user: null, loading: false, initialized: true })
+      } else {
+        const member = await fetchMemberWithProfile(user.id)
         set({
-          user: buildSessionUser(user.email!, member),
+          user: member ? buildSessionUser(user.email!, member) : null,
           loading: false,
           initialized: true,
         })
-      } else {
-        set({ user: null, loading: false, initialized: true })
       }
-    } else {
+    } catch {
+      // Network error or unexpected throw — unblock the UI so pages can redirect
       set({ user: null, loading: false, initialized: true })
     }
 
-    // Listen for auth changes
+    // Listen for auth changes (registered after initial state is resolved)
     supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
         const member = await fetchMemberWithProfile(session.user.id)
@@ -90,20 +93,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 // ---- Helpers ------------------------------------------------
 
 async function fetchMemberWithProfile(userId: string): Promise<MemberWithProfile | null> {
-  const supabase = createClient()
-
-  const { data, error } = await supabase
-    .from('members')
-    .select(`
-      *,
-      profile:member_profiles(*),
-      home_course:courses(*)
-    `)
-    .eq('id', userId)
-    .single()
-
-  if (error || !data) return null
-  return data as MemberWithProfile
+  try {
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from('members')
+      .select(`
+        *,
+        profile:member_profiles(*),
+        home_course:courses(*)
+      `)
+      .eq('id', userId)
+      .single()
+    if (error || !data) return null
+    return data as MemberWithProfile
+  } catch {
+    return null
+  }
 }
 
 function buildSessionUser(email: string, member: MemberWithProfile): SessionUser {

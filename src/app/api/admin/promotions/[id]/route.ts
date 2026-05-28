@@ -16,7 +16,7 @@ export const PATCH = withAuth(
 
     const stringFields = ['title', 'description', 'partner_name', 'badge_label', 'cta_label']
     const nullableFields = ['cta_url', 'expires_at', 'image_url', 'video_url', 'course_id']
-    const rawFields = ['active', 'sort_order']
+    const rawFields = ['active', 'sort_order', 'media_urls']
 
     for (const f of stringFields) {
       if (f in body) update[f] = typeof body[f] === 'string' ? (body[f] as string).trim() : body[f]

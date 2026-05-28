@@ -20,6 +20,7 @@ export const POST = withAuth(
       sort_order?: number
       image_url?: string | null
       video_url?: string | null
+      media_urls?: string[]
     }
 
     if (!body.title?.trim() || !body.description?.trim() || !body.partner_name?.trim() || !body.badge_label?.trim()) {
@@ -43,6 +44,7 @@ export const POST = withAuth(
       sort_order: body.sort_order ?? 0,
       image_url: body.image_url ?? null,
       video_url: body.video_url ?? null,
+      media_urls: body.media_urls ?? [],
     }).select().single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
