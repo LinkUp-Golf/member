@@ -1,335 +1,198 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react'
+import { useParams } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
-import { createClient } from '@/lib/supabase'
-import { apiClient } from '@/lib/api-client'
-import Avatar from '@/components/ui/Avatar'
+import { capitalizeName } from '@/lib/utils'
 import AppShell from '@/components/layout/AppShell'
+import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
-import { formatMessageTime, capitalizeName } from '@/lib/utils'
-import type { Message } from '@/types'
-
-interface MessageWithSender extends Message {
-  sender: {
-    id: string
-    first_name: string
-    last_name: string
-    profile: { avatar_url: string | null } | null
-  }
-}
-
-interface Participant {
-  id: string
-  first_name: string
-  last_name: string
-  profile: { avatar_url: string | null } | null
-}
+import { MessageList } from '@/components/messages/MessageList'
+import { MessageInput } from '@/components/messages/MessageInput'
+import { PresenceIndicator } from '@/components/messages/PresenceIndicator'
+import { useMessages } from '@/hooks/useMessages'
+import { useConversation } from '@/hooks/useConversation'
+import { usePresence } from '@/hooks/usePresence'
+import { useTypingIndicator } from '@/hooks/useTypingIndicator'
 
 export default function ChatPage() {
   const { id } = useParams<{ id: string }>()
-  const router = useRouter()
   const { user } = useAuthStore()
 
-  const [messages, setMessages] = useState<MessageWithSender[]>([])
-  const [participants, setParticipants] = useState<Participant[]>([])
-  const [convName, setConvName] = useState('')
-  const [convType, setConvType] = useState<'direct' | 'group'>('direct')
-  const [body, setBody] = useState('')
-  const [sending, setSending] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const { conversation, loading: convLoading, markAsRead } = useConversation(id, user?.id ?? null)
 
-  const markAsRead = useCallback(async () => {
-    await apiClient.patch(`/api/conversations/${id}/read`, {})
-  }, [id])
+  const { messages, loading: msgsLoading, loadingMore, hasMore, loadMore, sendMessage } =
+    useMessages(id, user?.id ?? null)
 
-  const loadConversation = useCallback(async () => {
-    const response = await apiClient.get<{ messages: MessageWithSender[]; participants: Participant[]; type: 'direct' | 'group'; name: string | null }>(`/api/conversations/${id}/messages`)
+  const { isOnline } = usePresence(id, user?.id ?? null)
 
-    if (response.error || !response.data) { router.push('/messages'); return }
+  const currentUserName = user
+    ? capitalizeName(user.member.first_name)
+    : ''
 
-    const { messages: msgs, participants: parts, type, name } = response.data
+  const { typingUsers, sendTyping, stopTyping } = useTypingIndicator(
+    id,
+    user?.id ?? null,
+    currentUserName
+  )
 
-    setConvType(type)
-    setParticipants(parts)
-
-    if (type === 'group' && name) {
-      setConvName(name)
-    } else {
-      const others = parts.filter(p => p.id !== user?.id)
-      setConvName(others.map(p => `${capitalizeName(p.first_name)} ${capitalizeName(p.last_name)}`).join(', '))
-    }
-
-    setMessages(msgs)
-    setLoading(false)
-  }, [id, user, router])
+  // Measure the actual bottom-nav height for pixel-perfect input placement.
+  const [navHeight, setNavHeight] = useState(0)
+  const inputBarRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!user || !id) return
-    loadConversation()
-    markAsRead()
+    const measure = () => {
+      const nav = document.querySelector('.bottom-nav')
+      if (nav) setNavHeight(nav.getBoundingClientRect().height)
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [])
 
-    // Subscribe to real-time messages
-    const supabase = createClient()
-    const channel = supabase
-      .channel(`chat-${id}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `conversation_id=eq.${id}`,
-      }, async (payload) => {
-        // Fetch the new message with sender info
-        const { data } = await supabase
-          .from('messages')
-          .select('*, sender:members(id, first_name, last_name, profile:member_profiles(avatar_url))')
-          .eq('id', payload.new.id)
-          .single()
-
-        if (data) {
-          setMessages(prev => [...prev, data as MessageWithSender])
-          markAsRead()
-        }
-      })
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [user, id, loadConversation, markAsRead])
-
-  // Scroll to bottom when messages change
+  // Mark conversation as read each time we open it or new messages arrive
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    if (user && messages.length > 0) markAsRead()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length, user?.id])
 
-  async function sendMessage() {
-    if (!body.trim() || !user || sending) return
-    const text = body.trim()
-    setBody('')
-    setSending(true)
+  // ---- Derived display values --------------------------------
+  const otherParticipants =
+    conversation?.participants.filter(p => p.member?.id !== user?.id) ?? []
 
-    const response = await apiClient.post(`/api/conversations/${id}/messages`, { body: text })
+  const headerParticipant =
+    conversation?.type === 'direct' ? otherParticipants[0] ?? null : null
 
-    if (response.error) {
-      console.error('Send error:', response.error)
-      setBody(text) // restore on error
-    }
-    setSending(false)
-    inputRef.current?.focus()
+  const convName =
+    conversation?.type === 'group' && conversation.name
+      ? conversation.name
+      : otherParticipants.map(p => capitalizeName(p.member?.first_name ?? '')).join(', ') || '…'
+
+  const isOtherOnline = headerParticipant ? isOnline(headerParticipant.member?.id ?? '') : false
+
+  // Map other participant IDs → last_read_at for the "Seen" indicator
+  const otherReadAt = Object.fromEntries(
+    otherParticipants.filter(p => p.member?.id).map(p => [p.member.id, p.last_read_at])
+  )
+
+  const typingNames = typingUsers.map(u => u.name)
+
+  // ---- Send handler -----------------------------------------
+  async function handleSend(body: string) {
+    return sendMessage(body, {
+      firstName: user?.member.first_name ?? '',
+      lastName: user?.member.last_name ?? '',
+      avatarUrl: user?.member.profile?.avatar_url ?? null,
+    })
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      sendMessage()
-    }
-  }
-
-  const otherParticipants = participants.filter(p => p.id !== user?.id)
-  const headerParticipant = convType === 'direct' ? otherParticipants[0] : null
+  const isLoading = convLoading || msgsLoading
 
   return (
     <AppShell
       header={
         <div className="top-bar flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            {headerParticipant ? (
-              <Avatar
-                firstName={headerParticipant.first_name}
-                lastName={headerParticipant.last_name}
-                avatarUrl={headerParticipant.profile?.avatar_url}
-                size="sm"
-              />
-            ) : (
-              <div className="w-9 h-9 rounded-full bg-green-700 flex items-center justify-center text-gold text-sm">#</div>
-            )}
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-white truncate">{convName}</p>
-              {convType === 'group' && (
-                <p className="text-xs text-white/40">{participants.length} members</p>
+            {/* Avatar with presence dot */}
+            <div className="relative flex-shrink-0">
+              {headerParticipant?.member ? (
+                <Avatar
+                  firstName={headerParticipant.member.first_name}
+                  lastName={headerParticipant.member.last_name}
+                  avatarUrl={headerParticipant.member.profile?.avatar_url}
+                  size="sm"
+                />
+              ) : (
+                <div className="w-9 h-9 rounded-full bg-green-700 flex items-center justify-center text-gold text-sm font-serif">
+                  #
+                </div>
               )}
-              {convType === 'direct' && headerParticipant && (
-                <p className="text-xs text-white/40">Active member</p>
+              {conversation?.type === 'direct' && (
+                <div className="absolute -bottom-0.5 -right-0.5">
+                  <PresenceIndicator online={isOtherOnline} />
+                </div>
               )}
             </div>
+
+            {/* Name + status */}
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-white truncate">{convName}</p>
+              <p className="text-xs text-white/40">
+                {conversation?.type === 'direct'
+                  ? isOtherOnline ? 'Online' : 'Offline'
+                  : `${conversation?.participants.length ?? 0} members`}
+              </p>
+            </div>
           </div>
-          <button
-            onClick={() => router.push('/messages')}
-            className="flex-shrink-0 text-gold"
-          >
-            <BackArrow />
-          </button>
+
         </div>
       }
     >
-      <div className="flex flex-col h-full">
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={{ background: '#F4F1E8' }}>
-        {loading ? (
+      {/* Messages — padding-bottom accounts for nav + input bar so the last
+          message is never hidden behind either fixed element. */}
+      <div
+        className="px-4 pt-4 min-h-full"
+        style={{ background: '#F4F1E8', paddingBottom: navHeight + 80 }}
+      >
+        {isLoading ? (
           <div className="flex justify-center pt-8">
             <Spinner className="text-green-700" />
           </div>
         ) : messages.length === 0 ? (
-          <div className="text-center py-8">
-            <p className="text-sm text-green-900/40 italic">
-              Start the conversation below.
-            </p>
-          </div>
+          <EmptyState name={convName} />
         ) : (
           <MessageList
             messages={messages}
             currentUserId={user?.id ?? ''}
+            isGroup={conversation?.type === 'group'}
+            otherParticipantsReadAt={otherReadAt}
+            typingNames={typingNames}
+            loadingMore={loadingMore}
+            hasMore={hasMore}
+            onLoadMore={loadMore}
           />
         )}
-        <div ref={bottomRef} />
       </div>
 
-      {/* Input bar */}
-      <div className="flex items-center gap-2 px-4 py-3 bg-white border-t border-green-900/08">
-        <input
-          ref={inputRef}
-          type="text"
-          placeholder={`Message ${convType === 'group' ? 'group' : capitalizeName(headerParticipant?.first_name ?? '')}…`}
-          value={body}
-          onChange={e => setBody(e.target.value)}
-          onKeyDown={handleKeyDown}
-          className="flex-1 bg-green-50 border border-green-900/10 rounded-full px-4 py-2 text-sm text-green-900 placeholder-green-900/35 outline-none"
-          autoComplete="off"
+      {/* Input bar — fixed above the bottom nav on mobile, flush to the
+          bottom on tablet+ (sidebar handles the left offset).
+          z-30 keeps it above the sticky top-bar (z-20).
+          bottom is set via inline style using the measured navHeight so there
+          is no gap between the input and the nav on any device. */}
+      <div
+        ref={inputBarRef}
+        className="fixed left-0 right-0 z-30 md:left-[var(--sidebar-width)] lg:left-[var(--sidebar-width-lg)]"
+        style={{ bottom: navHeight }}
+      >
+        <MessageInput
+          placeholder={
+            conversation?.type === 'group'
+              ? 'Message group…'
+              : `Message ${capitalizeName(headerParticipant?.member?.first_name ?? '')}…`
+          }
+          onSend={handleSend}
+          onTypingStart={sendTyping}
+          onTypingStop={stopTyping}
         />
-        <button
-          onClick={sendMessage}
-          disabled={!body.trim() || sending}
-          className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-40"
-          style={{ background: '#002669' }}
-          aria-label="Send message"
-        >
-          {sending ? (
-            <Spinner className="text-gold w-4 h-4" />
-          ) : (
-            <SendIcon />
-          )}
-        </button>
-      </div>
       </div>
     </AppShell>
   )
 }
 
-// ---- Message list with date grouping ------------------------
+// ---- Sub-components -----------------------------------------
 
-function MessageList({ messages, currentUserId }: { messages: MessageWithSender[]; currentUserId: string }) {
-  const grouped = groupByDate(messages)
-
+function EmptyState({ name }: { name: string }) {
   return (
-    <>
-      {grouped.map(({ date, messages: dayMsgs }) => (
-        <div key={date}>
-          <div className="divider-label my-2">{date}</div>
-          {dayMsgs.map((msg, i) => {
-            const isMe = msg.sender_id === currentUserId
-            const showAvatar = !isMe && (i === 0 || dayMsgs[i - 1]?.sender_id !== msg.sender_id)
-            return (
-              <MessageBubble
-                key={msg.id}
-                message={msg}
-                isMe={isMe}
-                showAvatar={showAvatar}
-              />
-            )
-          })}
-        </div>
-      ))}
-    </>
-  )
-}
-
-function MessageBubble({
-  message: msg,
-  isMe,
-  showAvatar,
-}: {
-  message: MessageWithSender
-  isMe: boolean
-  showAvatar: boolean
-}) {
-  return (
-    <div className={`flex items-end gap-2 mb-1 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-      {/* Avatar placeholder for alignment */}
-      {!isMe && (
-        <div className="w-7 flex-shrink-0">
-          {showAvatar && (
-            <Avatar
-              firstName={msg.sender.first_name}
-              lastName={msg.sender.last_name}
-              avatarUrl={msg.sender.profile?.avatar_url}
-              size="sm"
-              className="w-7 h-7 text-xs"
-            />
-          )}
-        </div>
-      )}
-
-      <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[75%]`}>
-        {showAvatar && !isMe && (
-          <p className="text-xs text-green-900/40 mb-1 ml-1">
-            {capitalizeName(msg.sender.first_name)}
-          </p>
-        )}
-        <div className={`bubble ${isMe ? 'bubble-out' : 'bubble-in'}`}>
-          {msg.body}
-        </div>
-        <p className={`text-xs text-green-900/30 mt-1 ${isMe ? 'mr-1' : 'ml-1'}`}>
-          {formatMessageTime(msg.created_at)}
-        </p>
+    <div className="flex flex-col items-center justify-center h-full text-center py-16">
+      <div
+        className="w-14 h-14 rounded-full flex items-center justify-center mb-4 text-2xl"
+        style={{ background: 'rgba(0,38,105,0.06)' }}
+      >
+        💬
       </div>
+      <p className="text-sm font-medium text-green-900/60 mb-1">Start the conversation</p>
+      <p className="text-xs text-green-900/35 italic">Say hello to {name}</p>
     </div>
   )
 }
 
-// ---- Helpers ------------------------------------------------
-
-function groupByDate(messages: MessageWithSender[]) {
-  const groups: { date: string; messages: MessageWithSender[] }[] = []
-  let currentDate = ''
-
-  for (const msg of messages) {
-    const date = formatDateLabel(msg.created_at)
-    if (date !== currentDate) {
-      currentDate = date
-      groups.push({ date, messages: [] })
-    }
-    groups[groups.length - 1]?.messages.push(msg)
-  }
-
-  return groups
-}
-
-function formatDateLabel(dateString: string): string {
-  const date = new Date(dateString)
-  const today = new Date()
-  const yesterday = new Date(today)
-  yesterday.setDate(today.getDate() - 1)
-
-  if (date.toDateString() === today.toDateString()) return 'Today'
-  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday'
-  return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
-}
-
-// ---- Icons --------------------------------------------------
-function BackArrow() {
-  return (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-    </svg>
-  )
-}
-
-function SendIcon() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: '#85bb65' }}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-    </svg>
-  )
-}

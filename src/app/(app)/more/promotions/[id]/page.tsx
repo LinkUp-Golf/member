@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useState, useEffect, useCallback } from 'react'
+import { useParams } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
 import AppShell from '@/components/layout/AppShell'
@@ -10,7 +10,6 @@ import type { Promotion } from '@/types'
 
 export default function PromotionDetailPage() {
   const { user } = useAuthStore()
-  const router = useRouter()
   const params = useParams()
   const id = params['id'] as string
 
@@ -18,17 +17,17 @@ export default function PromotionDetailPage() {
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
 
-  useEffect(() => {
-    if (user && id) load()
-  }, [user, id])
-
-  async function load() {
+  const load = useCallback(async () => {
     const res = await apiClient.get<Promotion[]>('/api/promotions')
     const found = res.data?.find(p => p.id === id) ?? null
     if (!found) setNotFound(true)
     else setPromo(found)
     setLoading(false)
-  }
+  }, [id])
+
+  useEffect(() => {
+    if (user && id) load()
+  }, [user, id, load])
 
   return (
     <AppShell
@@ -37,9 +36,6 @@ export default function PromotionDetailPage() {
           <div>
             <div className="logo-text">Member Offer</div>
           </div>
-          <button onClick={() => router.back()} className="text-gold text-sm">
-            Back
-          </button>
         </div>
       }
     >

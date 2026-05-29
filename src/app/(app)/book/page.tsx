@@ -111,7 +111,6 @@ export default function BookPage() {
         booking={booking}
         onToggleGuest={() => setIncludeGuest(v => !v)}
         onGuestName={setGuestName}
-        onBack={() => setStep('select')}
         onConfirm={confirmBooking}
       />
     )
@@ -306,7 +305,7 @@ function SlotRow({ slot, selected, onSelect }: { slot: Slot; selected: boolean; 
 
 function ConfirmScreen({
   slot, date, includeGuest, guestName, error, booking,
-  onToggleGuest, onGuestName, onBack, onConfirm,
+  onToggleGuest, onGuestName, onConfirm,
 }: {
   slot: Slot
   date: Date
@@ -316,7 +315,6 @@ function ConfirmScreen({
   booking: boolean
   onToggleGuest: () => void
   onGuestName: (v: string) => void
-  onBack: () => void
   onConfirm: () => void
 }) {
   const timeStr = slot.startTime.split('T')[1]?.slice(0, 8) ?? ''
@@ -327,9 +325,6 @@ function ConfirmScreen({
         <h1 className="text-sm font-medium" style={{ color: 'white' }}>
           Confirm Booking
         </h1>
-        <button onClick={onBack} style={{ color: 'var(--color-gold)' }}>
-          <BackArrow />
-        </button>
       </div>
 
       <div className="px-5 py-6 space-y-4">
@@ -550,10 +545,3 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void 
   )
 }
 
-function BackArrow() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-    </svg>
-  )
-}

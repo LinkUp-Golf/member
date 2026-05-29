@@ -4,7 +4,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
-import { createRouteHandlerClient } from '@/lib/supabase-server'
+import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import type { AuthContext } from '@/lib/auth/types'
 
 // GET /api/members
@@ -18,6 +18,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   const excludeSelf = searchParams.get('exclude_self') === 'true'
   const orderBy = searchParams.get('order') === 'created_at' ? 'created_at' : 'first_name'
 
+  // Use the session client only to look up the caller's own row (RLS: id = auth.uid())
   const { data: member } = await supabase
     .from('members').select('home_course_id').eq('id', ctx.userId).single()
 
@@ -25,7 +26,12 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     return NextResponse.json({ error: 'Member not found' }, { status: 404 })
   }
 
-  let query = supabase
+  // Use the admin client for the list query so all active members of the
+  // course are returned regardless of whether course_memberships rows exist.
+  // Authentication is already enforced by withAuth above.
+  const admin = createAdminClient()
+
+  let query = admin
     .from('members')
     .select('*, profile:member_profiles(*), home_course:courses(*)')
     .eq('home_course_id', member.home_course_id)

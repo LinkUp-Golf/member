@@ -73,7 +73,6 @@
     @apply flex-1 overflow-y-auto overflow-x-hidden;
     scrollbar-width: none;
     -ms-overflow-style: none;
-    padding-bottom: calc(var(--nav-height) + var(--safe-bottom) + 0.5rem);
   }
 
   @media (min-width: 768px) {

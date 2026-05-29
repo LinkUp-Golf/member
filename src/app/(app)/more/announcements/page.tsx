@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
@@ -30,7 +29,6 @@ const TYPE_LABELS: Record<string, string> = {
 
 export default function AnnouncementsPage() {
   const { user } = useAuthStore()
-  const router = useRouter()
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -52,9 +50,6 @@ export default function AnnouncementsPage() {
             <div className="logo-text">Announcements</div>
             <div className="logo-subtitle">Community updates</div>
           </div>
-          <button onClick={() => router.push('/more')} className="text-gold">
-            <BackArrow />
-          </button>
         </div>
       }
     >
@@ -134,10 +129,3 @@ function StackIcon() {
   )
 }
 
-function BackArrow() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-    </svg>
-  )
-}

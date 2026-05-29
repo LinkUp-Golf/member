@@ -40,8 +40,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       },
     })
 
+    // Race the auth call against a 10-second timeout so a slow/unavailable
+    // Supabase instance never leaves the app permanently stuck on the loader.
+    const authTimeout = new Promise<null>(resolve => setTimeout(() => resolve(null), 10_000))
+
     try {
-      const { data: { user }, error } = await supabase.auth.getUser()
+      const result = await Promise.race([
+        supabase.auth.getUser(),
+        authTimeout.then(() => null),
+      ])
+
+      const user = result && 'data' in result ? result.data.user : null
+      const error = result && 'error' in result ? result.error : null
 
       if (error || !user) {
         set({ user: null, loading: false, initialized: true })

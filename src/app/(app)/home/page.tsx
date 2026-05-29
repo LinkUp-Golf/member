@@ -17,7 +17,7 @@ import type {
 } from "@/types";
 
 export default function HomePage() {
-  const { user } = useAuthStore();
+  const { user, initialized } = useAuthStore();
   const [nextBooking, setNextBooking] = useState<Booking | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
@@ -32,9 +32,12 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    // Auth not ready yet — wait
+    if (!initialized) return;
+    // Auth done but no member session — clear loading so the page doesn't hang
+    if (!user) { setLoading(false); return; }
     loadHomeData();
-  }, [user]);
+  }, [user, initialized]);
 
   async function loadHomeData() {
     const [bookingRes, announcementRes, promoRes, memberRes] =

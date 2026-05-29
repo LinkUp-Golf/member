@@ -36,9 +36,19 @@ export default function MemberProfilePage() {
     if (id) loadMember()
   }, [id, loadMember])
 
+  const [startingConv, setStartingConv] = useState(false)
+
   async function startConversation() {
-    if (!user || !member) return
-    router.push(`/messages/new?with=${member.id}`)
+    if (!user || !member || startingConv) return
+    setStartingConv(true)
+
+    const res = await apiClient.post<{ id: string }>('/api/conversations', {
+      type: 'direct',
+      participant_ids: [member.id],
+    })
+
+    setStartingConv(false)
+    if (res.data?.id) router.push(`/messages/${res.data.id}`)
   }
 
   if (loading) {
@@ -57,11 +67,6 @@ export default function MemberProfilePage() {
     <AppShell
       title={`${capitalizeName(member.first_name)} ${capitalizeName(member.last_name)}`}
       description={p?.role_title ?? 'Member'}
-      end={
-        <button onClick={() => router.back()} className="text-gold">
-          <BackArrow />
-        </button>
-      }
     >
 
       {/* Profile header */}
@@ -102,8 +107,13 @@ export default function MemberProfilePage() {
 
       {/* Action buttons */}
       <div className="px-5 py-4 flex gap-3">
-        <button onClick={startConversation} className="btn btn-primary flex-1 justify-center">
-          <MessageIcon /> Message
+        <button
+          onClick={startConversation}
+          disabled={startingConv}
+          className="btn btn-primary flex-1 justify-center disabled:opacity-60"
+        >
+          {startingConv ? <Spinner className="w-4 h-4 text-gold" /> : <MessageIcon />}
+          Message
         </button>
         <Link
           href={`/book?invite=${member.id}`}
@@ -202,13 +212,6 @@ function GolfStat({ value, label }: { value: string; label: string }) {
 }
 
 // ---- Inline icons -------------------------------------------
-function BackArrow() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-    </svg>
-  )
-}
 function MessageIcon() {
   return (
     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

@@ -173,6 +173,7 @@ export interface Conversation {
   name: string | null
   created_by: string
   created_at: string
+  updated_at: string
 }
 
 export interface ConversationParticipant {
@@ -314,13 +315,27 @@ export interface MemberWithProfile extends Member {
   home_course: Course | null
 }
 
+// Minimal member shape returned by messaging API joins (avatar only from profile)
+export interface MemberSummary {
+  id: string
+  first_name: string
+  last_name: string
+  profile: { avatar_url: string | null } | null
+}
+
 export interface MessageWithSender extends Message {
-  sender: Pick<MemberWithProfile, 'id' | 'first_name' | 'last_name' | 'profile'>
+  sender: MemberSummary
+}
+
+export interface OptimisticMessage extends MessageWithSender {
+  pending?: boolean
+  failed?: boolean
+  tempId?: string
 }
 
 export interface ConversationWithDetails extends Conversation {
   participants: Array<{
-    member: Pick<MemberWithProfile, 'id' | 'first_name' | 'last_name' | 'profile'>
+    member: MemberSummary
     last_read_at: string | null
   }>
   last_message: MessageWithSender | null

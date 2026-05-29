@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
-import { useForm, Controller } from "react-hook-form";
+import { useForm } from "react-hook-form";
 import { createClient } from "@/lib/supabase";
 import {
   AdminPageHeader,
@@ -287,7 +287,7 @@ function AnnouncementForm({
     register,
     handleSubmit: rhfSubmit,
     formState: { errors, isSubmitting },
-    setError: setFieldError,
+    setError: _setFieldError,
   } = useForm<AnnouncementFormValues>({
     defaultValues: {
       type: initial?.type ?? 'admin_broadcast',

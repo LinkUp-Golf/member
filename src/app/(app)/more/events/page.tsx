@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
 import { Spinner, CardSkeleton } from '@/components/ui/Loading'
@@ -13,7 +12,6 @@ type Tab = 'upcoming' | 'submit'
 
 export default function MemberEventsPage() {
   const { user } = useAuthStore()
-  const router = useRouter()
   const [tab, setTab] = useState<Tab>('upcoming')
   const [events, setEvents] = useState<MemberEvent[]>([])
   const [rsvps, setRsvps] = useState<Record<string, string>>({})
@@ -48,9 +46,6 @@ export default function MemberEventsPage() {
             <div className="logo-text">Member Events</div>
             <div className="logo-subtitle">Community calendar</div>
           </div>
-          <button onClick={() => router.push('/more')} className="text-gold">
-            <BackArrow />
-          </button>
         </div>
       }
     >
@@ -266,10 +261,3 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
-function BackArrow() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-    </svg>
-  )
-}

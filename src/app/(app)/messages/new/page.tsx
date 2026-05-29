@@ -81,9 +81,6 @@ export default function NewConversationPage() {
             >
               {creating ? <Spinner className="w-4 h-4 text-gold" /> : 'Start'}
             </button>
-            <button onClick={() => router.push('/messages')} className="text-gold">
-              <BackArrow />
-            </button>
           </div>
         </div>
       }
@@ -188,10 +185,3 @@ export default function NewConversationPage() {
   )
 }
 
-function BackArrow() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-    </svg>
-  )
-}

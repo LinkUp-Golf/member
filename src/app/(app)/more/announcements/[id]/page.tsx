@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useState, useEffect, useCallback } from 'react'
+import { useParams } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
 import AppShell from '@/components/layout/AppShell'
@@ -28,7 +28,6 @@ const TYPE_LABELS: Record<string, string> = {
 
 export default function AnnouncementDetailPage() {
   const { user } = useAuthStore()
-  const router = useRouter()
   const params = useParams()
   const id = params['id'] as string
 
@@ -36,17 +35,17 @@ export default function AnnouncementDetailPage() {
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
 
-  useEffect(() => {
-    if (user && id) load()
-  }, [user, id])
-
-  async function load() {
+  const load = useCallback(async () => {
     const res = await apiClient.get<Announcement[]>('/api/announcements?limit=50')
     const found = res.data?.find(a => a.id === id) ?? null
     if (!found) setNotFound(true)
     else setAnnouncement(found)
     setLoading(false)
-  }
+  }, [id])
+
+  useEffect(() => {
+    if (user && id) load()
+  }, [user, id, load])
 
   return (
     <AppShell
@@ -55,9 +54,6 @@ export default function AnnouncementDetailPage() {
           <div>
             <div className="logo-text">Announcement</div>
           </div>
-          <button onClick={() => router.back()} className="text-gold text-sm">
-            Back
-          </button>
         </div>
       }
     >

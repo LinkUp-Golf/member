@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { apiClient } from '@/lib/api-client'
 import { Spinner } from '@/components/ui/Loading'
@@ -17,7 +16,6 @@ const STATUS_LABELS: Record<string, { label: string; colour: string }> = {
 
 export default function GuestAccessPage() {
   const { user } = useAuthStore()
-  const router = useRouter()
   const [courses, setCourses] = useState<Course[]>([])
   const [requests, setRequests] = useState<GuestAccessRequest[]>([])
   const [loading, setLoading] = useState(true)
@@ -44,9 +42,6 @@ export default function GuestAccessPage() {
             <div className="logo-text">Guest Access</div>
             <div className="logo-subtitle">Visit another community</div>
           </div>
-          <button onClick={() => router.push('/more')} className="text-gold">
-            <BackArrow />
-          </button>
         </div>
       }
     >
@@ -231,10 +226,3 @@ function GuestAccessForm({
   )
 }
 
-function BackArrow() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-    </svg>
-  )
-}

@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { usePushNotifications } from '@/hooks/usePushNotifications'
 import { Spinner } from '@/components/ui/Loading'
@@ -34,7 +33,6 @@ const PREF_LABELS: Record<keyof NotifPrefs, { label: string; desc: string }> = {
 }
 
 export default function SettingsPage() {
-  const router = useRouter()
   const { user, signOut } = useAuthStore()
   const { permission, subscribed, requesting, requestPermission, unsubscribe } = usePushNotifications()
 
@@ -67,9 +65,6 @@ export default function SettingsPage() {
     <div>
       <div className="top-bar flex items-center justify-between">
         <div className="logo-text">Settings</div>
-        <button onClick={() => router.push('/more')} className="text-gold">
-          <BackArrow />
-        </button>
       </div>
 
       <div className="px-5 py-5 pb-8 space-y-6">
@@ -210,10 +205,3 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void 
   )
 }
 
-function BackArrow() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-    </svg>
-  )
-}

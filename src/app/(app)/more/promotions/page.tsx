@@ -33,12 +33,6 @@ export default function PromotionsPage() {
             <div className="logo-text">Member Offers</div>
             <div className="logo-subtitle">Curated · Exclusive</div>
           </div>
-          <button
-            onClick={() => router.push("/more")}
-            className="text-gold text-sm flex items-center gap-1.5 flex-shrink-0"
-          >
-            Back
-          </button>
         </div>
       }
     >
@@ -69,7 +63,7 @@ export default function PromotionsPage() {
 
 function PromoCard({ promo, onTap }: { promo: Promotion; onTap?: () => void }) {
   return (
-    <div className="promo-card mb-4 cursor-pointer" onClick={onTap}>
+    <div className="promo-card mb-4 cursor-pointer" onClick={onTap} onKeyDown={e => e.key === 'Enter' && onTap?.()} role="button" tabIndex={0}>
       <div className="promo-accent" />
       {(() => {
         const url = promo.media_urls?.[0] ?? promo.image_url ?? promo.video_url
@@ -113,20 +107,3 @@ function PromoCard({ promo, onTap }: { promo: Promotion; onTap?: () => void }) {
   );
 }
 
-function _BackArrow() {
-  return (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={1.5}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"
-      />
-    </svg>
-  );
-}
