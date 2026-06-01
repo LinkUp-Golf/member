@@ -14,12 +14,15 @@
 import webpush from 'web-push'
 import { createAdminClient } from '@/lib/supabase-server'
 
-// Configure VAPID (set these env vars after running key generation above)
-webpush.setVapidDetails(
-  `mailto:${process.env.VAPID_CONTACT_EMAIL ?? 'hello@linkup.golf'}`,
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-  process.env.VAPID_PRIVATE_KEY!
-)
+// Lazy VAPID init — deferred to request time so env vars are available
+function configuredWebPush() {
+  webpush.setVapidDetails(
+    `mailto:${process.env.VAPID_CONTACT_EMAIL ?? 'hello@linkup.golf'}`,
+    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
+    process.env.VAPID_PRIVATE_KEY!
+  )
+  return webpush
+}
 
 // ---- Types --------------------------------------------------
 
@@ -118,7 +121,7 @@ async function sendToSubscriptions(
   await Promise.allSettled(
     subscriptions.map(async sub => {
       try {
-        await webpush.sendNotification(
+        await configuredWebPush().sendNotification(
           {
             endpoint: sub.endpoint,
             keys: { p256dh: sub.p256dh, auth: sub.auth },
