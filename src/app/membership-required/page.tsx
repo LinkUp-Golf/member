@@ -12,11 +12,11 @@ export default function MembershipRequiredPage() {
       className="min-h-screen flex flex-col items-center justify-center px-8 text-center"
       style={{ background: '#002669' }}
     >
-      <Logo size={72} className="mb-8" />
+      <Logo size={72} className="mb-8" variant="white" />
 
       <div className="text-5xl mb-6">🔒</div>
 
-      <h1 className="font-display text-2xl text-white mb-3">
+      <h1 className="font-sans font-black text-2xl text-white mb-3">
         Membership Required
       </h1>
 

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
+import { useAuthStore } from '@/store/auth'
 import {
   AdminTable, AdminTr, AdminTd,
   Badge, AdminButton,
@@ -10,9 +11,10 @@ import { format, formatDistanceToNow } from 'date-fns'
 import { capitalizeName } from '@/lib/utils'
 import type { MemberWithProfile } from '@/types'
 
-type FilterStatus = 'all' | 'active' | 'waitlist' | 'pending' | 'cancelled'
+type FilterStatus = 'all' | 'active' | 'waitlist' | 'pending' | 'suspended' | 'cancelled'
 
 export default function AdminMembersPage() {
+  const currentUserId = useAuthStore(s => s.user?.member?.id)
   const [members, setMembers] = useState<MemberWithProfile[]>([])
   const [filtered, setFiltered] = useState<MemberWithProfile[]>([])
   const [loading, setLoading] = useState(true)
@@ -55,21 +57,19 @@ export default function AdminMembersPage() {
 
   async function updateStatus(memberId: string, status: string) {
     setSaving(true)
-    const supabase = createClient()
-    await supabase.from('members').update({ membership_status: status }).eq('id', memberId)
-
-    // If activating from waitlist, also activate course membership
-    if (status === 'active') {
-      const member = members.find(m => m.id === memberId)
-      if (member) {
-        await supabase
-          .from('course_memberships')
-          .update({ status: 'active' })
-          .eq('member_id', memberId)
-          .eq('course_id', member.home_course_id)
+    try {
+      const res = await fetch(`/api/admin/members/${memberId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        console.error('[updateStatus] failed:', data)
       }
+    } catch (e) {
+      console.error('[updateStatus] error:', e)
     }
-
     await loadMembers()
     if (selected?.id === memberId) {
       setSelected(prev => prev ? { ...prev, membership_status: status as MemberWithProfile['membership_status'] } : null)
@@ -105,6 +105,7 @@ export default function AdminMembersPage() {
     active:    members.filter(m => m.membership_status === 'active').length,
     waitlist:  members.filter(m => m.membership_status === 'waitlist').length,
     pending:   members.filter(m => m.membership_status === 'pending').length,
+    suspended: members.filter(m => m.membership_status === 'suspended').length,
     cancelled: members.filter(m => m.membership_status === 'cancelled').length,
   }
 
@@ -113,7 +114,10 @@ export default function AdminMembersPage() {
       <div className="flex items-start justify-between gap-4 mb-6 sm:mb-8">
         <div>
           <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">Members</h1>
-          <p className="text-sm text-gray-500 mt-1">{statusCounts.active} active · {statusCounts.waitlist} waitlisted · {statusCounts.pending} pending</p>
+          <p className="text-sm text-gray-500 mt-1">
+            {statusCounts.active} active · {statusCounts.waitlist} waitlisted · {statusCounts.pending} pending
+            {statusCounts.suspended > 0 && <span className="text-red-500"> · {statusCounts.suspended} suspended</span>}
+          </p>
         </div>
         <button
           onClick={bulkSyncFromGHL}
@@ -146,14 +150,16 @@ export default function AdminMembersPage() {
               className="w-full sm:flex-1 px-4 py-2 text-sm border border-gray-200 rounded-xl outline-none focus:border-green-500"
             />
             <div className="flex gap-1 flex-wrap">
-              {(['all', 'active', 'waitlist', 'pending', 'cancelled'] as FilterStatus[]).map(s => (
+              {(['all', 'active', 'waitlist', 'pending', 'suspended', 'cancelled'] as FilterStatus[]).map(s => (
                 <button
                   key={s}
                   onClick={() => setStatusFilter(s)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${
                     statusFilter === s
-                      ? 'bg-green-900 text-white'
-                      : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                      ? s === 'suspended' ? 'bg-red-600 text-white' : 'bg-green-900 text-white'
+                      : s === 'suspended' && statusCounts.suspended > 0
+                        ? 'bg-red-50 border border-red-200 text-red-600 hover:bg-red-100'
+                        : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
                   }`}
                 >
                   {s} {statusCounts[s] > 0 && <span className="ml-0.5 opacity-60">({statusCounts[s]})</span>}
@@ -183,10 +189,12 @@ export default function AdminMembersPage() {
                   </span>
                 </AdminTd>
                 <AdminTd>
-                  <StatusBadge status={m.membership_status} />
-                  {m.is_admin && (
-                    <span className="ml-1.5 text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">Admin</span>
-                  )}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <StatusBadge status={m.membership_status} />
+                    {m.is_admin && (
+                      <span className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">Admin</span>
+                    )}
+                  </div>
                 </AdminTd>
                 <AdminTd>
                   <span className="text-xs text-gray-400">
@@ -204,16 +212,16 @@ export default function AdminMembersPage() {
                 </AdminTd>
                 <AdminTd>
                   <div className="flex gap-1.5" role="presentation" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
-                    {m.membership_status === 'waitlist' && (
+                    {(m.membership_status === 'waitlist' || m.membership_status === 'pending') && (
                       <AdminButton
-                        label="Activate"
+                        label="Approve"
                         onClick={() => updateStatus(m.id, 'active')}
                         variant="gold"
                         size="sm"
                         disabled={saving}
                       />
                     )}
-                    {m.membership_status === 'active' && (
+                    {m.membership_status === 'active' && m.id !== currentUserId && (
                       <AdminButton
                         label="Suspend"
                         onClick={() => updateStatus(m.id, 'suspended')}
@@ -273,6 +281,7 @@ export default function AdminMembersPage() {
                 <DetailRow label="GHL ID">
                   <span className="font-mono text-xs text-gray-400">{selected.ghl_contact_id}</span>
                 </DetailRow>
+
                 {selected.profile?.handicap_index && selected.profile?.show_handicap && (
                   <DetailRow label="Handicap">{selected.profile.handicap_index}</DetailRow>
                 )}
@@ -295,10 +304,10 @@ export default function AdminMembersPage() {
               {/* Admin actions */}
               <div className="mt-5 pt-4 border-t border-gray-100 space-y-2">
                 <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Actions</p>
-                {selected.membership_status === 'waitlist' && (
-                  <AdminButton label="Activate membership" onClick={() => updateStatus(selected.id, 'active')} variant="gold" disabled={saving} />
+                {(selected.membership_status === 'waitlist' || selected.membership_status === 'pending') && (
+                  <AdminButton label="Approve membership" onClick={() => updateStatus(selected.id, 'active')} variant="gold" disabled={saving} />
                 )}
-                {selected.membership_status === 'active' && (
+                {selected.membership_status === 'active' && selected.id !== currentUserId && (
                   <AdminButton label="Suspend membership" onClick={() => updateStatus(selected.id, 'suspended')} variant="danger" disabled={saving} />
                 )}
                 {selected.membership_status === 'suspended' && (

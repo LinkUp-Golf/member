@@ -71,7 +71,7 @@ export default function MemberEventsPage() {
           ) : events.length === 0 ? (
             <div className="text-center py-16">
               <p className="text-3xl mb-3">📅</p>
-              <p className="font-serif text-xl text-green-900 mb-2">No events yet</p>
+              <p className="font-sans font-black text-xl text-green-900 mb-2">No events yet</p>
               <p className="text-sm text-green-900/45 mb-5">
                 Be the first to post a community event.
               </p>
@@ -123,7 +123,7 @@ function EventCard({
       </div>
 
       <div className="card-pad">
-        <p className="font-serif text-lg text-green-900 font-medium">{e.title}</p>
+        <p className="font-sans font-black text-lg text-green-900">{e.title}</p>
         <p className="text-xs text-green-900/50 mt-1">📍 {e.location}</p>
         <p className="text-sm text-green-900/70 mt-2 leading-relaxed">{e.description}</p>
 
@@ -197,7 +197,7 @@ function SubmitEventForm({
     return (
       <div className="px-5 py-16 text-center">
         <p className="text-4xl mb-4">✅</p>
-        <p className="font-serif text-xl text-green-900 mb-2">Event submitted</p>
+        <p className="font-sans font-black text-xl text-green-900 mb-2">Event submitted</p>
         <p className="text-sm text-green-900/55 mb-6 leading-relaxed">
           Your event is pending review. Once approved, it will appear on the community calendar.
         </p>

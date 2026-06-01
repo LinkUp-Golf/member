@@ -22,6 +22,7 @@ const PUBLIC_ROUTES = [
   '/membership-required',
   '/api/auth/magic-link',   // unauthenticated users request magic links
   '/api/auth/callback',     // Supabase redirects here after magic link click
+  '/api/auth/signout',      // clears session cookie server-side
   '/api/webhooks',          // GHL webhooks secured by secret, not session
 ]
 

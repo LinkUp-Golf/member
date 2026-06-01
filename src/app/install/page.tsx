@@ -21,14 +21,13 @@ export default function InstallPage() {
       >
         <div className="flex justify-center mb-4">
           <Image
-            src="/linkup-golf.webp"
+            src="/logos/logo-white.png"
             alt="LinkUp Golf"
             width={80}
             height={80}
-            className="rounded-2xl"
           />
         </div>
-        <h1 className="font-serif text-2xl text-white font-medium">
+        <h1 className="font-sans font-black text-2xl text-white">
           LinkUp Golf
         </h1>
         <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.5)" }}>
@@ -71,7 +70,7 @@ function AlreadyInstalled() {
   return (
     <div className="text-center py-8">
       <div className="text-4xl mb-4">✓</div>
-      <h2 className="font-serif text-xl font-medium text-green-900 mb-2">
+      <h2 className="font-sans font-black text-xl text-green-900 mb-2">
         You&apos;re all set
       </h2>
       <p className="text-sm text-gray-500">
@@ -99,7 +98,7 @@ function AndroidInstructions({
 }) {
   return (
     <div>
-      <h2 className="font-serif text-xl font-medium text-green-900 mb-2">
+      <h2 className="font-sans font-black text-xl text-green-900 mb-2">
         Install on Android
       </h2>
       <p className="text-sm text-gray-500 mb-6">
@@ -139,7 +138,7 @@ function AndroidInstructions({
 function IOSSafariInstructions() {
   return (
     <div>
-      <h2 className="font-serif text-xl font-medium text-green-900 mb-2">
+      <h2 className="font-sans font-black text-xl text-green-900 mb-2">
         Install on iPhone
       </h2>
       <p className="text-sm text-gray-500 mb-6">
@@ -178,7 +177,7 @@ function IOSOtherInstructions() {
           Copy the link and paste it into <strong>Safari</strong> to continue.
         </p>
       </div>
-      <h2 className="font-serif text-xl font-medium text-green-900 mb-4">
+      <h2 className="font-sans font-black text-xl text-green-900 mb-4">
         Then, in Safari:
       </h2>
       <ol className="space-y-4">
@@ -208,7 +207,7 @@ function DesktopInstructions() {
 
   return (
     <div className="text-center py-4">
-      <h2 className="font-serif text-xl font-medium text-green-900 mb-2">
+      <h2 className="font-sans font-black text-xl text-green-900 mb-2">
         Open on your phone
       </h2>
       <p className="text-sm text-gray-500 mb-6">

@@ -61,7 +61,7 @@ export default function AnnouncementsPage() {
         ) : announcements.length === 0 ? (
           <div className="text-center py-16 px-8">
             <p className="text-3xl mb-3">📢</p>
-            <p className="font-serif text-xl text-green-900 mb-2">No announcements yet</p>
+            <p className="font-sans font-black text-xl text-green-900 mb-2">No announcements yet</p>
             <p className="text-sm text-green-900/45">Community announcements will appear here.</p>
           </div>
         ) : (

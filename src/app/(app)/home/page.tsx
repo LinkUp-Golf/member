@@ -58,14 +58,14 @@ export default function HomePage() {
   }
 
   return (
-    <AppShell title="LinkUp Golf" description="Member Portal">
+    <AppShell>
 
       {/* Hero banner */}
       <div className="hero-banner">
         <p className="text-[10px] uppercase tracking-[0.16em] mb-2.5" style={{ color: 'rgba(255,255,255,0.32)' }}>
           {greeting}
         </p>
-        <h1 className="font-serif leading-tight mb-5" style={{ fontSize: '2.1rem', color: 'white', fontWeight: 500 }}>
+        <h1 className="font-sans font-black leading-tight mb-5" style={{ fontSize: '2.1rem', color: 'white' }}>
           Welcome back,{' '}
           <br />
           <em style={{ color: 'var(--color-gold)', fontStyle: 'normal' }}>

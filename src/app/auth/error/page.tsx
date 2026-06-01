@@ -18,6 +18,10 @@ const REASONS: Record<string, { title: string; body: string }> = {
     title: 'Access not active',
     body: 'Your LinkUp Golf membership is not currently active. Please contact your LinkUp coordinator if you believe this is an error.',
   },
+  suspended: {
+    title: 'Account suspended',
+    body: 'Your account has been suspended and cannot be used to log in. Please contact your LinkUp Golf coordinator if you believe this is an error.',
+  },
   default: {
     title: 'Something went wrong',
     body: "We couldn't complete your login. Please try again from the login page.",
@@ -38,7 +42,7 @@ function ErrorContent() {
 
   return (
     <>
-      <h1 className="font-serif text-2xl text-white mb-3">{title}</h1>
+      <h1 className="font-sans font-black text-2xl text-white mb-3">{title}</h1>
       <p className="text-sm text-white/50 leading-relaxed max-w-xs mb-8">{body}</p>
     </>
   )
@@ -50,14 +54,14 @@ export default function AuthErrorPage() {
       className="min-h-screen flex flex-col items-center justify-center px-8 text-center"
       style={{ background: '#002669' }}
     >
-      <Logo size={72} className="mb-8" />
+      <Logo size={72} className="mb-8" variant="white" />
 
       <div className="text-4xl mb-5">🔒</div>
 
       <Suspense
         fallback={
           <>
-            <h1 className="font-serif text-2xl text-white mb-3">{DEFAULT_REASON.title}</h1>
+            <h1 className="font-sans font-black text-2xl text-white mb-3">{DEFAULT_REASON.title}</h1>
             <p className="text-sm text-white/50 leading-relaxed max-w-xs mb-8">{DEFAULT_REASON.body}</p>
           </>
         }

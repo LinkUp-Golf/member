@@ -162,7 +162,7 @@ export default function BookPage() {
                       style={{ color: active ? 'rgba(133,187,101,0.8)' : 'rgba(0,38,105,0.38)' }}>
                       {format(date, 'EEE')}
                     </span>
-                    <span className="font-serif text-2xl font-semibold mt-0.5"
+                    <span className="font-sans font-black text-2xl mt-0.5"
                       style={{ color: active ? 'white' : 'var(--color-green-900)' }}>
                       {format(date, 'd')}
                     </span>
@@ -271,7 +271,7 @@ function SlotRow({ slot, selected, onSelect }: { slot: Slot; selected: boolean; 
       }
     >
       <div>
-        <span className="font-serif text-2xl font-semibold" style={{ color: 'var(--color-green-900)' }}>
+        <span className="font-sans font-black text-2xl" style={{ color: 'var(--color-green-900)' }}>
           {formatTeeTime(timeStr)}
         </span>
         <p className="text-xs mt-0.5" style={{ color: 'rgba(0,38,105,0.42)' }}>
@@ -340,7 +340,7 @@ function ConfirmScreen({
           <div className="pt-3 border-t flex justify-between items-center"
             style={{ borderColor: 'rgba(0,38,105,0.07)' }}>
             <span className="text-sm font-medium" style={{ color: 'var(--color-green-900)' }}>Total</span>
-            <span className="font-serif text-2xl font-semibold" style={{ color: 'var(--color-green-900)' }}>
+            <span className="font-sans font-black text-2xl" style={{ color: 'var(--color-green-900)' }}>
               $160
             </span>
           </div>
@@ -411,7 +411,7 @@ function SuccessScreen({ booking, onDone }: { booking: { date: string; time: str
         style={{ background: 'rgba(133,187,101,0.12)', border: '1px solid rgba(133,187,101,0.2)' }}>
         ⛳
       </div>
-      <h1 className="font-serif mb-2" style={{ fontSize: '2rem', color: 'var(--color-green-900)', fontWeight: 500 }}>
+      <h1 className="font-sans font-black mb-2" style={{ fontSize: '2rem', color: 'var(--color-green-900)' }}>
         You&apos;re booked!
       </h1>
       <p className="text-sm mb-1" style={{ color: 'rgba(0,38,105,0.5)' }}>

@@ -1,23 +1,25 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Spinner } from "@/components/ui/Loading";
 import Logo from "@/components/ui/Logo";
 import { createClient } from "@/lib/supabase";
 
+const LAST_EMAIL_KEY = "linkup_last_email";
+
 type State = "idle" | "loading" | "sent" | "error";
 
 type GateResponse =
   | { returning: true; token_hash: string }
-  | { allowed: boolean; revoked?: true };
+  | { allowed: boolean; revoked?: true; suspended?: true };
 
 export default function LoginPage() {
   return (
     <Suspense>
       <LoginForm />
     </Suspense>
-  )
+  );
 }
 
 function LoginForm() {
@@ -25,6 +27,11 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [state, setState] = useState<State>("idle");
+
+  useEffect(() => {
+    const saved = localStorage.getItem(LAST_EMAIL_KEY);
+    if (saved) setEmail(saved);
+  }, []);
   const [errorMessage, setErrorMessage] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
@@ -33,6 +40,7 @@ function LoginForm() {
     setState("loading");
 
     const normalizedEmail = email.trim().toLowerCase();
+    localStorage.setItem(LAST_EMAIL_KEY, normalizedEmail);
 
     try {
       const gateRes = await fetch("/api/auth/magic-link", {
@@ -52,6 +60,12 @@ function LoginForm() {
       }
 
       const gate = (await gateRes.json()) as GateResponse;
+
+      // Account suspended — redirect to error page before attempting sign-in.
+      if ("suspended" in gate && gate.suspended) {
+        router.replace("/auth/error?reason=suspended");
+        return;
+      }
 
       // Membership revoked — redirect before attempting sign-in.
       if ("revoked" in gate && gate.revoked) {
@@ -121,7 +135,7 @@ function LoginForm() {
       <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
         {/* Logo */}
         <div className="mb-2 flex flex-col items-center">
-          <Logo size={80} className="mb-3" />
+          <Logo size={120} className="mb-3" variant="on-dark" />
           <div className="text-xs uppercase tracking-[0.2em] text-white/30">
             Member Portal
           </div>
@@ -135,7 +149,7 @@ function LoginForm() {
         {state === "sent" ? (
           <div className="text-center animate-fade-in">
             <div className="text-4xl mb-4">✉️</div>
-            <h2 className="font-serif text-2xl text-white mb-3">
+            <h2 className="font-sans font-black text-2xl text-white mb-3">
               Check your email
             </h2>
             <p className="text-sm text-white/50 leading-relaxed max-w-xs mx-auto">
@@ -151,6 +165,7 @@ function LoginForm() {
                 setState("idle");
                 setEmail("");
                 setErrorMessage("");
+                localStorage.removeItem(LAST_EMAIL_KEY);
               }}
               className="mt-6 text-xs underline text-white/30"
             >
@@ -159,7 +174,7 @@ function LoginForm() {
           </div>
         ) : (
           <div className="w-full max-w-sm animate-fade-in">
-            <h2 className="font-serif text-2xl text-white text-center mb-2">
+            <h2 className="font-sans font-black text-2xl text-white text-center mb-2">
               Sign in
             </h2>
             <p className="text-sm text-center text-white/40 mb-8">
@@ -200,7 +215,7 @@ function LoginForm() {
                 {state === "loading" ? (
                   <Spinner className="text-green-900" />
                 ) : (
-                  "Send login link"
+                  "Login"
                 )}
               </button>
             </form>

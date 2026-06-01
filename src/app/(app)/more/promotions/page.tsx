@@ -46,7 +46,7 @@ export default function PromotionsPage() {
         ) : promotions.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-3xl mb-3">🎁</p>
-            <p className="font-serif text-xl text-green-900 mb-2">
+            <p className="font-sans font-black text-xl text-green-900 mb-2">
               No offers right now
             </p>
             <p className="text-sm text-green-900/45">
@@ -81,7 +81,7 @@ function PromoCard({ promo, onTap }: { promo: Promotion; onTap?: () => void }) {
         >
           {promo.badge_label}
         </p>
-        <p className="font-serif text-xl text-white font-medium leading-snug mb-2">
+        <p className="font-sans font-black text-xl text-white leading-snug mb-2">
           {promo.title}
         </p>
         <p className="text-sm text-white/55 leading-relaxed">

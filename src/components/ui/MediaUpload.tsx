@@ -63,11 +63,17 @@ export default function MediaUpload({
       const ext = file.name.split('.').pop()?.toLowerCase() ?? 'bin'
       const path = `${folder}/${crypto.randomUUID()}.${ext}`
 
-      const { error: uploadError } = await supabase.storage
+      const uploadPromise = supabase.storage
         .from('post-media')
         .upload(path, file, { cacheControl: '31536000', upsert: false })
 
-      if (uploadError) throw uploadError
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Upload timed out. Check your connection and try again.')), 30000)
+      )
+
+      const { error: uploadError } = await Promise.race([uploadPromise, timeoutPromise])
+
+      if (uploadError) throw new Error(uploadError.message)
 
       const { data: { publicUrl } } = supabase.storage
         .from('post-media')
@@ -79,8 +85,9 @@ export default function MediaUpload({
       }
 
       onChange(publicUrl)
-    } catch {
-      setError('Upload failed. Please try again.')
+    } catch (e) {
+      console.error('[MediaUpload] upload error:', e)
+      setError(e instanceof Error ? e.message : 'Upload failed. Please try again.')
     } finally {
       setUploading(false)
     }

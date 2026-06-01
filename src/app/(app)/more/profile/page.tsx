@@ -70,7 +70,7 @@ export default function MyProfilePage() {
             size="xl"
           />
         </div>
-        <h1 className="font-serif text-2xl text-white font-medium">
+        <h1 className="font-sans font-black text-2xl text-white">
           {capitalizeName(m.first_name)} {capitalizeName(m.last_name)}
         </h1>
         {m.profile?.role_title && (
@@ -343,7 +343,7 @@ function Field({
 function GolfStat({ value, label }: { value: string; label: string }) {
   return (
     <div className="bg-green-50 rounded-xl p-3 text-center">
-      <p className="font-serif text-xl font-semibold text-green-900">{value}</p>
+      <p className="font-sans font-black text-xl text-green-900">{value}</p>
       <p className="text-xs text-green-900/40 mt-1">{label}</p>
     </div>
   )

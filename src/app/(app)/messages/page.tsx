@@ -105,7 +105,7 @@ function EmptyInbox({ onCompose }: { onCompose: () => void }) {
       >
         💬
       </div>
-      <p className="font-serif text-xl mb-2" style={{ color: 'var(--color-green-900)' }}>
+      <p className="font-sans font-black text-xl mb-2" style={{ color: 'var(--color-green-900)' }}>
         No messages yet
       </p>
       <p className="text-sm mb-7" style={{ color: 'rgba(0,38,105,0.42)' }}>

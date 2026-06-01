@@ -84,7 +84,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   signOut: async () => {
     const supabase = createClient()
     await supabase.auth.signOut()
-    set({ user: null })
+    await fetch('/api/auth/signout', { method: 'POST' })
+    set({ user: null, initialized: false })
+    window.location.href = '/login'
   },
 
   refreshMember: async () => {

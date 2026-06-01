@@ -73,6 +73,21 @@ export async function GET(request: NextRequest) {
       ctx: { supabase: adminClient, requestId },
     })
   }
+
+  // ---- Suspension check --------------------------------------
+  const { data: memberRecord } = await adminClient
+    .from('members')
+    .select('membership_status')
+    .eq('id', user.id)
+    .maybeSingle()
+
+  if (memberRecord?.membership_status === 'suspended') {
+    reqLog.warn('Suspended member attempted login — destroying session', { userId: user.id })
+    auditLog('LOGIN_DENIED', { requestId, userId: user.id, metadata: { reason: 'account_suspended' } })
+    await supabase.auth.signOut()
+    return NextResponse.redirect(new URL('/auth/error?reason=suspended', request.url))
+  }
+
   await adminClient
     .from('members')
     .update({ last_sign_in: new Date().toISOString() })

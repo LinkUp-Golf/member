@@ -63,11 +63,20 @@ export async function POST(request: NextRequest) {
     // Skip the GHL gate and generate a silent OTP — no email sent.
     const { data: existingMember } = await adminClient
       .from('members')
-      .select('id')
+      .select('id, membership_status')
       .eq('email', normalizedEmail)
       .maybeSingle()
 
     if (existingMember) {
+      // Block suspended accounts immediately — no GHL check needed.
+      if (existingMember.membership_status === 'suspended') {
+        auditLog('LOGIN_DENIED', { requestId, metadata: { reason: 'account_suspended', memberId: existingMember.id } })
+        return NextResponse.json(
+          { allowed: false, suspended: true },
+          { headers: { 'X-Request-Id': requestId } }
+        )
+      }
+
       // Re-validate GHL tags even for returning members — their membership
       // may have been revoked since their last login.
       const contact = await getContactByEmail(normalizedEmail)
