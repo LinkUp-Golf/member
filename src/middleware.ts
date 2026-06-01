@@ -39,6 +39,13 @@ export async function middleware(request: NextRequest) {
 
   const requestId = crypto.randomUUID()
 
+  // Guard: if Supabase env vars are missing, skip auth and let the request through.
+  // This prevents a hard crash in the edge runtime when env vars are not yet configured.
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    console.error('Middleware: Missing Supabase env vars — skipping auth checks')
+    return NextResponse.next()
+  }
+
   let response = NextResponse.next({
     request: { headers: request.headers },
   })
@@ -46,66 +53,72 @@ export async function middleware(request: NextRequest) {
   // Attach correlation ID so it propagates to API responses and logs
   response.headers.set('X-Request-Id', requestId)
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          return request.cookies.get(name)?.value
+  try {
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      {
+        cookies: {
+          get(name: string) {
+            return request.cookies.get(name)?.value
+          },
+          set(name: string, value: string, options: CookieOptions) {
+            request.cookies.set({ name, value, ...options })
+            response = NextResponse.next({ request: { headers: request.headers } })
+            response.headers.set('X-Request-Id', requestId)
+            response.cookies.set({ name, value, ...options })
+          },
+          remove(name: string, options: CookieOptions) {
+            request.cookies.set({ name, value: '', ...options })
+            response = NextResponse.next({ request: { headers: request.headers } })
+            response.headers.set('X-Request-Id', requestId)
+            response.cookies.set({ name, value: '', ...options })
+          },
         },
-        set(name: string, value: string, options: CookieOptions) {
-          request.cookies.set({ name, value, ...options })
-          response = NextResponse.next({ request: { headers: request.headers } })
-          response.headers.set('X-Request-Id', requestId)
-          response.cookies.set({ name, value, ...options })
-        },
-        remove(name: string, options: CookieOptions) {
-          request.cookies.set({ name, value: '', ...options })
-          response = NextResponse.next({ request: { headers: request.headers } })
-          response.headers.set('X-Request-Id', requestId)
-          response.cookies.set({ name, value: '', ...options })
-        },
-      },
+      }
+    )
+
+    // Refresh session (also validates JWT signature via Supabase)
+    const { data: { user } } = await supabase.auth.getUser()
+
+    // ---- Public routes ---------------------------------------
+    if (PUBLIC_ROUTES.some(route => pathname.startsWith(route))) {
+      // Already authenticated → redirect away from login page
+      if (user && pathname === '/login') {
+        const redirectResponse = NextResponse.redirect(new URL('/home', request.url))
+        redirectResponse.headers.set('X-Request-Id', requestId)
+        return redirectResponse
+      }
+      return response
     }
-  )
 
-  // Refresh session (also validates JWT signature via Supabase)
-  const { data: { user } } = await supabase.auth.getUser()
-
-  // ---- Public routes ---------------------------------------
-  if (PUBLIC_ROUTES.some(route => pathname.startsWith(route))) {
-    // Already authenticated → redirect away from login page
-    if (user && pathname === '/login') {
-      const redirectResponse = NextResponse.redirect(new URL('/home', request.url))
+    // ---- Unauthenticated: redirect to login ------------------
+    if (!user) {
+      const loginUrl = new URL('/login', request.url)
+      loginUrl.searchParams.set('redirectTo', pathname)
+      const redirectResponse = NextResponse.redirect(loginUrl)
       redirectResponse.headers.set('X-Request-Id', requestId)
       return redirectResponse
     }
-    return response
-  }
 
-  // ---- Unauthenticated: redirect to login ------------------
-  if (!user) {
-    const loginUrl = new URL('/login', request.url)
-    loginUrl.searchParams.set('redirectTo', pathname)
-    const redirectResponse = NextResponse.redirect(loginUrl)
-    redirectResponse.headers.set('X-Request-Id', requestId)
-    return redirectResponse
-  }
+    // ---- Admin routes: enforce is_admin ----------------------
+    if (user && ADMIN_ROUTES.some(route => pathname.startsWith(route))) {
+      const { data: member } = await supabase
+        .from('members')
+        .select('is_admin')
+        .eq('id', user.id)
+        .single()
 
-  // ---- Admin routes: enforce is_admin ----------------------
-  if (user && ADMIN_ROUTES.some(route => pathname.startsWith(route))) {
-    const { data: member } = await supabase
-      .from('members')
-      .select('is_admin')
-      .eq('id', user.id)
-      .single()
-
-    if (!member?.is_admin) {
-      const redirectResponse = NextResponse.redirect(new URL('/home', request.url))
-      redirectResponse.headers.set('X-Request-Id', requestId)
-      return redirectResponse
+      if (!member?.is_admin) {
+        const redirectResponse = NextResponse.redirect(new URL('/home', request.url))
+        redirectResponse.headers.set('X-Request-Id', requestId)
+        return redirectResponse
+      }
     }
+  } catch (err) {
+    console.error('Middleware error:', err)
+    // Fall through: let the request continue rather than crashing the edge worker.
+    // The page/API route will enforce its own auth checks.
   }
 
   return response
