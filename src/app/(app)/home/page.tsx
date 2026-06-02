@@ -156,57 +156,57 @@ export default function HomePage() {
         </section>
 
         {/* Member Spotlight */}
-        <section>
-          <div className="flex items-center justify-between mb-3.5">
-            <p className="section-label !mb-0">Member Spotlight</p>
-            <Link href="/members" className="text-xs font-medium" style={{ color: 'var(--color-green-600)' }}>
-              All members →
-            </Link>
-          </div>
-          {loading ? (
-            <div className="card">
-              <MemberRowSkeleton />
-              <MemberRowSkeleton />
+        {(loading || newMembers.length > 0) && (
+          <section>
+            <div className="flex items-center justify-between mb-3.5">
+              <p className="section-label !mb-0">Member Spotlight</p>
+              <Link href="/members" className="text-xs font-medium" style={{ color: 'var(--color-green-600)' }}>
+                All members →
+              </Link>
             </div>
-          ) : newMembers.length > 0 ? (
-            <div className="card">
-              {newMembers.map((m) => (
-                <Link
-                  key={m.id}
-                  href={`/members/${m.id}`}
-                  className="member-row"
-                >
-                  <Avatar
-                    firstName={m.first_name}
-                    lastName={m.last_name}
-                    avatarUrl={m.profile?.avatar_url}
-                    size="md"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium" style={{ color: 'var(--color-green-900)' }}>
-                      {capitalizeName(m.first_name)} {capitalizeName(m.last_name)}
-                    </p>
-                    <p className="text-xs mt-0.5" style={{ color: 'rgba(0,38,105,0.55)' }}>
-                      {m.profile?.role_title ?? ""}
-                      {m.profile?.business_name ? `, ${m.profile.business_name}` : ""}
-                    </p>
-                    {m.profile?.value_offered && (
-                      <span className="tag mt-1.5">
-                        Offers: {truncate(m.profile.value_offered, 40)}
-                      </span>
-                    )}
-                  </div>
-                  <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                    strokeWidth={1.5} style={{ color: 'rgba(0,38,105,0.2)' }}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                  </svg>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <EmptyState compact icon="👥" title="No members to spotlight yet" description="New members will appear here as the community grows." />
-          )}
-        </section>
+            {loading ? (
+              <div className="card">
+                <MemberRowSkeleton />
+                <MemberRowSkeleton />
+              </div>
+            ) : (
+              <div className="card">
+                {newMembers.map((m) => (
+                  <Link
+                    key={m.id}
+                    href={`/members/${m.id}`}
+                    className="member-row"
+                  >
+                    <Avatar
+                      firstName={m.first_name}
+                      lastName={m.last_name}
+                      avatarUrl={m.profile?.avatar_url}
+                      size="md"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium" style={{ color: 'var(--color-green-900)' }}>
+                        {capitalizeName(m.first_name)} {capitalizeName(m.last_name)}
+                      </p>
+                      <p className="text-xs mt-0.5" style={{ color: 'rgba(0,38,105,0.55)' }}>
+                        {m.profile?.role_title ?? ""}
+                        {m.profile?.business_name ? `, ${m.profile.business_name}` : ""}
+                      </p>
+                      {m.profile?.value_offered && (
+                        <span className="tag mt-1.5">
+                          Offers: {truncate(m.profile.value_offered, 40)}
+                        </span>
+                      )}
+                    </div>
+                    <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                      strokeWidth={1.5} style={{ color: 'rgba(0,38,105,0.2)' }}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                    </svg>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
         {/* Promotions */}
         {(loading || promotions.length > 0) && (
