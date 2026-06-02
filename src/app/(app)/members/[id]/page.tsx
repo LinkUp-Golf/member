@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { useAuthStore } from "@/store/auth";
+import { useProfile } from "@/hooks/useProfile"
 import { apiClient } from "@/lib/api-client";
 import { capitalizeName } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
@@ -14,7 +14,7 @@ import type { MemberWithProfile } from "@/types";
 export default function MemberProfilePage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user } = useProfile();
   const [member, setMember] = useState<MemberWithProfile | null>(null);
   const [playedTogether, setPlayedTogether] = useState(false);
   const [loading, setLoading] = useState(true);

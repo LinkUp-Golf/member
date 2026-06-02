@@ -2,19 +2,20 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useAuthStore } from "@/store/auth";
+import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
 import { shortCategory, truncate, capitalizeName } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
 import AppShell from "@/components/layout/AppShell";
 import { MemberRowSkeleton } from "@/components/ui/Loading";
+import EmptyState from "@/components/ui/EmptyState";
 import { INDUSTRY_CATEGORIES } from "@/types";
 import type { MemberWithProfile } from "@/types";
 
 const FILTER_ALL = "All";
 
 export default function MembersPage() {
-  const { user, initialized } = useAuthStore();
+  const { user, loading: authLoading } = useProfile();
   const [members, setMembers] = useState<MemberWithProfile[]>([]);
   const [filtered, setFiltered] = useState<MemberWithProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,13 +25,13 @@ export default function MembersPage() {
   const filters = [FILTER_ALL, ...INDUSTRY_CATEGORIES.map(shortCategory)];
 
   useEffect(() => {
-    if (!initialized) return;
+    if (authLoading) return;
     if (user) {
       loadMembers();
     } else {
       setLoading(false);
     }
-  }, [user, initialized]);
+  }, [user, authLoading]);
 
   const applyFilters = useCallback(() => {
     let result = members;
@@ -138,13 +139,12 @@ export default function MembersPage() {
           ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="px-5 py-14 text-center">
-          <p
-            className="text-sm italic"
-            style={{ color: "rgba(0,38,105,0.35)" }}
-          >
-            {search ? "No members match your search." : "No members found."}
-          </p>
+        <div className="px-5 py-6">
+          <EmptyState
+            icon={search ? "🔍" : "👥"}
+            title={search ? "No members match your search" : "No members yet"}
+            description={search ? "Try a different name or keyword." : "Members will appear here once they join."}
+          />
         </div>
       ) : (
         <div className="mx-5 card mb-6">

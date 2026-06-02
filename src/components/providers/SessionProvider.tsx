@@ -1,18 +1,23 @@
 'use client'
 
-import { useEffect } from 'react'
-import { useAuthStore } from '@/store/auth'
+import { AuthProvider } from '@/contexts/AuthContext'
+import { ProfileProvider } from '@/contexts/ProfileContext'
 
-// Initializes Supabase auth session and subscribes to auth state
-// changes for the lifetime of the app. Placed in the root layout so
-// session data is available on every route — including login, error,
-// and membership-required pages.
+// In mock mode (dev only) MockProvider injects its own AuthContext /
+// ProfileContext values from the outside, so we skip the real providers here
+// to avoid overriding them with the real Supabase listener.
+const isMock =
+  process.env.NODE_ENV === 'development' &&
+  process.env.NEXT_PUBLIC_MOCK !== 'false'
+
 export default function SessionProvider({ children }: { children: React.ReactNode }) {
-  const { initialize, initialized } = useAuthStore()
+  if (isMock) return <>{children}</>
 
-  useEffect(() => {
-    if (!initialized) initialize()
-  }, [initialize, initialized])
-
-  return <>{children}</>
+  return (
+    <AuthProvider>
+      <ProfileProvider>
+        {children}
+      </ProfileProvider>
+    </AuthProvider>
+  )
 }

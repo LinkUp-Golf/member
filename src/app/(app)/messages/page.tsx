@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { createClient } from '@/lib/supabase'
 import { apiClient } from '@/lib/api-client'
 import { usePresence } from '@/hooks/usePresence'
@@ -12,7 +12,7 @@ import { ConversationItem } from '@/components/messages/ConversationItem'
 import type { ConversationWithDetails } from '@/types'
 
 export default function MessagesPage() {
-  const { user } = useAuthStore()
+  const { user } = useProfile()
   const router = useRouter()
   const [conversations, setConversations] = useState<ConversationWithDetails[]>([])
   const [loading, setLoading] = useState(true)

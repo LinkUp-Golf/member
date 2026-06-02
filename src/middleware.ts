@@ -104,15 +104,30 @@ export async function middleware(request: NextRequest) {
 
     // ---- Admin routes: enforce is_admin ----------------------
     if (user && ADMIN_ROUTES.some(route => pathname.startsWith(route))) {
-      const { data: member } = await supabase
+      const { data: member, error: memberError } = await supabase
         .from('members')
         .select('is_admin')
         .eq('id', user.id)
         .single()
 
-      if (!member?.is_admin) {
+      if (memberError) {
+        // DB query failed (network blip, cold start, etc.) — retry once
+        // before making an access decision to avoid false denials.
+        const { data: retried, error: retryError } = await supabase
+          .from('members')
+          .select('is_admin')
+          .eq('id', user.id)
+          .single()
+
+        if (retryError || !retried?.is_admin) {
+          const redirectResponse = NextResponse.redirect(new URL('/home', request.url))
+          redirectResponse.headers.set('X-Request-Id', requestId)
+          return redirectResponse
+        }
+      } else if (!member?.is_admin) {
         const redirectResponse = NextResponse.redirect(new URL('/home', request.url))
         redirectResponse.headers.set('X-Request-Id', requestId)
+        console.log("hahahahahaha", member)
         return redirectResponse
       }
     }

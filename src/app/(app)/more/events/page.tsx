@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import { Spinner, CardSkeleton } from '@/components/ui/Loading'
 import AppShell from '@/components/layout/AppShell'
@@ -11,7 +11,7 @@ import type { MemberEvent } from '@/types'
 type Tab = 'upcoming' | 'submit'
 
 export default function MemberEventsPage() {
-  const { user } = useAuthStore()
+  const { user } = useProfile()
   const [tab, setTab] = useState<Tab>('upcoming')
   const [events, setEvents] = useState<MemberEvent[]>([])
   const [rsvps, setRsvps] = useState<Record<string, string>>({})
@@ -43,7 +43,7 @@ export default function MemberEventsPage() {
       header={
         <div className="top-bar flex items-center justify-between">
           <div>
-            <div className="logo-text">Member Events</div>
+            <div className="font-sans font-black text-2xl" style={{ color: 'var(--color-gold)' }}>Member Events</div>
             <div className="logo-subtitle">Community calendar</div>
           </div>
         </div>

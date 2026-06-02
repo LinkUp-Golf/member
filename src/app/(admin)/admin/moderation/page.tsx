@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { createClient } from '@/lib/supabase'
 import {
   AdminPageHeader, AdminCard, AdminButton, Badge,
@@ -64,7 +64,7 @@ const STATUS_COLOURS: Record<string, string> = {
 }
 
 export default function AdminModerationPage() {
-  const { user } = useAuthStore()
+  const { user } = useProfile()
   const [items, setItems] = useState<ModerationItem[]>([])
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<string | null>(null)

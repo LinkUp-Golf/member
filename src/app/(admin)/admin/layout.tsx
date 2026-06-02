@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { createClient } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import { FullScreenLoader } from '@/components/ui/Loading'
@@ -139,7 +139,7 @@ function NavContent({
 }
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { user, initialized, initialize } = useAuthStore()
+  const { user, profile, loading, isAdmin } = useProfile()
   const router = useRouter()
   const pathname = usePathname()
   const [pendingCount, setPendingCount] = useState(0)
@@ -147,14 +147,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   useEffect(() => {
-    if (!initialized) initialize()
-  }, [initialized, initialize])
-
-  useEffect(() => {
-    if (initialized && (!user || !user.isAdmin)) {
-      router.push('/home')
-    }
-  }, [user, initialized, router])
+    if (loading) return
+    // Not authenticated → always redirect
+    if (!user) { router.push('/home'); return }
+    // Profile loaded and confirmed not admin → redirect.
+    // If profile is null (fetch error) we stay put — don't kick valid admins
+    // because of a transient DB error.
+    if (profile !== null && !isAdmin) { router.push('/home') }
+  }, [user, profile, loading, isAdmin, router])
 
   const fetchCounts = useCallback(async () => {
     const supabase = createClient()
@@ -175,15 +175,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }, [])
 
   useEffect(() => {
-    if (user?.isAdmin) fetchCounts()
-  }, [user, fetchCounts])
+    if (isAdmin) fetchCounts()
+  }, [isAdmin, fetchCounts])
 
   // Close drawer on route change
   useEffect(() => {
     setDrawerOpen(false)
   }, [pathname])
 
-  if (!initialized || !user) return <FullScreenLoader />
+  if (loading || !user) return <FullScreenLoader />
 
   return (
     <div className="flex h-screen bg-gray-50 font-sans">
@@ -193,7 +193,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           pathname={pathname}
           pendingCount={pendingCount}
           guestCount={guestCount}
-          user={user}
+          user={{ email: user.email ?? '' }}
         />
       </aside>
 
@@ -223,7 +223,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               pathname={pathname}
               pendingCount={pendingCount}
               guestCount={guestCount}
-              user={user}
+              user={{ email: user.email ?? '' }}
               onNavigate={() => setDrawerOpen(false)}
             />
           </aside>

@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useAuthStore } from "@/store/auth";
+import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
 import { formatBookingDate, formatTeeTime, truncate, capitalizeName, formatRelativeTime } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
+import EmptyState from "@/components/ui/EmptyState";
 import AppShell from '@/components/layout/AppShell';
 import InstallBanner from '@/components/ui/InstallBanner';
 import { CardSkeleton, MemberRowSkeleton } from "@/components/ui/Loading";
@@ -17,7 +18,7 @@ import type {
 } from "@/types";
 
 export default function HomePage() {
-  const { user, initialized } = useAuthStore();
+  const { user, profile, loading: authLoading, refetch } = useProfile();
   const [nextBooking, setNextBooking] = useState<Booking | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
@@ -25,19 +26,22 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
 
   const [greeting, setGreeting] = useState('');
-  const firstName = capitalizeName(user?.member?.first_name ?? "");
+  const firstName = capitalizeName(profile?.first_name ?? "");
 
   useEffect(() => {
     setGreeting(getGreeting());
   }, []);
 
   useEffect(() => {
-    // Auth not ready yet — wait
-    if (!initialized) return;
-    // Auth done but no member session — clear loading so the page doesn't hang
-    if (!user) { setLoading(false); return; }
+    if (authLoading) return;
+    if (!user) {
+      // Auth resolved but no session — retry profile fetch once in case of race
+      refetch();
+      setLoading(false);
+      return;
+    }
     loadHomeData();
-  }, [user, initialized]);
+  }, [user, authLoading, refetch]);
 
   async function loadHomeData() {
     const [bookingRes, announcementRes, promoRes, memberRes] =
@@ -147,9 +151,7 @@ export default function HomePage() {
               ))}
             </div>
           ) : (
-            <p className="text-sm italic" style={{ color: 'rgba(0,38,105,0.35)' }}>
-              No announcements yet.
-            </p>
+            <EmptyState compact icon="📢" title="No announcements yet" description="Course news and community highlights will appear here." />
           )}
         </section>
 
@@ -202,9 +204,7 @@ export default function HomePage() {
               ))}
             </div>
           ) : (
-            <p className="text-sm italic" style={{ color: 'rgba(0,38,105,0.35)' }}>
-              No members to spotlight yet.
-            </p>
+            <EmptyState compact icon="👥" title="No members to spotlight yet" description="New members will appear here as the community grows." />
           )}
         </section>
 

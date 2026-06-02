@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import AppShell from '@/components/layout/AppShell'
 import { formatRelativeTime } from '@/lib/utils'
@@ -27,7 +27,7 @@ const TYPE_LABELS: Record<string, string> = {
 }
 
 export default function AnnouncementDetailPage() {
-  const { user } = useAuthStore()
+  const { user } = useProfile()
   const params = useParams()
   const id = params['id'] as string
 
@@ -52,7 +52,7 @@ export default function AnnouncementDetailPage() {
       header={
         <div className="top-bar flex items-center justify-between">
           <div>
-            <div className="logo-text">Announcement</div>
+            <div className="font-sans font-black text-2xl" style={{ color: 'var(--color-gold)' }}>Announcement</div>
           </div>
         </div>
       }

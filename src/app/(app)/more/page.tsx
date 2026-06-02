@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { capitalizeName } from '@/lib/utils'
 import Avatar from '@/components/ui/Avatar'
 import AppShell from '@/components/layout/AppShell'
@@ -33,8 +33,8 @@ const MORE_ITEMS = [
 ]
 
 export default function MorePage() {
-  const { user, signOut } = useAuthStore()
-  const m = user?.member
+  const { profile, signOut } = useProfile()
+  const m = profile
 
   return (
     <AppShell title="More" description="Settings &amp; account">

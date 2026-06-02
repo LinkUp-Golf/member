@@ -12,7 +12,7 @@ export default function Header({ title, description, end, className }: HeaderPro
     <div className={cn('top-bar', className)}>
       <div className="flex items-center justify-between">
         <div>
-          <div className="logo-text">{title}</div>
+          <div className="font-sans font-black text-2xl" style={{ color: 'var(--color-gold)' }}>{title}</div>
           {description && <div className="logo-subtitle">{description}</div>}
         </div>
         {end && <div className="flex items-center gap-2">{end}</div>}

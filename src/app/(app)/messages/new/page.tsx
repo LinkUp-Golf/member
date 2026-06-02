@@ -2,18 +2,19 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import { capitalizeName } from '@/lib/utils'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
+import EmptyState from '@/components/ui/EmptyState'
 import AppShell from '@/components/layout/AppShell'
 import type { MemberWithProfile } from '@/types'
 
 export default function NewConversationPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { user } = useAuthStore()
+  const { user } = useProfile()
 
   const preselectedId = searchParams.get('with')
 
@@ -137,7 +138,9 @@ export default function NewConversationPage() {
         {loading ? (
           <div className="flex justify-center py-8"><Spinner className="text-green-700" /></div>
         ) : filtered.length === 0 ? (
-          <p className="text-center text-sm text-green-900/40 py-8 italic">No members found.</p>
+          <div className="px-4 py-4">
+            <EmptyState icon="🔍" title="No members found" description="Try a different name or business." />
+          </div>
         ) : (
           <div className="space-y-px bg-green-50/30">
             {filtered.map(m => {

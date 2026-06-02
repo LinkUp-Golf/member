@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import { Spinner } from '@/components/ui/Loading'
+import EmptyState from '@/components/ui/EmptyState'
 import AppShell from '@/components/layout/AppShell'
 import { INDUSTRY_CATEGORIES } from '@/types'
 import { formatRelativeTime } from '@/lib/utils'
@@ -19,7 +20,7 @@ const STATUS_LABELS: Record<string, { label: string; colour: string }> = {
 }
 
 export default function ReferralsPage() {
-  const { user } = useAuthStore()
+  const { user } = useProfile()
   const router = useRouter()
   const [referrals, setReferrals] = useState<Referral[]>([])
   const [loading, setLoading] = useState(true)
@@ -40,7 +41,7 @@ export default function ReferralsPage() {
       header={
         <div className="top-bar flex items-center justify-between">
           <div>
-            <div className="logo-text">Refer a Member</div>
+            <div className="font-sans font-black text-2xl" style={{ color: 'var(--color-gold)' }}>Refer a Member</div>
             <div className="logo-subtitle">Grow the community</div>
           </div>
         </div>
@@ -117,9 +118,11 @@ export default function ReferralsPage() {
         )}
 
         {!loading && referrals.length === 0 && !showForm && (
-          <p className="text-center text-sm text-green-900/40 italic py-4">
-            You haven&apos;t referred anyone yet.
-          </p>
+          <EmptyState
+            icon="🤝"
+            title="No referrals yet"
+            description="Invite someone you believe would be a great fit. Your referrals will track here."
+          />
         )}
       </div>
     </AppShell>

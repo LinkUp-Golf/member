@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import { Spinner } from '@/components/ui/Loading'
 import AppShell from '@/components/layout/AppShell'
@@ -15,7 +15,7 @@ const STATUS_LABELS: Record<string, { label: string; colour: string }> = {
 }
 
 export default function GuestAccessPage() {
-  const { user } = useAuthStore()
+  const { user } = useProfile()
   const [courses, setCourses] = useState<Course[]>([])
   const [requests, setRequests] = useState<GuestAccessRequest[]>([])
   const [loading, setLoading] = useState(true)
@@ -39,7 +39,7 @@ export default function GuestAccessPage() {
       header={
         <div className="top-bar flex items-center justify-between">
           <div>
-            <div className="logo-text">Guest Access</div>
+            <div className="font-sans font-black text-2xl" style={{ color: 'var(--color-gold)' }}>Guest Access</div>
             <div className="logo-subtitle">Visit another community</div>
           </div>
         </div>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import { Spinner } from '@/components/ui/Loading'
 import AppShell from '@/components/layout/AppShell'
@@ -10,7 +10,7 @@ import { INDUSTRY_CATEGORIES, type IndustryCategory, type FocusLinkup } from '@/
 import { format } from 'date-fns'
 
 export default function FocusLinkupsPage() {
-  const { user } = useAuthStore()
+  const { user } = useProfile()
   const router = useRouter()
   const [subscribed, setSubscribed] = useState<Set<string>>(new Set())
   const [upcoming, setUpcoming] = useState<FocusLinkup[]>([])
@@ -49,7 +49,7 @@ export default function FocusLinkupsPage() {
       header={
         <div className="top-bar flex items-center justify-between">
           <div>
-            <div className="logo-text">Focus LinkUps</div>
+            <div className="font-sans font-black text-2xl" style={{ color: 'var(--color-gold)' }}>Focus LinkUps</div>
             <div className="logo-subtitle">Manage notifications</div>
           </div>
         </div>
@@ -100,35 +100,44 @@ export default function FocusLinkupsPage() {
         </div>
 
         {/* Upcoming Focus LinkUps */}
-        {upcoming.length > 0 && (
-          <>
-            <p className="section-label mb-3">Upcoming Focus LinkUps</p>
-            <div className="space-y-3">
-              {upcoming.map(fl => (
-                <div key={fl.id} className="card card-pad">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-green-900">{fl.title}</p>
-                      <p className="text-xs text-green-900/50 mt-1">
-                        {format(new Date(fl.focus_date + 'T12:00:00'), 'EEEE, MMMM d')} · {fl.tee_time.slice(0, 5)}
-                      </p>
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {fl.industry_focus.map(f => (
-                          <span key={f} className="tag text-xs">{f}</span>
-                        ))}
-                      </div>
+        <p className="section-label mb-3">Upcoming Focus LinkUps</p>
+        {upcoming.length === 0 ? (
+          <div
+            className="rounded-2xl flex flex-col items-center text-center px-6 py-10"
+            style={{ background: 'rgba(0,38,105,0.04)', border: '1.5px dashed rgba(0,38,105,0.12)' }}
+          >
+            <div className="text-3xl mb-3">⛳</div>
+            <p className="font-sans font-black text-base text-green-900 mb-1">No upcoming dates yet</p>
+            <p className="text-xs text-green-900/40 leading-relaxed max-w-xs">
+              Focus LinkUp dates are scheduled throughout the season. Subscribe above to get notified when one relevant to your industry is announced.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {upcoming.map(fl => (
+              <div key={fl.id} className="card card-pad">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black text-green-900">{fl.title}</p>
+                    <p className="text-xs text-green-900/50 mt-1">
+                      {format(new Date(fl.focus_date + 'T12:00:00'), 'EEEE, MMMM d')} · {fl.tee_time.slice(0, 5)}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {fl.industry_focus.map(f => (
+                        <span key={f} className="tag text-xs">{f}</span>
+                      ))}
                     </div>
-                    <button
-                      onClick={() => router.push(`/book?focusLinkup=${fl.id}&date=${fl.focus_date}`)}
-                      className="btn btn-primary btn-sm flex-shrink-0"
-                    >
-                      Book
-                    </button>
                   </div>
+                  <button
+                    onClick={() => router.push(`/book?focusLinkup=${fl.id}&date=${fl.focus_date}`)}
+                    className="btn btn-primary btn-sm flex-shrink-0"
+                  >
+                    Book
+                  </button>
                 </div>
-              ))}
-            </div>
-          </>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </AppShell>

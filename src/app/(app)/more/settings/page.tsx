@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { usePushNotifications } from '@/hooks/usePushNotifications'
 import { Spinner } from '@/components/ui/Loading'
 
@@ -33,7 +33,7 @@ const PREF_LABELS: Record<keyof NotifPrefs, { label: string; desc: string }> = {
 }
 
 export default function SettingsPage() {
-  const { user, signOut } = useAuthStore()
+  const { user, profile, signOut } = useProfile()
   const { permission, subscribed, requesting, requestPermission, unsubscribe } = usePushNotifications()
 
   const [prefs, setPrefs] = useState<NotifPrefs>(DEFAULT_PREFS)
@@ -64,7 +64,7 @@ export default function SettingsPage() {
   return (
     <div>
       <div className="top-bar flex items-center justify-between">
-        <div className="logo-text">Settings</div>
+        <div className="font-sans font-black text-2xl" style={{ color: 'var(--color-gold)' }}>Settings</div>
       </div>
 
       <div className="px-5 py-5 pb-8 space-y-6">
@@ -158,13 +158,13 @@ export default function SettingsPage() {
             </div>
             <div className="px-4 py-3.5 border-b border-green-900/08">
               <p className="text-xs text-green-900/40 mb-0.5">Home course</p>
-              <p className="text-sm text-green-900">{user?.member?.home_course?.name ?? 'Aviara'}</p>
+              <p className="text-sm text-green-900">{profile?.home_course?.name ?? 'Aviara'}</p>
             </div>
             <div className="px-4 py-3.5">
               <p className="text-xs text-green-900/40 mb-0.5">Member since</p>
               <p className="text-sm text-green-900">
-                {user?.member?.membership_start_date
-                  ? new Date(user.member.membership_start_date).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+                {profile?.membership_start_date
+                  ? new Date(profile.membership_start_date).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
                   : 'Active member'}
               </p>
             </div>

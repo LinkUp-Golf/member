@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useAuthStore } from "@/store/auth";
+import { useProfile } from "@/hooks/useProfile"
 import { apiClient } from "@/lib/api-client";
 import AppShell from "@/components/layout/AppShell";
 import { PromoCardSkeleton } from "@/components/ui/Loading";
@@ -10,7 +10,7 @@ import { formatBookingDate } from "@/lib/utils";
 import type { Promotion } from "@/types";
 
 export default function PromotionsPage() {
-  const { user } = useAuthStore();
+  const { user } = useProfile();
   const router = useRouter();
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,7 +30,7 @@ export default function PromotionsPage() {
       header={
         <div className="top-bar flex items-center gap-3">
           <div className="flex-1">
-            <div className="logo-text">Member Offers</div>
+            <div className="font-sans font-black text-2xl" style={{ color: 'var(--color-gold)' }}>Member Offers</div>
             <div className="logo-subtitle">Curated · Exclusive</div>
           </div>
         </div>
@@ -44,14 +44,18 @@ export default function PromotionsPage() {
             ))}
           </div>
         ) : promotions.length === 0 ? (
-          <div className="text-center py-16">
-            <p className="text-3xl mb-3">🎁</p>
-            <p className="font-sans font-black text-xl text-green-900 mb-2">
-              No offers right now
+          <div className="flex flex-col items-center text-center px-8 py-16">
+            <div
+              className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl mb-5"
+              style={{ background: 'rgba(133,187,101,0.1)', border: '1.5px solid rgba(133,187,101,0.2)' }}
+            >
+              🎁
+            </div>
+            <p className="font-sans font-black text-xl text-green-900 mb-2">No offers right now</p>
+            <p className="text-sm text-green-900/45 leading-relaxed max-w-xs">
+              Exclusive member offers and partner deals will appear here when they become available.
             </p>
-            <p className="text-sm text-green-900/45">
-              Check back soon — new member offers are added regularly.
-            </p>
+            <p className="text-xs text-green-900/25 mt-4">New offers are added regularly — check back soon.</p>
           </div>
         ) : (
           promotions.map((p) => <PromoCard key={p.id} promo={p} onTap={() => router.push(`/more/promotions/${p.id}`)} />)

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { createClient } from '@/lib/supabase'
 import { AdminPageHeader, AdminTable, AdminTr, AdminTd, Badge, AdminButton } from '@/components/admin/AdminUI'
 import { formatBookingDate, formatRelativeTime, capitalizeName } from '@/lib/utils'
@@ -39,7 +39,7 @@ const BADGE_MAP: Record<GuestAccessStatus, { label: string; colour: 'yellow' | '
 }
 
 export default function AdminGuestAccessPage() {
-  const { user } = useAuthStore()
+  const { user } = useProfile()
   const [requests, setRequests] = useState<GuestAccessRow[]>([])
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<string | null>(null)

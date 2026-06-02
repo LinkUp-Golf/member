@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import AppShell from '@/components/layout/AppShell'
 import { formatBookingDate } from '@/lib/utils'
 import type { Promotion } from '@/types'
 
 export default function PromotionDetailPage() {
-  const { user } = useAuthStore()
+  const { user } = useProfile()
   const params = useParams()
   const id = params['id'] as string
 
@@ -34,7 +34,7 @@ export default function PromotionDetailPage() {
       header={
         <div className="top-bar flex items-center justify-between">
           <div>
-            <div className="logo-text">Member Offer</div>
+            <div className="font-sans font-black text-2xl" style={{ color: 'var(--color-gold)' }}>Member Offer</div>
           </div>
         </div>
       }

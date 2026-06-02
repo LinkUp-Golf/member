@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import AppShell from '@/components/layout/AppShell'
 import { Spinner } from '@/components/ui/Loading'
+import EmptyState from '@/components/ui/EmptyState'
 import { getBookingDates, formatTeeTime, cn } from '@/lib/utils'
 import { format, isSameDay } from 'date-fns'
 import type { Booking } from '@/types'
@@ -19,7 +20,7 @@ interface Slot {
 type Step = 'select' | 'confirm' | 'success'
 
 export default function BookPage() {
-  const { user } = useAuthStore()
+  const { user } = useProfile()
 
   const [dates] = useState(() => getBookingDates())
   const [selectedDate, setSelectedDate] = useState<Date>(dates[0] ?? new Date())
@@ -183,9 +184,9 @@ export default function BookPage() {
                 <Spinner className="text-green-700" />
               </div>
             ) : slots.length === 0 ? (
-              <p className="text-sm italic text-center py-10" style={{ color: 'rgba(0,38,105,0.35)' }}>
-                No tee times available for this date.
-              </p>
+              <div className="py-4">
+                <EmptyState icon="⛳" title="No tee times available" description="There are no open slots for this date. Try another day." />
+              </div>
             ) : (
               <div className="space-y-2">
                 {slots.some(s => parseInt(s.startTime.split('T')[1] ?? '0') < 12) && (
@@ -458,9 +459,7 @@ function MyBookingsTab({ bookings, onRefresh }: { bookings: Booking[]; onRefresh
   return (
     <div className="px-5 py-5 pb-8">
       {upcoming.length === 0 && past.length === 0 && (
-        <p className="text-center text-sm italic py-10" style={{ color: 'rgba(0,38,105,0.38)' }}>
-          No bookings yet. Book your first round above.
-        </p>
+        <EmptyState icon="🗓️" title="No bookings yet" description="Book your first round using the tee time selector above." />
       )}
 
       {upcoming.length > 0 && (

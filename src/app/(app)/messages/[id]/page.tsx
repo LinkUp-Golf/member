@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { capitalizeName } from '@/lib/utils'
 import AppShell from '@/components/layout/AppShell'
 import Avatar from '@/components/ui/Avatar'
@@ -17,7 +17,7 @@ import { useTypingIndicator } from '@/hooks/useTypingIndicator'
 
 export default function ChatPage() {
   const { id } = useParams<{ id: string }>()
-  const { user } = useAuthStore()
+  const { user, profile } = useProfile()
 
   const { conversation, loading: convLoading, markAsRead } = useConversation(id, user?.id ?? null)
 
@@ -26,8 +26,8 @@ export default function ChatPage() {
 
   const { isOnline } = usePresence(id, user?.id ?? null)
 
-  const currentUserName = user
-    ? capitalizeName(user.member.first_name)
+  const currentUserName = profile
+    ? capitalizeName(profile.first_name)
     : ''
 
   const { typingUsers, sendTyping, stopTyping } = useTypingIndicator(
@@ -80,9 +80,9 @@ export default function ChatPage() {
   // ---- Send handler -----------------------------------------
   async function handleSend(body: string) {
     return sendMessage(body, {
-      firstName: user?.member.first_name ?? '',
-      lastName: user?.member.last_name ?? '',
-      avatarUrl: user?.member.profile?.avatar_url ?? null,
+      firstName: profile?.first_name ?? '',
+      lastName: profile?.last_name ?? '',
+      avatarUrl: profile?.profile?.avatar_url ?? null,
     })
   }
 
@@ -116,7 +116,7 @@ export default function ChatPage() {
 
             {/* Name + status */}
             <div className="min-w-0">
-              <p className="text-sm font-medium text-white truncate">{convName}</p>
+              <p className="text-sm font-black text-white truncate">{convName}</p>
               <p className="text-xs text-white/40">
                 {conversation?.type === 'direct'
                   ? isOtherOnline ? 'Online' : 'Offline'

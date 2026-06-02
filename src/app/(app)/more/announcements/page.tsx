@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import AppShell from '@/components/layout/AppShell'
 import { CardSkeleton } from '@/components/ui/Loading'
@@ -28,7 +28,7 @@ const TYPE_LABELS: Record<string, string> = {
 }
 
 export default function AnnouncementsPage() {
-  const { user } = useAuthStore()
+  const { user } = useProfile()
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -47,7 +47,7 @@ export default function AnnouncementsPage() {
       header={
         <div className="top-bar flex items-center justify-between">
           <div>
-            <div className="logo-text">Announcements</div>
+            <div className="font-sans font-black text-2xl" style={{ color: 'var(--color-gold)' }}>Announcements</div>
             <div className="logo-subtitle">Community updates</div>
           </div>
         </div>
@@ -59,10 +59,18 @@ export default function AnnouncementsPage() {
             {[1, 2, 3, 4].map(i => <CardSkeleton key={i} lines={2} />)}
           </div>
         ) : announcements.length === 0 ? (
-          <div className="text-center py-16 px-8">
-            <p className="text-3xl mb-3">📢</p>
-            <p className="font-sans font-black text-xl text-green-900 mb-2">No announcements yet</p>
-            <p className="text-sm text-green-900/45">Community announcements will appear here.</p>
+          <div className="flex flex-col items-center text-center px-8 py-16">
+            <div
+              className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl mb-5"
+              style={{ background: 'rgba(0,38,105,0.06)', border: '1.5px solid rgba(0,38,105,0.08)' }}
+            >
+              📢
+            </div>
+            <p className="font-sans font-black text-xl text-green-900 mb-2">Nothing posted yet</p>
+            <p className="text-sm text-green-900/45 leading-relaxed max-w-xs">
+              Your club coordinator will post course news, member updates, and community highlights here.
+            </p>
+            <p className="text-xs text-green-900/25 mt-4">Check back soon — announcements will appear as they&apos;re published.</p>
           </div>
         ) : (
           <div className="px-5 space-y-2.5">
@@ -81,7 +89,7 @@ export default function AnnouncementsPage() {
                       {formatRelativeTime(a.published_at ?? a.created_at)}
                     </span>
                   </div>
-                  <p className="text-sm font-medium text-green-900 leading-snug line-clamp-2">{a.title}</p>
+                  <p className="text-sm font-black text-green-900 leading-snug line-clamp-2">{a.title}</p>
                   <p className="text-xs mt-1 text-green-900/55 leading-relaxed line-clamp-2">{a.body}</p>
                 </div>
                 <AnnouncementThumbnail announcement={a} />

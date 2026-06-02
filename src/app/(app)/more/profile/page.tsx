@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useAuthStore } from '@/store/auth'
+import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import { capitalizeName } from '@/lib/utils'
 import Avatar from '@/components/ui/Avatar'
@@ -11,16 +11,16 @@ import { INDUSTRY_CATEGORIES } from '@/types'
 import type { MemberProfile } from '@/types'
 
 export default function MyProfilePage() {
-  const { user, refreshMember } = useAuthStore()
+  const { user, profile, refetch } = useProfile()
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState<Partial<MemberProfile>>({})
 
   useEffect(() => {
-    if (user?.member?.profile) {
-      setForm(user.member.profile)
+    if (profile?.profile) {
+      setForm(profile.profile)
     }
-  }, [user])
+  }, [profile])
 
   function set(field: keyof MemberProfile, value: unknown) {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -49,14 +49,14 @@ export default function MyProfilePage() {
     })
 
     if (!response.error) {
-      await refreshMember()
+      await refetch()
       setEditing(false)
     }
     setSaving(false)
   }
 
-  if (!user) return null
-  const m = user.member
+  if (!user || !profile) return null
+  const m = profile
 
   return (
     <AppShell title="Profile" description="Your member details">
