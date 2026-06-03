@@ -140,9 +140,57 @@ export function useMessages(conversationId: string, currentUserId: string | null
     return sendMessage(body, sender)
   }, [sendMessage])
 
+  // ---- Edit a message ----------------------------------------
+  const editMessage = useCallback(async (messageId: string, newBody: string): Promise<boolean> => {
+    if (!newBody.trim()) return false
+
+    const res = await apiClient.patch<MessageWithSender>(
+      `/api/conversations/${conversationId}/messages/${messageId}`,
+      { body: newBody.trim() }
+    )
+
+    if (res.error || !res.data) return false
+
+    const updated = res.data
+    setMessages(prev =>
+      prev.map(m => m.id === messageId
+        ? { ...m, body: updated.body, edited_at: updated.edited_at }
+        : m
+      )
+    )
+
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'message_updated',
+      payload: updated,
+    })
+
+    return true
+  }, [conversationId])
+
+  // ---- Delete a message (soft delete) ------------------------
+  const deleteMessage = useCallback(async (messageId: string): Promise<boolean> => {
+    const res = await apiClient.delete<{ id: string; deleted_at: string }>(
+      `/api/conversations/${conversationId}/messages/${messageId}`
+    )
+
+    if (res.error || !res.data) return false
+
+    const deletedAt = res.data.deleted_at
+    setMessages(prev =>
+      prev.map(m => m.id === messageId ? { ...m, deleted_at: deletedAt } : m)
+    )
+
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'message_deleted',
+      payload: { id: messageId, deleted_at: deletedAt },
+    })
+
+    return true
+  }, [conversationId])
+
   // ---- Realtime subscription ---------------------------------
-  // Primary: broadcast (fast, no RLS dependency)
-  // Backup:  postgres_changes (works once RLS fix migration is applied)
   useEffect(() => {
     if (!currentUserId) return
 
@@ -159,8 +207,25 @@ export function useMessages(conversationId: string, currentUserId: string | null
         if (msg.sender_id === currentUserId) return
         addMessage(msg)
       })
-      // Backup: postgres CDC for cases where broadcast wasn't sent
-      // (e.g. sender on another device / tab, or a future server-side trigger)
+      // Receive edits broadcast by the editor
+      .on('broadcast', { event: 'message_updated' }, ({ payload }) => {
+        const msg = payload as MessageWithSender
+        if (msg.sender_id === currentUserId) return // already applied locally
+        setMessages(prev =>
+          prev.map(m => m.id === msg.id
+            ? { ...m, body: msg.body, edited_at: msg.edited_at }
+            : m
+          )
+        )
+      })
+      // Receive deletions broadcast by the deleter
+      .on('broadcast', { event: 'message_deleted' }, ({ payload }) => {
+        const { id, deleted_at } = payload as { id: string; deleted_at: string }
+        setMessages(prev =>
+          prev.map(m => m.id === id ? { ...m, deleted_at } : m)
+        )
+      })
+      // Backup: postgres CDC for new messages (other devices/tabs)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
@@ -170,7 +235,6 @@ export function useMessages(conversationId: string, currentUserId: string | null
         const newId = payload.new.id as string
         if (knownIds.current.has(newId)) return
 
-        // Fetch the full row with sender join via the API (uses admin client server-side)
         const res = await apiClient.get<{ messages: MessageWithSender[] }>(
           `/api/conversations/${conversationId}/messages?limit=1&before=${encodeURIComponent(
             new Date(Date.now() + 1000).toISOString()
@@ -178,6 +242,21 @@ export function useMessages(conversationId: string, currentUserId: string | null
         )
         const msg = res.data?.messages.find(m => m.id === newId)
         if (msg) addMessage(msg)
+      })
+      // Backup: postgres CDC for edits/deletes (other devices/tabs)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages',
+        filter: `conversation_id=eq.${conversationId}`,
+      }, (payload) => {
+        const row = payload.new as { id: string; body: string; edited_at: string | null; deleted_at: string | null }
+        setMessages(prev =>
+          prev.map(m => m.id === row.id
+            ? { ...m, body: row.body, edited_at: row.edited_at, deleted_at: row.deleted_at }
+            : m
+          )
+        )
       })
       .subscribe()
 
@@ -197,5 +276,7 @@ export function useMessages(conversationId: string, currentUserId: string | null
     loadMore,
     sendMessage,
     retryMessage,
+    editMessage,
+    deleteMessage,
   }
 }

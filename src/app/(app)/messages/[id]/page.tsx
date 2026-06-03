@@ -10,6 +10,7 @@ import { Spinner } from '@/components/ui/Loading'
 import { MessageList } from '@/components/messages/MessageList'
 import { MessageInput } from '@/components/messages/MessageInput'
 import { PresenceIndicator } from '@/components/messages/PresenceIndicator'
+import { GroupMembersPanel } from '@/components/messages/GroupMembersPanel'
 import { useMessages } from '@/hooks/useMessages'
 import { useConversation } from '@/hooks/useConversation'
 import { usePresence } from '@/hooks/usePresence'
@@ -19,16 +20,23 @@ export default function ChatPage() {
   const { id } = useParams<{ id: string }>()
   const { user, profile } = useProfile()
 
-  const { conversation, loading: convLoading, markAsRead } = useConversation(id, user?.id ?? null)
+  const { conversation, loading: convLoading, markAsRead, reload } = useConversation(id, user?.id ?? null)
 
-  const { messages, loading: msgsLoading, loadingMore, hasMore, loadMore, sendMessage } =
-    useMessages(id, user?.id ?? null)
+  const {
+    messages,
+    loading: msgsLoading,
+    loadingMore,
+    hasMore,
+    loadMore,
+    sendMessage,
+    retryMessage,
+    editMessage,
+    deleteMessage,
+  } = useMessages(id, user?.id ?? null)
 
   const { isOnline } = usePresence(id, user?.id ?? null)
 
-  const currentUserName = profile
-    ? capitalizeName(profile.first_name)
-    : ''
+  const currentUserName = profile ? capitalizeName(profile.first_name) : ''
 
   const { typingUsers, sendTyping, stopTyping } = useTypingIndicator(
     id,
@@ -36,7 +44,8 @@ export default function ChatPage() {
     currentUserName
   )
 
-  // Measure the actual bottom-nav height for pixel-perfect input placement.
+  const [membersOpen, setMembersOpen] = useState(false)
+
   const [navHeight, setNavHeight] = useState(0)
   const inputBarRef = useRef<HTMLDivElement>(null)
 
@@ -50,7 +59,6 @@ export default function ChatPage() {
     return () => window.removeEventListener('resize', measure)
   }, [])
 
-  // Mark conversation as read each time we open it or new messages arrive
   useEffect(() => {
     if (user && messages.length > 0) markAsRead()
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -70,16 +78,27 @@ export default function ChatPage() {
 
   const isOtherOnline = headerParticipant ? isOnline(headerParticipant.member?.id ?? '') : false
 
-  // Map other participant IDs → last_read_at for the "Seen" indicator
   const otherReadAt = Object.fromEntries(
     otherParticipants.filter(p => p.member?.id).map(p => [p.member.id, p.last_read_at])
   )
 
   const typingNames = typingUsers.map(u => u.name)
 
-  // ---- Send handler -----------------------------------------
+  // Whether the current user is a moderator in this group conversation
+  const myParticipant = conversation?.participants.find(p => p.member?.id === user?.id)
+  const isModerator = conversation?.type === 'group' && myParticipant?.role === 'moderator'
+
+  // ---- Handlers ----------------------------------------------
   async function handleSend(body: string) {
     return sendMessage(body, {
+      firstName: profile?.first_name ?? '',
+      lastName: profile?.last_name ?? '',
+      avatarUrl: profile?.profile?.avatar_url ?? null,
+    })
+  }
+
+  function handleRetry(tempId: string, body: string) {
+    retryMessage(tempId, body, {
       firstName: profile?.first_name ?? '',
       lastName: profile?.last_name ?? '',
       avatarUrl: profile?.profile?.avatar_url ?? null,
@@ -89,93 +108,115 @@ export default function ChatPage() {
   const isLoading = convLoading || msgsLoading
 
   return (
-    <AppShell
-      header={
-        <div className="top-bar flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            {/* Avatar with presence dot */}
-            <div className="relative flex-shrink-0">
-              {headerParticipant?.member ? (
-                <Avatar
-                  firstName={headerParticipant.member.first_name}
-                  lastName={headerParticipant.member.last_name}
-                  avatarUrl={headerParticipant.member.profile?.avatar_url}
-                  size="sm"
-                />
-              ) : (
-                <div className="w-9 h-9 rounded-full bg-green-700 flex items-center justify-center text-gold text-sm font-serif">
-                  #
-                </div>
-              )}
-              {conversation?.type === 'direct' && (
-                <div className="absolute -bottom-0.5 -right-0.5">
-                  <PresenceIndicator online={isOtherOnline} />
-                </div>
-              )}
+    <>
+      <AppShell
+        header={
+          <div className="top-bar flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              {/* Avatar with presence dot */}
+              <div className="relative flex-shrink-0">
+                {headerParticipant?.member ? (
+                  <Avatar
+                    firstName={headerParticipant.member.first_name}
+                    lastName={headerParticipant.member.last_name}
+                    avatarUrl={headerParticipant.member.profile?.avatar_url}
+                    size="sm"
+                  />
+                ) : (
+                  <div className="w-9 h-9 rounded-full bg-green-700 flex items-center justify-center text-gold text-sm font-serif">
+                    #
+                  </div>
+                )}
+                {conversation?.type === 'direct' && (
+                  <div className="absolute -bottom-0.5 -right-0.5">
+                    <PresenceIndicator online={isOtherOnline} />
+                  </div>
+                )}
+              </div>
+
+              {/* Name + status */}
+              <div className="min-w-0">
+                <p className="text-sm font-black text-white truncate">{convName}</p>
+                <p className="text-xs text-white/40">
+                  {conversation?.type === 'direct'
+                    ? isOtherOnline ? 'Online' : 'Offline'
+                    : `${conversation?.participants.length ?? 0} members`}
+                </p>
+              </div>
             </div>
 
-            {/* Name + status */}
-            <div className="min-w-0">
-              <p className="text-sm font-black text-white truncate">{convName}</p>
-              <p className="text-xs text-white/40">
-                {conversation?.type === 'direct'
-                  ? isOtherOnline ? 'Online' : 'Offline'
-                  : `${conversation?.participants.length ?? 0} members`}
-              </p>
-            </div>
+            {/* Group settings button — group chats only */}
+            {conversation?.type === 'group' && (
+              <button
+                onClick={() => setMembersOpen(true)}
+                className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+                aria-label="Group settings"
+              >
+                <SettingsIcon />
+              </button>
+            )}
           </div>
-
+        }
+      >
+        <div
+          className="px-4 pt-4 min-h-full"
+          style={{ background: '#F4F1E8', paddingBottom: navHeight + 80 }}
+        >
+          {isLoading ? (
+            <div className="flex justify-center pt-8">
+              <Spinner className="text-green-700" />
+            </div>
+          ) : messages.length === 0 ? (
+            <EmptyState name={convName} />
+          ) : (
+            <MessageList
+              messages={messages}
+              currentUserId={user?.id ?? ''}
+              isGroup={conversation?.type === 'group'}
+              isModerator={isModerator}
+              otherParticipantsReadAt={otherReadAt}
+              typingNames={typingNames}
+              loadingMore={loadingMore}
+              hasMore={hasMore}
+              onLoadMore={loadMore}
+              onEdit={editMessage}
+              onDelete={deleteMessage}
+              onRetry={handleRetry}
+            />
+          )}
         </div>
-      }
-    >
-      {/* Messages — padding-bottom accounts for nav + input bar so the last
-          message is never hidden behind either fixed element. */}
-      <div
-        className="px-4 pt-4 min-h-full"
-        style={{ background: '#F4F1E8', paddingBottom: navHeight + 80 }}
-      >
-        {isLoading ? (
-          <div className="flex justify-center pt-8">
-            <Spinner className="text-green-700" />
-          </div>
-        ) : messages.length === 0 ? (
-          <EmptyState name={convName} />
-        ) : (
-          <MessageList
-            messages={messages}
-            currentUserId={user?.id ?? ''}
-            isGroup={conversation?.type === 'group'}
-            otherParticipantsReadAt={otherReadAt}
-            typingNames={typingNames}
-            loadingMore={loadingMore}
-            hasMore={hasMore}
-            onLoadMore={loadMore}
-          />
-        )}
-      </div>
 
-      {/* Input bar — fixed above the bottom nav on mobile, flush to the
-          bottom on tablet+ (sidebar handles the left offset).
-          z-30 keeps it above the sticky top-bar (z-20).
-          bottom is set via inline style using the measured navHeight so there
-          is no gap between the input and the nav on any device. */}
-      <div
-        ref={inputBarRef}
-        className="fixed left-0 right-0 z-30 md:left-[var(--sidebar-width)] lg:left-[var(--sidebar-width-lg)]"
-        style={{ bottom: navHeight }}
-      >
-        <MessageInput
-          placeholder={
-            conversation?.type === 'group'
-              ? 'Message group…'
-              : `Message ${capitalizeName(headerParticipant?.member?.first_name ?? '')}…`
-          }
-          onSend={handleSend}
-          onTypingStart={sendTyping}
-          onTypingStop={stopTyping}
+        <div
+          ref={inputBarRef}
+          className="fixed left-0 right-0 z-30 md:left-[var(--sidebar-width)] lg:left-[var(--sidebar-width-lg)]"
+          style={{ bottom: navHeight }}
+        >
+          <MessageInput
+            placeholder={
+              conversation?.type === 'group'
+                ? 'Message group…'
+                : `Message ${capitalizeName(headerParticipant?.member?.first_name ?? '')}…`
+            }
+            onSend={handleSend}
+            onTypingStart={sendTyping}
+            onTypingStop={stopTyping}
+          />
+        </div>
+      </AppShell>
+
+      {/* Group members panel */}
+      {conversation?.type === 'group' && user?.id && (
+        <GroupMembersPanel
+          conversationId={id}
+          currentUserId={user.id}
+          isModerator={!!isModerator}
+          open={membersOpen}
+          onClose={() => setMembersOpen(false)}
+          conversationName={conversation.name}
+          onNameChange={reload}
         />
-      </div>
-    </AppShell>
+      )}
+    </>
   )
 }
 
@@ -196,3 +237,15 @@ function EmptyState({ name }: { name: string }) {
   )
 }
 
+function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+      />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}

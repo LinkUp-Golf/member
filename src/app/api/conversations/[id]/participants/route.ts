@@ -1,0 +1,48 @@
+export const dynamic = 'force-dynamic'
+
+import type { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
+import { withAuth } from '@/lib/auth/with-auth'
+import { createAdminClient } from '@/lib/supabase-server'
+import type { AuthContext } from '@/lib/auth/types'
+
+// GET /api/conversations/[id]/participants
+// Returns all participants with roles and join dates.
+// Available to any participant; used by the group members panel.
+export const GET = withAuth(async (
+  _req: NextRequest,
+  ctx: AuthContext,
+  routeCtx?: { params: Record<string, string> }
+) => {
+  const convId = routeCtx?.params?.['id']
+  if (!convId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
+  const admin = createAdminClient()
+
+  // Verify caller is a participant
+  const { data: myParticipant } = await admin
+    .from('conversation_participants')
+    .select('role')
+    .eq('conversation_id', convId)
+    .eq('member_id', ctx.userId)
+    .single()
+
+  if (!myParticipant) return NextResponse.json({ error: 'Not a participant' }, { status: 403 })
+
+  const { data, error } = await admin
+    .from('conversation_participants')
+    .select(`
+      role,
+      joined_at,
+      member:members(
+        id, first_name, last_name,
+        profile:member_profiles(avatar_url)
+      )
+    `)
+    .eq('conversation_id', convId)
+    .order('joined_at', { ascending: true })
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json(data ?? [])
+})

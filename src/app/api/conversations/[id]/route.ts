@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import type { AuthContext } from '@/lib/auth/types'
-import type { ConversationWithDetails, MessageWithSender } from '@/types'
+import type { ConversationWithDetails, MessageWithSender, ParticipantRole } from '@/types'
 
 // GET /api/conversations/[id]
 export const GET = withAuth(async (
@@ -21,7 +21,7 @@ export const GET = withAuth(async (
   // Verify participation
   const { data: myParticipation } = await admin
     .from('conversation_participants')
-    .select('last_read_at')
+    .select('last_read_at, role')
     .eq('conversation_id', convId)
     .eq('member_id', ctx.userId)
     .single()
@@ -37,6 +37,7 @@ export const GET = withAuth(async (
       id, type, name, course_id, created_by, created_at, updated_at,
       participants:conversation_participants(
         last_read_at,
+        role,
         member:members(
           id, first_name, last_name,
           profile:member_profiles(avatar_url)
@@ -81,6 +82,7 @@ export const GET = withAuth(async (
 
   type RawParticipant = {
     last_read_at: string | null
+    role: string
     member: { id: string; first_name: string; last_name: string; profile: { avatar_url: string | null } | null } | null
   }
   const participants = (conv.participants ?? []) as unknown as RawParticipant[]
@@ -92,10 +94,51 @@ export const GET = withAuth(async (
       .map(cp => ({
         member: cp.member,
         last_read_at: cp.last_read_at,
+        role: (cp.role ?? 'member') as ParticipantRole,
       })),
     last_message: lastMessage,
     unread_count: hasUnread ? 1 : 0,
   }
 
   return NextResponse.json(result)
+})
+
+// PATCH /api/conversations/[id]
+// Update the group name. Only moderators can rename a group.
+export const PATCH = withAuth(async (
+  req: NextRequest,
+  ctx: AuthContext,
+  routeCtx?: { params: Record<string, string> }
+) => {
+  const convId = routeCtx?.params?.['id']
+  if (!convId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
+  const { name } = await req.json() as { name: string }
+  const trimmed = name?.trim() ?? ''
+  if (trimmed.length > 100) {
+    return NextResponse.json({ error: 'Group name must be 100 characters or less' }, { status: 400 })
+  }
+
+  const admin = createAdminClient()
+
+  const { data: myParticipant } = await admin
+    .from('conversation_participants')
+    .select('role')
+    .eq('conversation_id', convId)
+    .eq('member_id', ctx.userId)
+    .single()
+
+  if (!myParticipant) return NextResponse.json({ error: 'Not a participant' }, { status: 403 })
+  if (myParticipant.role !== 'moderator') {
+    return NextResponse.json({ error: 'Only moderators can rename the group' }, { status: 403 })
+  }
+
+  const { error } = await admin
+    .from('conversations')
+    .update({ name: trimmed || null })
+    .eq('id', convId)
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json({ name: trimmed || null })
 })

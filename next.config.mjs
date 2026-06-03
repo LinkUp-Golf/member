@@ -1,3 +1,7 @@
+import { createRequire } from 'module'
+
+const require = createRequire(import.meta.url)
+
 const withPWA = require('next-pwa')({
   dest: 'public',
   register: false,
@@ -32,6 +36,17 @@ const withBundleAnalyzer = require('@next/bundle-analyzer')({
 const nextConfig = {
   reactStrictMode: true,
 
+  async redirects() {
+    return [
+      {
+        source: '/:path*',
+        has: [{ type: 'host', value: 'member-one-hazel.vercel.app' }],
+        destination: 'https://app.linkup.golf/:path*',
+        permanent: true,
+      },
+    ]
+  },
+
   // Remove X-Powered-By header — minor hardening + saves a response header byte
   poweredByHeader: false,
 
@@ -65,4 +80,4 @@ const nextConfig = {
   },
 }
 
-module.exports = withBundleAnalyzer(withPWA(nextConfig))
+export default withBundleAnalyzer(withPWA(nextConfig))

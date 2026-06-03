@@ -9,23 +9,30 @@ interface Props {
   messages: OptimisticMessage[]
   currentUserId: string
   isGroup?: boolean
-  // Maps other participant user IDs → their last_read_at timestamp
+  isModerator?: boolean
   otherParticipantsReadAt?: Record<string, string | null>
   typingNames?: string[]
   loadingMore?: boolean
   hasMore?: boolean
   onLoadMore?: () => void
+  onEdit?: (messageId: string, newBody: string) => Promise<boolean>
+  onDelete?: (messageId: string) => Promise<boolean>
+  onRetry?: (tempId: string, body: string) => void
 }
 
 export function MessageList({
   messages,
   currentUserId,
   isGroup,
+  isModerator,
   otherParticipantsReadAt = {},
   typingNames = [],
   loadingMore,
   hasMore,
   onLoadMore,
+  onEdit,
+  onDelete,
+  onRetry,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const topSentinelRef = useRef<HTMLDivElement>(null)
@@ -53,13 +60,12 @@ export function MessageList({
     const { scrollTop, scrollHeight, clientHeight } = container
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight
 
-    // Auto-scroll only if the user is within 150 px of the bottom
     if (distanceFromBottom < 150) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
   }, [messages.length])
 
-  // Infinite-scroll sentinel: fire onLoadMore when the top sentinel enters the viewport
+  // Infinite-scroll sentinel
   useEffect(() => {
     if (!hasMore || !onLoadMore) return
     const sentinel = topSentinelRef.current
@@ -73,7 +79,7 @@ export function MessageList({
     return () => observer.disconnect()
   }, [hasMore, onLoadMore])
 
-  // Determine the last confirmed (non-pending) message sent by me that others have seen
+  // Determine the last confirmed message from me that others have seen
   const lastConfirmedByMe = [...messages]
     .reverse()
     .find(m => m.sender_id === currentUserId && !m.pending && !m.failed && !m.tempId)
@@ -92,7 +98,6 @@ export function MessageList({
 
   return (
     <div className="flex flex-col min-h-full">
-      {/* Top sentinel for infinite scroll */}
       {hasMore && <div ref={topSentinelRef} className="h-px" />}
 
       {loadingMore && (
@@ -108,11 +113,8 @@ export function MessageList({
             const isMe = msg.sender_id === currentUserId
             const prevMsg = dayMsgs[i - 1]
             const nextMsg = dayMsgs[i + 1]
-            // Show avatar/name on the first bubble in a consecutive run from the same sender
             const showSenderInfo = i === 0 || prevMsg?.sender_id !== msg.sender_id
-            // "Seen" label only on the last confirmed message from me that was read
             const isSeen = isMe && msg.id === lastSeenId
-            // Collapse bottom margin when next bubble is from the same sender
             const isSameRunContinues = !!nextMsg && nextMsg.sender_id === msg.sender_id
 
             return (
@@ -123,6 +125,10 @@ export function MessageList({
                   showSenderInfo={showSenderInfo}
                   isSeen={isSeen}
                   isGroup={isGroup}
+                  isModerator={isModerator}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onRetry={onRetry}
                 />
               </div>
             )
@@ -136,7 +142,6 @@ export function MessageList({
         </div>
       )}
 
-      {/* Scroll anchor */}
       <div ref={bottomRef} />
     </div>
   )
