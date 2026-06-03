@@ -18,6 +18,7 @@ export const POST = withAuth(
       image_url?: string | null
       video_url?: string | null
       media_urls?: string[]
+      focus_linkup_categories?: string[]
     }
 
     if (!body.title?.trim() || !body.body?.trim() || !body.course_id) {
@@ -36,6 +37,7 @@ export const POST = withAuth(
       image_url: body.image_url ?? null,
       video_url: body.video_url ?? null,
       media_urls: body.media_urls ?? [],
+      focus_linkup_categories: body.focus_linkup_categories ?? [],
     }).select().single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

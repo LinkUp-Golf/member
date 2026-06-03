@@ -27,25 +27,42 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   const limit = parseInt(req.nextUrl.searchParams.get('limit') ?? '50', 10)
   const cache = getCache(COURSE_ANN_NS)
   const key   = courseAnnKey(courseId, limit)
+  const admin = createAdminClient()
 
-  const data = await withCache(
-    cache,
-    key,
-    async () => {
-      const admin = createAdminClient()
-      const { data, error } = await admin
-        .from('announcements')
-        .select('*')
-        .eq('course_id', courseId)
-        .eq('status', 'published')
-        .order('published_at', { ascending: false })
-        .limit(limit)
+  const [allAnnouncements, subscriptionsResult] = await Promise.all([
+    withCache(
+      cache,
+      key,
+      async () => {
+        const { data, error } = await admin
+          .from('announcements')
+          .select('*')
+          .eq('course_id', courseId)
+          .eq('status', 'published')
+          .order('published_at', { ascending: false })
+          .limit(limit)
 
-      if (error) throw new Error(error.message)
-      return data ?? []
-    },
-    COURSE_ANN_TTL_MS
+        if (error) throw new Error(error.message)
+        return data ?? []
+      },
+      COURSE_ANN_TTL_MS
+    ),
+    admin
+      .from('focus_linkup_subscriptions')
+      .select('industry_focus')
+      .eq('member_id', ctx.memberId),
+  ])
+
+  const subscribedCategories = new Set(
+    (subscriptionsResult.data ?? []).map((s: { industry_focus: string }) => s.industry_focus)
   )
+
+  const data = allAnnouncements.filter((a: { type: string; focus_linkup_categories?: string[] }) => {
+    if (a.type !== 'focus_linkup') return true
+    const cats = a.focus_linkup_categories
+    if (!cats?.length) return true
+    return cats.some((c: string) => subscribedCategories.has(c))
+  })
 
   return NextResponse.json(data)
 })

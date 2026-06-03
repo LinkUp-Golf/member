@@ -89,8 +89,8 @@ export default function FocusLinkupsPage() {
                     role="switch"
                     aria-checked={isSubscribed}
                   >
-                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                      isSubscribed ? 'translate-x-5' : 'translate-x-0.5'
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${
+                      isSubscribed ? 'translate-x-5' : 'translate-x-0'
                     }`} />
                   </button>
                 )}

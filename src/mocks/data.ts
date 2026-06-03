@@ -240,6 +240,7 @@ export const mockAnnouncements: Announcement[] = [
     image_url: null,
     video_url: null,
     media_urls: [],
+    focus_linkup_categories: [],
     created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
   },
   {
@@ -256,6 +257,7 @@ export const mockAnnouncements: Announcement[] = [
     image_url: null,
     video_url: null,
     media_urls: [],
+    focus_linkup_categories: [],
     created_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
   },
   {
@@ -272,6 +274,7 @@ export const mockAnnouncements: Announcement[] = [
     image_url: null,
     video_url: null,
     media_urls: [],
+    focus_linkup_categories: [],
     created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
   },
 ]

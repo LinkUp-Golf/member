@@ -17,6 +17,7 @@ import {
 import FormField from "@/components/admin/FormField";
 import { formatRelativeTime, capitalizeName } from "@/lib/utils";
 import MultiMediaUpload, { type MediaFile } from "@/components/ui/MultiMediaUpload";
+import { INDUSTRY_CATEGORIES } from "@/types";
 import type { AnnouncementType, ModerationStatus } from "@/types";
 
 interface AnnouncementRow {
@@ -30,6 +31,7 @@ interface AnnouncementRow {
   image_url: string | null;
   video_url: string | null;
   media_urls: string[];
+  focus_linkup_categories: string[];
   author: { first_name: string; last_name: string } | null;
 }
 
@@ -40,6 +42,7 @@ interface AnnouncementPayload {
   image_url: string | null;
   video_url: string | null;
   media_urls: string[];
+  focus_linkup_categories: string[];
 }
 
 const TYPE_OPTIONS = [
@@ -287,6 +290,7 @@ function AnnouncementForm({
   const {
     register,
     handleSubmit: rhfSubmit,
+    watch,
     formState: { errors, isSubmitting },
     setError: _setFieldError,
   } = useForm<AnnouncementFormValues>({
@@ -297,12 +301,22 @@ function AnnouncementForm({
     },
   })
 
+  const watchedType = watch('type')
+  const [focusCategories, setFocusCategories] = useState<string[]>(
+    () => initial?.focus_linkup_categories ?? []
+  )
   const [mediaFiles, setMediaFiles] = useState<MediaFile[]>(() => initial ? initMediaFiles(initial) : [])
   const [uploadStatus, setUploadStatus] = useState<string | null>(null)
   const [serverError, setServerError] = useState<string | null>(null)
 
   const isEditing = !!initial
   const saving = isSubmitting
+
+  function toggleFocusCategory(cat: string) {
+    setFocusCategories(prev =>
+      prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
+    )
+  }
 
   function handleCancel() {
     mediaFiles.forEach(f => { if (f.file) URL.revokeObjectURL(f.previewUrl) })
@@ -349,6 +363,7 @@ function AnnouncementForm({
         image_url: resolved.find(m => m.mediaType === 'image')?.url ?? null,
         video_url: resolved.find(m => m.mediaType === 'video')?.url ?? null,
         media_urls: resolved.map(m => m.url),
+        focus_linkup_categories: values.type === 'focus_linkup' ? focusCategories : [],
       })
       if (err) { await cleanup(); setServerError(err) }
     } catch (e) {
@@ -375,6 +390,33 @@ function AnnouncementForm({
               {TYPE_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
           </FormField>
+
+          {watchedType === 'focus_linkup' && (
+            <FormField label="Target audience" htmlFor="focus-cats">
+              <p className="text-xs text-gray-400 mb-2">
+                Select the Focus LinkUp categories to notify. Leave empty to send to all members.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {INDUSTRY_CATEGORIES.map(cat => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => toggleFocusCategory(cat)}
+                    className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                      focusCategories.includes(cat)
+                        ? 'bg-green-900 text-white border-green-900'
+                        : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+              {focusCategories.length === 0 && (
+                <p className="text-xs text-amber-600 mt-1.5">No categories selected — announcement will reach all members.</p>
+              )}
+            </FormField>
+          )}
 
           <FormField label="Title" htmlFor="broadcast-title" required error={errors.title?.message}>
             <input
@@ -414,7 +456,9 @@ function AnnouncementForm({
 
           {!isEditing && (
             <p className="text-xs text-gray-400">
-              This will be published immediately and visible to all Aviara members.
+              {watchedType === 'focus_linkup' && focusCategories.length > 0
+                ? `Only members subscribed to: ${focusCategories.join(', ')} will see this.`
+                : 'This will be published immediately and visible to all Aviara members.'}
             </p>
           )}
 

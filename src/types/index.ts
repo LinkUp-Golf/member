@@ -209,6 +209,7 @@ export interface Announcement {
   image_url: string | null
   video_url: string | null
   media_urls: string[]
+  focus_linkup_categories: string[]
   created_at: string
 }
 
