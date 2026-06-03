@@ -14,10 +14,13 @@ export const PATCH = withAuth(async (
 ) => {
   const supabase = createRouteHandlerClient(cookies())
 
+  const id = routeCtx?.params?.['id']
+  if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
   const { error } = await supabase
     .from('bookings')
     .update({ status: 'cancelled' })
-    .eq('id', routeCtx!.params.id)
+    .eq('id', id)
     .eq('member_id', ctx.userId)   // RLS + explicit ownership check
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

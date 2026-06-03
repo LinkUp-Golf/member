@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useProfile } from "@/hooks/useProfile"
 import { apiClient } from "@/lib/api-client";
@@ -76,7 +77,11 @@ function PromoCard({ promo, onTap }: { promo: Promotion; onTap?: () => void }) {
         const isVideo = ['mp4', 'webm', 'mov', 'quicktime'].includes(ext)
         return isVideo
           ? <video src={url} muted playsInline className="w-full max-h-56 object-contain bg-black rounded-t-2xl" />
-          : <img src={url} alt="" className="w-full max-h-56 object-contain bg-black rounded-t-2xl" />
+          : (
+              <div className="relative w-full h-56 bg-black rounded-t-2xl overflow-hidden">
+                <Image src={url} alt="" fill className="object-contain" />
+              </div>
+            )
       })()}
       <div className="p-5">
         <p

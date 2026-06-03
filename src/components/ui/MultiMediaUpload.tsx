@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
+import Image from 'next/image'
 
 const ACCEPT = 'image/jpeg,image/jpg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime'
 const MAX_IMAGE = 10 * 1024 * 1024   // 10 MB
@@ -106,7 +107,7 @@ export default function MultiMediaUpload({
               className="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200 bg-black flex-shrink-0"
             >
               {f.mediaType === 'image' ? (
-                <img src={f.previewUrl} alt="" className="w-full h-full object-cover" />
+                <Image src={f.previewUrl} alt="" fill className="object-cover" unoptimized />
               ) : (
                 <video src={f.previewUrl} className="w-full h-full object-cover" muted playsInline />
               )}

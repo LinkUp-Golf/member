@@ -27,7 +27,7 @@ export const GET = withAuth(async (
   ctx: AuthContext,
   routeCtx?: { params: Record<string, string> }
 ) => {
-  const memberId = routeCtx!.params['id'] ?? ''
+  const memberId = routeCtx?.params?.['id']
   if (!memberId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
   const cache    = getCache(MEMBER_DETAIL_NS)
 

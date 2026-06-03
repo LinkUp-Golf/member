@@ -22,10 +22,11 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   if (!ctx.homeCourseId) {
     return NextResponse.json({ error: 'Member not found' }, { status: 404 })
   }
+  const courseId = ctx.homeCourseId
 
   const limit = parseInt(req.nextUrl.searchParams.get('limit') ?? '50', 10)
   const cache = getCache(COURSE_ANN_NS)
-  const key   = courseAnnKey(ctx.homeCourseId, limit)
+  const key   = courseAnnKey(courseId, limit)
 
   const data = await withCache(
     cache,
@@ -35,7 +36,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
       const { data, error } = await admin
         .from('announcements')
         .select('*')
-        .eq('course_id', ctx.homeCourseId!)
+        .eq('course_id', courseId)
         .eq('status', 'published')
         .order('published_at', { ascending: false })
         .limit(limit)

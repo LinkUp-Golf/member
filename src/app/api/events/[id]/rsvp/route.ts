@@ -21,10 +21,13 @@ export const POST = withAuth(async (
     return NextResponse.json({ error: 'Invalid RSVP status' }, { status: 400 })
   }
 
+  const eventId = routeCtx?.params?.['id']
+  if (!eventId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
   const { data, error } = await supabase
     .from('member_event_rsvps')
     .upsert(
-      { event_id: routeCtx!.params.id, member_id: ctx.userId, status },
+      { event_id: eventId, member_id: ctx.userId, status },
       { onConflict: 'event_id,member_id' }
     )
     .select()

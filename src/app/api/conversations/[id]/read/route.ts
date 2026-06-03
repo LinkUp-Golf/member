@@ -15,10 +15,13 @@ export const PATCH = withAuth(async (
 ) => {
   const supabase = createRouteHandlerClient(cookies())
 
+  const convId = routeCtx?.params?.['id']
+  if (!convId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
   const { error } = await supabase
     .from('conversation_participants')
     .update({ last_read_at: new Date().toISOString() })
-    .eq('conversation_id', routeCtx!.params.id)
+    .eq('conversation_id', convId)
     .eq('member_id', ctx.userId)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

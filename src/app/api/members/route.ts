@@ -30,16 +30,15 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   if (!ctx.homeCourseId) {
     return NextResponse.json({ error: 'Member not found' }, { status: 404 })
   }
+  const courseId = ctx.homeCourseId
 
   const { searchParams } = req.nextUrl
   const limit      = parseInt(searchParams.get('limit') ?? '0', 10)
   const excludeSelf = searchParams.get('exclude_self') === 'true'
   const orderBy    = searchParams.get('order') === 'created_at' ? 'created_at' : 'first_name'
 
-  // Cache key encodes all variant dimensions so different query shapes
-  // don't collide and don't accidentally share data.
   const cacheKey = courseMembersKey(
-    ctx.homeCourseId,
+    courseId,
     `${orderBy}:excl${excludeSelf ? '1' : '0'}`,
     limit
   )
@@ -54,7 +53,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
       let query = admin
         .from('members')
         .select('*, profile:member_profiles(*), home_course:courses(*)')
-        .eq('home_course_id', ctx.homeCourseId!)
+        .eq('home_course_id', courseId)
         .eq('membership_status', 'active')
         .order(orderBy, { ascending: orderBy === 'first_name' })
 

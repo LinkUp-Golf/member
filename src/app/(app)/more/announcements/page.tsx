@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
@@ -114,7 +115,7 @@ function AnnouncementThumbnail({ announcement }: { announcement: Announcement })
       {isVideo ? (
         <video src={url} className="w-full h-full object-cover" muted playsInline />
       ) : (
-        <img src={url} alt="" className="w-full h-full object-cover" />
+        <Image src={url} alt="" fill className="object-cover" />
       )}
       {count > 1 && (
         <div className="absolute bottom-1 right-1 flex items-center gap-0.5 text-[9px] font-semibold text-white px-1.5 py-0.5 rounded-full leading-none"

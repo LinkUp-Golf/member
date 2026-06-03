@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Image from 'next/image'
 import { useParams } from 'next/navigation'
 import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
@@ -161,12 +162,9 @@ function MediaCarousel({
           {items.map((item, i) => (
             <div key={i} className="flex-shrink-0 w-full">
               {item.type === 'image' ? (
-                <img
-                  src={item.url}
-                  alt=""
-                  className="w-full max-h-72 object-contain block"
-                  draggable={false}
-                />
+                <div className="relative w-full h-72">
+                  <Image src={item.url} alt="" fill className="object-contain" />
+                </div>
               ) : (
                 <video
                   src={item.url}

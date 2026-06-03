@@ -17,7 +17,9 @@ export const GET = withAuth(async (
   ctx: AuthContext,
   routeCtx?: { params: Record<string, string> }
 ) => {
-  const convId = routeCtx!.params.id
+  const convId = routeCtx?.params?.['id']
+  if (!convId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
   const admin = createAdminClient()
 
   const { searchParams } = new URL(req.url)
@@ -65,7 +67,9 @@ export const POST = withAuth(async (
   ctx: AuthContext,
   routeCtx?: { params: Record<string, string> }
 ) => {
-  const convId = routeCtx!.params.id
+  const convId = routeCtx?.params?.['id']
+  if (!convId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
   const admin = createAdminClient()
   // Session client only for the auth.getUser() path already done by withAuth.
   // We keep a reference for cookie forwarding but use admin for DB writes.

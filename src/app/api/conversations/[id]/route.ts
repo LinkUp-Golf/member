@@ -13,7 +13,9 @@ export const GET = withAuth(async (
   ctx: AuthContext,
   routeCtx?: { params: Record<string, string> }
 ) => {
-  const convId = routeCtx!.params.id
+  const convId = routeCtx?.params?.['id']
+  if (!convId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
   const admin = createAdminClient()
 
   // Verify participation

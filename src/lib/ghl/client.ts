@@ -11,7 +11,7 @@ import type { GHLContact, GHLCalendarEvent, GHLBookingSlot } from '@/types'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
 import { logger } from '@/lib/logger'
 
-const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID!
+const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID ?? ''
 const GHL_BASE_URL = 'https://services.leadconnectorhq.com'
 
 // ---- SDK client (singleton) ---------------------------------

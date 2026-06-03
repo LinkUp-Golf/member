@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
+import Image from 'next/image'
 import { createClient } from '@/lib/supabase'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024  // 10 MB
@@ -116,10 +117,13 @@ export default function MediaUpload({
       {value ? (
         <div className="relative rounded-xl overflow-hidden border border-gray-200">
           {mediaType === 'image' ? (
-            <img
+            <Image
               src={value}
               alt="Preview"
+              width={600}
+              height={208}
               className="w-full max-h-52 object-cover"
+              unoptimized
             />
           ) : (
             <video

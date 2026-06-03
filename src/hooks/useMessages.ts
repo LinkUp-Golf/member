@@ -117,9 +117,10 @@ export function useMessages(conversationId: string, currentUserId: string | null
     }
 
     // Replace optimistic with the confirmed message
-    knownIds.current.add(res.data.id)
+    const confirmed = res.data
+    knownIds.current.add(confirmed.id)
     setMessages(prev =>
-      prev.map(m => m.tempId === tempId ? { ...res.data!, pending: false, failed: false } : m)
+      prev.map(m => m.tempId === tempId ? { ...confirmed, pending: false, failed: false } : m)
     )
 
     // Broadcast to the channel so the other participant receives it immediately,

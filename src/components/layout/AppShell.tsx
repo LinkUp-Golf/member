@@ -27,7 +27,7 @@ export default function AppShell({
   return (
     <>
       {showHeader && (
-        header ?? <Header title={title!} description={description} end={end} />
+        header ?? <Header title={title ?? ''} description={description} end={end} />
       )}
       {children}
     </>

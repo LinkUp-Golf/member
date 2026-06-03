@@ -127,7 +127,6 @@ export async function middleware(request: NextRequest) {
       } else if (!member?.is_admin) {
         const redirectResponse = NextResponse.redirect(new URL('/home', request.url))
         redirectResponse.headers.set('X-Request-Id', requestId)
-        console.log("hahahahahaha", member)
         return redirectResponse
       }
     }

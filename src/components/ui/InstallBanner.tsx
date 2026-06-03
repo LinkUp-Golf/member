@@ -29,11 +29,6 @@ export default function InstallBanner() {
 
   if (!visible) return null;
 
-  const platformLabel =
-    platform === "ios-safari" || platform === "ios-other"
-      ? "iPhone"
-      : "Android";
-
   return (
     <div className="mx-4 my-2 relative">
       <button

@@ -167,7 +167,7 @@ export const mockMembers: MemberWithProfile[] = [
   { ...buildMember(MOCK_MEMBER_5_ID, 'Diana', 'Okafor', 'diana@axiomhealth.com', false, '2024-03-15T00:00:00Z'), profile: profiles[MOCK_MEMBER_5_ID] ?? null, home_course: mockCourse },
 ]
 
-export const mockCurrentUser = mockMembers[0]!
+export const mockCurrentUser = mockMembers[0] as MemberWithProfile
 
 // ---- Course memberships ----------------------------------------
 export const mockCourseMemberships: CourseMembership[] = [
@@ -188,7 +188,7 @@ export const mockCourseMemberships: CourseMembership[] = [
 const futureDate = (daysFromNow: number) => {
   const d = new Date()
   d.setDate(d.getDate() + daysFromNow)
-  return d.toISOString().split('T')[0]!
+  return d.toISOString().split('T')[0] ?? ''
 }
 
 export const mockBookings: Booking[] = [
@@ -285,7 +285,7 @@ export const mockPromotions: Promotion[] = [
     description: 'Present your LinkUp Golf membership card at the pro shop to receive a complimentary premium cart upgrade on your next round. Valid through end of season.',
     partner_name: 'Park Hyatt Aviara',
     badge_label: 'Member Exclusive',
-    expires_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]!,
+    expires_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] ?? '',
     cta_label: 'Claim Offer',
     cta_url: null,
     active: true,
@@ -372,7 +372,7 @@ export const mockFocusLinkups: FocusLinkup[] = [
     course_id: MOCK_COURSE_ID,
     title: 'Real Estate & Capital Providers LinkUp',
     description: 'A curated round connecting real estate operators with capital providers. Limited to 8 members.',
-    focus_date: futureDate(14)!,
+    focus_date: futureDate(14),
     tee_time: '07:00:00',
     industry_focus: ['Real Estate', 'Capital Provider'],
     notification_sent_2w: false,
@@ -384,7 +384,7 @@ export const mockFocusLinkups: FocusLinkup[] = [
     course_id: MOCK_COURSE_ID,
     title: 'Healthcare & Technology LinkUp',
     description: 'Connecting healthcare operators with technology partners and investors.',
-    focus_date: futureDate(28)!,
+    focus_date: futureDate(28),
     tee_time: '08:00:00',
     industry_focus: ['Healthcare / Life Sciences', 'Technology'],
     notification_sent_2w: false,
@@ -400,8 +400,8 @@ export const mockGuestAccessRequests: GuestAccessRequest[] = [
     requesting_member_id: MOCK_USER_ID,
     target_course_id: MOCK_COURSE_ID,
     reason: 'Visiting San Diego for a conference next month.',
-    visit_from: futureDate(30)!,
-    visit_until: futureDate(33)!,
+    visit_from: futureDate(30),
+    visit_until: futureDate(33),
     location_verified: false,
     status: 'pending',
     reviewed_by: null,

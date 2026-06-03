@@ -22,10 +22,11 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
   if (!ctx.homeCourseId) {
     return NextResponse.json({ error: 'Member not found' }, { status: 404 })
   }
+  const courseId = ctx.homeCourseId
 
   const today  = new Date().toISOString().slice(0, 10)
   const cache  = getCache(COURSE_LINKUPS_NS)
-  const key    = courseLinkupsKey(ctx.homeCourseId)
+  const key    = courseLinkupsKey(courseId)
 
   // Fetch linkups (shared, cached) and subscriptions (user-specific, fresh) in parallel.
   const [linkups, subsRes] = await Promise.all([
@@ -37,7 +38,7 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
         const { data, error } = await admin
           .from('focus_linkups')
           .select('*')
-          .eq('course_id', ctx.homeCourseId!)
+          .eq('course_id', courseId)
           .gte('focus_date', today)
           .order('focus_date', { ascending: true })
           .limit(10)

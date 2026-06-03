@@ -154,7 +154,7 @@ function groupByDate(messages: OptimisticMessage[]) {
       currentDate = date
       groups.push({ date, messages: [] })
     }
-    groups[groups.length - 1]!.messages.push(msg)
+    groups.at(-1)?.messages.push(msg)
   }
 
   return groups

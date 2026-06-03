@@ -180,8 +180,12 @@ function createCache(): (namespace: string) => ICache {
   // In-memory: one MemoryCache per namespace.
   const memMap = new Map<string, MemoryCache>()
   return (namespace: string): ICache => {
-    if (!memMap.has(namespace)) memMap.set(namespace, new MemoryCache())
-    return memMap.get(namespace)!
+    let c = memMap.get(namespace)
+    if (!c) {
+      c = new MemoryCache()
+      memMap.set(namespace, c)
+    }
+    return c
   }
 }
 

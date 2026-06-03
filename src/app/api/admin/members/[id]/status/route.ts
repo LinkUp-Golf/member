@@ -10,7 +10,8 @@ type StatusAction = 'active' | 'suspended' | 'cancelled' | 'waitlist' | 'pending
 
 export const PATCH = withAuth(
   async (req: NextRequest, ctx: AuthContext, routeCtx?: { params: Record<string, string> }) => {
-    const memberId = routeCtx!.params.id
+    const memberId = routeCtx?.params?.['id']
+    if (!memberId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
     const body = await req.json() as { status: StatusAction }
     const { status } = body
 
