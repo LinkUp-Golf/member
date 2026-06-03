@@ -19,6 +19,9 @@ export type CourseSlug = (typeof COURSE_TAG_MAP)[CourseTag]
 /** All tags that grant any course access */
 export const ALL_ACCESS_TAGS = Object.keys(COURSE_TAG_MAP) as CourseTag[]
 
+/** Unique course slugs across all access tags — use this instead of hardcoding a slug. */
+export const COURSE_SLUGS = [...new Set(Object.values(COURSE_TAG_MAP))] as CourseSlug[]
+
 /** Returns true if a tag grants access to any course */
 export function isAccessTag(tag: string): tag is CourseTag {
   return tag in COURSE_TAG_MAP

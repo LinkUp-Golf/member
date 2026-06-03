@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
+import { COURSE_SLUGS } from "@/lib/ghl/tags";
 import {
   AdminPageHeader,
   StatCard,
@@ -52,18 +53,17 @@ export default function AdminDashboard() {
   async function loadDashboard() {
     const supabase = createClient();
 
-    // Get the Aviara course
-    const { data: course } = await supabase
+    const { data: courses } = await supabase
       .from("courses")
       .select("id, max_members, max_rounds_per_month, reserved_rounds")
-      .eq("slug", "aviara")
-      .single();
+      .in("slug", COURSE_SLUGS);
 
-    if (!course) {
+    if (!courses?.length) {
       setLoading(false);
       return;
     }
 
+    const courseIds = courses.map(c => c.id);
     const monthStart = format(startOfMonth(new Date()), "yyyy-MM-dd");
     const monthEnd = format(endOfMonth(new Date()), "yyyy-MM-dd");
 
@@ -80,39 +80,39 @@ export default function AdminDashboard() {
       supabase
         .from("members")
         .select("id", { count: "exact" })
-        .eq("home_course_id", course.id)
+        .in("home_course_id", courseIds)
         .eq("membership_status", "active"),
       supabase
         .from("members")
         .select("id", { count: "exact" })
-        .eq("home_course_id", course.id)
+        .in("home_course_id", courseIds)
         .eq("membership_status", "waitlist"),
       supabase
         .from("members")
         .select("id", { count: "exact" })
-        .eq("home_course_id", course.id)
+        .in("home_course_id", courseIds)
         .eq("membership_status", "pending"),
       supabase
         .from("bookings")
         .select("id", { count: "exact" })
-        .eq("course_id", course.id)
+        .in("course_id", courseIds)
         .eq("status", "confirmed")
         .gte("booking_date", monthStart)
         .lte("booking_date", monthEnd),
       supabase
         .from("announcements")
         .select("id", { count: "exact" })
-        .eq("course_id", course.id)
+        .in("course_id", courseIds)
         .eq("status", "pending_review"),
       supabase
         .from("guest_access_requests")
         .select("id", { count: "exact" })
-        .eq("target_course_id", course.id)
+        .in("target_course_id", courseIds)
         .eq("status", "pending"),
       supabase
         .from("members")
         .select("id, first_name, last_name, created_at, membership_status")
-        .eq("home_course_id", course.id)
+        .in("home_course_id", courseIds)
         .order("created_at", { ascending: false })
         .limit(5),
       supabase
@@ -120,11 +120,14 @@ export default function AdminDashboard() {
         .select(
           "id, booking_date, tee_time, amount_charged, member:members(first_name, last_name)",
         )
-        .eq("course_id", course.id)
+        .in("course_id", courseIds)
         .eq("status", "confirmed")
         .order("booking_date", { ascending: false })
         .limit(5),
     ]);
+
+    const maxRounds = courses.reduce((sum, c) => sum + c.max_rounds_per_month - c.reserved_rounds, 0);
+    const reservedRounds = courses.reduce((sum, c) => sum + c.reserved_rounds, 0);
 
     setData({
       totalMembers: membersRes.count ?? 0,
@@ -132,8 +135,8 @@ export default function AdminDashboard() {
       waitlistCount: waitlistRes.count ?? 0,
       pendingCount: pendingRes.count ?? 0,
       roundsThisMonth: roundsRes.count ?? 0,
-      maxRounds: course.max_rounds_per_month - course.reserved_rounds,
-      reservedRounds: course.reserved_rounds,
+      maxRounds,
+      reservedRounds,
       pendingModeration: moderationRes.count ?? 0,
       pendingGuestAccess: guestRes.count ?? 0,
       recentMembers: recentMembersRes.data ?? [],

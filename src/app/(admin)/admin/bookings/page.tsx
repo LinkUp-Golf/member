@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
+import { COURSE_SLUGS } from '@/lib/ghl/tags'
 import {
   AdminPageHeader, StatCard, AdminTable, AdminTr, AdminTd,
   ProgressBar, AdminCard, AdminButton,
@@ -44,18 +45,21 @@ export default function AdminBookingsPage() {
     const monthStart = format(startOfMonth(month), 'yyyy-MM-dd')
     const monthEnd = format(endOfMonth(month), 'yyyy-MM-dd')
 
-    const { data: course } = await supabase
+    const { data: courses } = await supabase
       .from('courses')
       .select('id, max_rounds_per_month, reserved_rounds')
-      .eq('slug', 'aviara')
-      .single()
+      .in('slug', COURSE_SLUGS)
 
-    setCourseData(course)
+    const courseIds = (courses ?? []).map(c => c.id)
+    setCourseData(courses?.length ? {
+      max_rounds_per_month: courses.reduce((sum, c) => sum + c.max_rounds_per_month, 0),
+      reserved_rounds: courses.reduce((sum, c) => sum + c.reserved_rounds, 0),
+    } : null)
 
     const { data } = await supabase
       .from('bookings')
       .select('id, booking_date, tee_time, players, guest_name, status, amount_charged, admin_notes, member:members(first_name, last_name, email)')
-      .eq('course_id', course?.id)
+      .in('course_id', courseIds)
       .gte('booking_date', monthStart)
       .lte('booking_date', monthEnd)
       .order('booking_date', { ascending: false })

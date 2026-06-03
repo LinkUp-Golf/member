@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase";
+import { COURSE_SLUGS } from "@/lib/ghl/tags";
 import {
   AdminPageHeader,
   AdminTable,
@@ -26,12 +27,12 @@ export default function AdminFocusLinkupsPage() {
 
   async function loadData() {
     const supabase = createClient();
-    const { data: course } = await supabase
+    const { data: courses } = await supabase
       .from("courses")
       .select("id")
-      .eq("slug", "aviara")
-      .single();
-    if (course) setCourseId(course.id);
+      .in("slug", COURSE_SLUGS);
+    const courseIds = (courses ?? []).map(c => c.id);
+    if (courseIds[0]) setCourseId(courseIds[0]);
 
     const { data } = await supabase
       .from("focus_linkups")

@@ -6,6 +6,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { useProfile } from '@/hooks/useProfile'
 import { createClient } from '@/lib/supabase'
+import { COURSE_SLUGS } from '@/lib/ghl/tags'
 import { cn } from '@/lib/utils'
 import { FullScreenLoader } from '@/components/ui/Loading'
 
@@ -158,17 +159,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const fetchCounts = useCallback(async () => {
     const supabase = createClient()
-    const { data: course } = await supabase
+    const { data: courses } = await supabase
       .from('courses')
       .select('id')
-      .eq('slug', 'aviara')
-      .single()
-    if (!course) return
+      .in('slug', COURSE_SLUGS)
+    if (!courses?.length) return
+    const courseIds = courses.map(c => c.id)
     const [modRes, guestRes] = await Promise.all([
       supabase.from('announcements').select('id', { count: 'exact', head: true })
-        .eq('course_id', course.id).eq('status', 'pending_review'),
+        .in('course_id', courseIds).eq('status', 'pending_review'),
       supabase.from('guest_access_requests').select('id', { count: 'exact', head: true })
-        .eq('target_course_id', course.id).eq('status', 'pending'),
+        .in('target_course_id', courseIds).eq('status', 'pending'),
     ])
     setPendingCount(modRes.count ?? 0)
     setGuestCount(guestRes.count ?? 0)
