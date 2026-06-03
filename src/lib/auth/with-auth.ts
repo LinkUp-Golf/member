@@ -32,7 +32,16 @@ import {
   toErrorResponse,
   ErrorCode,
 } from '@/lib/errors/app-error'
+import { getCache } from '@/lib/cache'
+import { MEMBER_ROW_NS, MEMBER_ROW_TTL_MS, memberRowKey } from '@/lib/cache/keys'
 import type { AuthContext } from './types'
+
+// Shape stored in the member row cache
+interface CachedMemberRow {
+  ghl_contact_id: string
+  is_admin: boolean
+  home_course_id: string | null
+}
 
 interface WithAuthOptions {
   /** If true, require is_admin=true on the member row */
@@ -92,22 +101,38 @@ export function withAuth(
       throw new RateLimitError(Math.ceil((limit.resetAt - Date.now()) / 1000))
     }
 
-    // ---- 3. Load member row --------------------------------
-    let member: { id: string; ghl_contact_id: string; is_admin: boolean } | null = null
+    // ---- 3. Load member row (cached 5 min) -----------------
+    // Also fetches home_course_id so downstream routes don't
+    // need a second DB query for the same field.
+    let member: { id: string; ghl_contact_id: string; is_admin: boolean; home_course_id: string | null } | null = null
     try {
-      const { data, error } = await supabase
-        .from('members')
-        .select('id, ghl_contact_id, is_admin')
-        .eq('id', userId)
-        .single()
+      const memberCache = getCache(MEMBER_ROW_NS)
+      const cached = await memberCache.get<CachedMemberRow>(memberRowKey(userId))
 
-      if (error || !data) {
-        authLog.warn('Member row not found', { action: 'member_lookup' })
-        auditLog('SESSION_EXPIRED', { requestId, userId })
-        throw new AuthError('Member not found', ErrorCode.UNAUTHENTICATED)
+      if (cached) {
+        member = { id: userId, ...cached }
+      } else {
+        const { data, error } = await supabase
+          .from('members')
+          .select('id, ghl_contact_id, is_admin, home_course_id')
+          .eq('id', userId)
+          .single()
+
+        if (error || !data) {
+          authLog.warn('Member row not found', { action: 'member_lookup' })
+          auditLog('SESSION_EXPIRED', { requestId, userId })
+          throw new AuthError('Member not found', ErrorCode.UNAUTHENTICATED)
+        }
+
+        member = data
+        // Cache only the fields we need — not the full row
+        const toCache: CachedMemberRow = {
+          ghl_contact_id: data.ghl_contact_id,
+          is_admin: data.is_admin,
+          home_course_id: data.home_course_id,
+        }
+        await memberCache.set(memberRowKey(userId), toCache, MEMBER_ROW_TTL_MS).catch(() => {})
       }
-
-      member = data
     } catch (err) {
       if (err instanceof AuthError) {
         return errorResponse(err.statusCode, err.code, err.message, requestId)
@@ -158,6 +183,7 @@ export function withAuth(
       memberId: member.id,
       ghlContactId: member.ghl_contact_id,
       isAdmin: member.is_admin,
+      homeCourseId: member.home_course_id,
     }
 
     try {

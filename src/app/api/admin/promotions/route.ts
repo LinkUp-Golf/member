@@ -4,6 +4,8 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
+import { getCache } from '@/lib/cache'
+import { COURSE_PROMO_NS, coursePromoPrefix } from '@/lib/cache/keys'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(
@@ -48,6 +50,16 @@ export const POST = withAuth(
     }).select().single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+    // Promotions can be course-specific (course_id set) or global (null).
+    // Bust the specific course cache when scoped, or all course caches when global.
+    if (data.course_id) {
+      await getCache(COURSE_PROMO_NS).clear(coursePromoPrefix(data.course_id)).catch(() => {})
+    } else {
+      // Global promotion — affects every course's list. Clear the entire namespace.
+      await getCache(COURSE_PROMO_NS).clear('course:promo:').catch(() => {})
+    }
+
     return NextResponse.json(data, { status: 201 })
   },
   { requireAdmin: true, skipGHLCheck: true }

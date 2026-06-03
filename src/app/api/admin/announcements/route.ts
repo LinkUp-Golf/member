@@ -4,6 +4,8 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
+import { getCache } from '@/lib/cache'
+import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(
@@ -37,6 +39,10 @@ export const POST = withAuth(
     }).select().single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+    // Invalidate all cached variants for this course's announcements.
+    await getCache(COURSE_ANN_NS).clear(courseAnnPrefix(body.course_id)).catch(() => {})
+
     return NextResponse.json(data, { status: 201 })
   },
   { requireAdmin: true, skipGHLCheck: true }

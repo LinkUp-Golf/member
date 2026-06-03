@@ -2,35 +2,52 @@ export const dynamic = 'force-dynamic'
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
-import { createRouteHandlerClient } from '@/lib/supabase-server'
+import { createAdminClient } from '@/lib/supabase-server'
+import { getCache, withCache } from '@/lib/cache'
+import {
+  COURSE_PROMO_NS,
+  COURSE_PROMO_TTL_MS,
+  coursePromoKey,
+} from '@/lib/cache/keys'
 import type { AuthContext } from '@/lib/auth/types'
 
 // GET /api/promotions
 // ?limit=n   — max results (default: all)
+//
+// Cache strategy: per-course, 30-min TTL.
+// Promotions are admin-managed and change infrequently.
+// Cached data is the same for all course members.
+// Invalidated by admin create/update/delete.
 export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
-  const supabase = createRouteHandlerClient(cookies())
-  const limit = parseInt(req.nextUrl.searchParams.get('limit') ?? '0', 10)
-
-  const { data: member } = await supabase
-    .from('members').select('home_course_id').eq('id', ctx.userId).single()
-
-  if (!member?.home_course_id) {
+  if (!ctx.homeCourseId) {
     return NextResponse.json({ error: 'Member not found' }, { status: 404 })
   }
 
-  let query = supabase
-    .from('promotions')
-    .select('*')
-    .eq('active', true)
-    .or(`course_id.is.null,course_id.eq.${member.home_course_id}`)
-    .order('sort_order', { ascending: true })
+  const limit = parseInt(req.nextUrl.searchParams.get('limit') ?? '0', 10)
+  const cache = getCache(COURSE_PROMO_NS)
+  const key   = coursePromoKey(ctx.homeCourseId, limit)
 
-  if (limit > 0) query = query.limit(limit)
+  const data = await withCache(
+    cache,
+    key,
+    async () => {
+      const admin = createAdminClient()
+      let query = admin
+        .from('promotions')
+        .select('*')
+        .eq('active', true)
+        .or(`course_id.is.null,course_id.eq.${ctx.homeCourseId}`)
+        .order('sort_order', { ascending: true })
 
-  const { data, error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      if (limit > 0) query = query.limit(limit)
+
+      const { data, error } = await query
+      if (error) throw new Error(error.message)
+      return data ?? []
+    },
+    COURSE_PROMO_TTL_MS
+  )
 
   return NextResponse.json(data)
 })

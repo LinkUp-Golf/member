@@ -15,6 +15,8 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { createBooking, chargeForBooking } from '@/lib/ghl/client'
+import { getCache } from '@/lib/cache'
+import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
 import { format, differenceInDays } from 'date-fns'
 
 const BOOKING_PRICE_CENTS = 16000     // $160.00
@@ -180,6 +182,9 @@ export async function POST(request: NextRequest) {
         status: 'published',
         published_at: new Date().toISOString(),
       })
+
+    // Booking auto-posts a community announcement — bust that course's cache.
+    await getCache(COURSE_ANN_NS).clear(courseAnnPrefix(member.home_course_id)).catch(() => {})
 
     return NextResponse.json({
       bookingId: pendingBooking.id,

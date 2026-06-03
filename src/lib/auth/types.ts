@@ -15,6 +15,8 @@ export interface AuthContext {
   ghlContactId: string
   /** Whether the member has is_admin=true in the members table */
   isAdmin: boolean
+  /** The member's home course ID — null for members not yet assigned a course */
+  homeCourseId: string | null
 }
 
 export interface GHLAuthorizationResult {

@@ -5,6 +5,8 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createRouteHandlerClient } from '@/lib/supabase-server'
+import { getCache } from '@/lib/cache'
+import { MEMBER_DETAIL_NS, memberDetailKey } from '@/lib/cache/keys'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
@@ -47,6 +49,9 @@ export const PATCH = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Invalidate the cached member detail so other members see the updated profile.
+  await getCache(MEMBER_DETAIL_NS).delete(memberDetailKey(ctx.userId)).catch(() => {})
 
   return NextResponse.json(data)
 })
