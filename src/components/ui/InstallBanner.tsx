@@ -30,46 +30,46 @@ export default function InstallBanner() {
   if (!visible) return null;
 
   const platformLabel =
-    platform === "ios-safari" || platform === "ios-other" ? "iPhone" : "Android";
+    platform === "ios-safari" || platform === "ios-other"
+      ? "iPhone"
+      : "Android";
 
   return (
-    <div
-      className="mx-4 mb-2 rounded-2xl border flex items-center gap-3 px-4 py-3.5"
-      style={{ borderColor: "rgba(133,187,101,0.25)", background: "#f9f8f3" }}
-    >
-      <Image
-        src="/linkup-golf.webp"
-        alt="LinkUp Golf"
-        width={38}
-        height={38}
-        className="rounded-xl flex-shrink-0"
-      />
-
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold" style={{ color: "#1A2E1A" }}>
-          Install LinkUp Golf
-        </p>
-        <p className="text-xs mt-0.5" style={{ color: "rgba(0,0,0,0.4)" }}>
-          Add the app to your {platformLabel} home screen
-        </p>
-      </div>
-
-      <Link
-        href="/install"
-        className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold text-white whitespace-nowrap"
-        style={{ background: "#1A2E1A" }}
-      >
-        Installation Guide
-      </Link>
-
+    <div className="mx-4 my-2 relative">
       <button
         onClick={dismiss}
-        className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-sm font-medium"
+        className="absolute top-2.5 right-2.5 z-10 w-5 h-5 flex items-center justify-center rounded-full text-xs font-medium"
         style={{ background: "rgba(0,0,0,0.06)", color: "rgba(0,0,0,0.35)" }}
         aria-label="Dismiss"
       >
         ×
       </button>
+
+      <Link
+        href="/install"
+        className="flex items-center gap-3 rounded-2xl border px-4 py-3.5 pr-8"
+        style={{ borderColor: "rgba(133,187,101,0.25)", background: "#f9f8f3" }}
+      >
+        <Image
+          src="/linkup-golf.webp"
+          alt="LinkUp Golf"
+          width={38}
+          height={38}
+          className="rounded-xl flex-shrink-0"
+        />
+
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold" style={{ color: "#1A2E1A" }}>
+            Install LinkUp Golf
+          </p>
+          <p
+            className="text-xs mt-0.5 font-medium"
+            style={{ color: "rgba(133,187,101,0.9)" }}
+          >
+            Tap for installation guide →
+          </p>
+        </div>
+      </Link>
     </div>
   );
 }

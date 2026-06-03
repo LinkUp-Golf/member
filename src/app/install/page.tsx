@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useInstallState } from "@/hooks/useInstallState";
 import { useAndroidInstall } from "@/hooks/useAndroidInstall";
 
@@ -16,9 +17,30 @@ export default function InstallPage() {
     >
       {/* Header */}
       <div
-        className="px-6 pt-12 pb-8 text-center"
+        className="px-6 pt-12 pb-8 text-center relative"
         style={{ background: "#0a1f0a" }}
       >
+        <Link
+          href="/home"
+          className="absolute left-4 top-4 flex items-center gap-1.5 text-xs font-medium"
+          style={{ color: "rgba(255,255,255,0.5)" }}
+        >
+          <svg
+            className="w-3.5 h-3.5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M15.75 19.5L8.25 12l7.5-7.5"
+            />
+          </svg>
+          Home
+        </Link>
+
         <div className="flex justify-center mb-4">
           <Image
             src="/logos/logo-white.png"
