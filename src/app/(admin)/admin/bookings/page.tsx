@@ -10,7 +10,7 @@ import {
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns'
 import { formatTeeTime, capitalizeName } from '@/lib/utils'
 
-type BookingStatus = 'confirmed' | 'pending' | 'cancelled' | 'waitlist'
+type BookingStatus = 'tentative' | 'availability_confirmed' | 'payment_confirmed' | 'confirmed' | 'pending' | 'cancelled' | 'waitlist'
 
 interface BookingRow {
   id: string
@@ -21,11 +21,22 @@ interface BookingRow {
   status: BookingStatus
   amount_charged: number
   admin_notes: string | null
+  ghl_opportunity_id: string | null
   member: { first_name: string; last_name: string; email: string } | null
 }
 
-const STATUS_FILTERS = ['all', 'confirmed', 'pending', 'cancelled'] as const
+const STATUS_FILTERS = ['all', 'tentative', 'availability_confirmed', 'payment_confirmed', 'confirmed', 'cancelled'] as const
 type StatusFilter = typeof STATUS_FILTERS[number]
+
+const STATUS_DISPLAY: Record<BookingStatus, { label: string; color: string }> = {
+  tentative:              { label: 'Tentative',           color: 'bg-yellow-50 text-yellow-700' },
+  availability_confirmed: { label: 'Avail. Confirmed',    color: 'bg-blue-50 text-blue-700' },
+  payment_confirmed:      { label: 'Payment Confirmed',   color: 'bg-green-50 text-green-700' },
+  confirmed:              { label: 'Confirmed',           color: 'bg-green-50 text-green-700' },
+  pending:                { label: 'Pending',             color: 'bg-yellow-50 text-yellow-700' },
+  cancelled:              { label: 'Cancelled',           color: 'bg-gray-100 text-gray-500' },
+  waitlist:               { label: 'Waitlist',            color: 'bg-gray-100 text-gray-500' },
+}
 
 export default function AdminBookingsPage() {
   const [bookings, setBookings] = useState<BookingRow[]>([])
@@ -58,7 +69,7 @@ export default function AdminBookingsPage() {
 
     const { data } = await supabase
       .from('bookings')
-      .select('id, booking_date, tee_time, players, guest_name, status, amount_charged, admin_notes, member:members(first_name, last_name, email)')
+      .select('id, booking_date, tee_time, players, guest_name, status, amount_charged, admin_notes, ghl_opportunity_id, member:members(first_name, last_name, email)')
       .in('course_id', courseIds)
       .gte('booking_date', monthStart)
       .lte('booking_date', monthEnd)
@@ -82,14 +93,15 @@ export default function AdminBookingsPage() {
     return bookings.filter(b => {
       const memberName = `${b.member?.first_name ?? ''} ${b.member?.last_name ?? ''} ${b.member?.email ?? ''}`.toLowerCase()
       const matchesSearch = !search || memberName.includes(search.toLowerCase())
-      const matchesStatus = statusFilter === 'all' || b.status === statusFilter
+      const matchesStatus = statusFilter === 'all' || b.status === (statusFilter as BookingStatus)
       return matchesSearch && matchesStatus
     })
   }, [bookings, search, statusFilter])
 
-  const confirmed = bookings.filter(b => b.status === 'confirmed').length
+  const confirmed = bookings.filter(b => ['confirmed', 'payment_confirmed', 'availability_confirmed'].includes(b.status)).length
+  const tentative = bookings.filter(b => b.status === 'tentative').length
   const withGuest = bookings.filter(b => b.guest_name).length
-  const revenue = bookings.filter(b => b.status === 'confirmed').reduce((sum, b) => sum + Number(b.amount_charged), 0)
+  const revenue = bookings.filter(b => ['confirmed', 'payment_confirmed'].includes(b.status)).reduce((sum, b) => sum + Number(b.amount_charged), 0)
   const memberAlloc = courseData ? courseData.max_rounds_per_month - courseData.reserved_rounds : 200
 
   async function saveNote(bookingId: string) {
@@ -152,8 +164,8 @@ export default function AdminBookingsPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
         <StatCard label="Confirmed rounds" value={confirmed} sub={`of ${memberAlloc} member allocation`} colour="green" />
-        <StatCard label="Rounds with guest" value={withGuest} sub="Non-member guests" colour="blue" />
-        <StatCard label="Revenue" value={`$${revenue.toLocaleString()}`} sub="Confirmed payments" colour="green" />
+        <StatCard label="Tentative" value={tentative} sub="Pending availability check" colour="blue" />
+        <StatCard label="Revenue" value={`$${revenue.toLocaleString()}`} sub="Paid bookings" colour="green" />
         <StatCard label="Reserved pool" value={courseData?.reserved_rounds ?? 0} sub="Held for NBD + events" colour="gray" />
       </div>
 
@@ -190,13 +202,13 @@ export default function AdminBookingsPage() {
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                 statusFilter === s
                   ? 'bg-green-900 text-white'
                   : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
               }`}
             >
-              {s}
+              {s === 'all' ? 'All' : (STATUS_DISPLAY[s as BookingStatus]?.label ?? s)}
             </button>
           ))}
         </div>
@@ -226,13 +238,14 @@ export default function AdminBookingsPage() {
             <AdminTd>{b.guest_name ?? <span className="text-gray-300">—</span>}</AdminTd>
             <AdminTd className="font-medium text-green-700">${Number(b.amount_charged).toFixed(0)}</AdminTd>
             <AdminTd>
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                b.status === 'confirmed' ? 'bg-green-50 text-green-700' :
-                b.status === 'pending'   ? 'bg-yellow-50 text-yellow-700' :
-                'bg-gray-100 text-gray-500'
-              }`}>
-                {b.status}
+              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_DISPLAY[b.status]?.color ?? 'bg-gray-100 text-gray-500'}`}>
+                {STATUS_DISPLAY[b.status]?.label ?? b.status}
               </span>
+              {b.ghl_opportunity_id && (
+                <p className="text-[10px] text-gray-400 mt-0.5 font-mono truncate max-w-[120px]" title={b.ghl_opportunity_id}>
+                  {b.ghl_opportunity_id.slice(0, 8)}…
+                </p>
+              )}
             </AdminTd>
             <AdminTd className="max-w-xs">
               {editingNote === b.id ? (

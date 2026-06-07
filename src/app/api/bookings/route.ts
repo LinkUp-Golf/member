@@ -25,7 +25,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
   if (upcoming) {
     query = query
-      .eq('status', 'confirmed')
+      .in('status', ['tentative', 'availability_confirmed', 'payment_confirmed', 'confirmed'])
       .gte('booking_date', new Date().toISOString().slice(0, 10))
   }
 
