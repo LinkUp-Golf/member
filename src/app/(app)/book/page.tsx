@@ -8,6 +8,7 @@ import AppShell from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/Loading";
 import EmptyState from "@/components/ui/EmptyState";
 import { formatTeeTime, cn } from "@/lib/utils";
+import Select from "@/components/ui/Select";
 import {
   format,
   parse,
@@ -305,21 +306,14 @@ export default function BookPage() {
             >
               Timezone
             </span>
-            <select
+            <Select
+              options={timezones.map(tz => ({ value: tz, label: tz.replace(/_/g, ' ') }))}
               value={timezone}
-              onChange={(e) => setTimezone(e.target.value)}
-              className="flex-1 min-w-0 text-xs py-1.5 px-2.5 rounded-xl border bg-white focus:outline-none focus:ring-2 focus:ring-green-900/20 truncate"
-              style={{
-                borderColor: "rgba(0,38,105,0.1)",
-                color: "var(--color-green-900)",
-              }}
-            >
-              {timezones.map((tz) => (
-                <option key={tz} value={tz}>
-                  {tz.replace(/_/g, " ")}
-                </option>
-              ))}
-            </select>
+              onChange={setTimezone}
+              className="flex-1 min-w-0"
+              triggerClassName="w-full flex items-center justify-between gap-1.5 text-xs py-1.5 px-2.5 rounded-xl border border-green-900/10 bg-white text-green-900 focus:outline-none focus:ring-2 focus:ring-green-900/20 truncate"
+              searchPlaceholder="Search timezone…"
+            />
           </div>
 
           {/* Month navigation */}

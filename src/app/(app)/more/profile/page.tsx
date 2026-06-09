@@ -8,6 +8,7 @@ import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
 import AppShell from '@/components/layout/AppShell'
 import { INDUSTRY_CATEGORIES } from '@/types'
+import Select from '@/components/ui/Select'
 import type { MemberProfile } from '@/types'
 
 export default function MyProfilePage() {
@@ -165,16 +166,13 @@ export default function MyProfilePage() {
         {editing && (
           <div className="px-5 py-4 border-b border-green-900/08">
             <p className="text-xs uppercase tracking-widest text-green-900/40 mb-2">Industry category</p>
-            <select
-              className="input"
+            <Select
+              options={INDUSTRY_CATEGORIES.map(c => ({ value: c, label: c }))}
               value={form.industry_category ?? ''}
-              onChange={e => set('industry_category', e.target.value)}
-            >
-              <option value="">Select a category…</option>
-              {INDUSTRY_CATEGORIES.map(c => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
+              onChange={v => set('industry_category', v)}
+              placeholder="Select a category…"
+              searchPlaceholder="Search categories…"
+            />
           </div>
         )}
 

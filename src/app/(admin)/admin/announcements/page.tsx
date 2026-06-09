@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
+import Select from "@/components/ui/Select";
 import { createClient } from "@/lib/supabase";
 import { COURSE_SLUGS } from "@/lib/ghl/tags";
 import {
@@ -291,6 +292,7 @@ function AnnouncementForm({
     register,
     handleSubmit: rhfSubmit,
     watch,
+    control,
     formState: { errors, isSubmitting },
     setError: _setFieldError,
   } = useForm<AnnouncementFormValues>({
@@ -382,13 +384,20 @@ function AnnouncementForm({
       <form onSubmit={rhfSubmit(onValid)} noValidate>
         <div className="space-y-4">
           <FormField label="Announcement type" htmlFor="broadcast-type" required>
-            <select
-              id="broadcast-type"
-              className={inputCls(false)}
-              {...register('type', { required: true })}
-            >
-              {TYPE_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
+            <Controller
+              name="type"
+              control={control}
+              rules={{ required: true }}
+              render={({ field }) => (
+                <Select
+                  id="broadcast-type"
+                  options={TYPE_OPTIONS.map(t => ({ value: t.value, label: t.label }))}
+                  value={field.value}
+                  onChange={field.onChange}
+                  triggerClassName={inputCls(false) + ' flex items-center justify-between gap-2 text-left'}
+                />
+              )}
+            />
           </FormField>
 
           {watchedType === 'focus_linkup' && (
