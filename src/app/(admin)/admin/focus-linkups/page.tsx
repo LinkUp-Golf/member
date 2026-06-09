@@ -15,8 +15,19 @@ import { INDUSTRY_CATEGORIES } from "@/types";
 import { format } from "date-fns";
 import type { FocusLinkup } from "@/types";
 
+interface CustomGroupRequest {
+  id: string
+  custom_label: string
+  status: 'pending' | 'approved' | 'declined'
+  created_at: string
+  member_id: string
+  first_name: string
+  last_name: string
+}
+
 export default function AdminFocusLinkupsPage() {
   const [linkups, setLinkups] = useState<FocusLinkup[]>([]);
+  const [customRequests, setCustomRequests] = useState<CustomGroupRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [courseId, setCourseId] = useState("");
@@ -34,12 +45,46 @@ export default function AdminFocusLinkupsPage() {
     const courseIds = (courses ?? []).map(c => c.id);
     if (courseIds[0]) setCourseId(courseIds[0]);
 
-    const { data } = await supabase
-      .from("focus_linkups")
-      .select("*")
-      .order("focus_date", { ascending: true });
-    setLinkups(data ?? []);
+    const [linkupsRes, subsRes] = await Promise.all([
+      supabase
+        .from("focus_linkups")
+        .select("*")
+        .order("focus_date", { ascending: true }),
+      supabase
+        .from("focus_linkup_subscriptions")
+        .select("id, custom_label, status, created_at, member_id, members(first_name, last_name)")
+        .eq("industry_focus", "Other")
+        .not("custom_label", "is", null)
+        .order("created_at", { ascending: false }),
+    ]);
+
+    setLinkups(linkupsRes.data ?? []);
+    setCustomRequests(
+      (subsRes.data ?? []).map((r: Record<string, unknown>) => {
+        const m = r.members as { first_name: string; last_name: string } | null
+        return {
+          id: r.id as string,
+          custom_label: r.custom_label as string,
+          status: (r.status ?? 'pending') as 'pending' | 'approved' | 'declined',
+          created_at: r.created_at as string,
+          member_id: r.member_id as string,
+          first_name: m?.first_name ?? '',
+          last_name: m?.last_name ?? '',
+        }
+      })
+    );
     setLoading(false);
+  }
+
+  async function reviewRequest(id: string, action: 'approved' | 'declined') {
+    const supabase = createClient();
+    await supabase
+      .from("focus_linkup_subscriptions")
+      .update({ status: action, reviewed_at: new Date().toISOString() })
+      .eq("id", id);
+    setCustomRequests(prev =>
+      prev.map(r => r.id === id ? { ...r, status: action } : r)
+    );
   }
 
   async function deleteLinkup(id: string) {
@@ -170,6 +215,71 @@ export default function AdminFocusLinkupsPage() {
                 variant="danger"
                 size="sm"
               />
+            </AdminTd>
+          </AdminTr>
+        ))}
+      </AdminTable>
+
+      {/* Custom group requests */}
+      <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 mt-8">
+        Custom group requests
+        {customRequests.filter(r => r.status === 'pending').length > 0 && (
+          <span className="ml-2 text-xs font-medium text-yellow-700 bg-yellow-50 border border-yellow-200 px-2 py-0.5 rounded-full normal-case">
+            {customRequests.filter(r => r.status === 'pending').length} pending
+          </span>
+        )}
+      </h2>
+      <AdminTable
+        headers={["Member", "Custom group", "Status", "Requested", "Actions"]}
+        empty={loading ? "Loading…" : customRequests.length === 0 ? "No custom group requests yet." : undefined}
+      >
+        {customRequests.map((r) => (
+          <AdminTr key={r.id}>
+            <AdminTd>
+              <p className="text-sm font-medium text-gray-900">
+                {r.first_name} {r.last_name}
+              </p>
+            </AdminTd>
+            <AdminTd>
+              <span className="text-xs bg-yellow-50 text-yellow-800 border border-yellow-200 px-2 py-0.5 rounded-full">
+                {r.custom_label}
+              </span>
+            </AdminTd>
+            <AdminTd>
+              {r.status === 'pending' && (
+                <span className="text-xs text-yellow-700 font-medium">Pending</span>
+              )}
+              {r.status === 'approved' && (
+                <span className="text-xs text-green-600 font-medium">Approved ✓</span>
+              )}
+              {r.status === 'declined' && (
+                <span className="text-xs text-red-500 font-medium">Declined ✗</span>
+              )}
+            </AdminTd>
+            <AdminTd>
+              <span className="text-xs text-gray-400">
+                {format(new Date(r.created_at), "MMM d, yyyy")}
+              </span>
+            </AdminTd>
+            <AdminTd>
+              {r.status === 'pending' ? (
+                <div className="flex gap-2">
+                  <AdminButton
+                    label="Approve"
+                    onClick={() => reviewRequest(r.id, 'approved')}
+                    variant="ghost"
+                    size="sm"
+                  />
+                  <AdminButton
+                    label="Decline"
+                    onClick={() => reviewRequest(r.id, 'declined')}
+                    variant="danger"
+                    size="sm"
+                  />
+                </div>
+              ) : (
+                <span className="text-xs text-gray-300">—</span>
+              )}
             </AdminTd>
           </AdminTr>
         ))}
