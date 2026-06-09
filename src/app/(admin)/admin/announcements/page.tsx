@@ -16,7 +16,7 @@ import {
   Badge,
 } from "@/components/admin/AdminUI";
 import FormField from "@/components/admin/FormField";
-import { formatRelativeTime, capitalizeName } from "@/lib/utils";
+import { formatRelativeTime } from "@/lib/utils";
 import MultiMediaUpload, { type MediaFile } from "@/components/ui/MultiMediaUpload";
 import { INDUSTRY_CATEGORIES } from "@/types";
 import type { AnnouncementType, ModerationStatus } from "@/types";
@@ -202,9 +202,9 @@ export default function AdminAnnouncementsPage() {
               </p>
             </AdminTd>
             <AdminTd>
-              <span className="text-sm text-gray-600">
-                {capitalizeName(a.author?.first_name ?? "")}{" "}
-                {capitalizeName(a.author?.last_name ?? "")}
+              <span className="text-sm text-gray-600 capitalize">
+                {a.author?.first_name ?? ""}{" "}
+                {a.author?.last_name ?? ""}
               </span>
             </AdminTd>
             <AdminTd>

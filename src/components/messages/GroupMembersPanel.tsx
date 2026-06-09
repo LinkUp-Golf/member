@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
 import { apiClient } from '@/lib/api-client'
-import { capitalizeName } from '@/lib/utils'
 import type { GroupParticipant, ParticipantRole } from '@/types'
 
 interface Props {
@@ -241,8 +240,8 @@ export function GroupMembersPanel({
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-medium text-green-900">
-                          {capitalizeName(p.member.first_name)} {capitalizeName(p.member.last_name)}
+                        <p className="text-sm font-medium text-green-900 capitalize">
+                          {p.member.first_name} {p.member.last_name}
                           {isMe && (
                             <span className="text-green-900/40 font-normal"> (you)</span>
                           )}

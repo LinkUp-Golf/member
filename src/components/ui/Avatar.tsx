@@ -1,5 +1,5 @@
 import Image from 'next/image'
-import { getInitials, capitalizeName, cn } from '@/lib/utils'
+import { getInitials, cn } from '@/lib/utils'
 
 interface AvatarProps {
   firstName: string
@@ -31,16 +31,14 @@ const PX_SIZES = {
 }
 
 export default function Avatar({ firstName, lastName, avatarUrl, size = 'md', className }: AvatarProps) {
-  const first = capitalizeName(firstName)
-  const last = capitalizeName(lastName)
-  const initials = getInitials(first, last)
+  const initials = getInitials(firstName, lastName)
 
   if (avatarUrl) {
     return (
       <div className={cn('avatar overflow-hidden', SIZE_CLASSES[size], className)}>
         <Image
           src={avatarUrl}
-          alt={`${first} ${last}`}
+          alt={`${firstName} ${lastName}`}
           width={PX_SIZES[size]}
           height={PX_SIZES[size]}
           className="w-full h-full object-cover"
@@ -52,7 +50,7 @@ export default function Avatar({ firstName, lastName, avatarUrl, size = 'md', cl
   return (
     <div
       className={cn('avatar font-sans font-black', SIZE_CLASSES[size], FONT_SIZES[size], className)}
-      aria-label={`${first} ${last}`}
+      aria-label={`${firstName} ${lastName}`}
     >
       {initials}
     </div>

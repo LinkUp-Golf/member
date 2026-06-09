@@ -7,6 +7,7 @@ import { apiClient } from "@/lib/api-client";
 import AppShell from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/Loading";
 import EmptyState from "@/components/ui/EmptyState";
+import Image from "next/image";
 import { formatTeeTime, cn } from "@/lib/utils";
 import Select from "@/components/ui/Select";
 import {
@@ -19,7 +20,7 @@ import {
   getDaysInMonth,
   startOfMonth,
 } from "date-fns";
-import type { Booking, GHLBookingSlot, AdditionalPlayer } from "@/types";
+import type { Booking, GHLBookingSlot, AdditionalPlayer, MemberWithProfile } from "@/types";
 
 type Step = "select" | "confirm" | "success";
 
@@ -618,8 +619,15 @@ function SlotRow({
 // ---- Confirmation screen ------------------------------------
 
 type PlayersForm = { players: AdditionalPlayer[] }
+type PlayerMode = 'member' | 'new'
 
 const PHONE_RE = /^[+]?[\d][\d\s\-()+.]{6,19}$/
+
+const inputBase =
+  "w-full px-3 py-2 text-sm rounded-xl border bg-white outline-none transition-colors focus:border-green-700"
+const inputStyle = { borderColor: "rgba(0,38,105,0.12)", color: "var(--color-green-900)" }
+const errStyle = { borderColor: "rgba(220,38,38,0.5)" }
+
 
 function ConfirmScreen({
   slot,
@@ -640,12 +648,23 @@ function ConfirmScreen({
 }) {
   const maxAdditional = Math.max(0, (slot.spotsOpen ?? 1) - 1);
   const [collapsed, setCollapsed] = useState<boolean[]>([]);
+  const [playerModes, setPlayerModes] = useState<PlayerMode[]>([]);
+  const [playerSelections, setPlayerSelections] = useState<Array<MemberWithProfile | null>>([]);
+  const [members, setMembers] = useState<MemberWithProfile[]>([]);
+
+  useEffect(() => {
+    fetch('/api/members?exclude_self=true')
+      .then(r => r.json())
+      .then(d => setMembers(Array.isArray(d) ? d : []))
+      .catch(() => {})
+  }, [])
 
   const {
     control,
     register,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors, isValid },
   } = useForm<PlayersForm>({
     defaultValues: { players: [] },
@@ -658,19 +677,69 @@ function ConfirmScreen({
   function addPlayer() {
     if (fields.length >= maxAdditional) return;
     append({ firstName: "", lastName: "", mobile: "", email: "" });
-    setCollapsed((prev) => [...prev, false]);
+    setCollapsed(prev => [...prev, false]);
+    setPlayerModes(prev => [...prev, 'member']);
+    setPlayerSelections(prev => [...prev, null]);
   }
 
   function removePlayer(i: number) {
     remove(i);
-    setCollapsed((prev) => prev.filter((_, idx) => idx !== i));
+    setCollapsed(prev => prev.filter((_, idx) => idx !== i));
+    setPlayerModes(prev => prev.filter((_, idx) => idx !== i));
+    setPlayerSelections(prev => prev.filter((_, idx) => idx !== i));
   }
 
   function toggleCollapsed(i: number) {
-    setCollapsed((prev) => prev.map((c, idx) => (idx === i ? !c : c)));
+    // Don't allow collapse in member mode with no selection
+    if ((playerModes[i] ?? 'member') === 'member' && !playerSelections[i]) return;
+    setCollapsed(prev => prev.map((c, idx) => idx === i ? !c : c));
+  }
+
+  function togglePlayerMode(i: number) {
+    const current = playerModes[i] ?? 'member';
+    if (current === 'member') {
+      // switching to new — clear any selection
+      setPlayerSelections(prev => prev.map((s, idx) => idx === i ? null : s));
+      setValue(`players.${i}.firstName`, '', { shouldValidate: false });
+      setValue(`players.${i}.lastName`, '', { shouldValidate: false });
+      setValue(`players.${i}.email`, '', { shouldValidate: false });
+      setValue(`players.${i}.mobile`, '', { shouldValidate: false });
+      setCollapsed(prev => prev.map((c, idx) => idx === i ? false : c));
+    } else {
+      // switching back to member — clear form
+      setPlayerSelections(prev => prev.map((s, idx) => idx === i ? null : s));
+      setValue(`players.${i}.firstName`, '', { shouldValidate: false });
+      setValue(`players.${i}.lastName`, '', { shouldValidate: false });
+      setValue(`players.${i}.email`, '', { shouldValidate: false });
+      setValue(`players.${i}.mobile`, '', { shouldValidate: false });
+      setCollapsed(prev => prev.map((c, idx) => idx === i ? false : c));
+    }
+    setPlayerModes(prev => prev.map((m, idx) => idx === i ? (m === 'member' ? 'new' : 'member') : m));
+  }
+
+  function selectMember(i: number, member: MemberWithProfile) {
+    setValue(`players.${i}.firstName`, member.first_name, { shouldValidate: true });
+    setValue(`players.${i}.lastName`, member.last_name, { shouldValidate: true });
+    setValue(`players.${i}.email`, member.email, { shouldValidate: true });
+    setValue(`players.${i}.mobile`, member.phone ?? '', { shouldValidate: true });
+    setPlayerSelections(prev => prev.map((s, idx) => idx === i ? member : s));
+    if (member.phone) {
+      setCollapsed(prev => prev.map((c, idx) => idx === i ? true : c));
+    }
+  }
+
+  function clearMemberSelection(i: number) {
+    setPlayerSelections(prev => prev.map((s, idx) => idx === i ? null : s));
+    setValue(`players.${i}.firstName`, '', { shouldValidate: false });
+    setValue(`players.${i}.lastName`, '', { shouldValidate: false });
+    setValue(`players.${i}.email`, '', { shouldValidate: false });
+    setValue(`players.${i}.mobile`, '', { shouldValidate: false });
+    setCollapsed(prev => prev.map((c, idx) => idx === i ? false : c));
   }
 
   function playerLabel(i: number): string {
+    const selection = playerSelections[i];
+    if (selection) return `${selection.first_name} ${selection.last_name}`.trim();
     const p = watchedPlayers[i];
     if (!p) return `Player ${i + 2}`;
     const name = [p.firstName, p.lastName].filter(Boolean).join(" ").trim();
@@ -679,10 +748,8 @@ function ConfirmScreen({
     return `Player ${i + 2}`;
   }
 
-  const inputBase =
-    "w-full px-3 py-2 text-sm rounded-xl border bg-white outline-none transition-colors focus:border-green-700";
-  const inputStyle = { borderColor: "rgba(0,38,105,0.12)", color: "var(--color-green-900)" };
-  const errStyle = { borderColor: "rgba(220,38,38,0.5)" };
+  // Ids already chosen (to exclude from autocomplete)
+  const selectedMemberIds = playerSelections.flatMap(s => s ? [s.id] : []);
 
   return (
     <div>
@@ -762,17 +829,21 @@ function ConfirmScreen({
           {/* Additional players */}
           {fields.map((field, i) => {
             const isCollapsed = collapsed[i] ?? false;
+            const mode = playerModes[i] ?? 'member';
+            const selection = playerSelections[i] ?? null;
             const fieldErrors = errors.players?.[i];
             const p = watchedPlayers[i];
             const filled = p?.mobile && p?.email && !fieldErrors;
+            const canCollapse = mode === 'new' || !!selection;
+
             return (
-              <div key={field.id} className="card mb-2 overflow-hidden">
+              <div key={field.id} className="card mb-2">
                 {/* Header row */}
                 <div className="flex items-center gap-2 px-4 py-3">
                   <button
                     type="button"
-                    className="flex-1 flex items-center gap-2 text-left min-w-0"
-                    onClick={() => toggleCollapsed(i)}
+                    className={cn("flex-1 flex items-center gap-2 text-left min-w-0", !canCollapse && "cursor-default")}
+                    onClick={() => canCollapse && toggleCollapsed(i)}
                   >
                     <div
                       className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
@@ -789,13 +860,15 @@ function ConfirmScreen({
                         <path d="M2.5 8.5l3.5 3.5 7.5-8" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     )}
-                    <svg
-                      className={cn("w-4 h-4 flex-shrink-0 transition-transform duration-200", isCollapsed ? "" : "rotate-180")}
-                      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-                      style={{ color: "rgba(0,38,105,0.35)" }}
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                    </svg>
+                    {canCollapse && (
+                      <svg
+                        className={cn("w-4 h-4 flex-shrink-0 transition-transform duration-200", isCollapsed ? "" : "rotate-180")}
+                        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                        style={{ color: "rgba(0,38,105,0.35)" }}
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                      </svg>
+                    )}
                   </button>
                   <button
                     type="button"
@@ -807,63 +880,152 @@ function ConfirmScreen({
                   </button>
                 </div>
 
-                {/* Collapsible form */}
+                {/* Collapsible body */}
                 {!isCollapsed && (
                   <div className="px-4 pb-4 space-y-3 border-t" style={{ borderColor: "rgba(0,38,105,0.07)" }}>
-                    <div className="grid grid-cols-2 gap-2 pt-3">
-                      <input
-                        placeholder="First name"
-                        className={inputBase}
-                        style={inputStyle}
-                        {...register(`players.${i}.firstName`)}
-                      />
-                      <input
-                        placeholder="Last name"
-                        className={inputBase}
-                        style={inputStyle}
-                        {...register(`players.${i}.lastName`)}
-                      />
-                    </div>
-
-                    <div>
-                      <input
-                        placeholder="Mobile *"
-                        type="tel"
-                        className={cn(inputBase, fieldErrors?.mobile ? "border-red-300" : "")}
-                        style={fieldErrors?.mobile ? errStyle : inputStyle}
-                        {...register(`players.${i}.mobile`, {
-                          required: "Mobile is required",
-                          validate: (v) =>
-                            PHONE_RE.test(v.trim()) || "Enter a valid mobile number",
-                        })}
-                      />
-                      {fieldErrors?.mobile && (
-                        <p className="text-xs mt-1" style={{ color: "rgba(220,38,38,0.8)" }}>
-                          {fieldErrors.mobile.message}
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <input
-                        placeholder="Email *"
-                        type="email"
-                        className={cn(inputBase, fieldErrors?.email ? "border-red-300" : "")}
-                        style={fieldErrors?.email ? errStyle : inputStyle}
-                        {...register(`players.${i}.email`, {
-                          required: "Email is required",
-                          pattern: {
-                            value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                            message: "Enter a valid email address",
-                          },
-                        })}
-                      />
-                      {fieldErrors?.email && (
-                        <p className="text-xs mt-1" style={{ color: "rgba(220,38,38,0.8)" }}>
-                          {fieldErrors.email.message}
-                        </p>
-                      )}
-                    </div>
+                    {mode === 'member' && !selection ? (
+                      // Member search — no selection yet
+                      <>
+                        <div className="pt-3">
+                          <MemberAutocomplete
+                            members={members}
+                            excludeIds={selectedMemberIds}
+                            onSelect={(m) => selectMember(i, m)}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => togglePlayerMode(i)}
+                          className="text-xs"
+                          style={{ color: "rgba(0,38,105,0.4)" }}
+                        >
+                          Enter details manually instead →
+                        </button>
+                      </>
+                    ) : mode === 'member' && selection ? (
+                      // Member selected
+                      <>
+                        <div className="pt-3 flex items-center gap-3">
+                          {selection.profile?.avatar_url ? (
+                            <Image
+                              src={selection.profile.avatar_url}
+                              alt=""
+                              width={32}
+                              height={32}
+                              className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                            />
+                          ) : (
+                            <div
+                              className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold"
+                              style={{ background: "rgba(133,187,101,0.15)", color: "var(--color-green-700)" }}
+                            >
+                              <span className="uppercase">{selection.first_name[0]}{selection.last_name[0]}</span>
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium capitalize" style={{ color: "var(--color-green-900)" }}>
+                              {selection.first_name} {selection.last_name}
+                            </p>
+                            <p className="text-xs truncate" style={{ color: "rgba(0,38,105,0.45)" }}>
+                              {selection.email}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => clearMemberSelection(i)}
+                            className="text-xs px-2 py-1 rounded-lg flex-shrink-0"
+                            style={{ color: "rgba(0,38,105,0.45)", background: "rgba(0,38,105,0.05)" }}
+                          >
+                            Change
+                          </button>
+                        </div>
+                        {/* Show phone input only if member has no phone on file */}
+                        {!selection.phone && (
+                          <div>
+                            <input
+                              placeholder="Mobile *"
+                              type="tel"
+                              className={cn(inputBase, fieldErrors?.mobile ? "border-red-300" : "")}
+                              style={fieldErrors?.mobile ? errStyle : inputStyle}
+                              {...register(`players.${i}.mobile`, {
+                                required: "Mobile is required",
+                                validate: (v) =>
+                                  PHONE_RE.test(v.trim()) || "Enter a valid mobile number",
+                              })}
+                            />
+                            {fieldErrors?.mobile && (
+                              <p className="text-xs mt-1" style={{ color: "rgba(220,38,38,0.8)" }}>
+                                {fieldErrors.mobile.message}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      // New player mode — manual form
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => togglePlayerMode(i)}
+                          className="pt-3 block text-xs"
+                          style={{ color: "rgba(0,38,105,0.4)" }}
+                        >
+                          ← Search existing members
+                        </button>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            placeholder="First name"
+                            className={inputBase}
+                            style={inputStyle}
+                            {...register(`players.${i}.firstName`)}
+                          />
+                          <input
+                            placeholder="Last name"
+                            className={inputBase}
+                            style={inputStyle}
+                            {...register(`players.${i}.lastName`)}
+                          />
+                        </div>
+                        <div>
+                          <input
+                            placeholder="Mobile *"
+                            type="tel"
+                            className={cn(inputBase, fieldErrors?.mobile ? "border-red-300" : "")}
+                            style={fieldErrors?.mobile ? errStyle : inputStyle}
+                            {...register(`players.${i}.mobile`, {
+                              required: "Mobile is required",
+                              validate: (v) =>
+                                PHONE_RE.test(v.trim()) || "Enter a valid mobile number",
+                            })}
+                          />
+                          {fieldErrors?.mobile && (
+                            <p className="text-xs mt-1" style={{ color: "rgba(220,38,38,0.8)" }}>
+                              {fieldErrors.mobile.message}
+                            </p>
+                          )}
+                        </div>
+                        <div>
+                          <input
+                            placeholder="Email *"
+                            type="email"
+                            className={cn(inputBase, fieldErrors?.email ? "border-red-300" : "")}
+                            style={fieldErrors?.email ? errStyle : inputStyle}
+                            {...register(`players.${i}.email`, {
+                              required: "Email is required",
+                              pattern: {
+                                value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                                message: "Enter a valid email address",
+                              },
+                            })}
+                          />
+                          {fieldErrors?.email && (
+                            <p className="text-xs mt-1" style={{ color: "rgba(220,38,38,0.8)" }}>
+                              {fieldErrors.email.message}
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -939,6 +1101,136 @@ function ConfirmScreen({
       </form>
     </div>
   );
+}
+
+// ---- Member autocomplete ------------------------------------
+
+function MemberAutocomplete({
+  members,
+  excludeIds,
+  onSelect,
+}: {
+  members: MemberWithProfile[]
+  excludeIds: string[]
+  onSelect: (m: MemberWithProfile) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const [dropdownRect, setDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  function measureInput() {
+    if (inputRef.current) {
+      const r = inputRef.current.getBoundingClientRect()
+      setDropdownRect({ top: r.bottom + 4, left: r.left, width: r.width })
+    }
+  }
+
+  useEffect(() => {
+    function handleOutside(e: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    function handleScroll(e: Event) {
+      // Allow scrolling inside the dropdown itself
+      if (dropdownRef.current?.contains(e.target as Node)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', handleOutside)
+    document.addEventListener('scroll', handleScroll, true)
+    return () => {
+      document.removeEventListener('mousedown', handleOutside)
+      document.removeEventListener('scroll', handleScroll, true)
+    }
+  }, [])
+
+  const VISIBLE_ROWS = 4
+  const ROW_HEIGHT = 52 // px — matches py-2.5 + content height
+
+  const filtered = query.trim().length >= 1
+    ? members
+        .filter(m => {
+          if (excludeIds.includes(m.id)) return false
+          const q = query.toLowerCase()
+          return (
+            `${m.first_name} ${m.last_name}`.toLowerCase().includes(q) ||
+            m.email.toLowerCase().includes(q)
+          )
+        })
+        .slice(0, 20)
+    : []
+
+  return (
+    <div ref={wrapperRef}>
+      <input
+        ref={inputRef}
+        type="text"
+        value={query}
+        autoComplete="off"
+        placeholder="Search members…"
+        className={inputBase}
+        style={inputStyle}
+        onChange={e => { setQuery(e.target.value); setOpen(true); measureInput() }}
+        onFocus={() => { setOpen(true); measureInput() }}
+      />
+      {open && filtered.length > 0 && dropdownRect && (
+        <div
+          ref={dropdownRef}
+          className="bg-white rounded-xl border shadow-lg"
+          style={{
+            position: 'fixed',
+            top: dropdownRect.top,
+            left: dropdownRect.left,
+            width: dropdownRect.width,
+            zIndex: 9999,
+            borderColor: "rgba(0,38,105,0.12)",
+            maxHeight: VISIBLE_ROWS * ROW_HEIGHT,
+            overflowY: filtered.length > VISIBLE_ROWS ? 'auto' : 'hidden',
+          }}
+        >
+          {filtered.map(m => (
+            <button
+              key={m.id}
+              type="button"
+              onMouseDown={e => {
+                e.preventDefault()
+                onSelect(m)
+                setQuery('')
+                setOpen(false)
+              }}
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-green-50"
+            >
+              {m.profile?.avatar_url ? (
+                <Image
+                  src={m.profile.avatar_url}
+                  alt=""
+                  width={28}
+                  height={28}
+                  className="w-7 h-7 rounded-full object-cover flex-shrink-0"
+                />
+              ) : (
+                <div
+                  className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold uppercase"
+                  style={{ background: "rgba(133,187,101,0.15)", color: "var(--color-green-700)" }}
+                >
+                  {m.first_name[0]}{m.last_name[0]}
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate capitalize" style={{ color: "var(--color-green-900)" }}>
+                  {m.first_name} {m.last_name}
+                </p>
+                <p className="text-xs truncate" style={{ color: "rgba(0,38,105,0.45)" }}>
+                  {m.email}
+                </p>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ---- Success screen -----------------------------------------

@@ -11,7 +11,6 @@ import {
   AdminButton,
 } from "@/components/admin/AdminUI";
 import { format, formatDistanceToNow } from "date-fns";
-import { capitalizeName } from "@/lib/utils";
 import type { MemberWithProfile } from "@/types";
 
 type FilterStatus =
@@ -280,9 +279,9 @@ export default function AdminMembersPage() {
               <AdminTr key={m.id} onClick={() => setSelected(m)}>
                 <AdminTd>
                   <div>
-                    <p className="font-medium text-gray-900">
-                      {capitalizeName(m.first_name)}{" "}
-                      {capitalizeName(m.last_name)}
+                    <p className="font-medium text-gray-900 capitalize">
+                      {m.first_name}{" "}
+                      {m.last_name}
                     </p>
                     <p className="text-xs text-gray-400">{m.email}</p>
                     {m.profile?.business_name && (
@@ -401,9 +400,9 @@ export default function AdminMembersPage() {
                 <div className="p-4 sm:p-5">
                   <div className="flex items-start justify-between mb-4">
                     <div>
-                      <p className="font-semibold text-gray-900">
-                        {capitalizeName(panelData.first_name)}{" "}
-                        {capitalizeName(panelData.last_name)}
+                      <p className="font-semibold text-gray-900 capitalize">
+                        {panelData.first_name}{" "}
+                        {panelData.last_name}
                       </p>
                       <p className="text-xs text-gray-400 mt-0.5">
                         {panelData.email}

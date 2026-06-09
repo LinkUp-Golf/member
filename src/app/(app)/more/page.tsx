@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import { useProfile } from '@/hooks/useProfile'
-import { capitalizeName } from '@/lib/utils'
 import Avatar from '@/components/ui/Avatar'
 import AppShell from '@/components/layout/AppShell'
 import Icon, { type IconName } from '@/components/ui/Icon'
@@ -65,8 +64,8 @@ export default function MorePage() {
             size="lg"
           />
           <div className="flex-1 min-w-0">
-            <p className="font-semibold text-base" style={{ color: 'var(--color-green-900)' }}>
-              {capitalizeName(m.first_name)} {capitalizeName(m.last_name)}
+            <p className="font-semibold text-base capitalize" style={{ color: 'var(--color-green-900)' }}>
+              {m.first_name} {m.last_name}
             </p>
             <p className="text-sm mt-0.5" style={{ color: 'rgba(0,38,105,0.5)' }}>
               {m.profile?.role_title ?? 'Complete your profile'}

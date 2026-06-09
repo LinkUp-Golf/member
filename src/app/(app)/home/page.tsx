@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
-import { formatBookingDate, formatTeeTime, truncate, capitalizeName, formatRelativeTime } from "@/lib/utils";
+import { formatBookingDate, formatTeeTime, truncate, formatRelativeTime } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
 import EmptyState from "@/components/ui/EmptyState";
 import AppShell from '@/components/layout/AppShell';
@@ -28,7 +28,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
 
   const [greeting, setGreeting] = useState('');
-  const firstName = capitalizeName(profile?.first_name ?? "");
+  const firstName = profile?.first_name ?? "";
 
   useEffect(() => {
     setGreeting(getGreeting());
@@ -74,7 +74,7 @@ export default function HomePage() {
         <h1 className="font-sans font-black leading-tight mb-5" style={{ fontSize: '2.1rem', color: 'white' }}>
           Welcome back,{' '}
           <br />
-          <em style={{ color: 'var(--color-gold)', fontStyle: 'normal' }}>
+          <em className="capitalize" style={{ color: 'var(--color-gold)', fontStyle: 'normal' }}>
             {firstName || "Guest"}.
           </em>
         </h1>
@@ -186,8 +186,8 @@ export default function HomePage() {
                       size="md"
                     />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium" style={{ color: 'var(--color-green-900)' }}>
-                        {capitalizeName(m.first_name)} {capitalizeName(m.last_name)}
+                      <p className="text-sm font-medium capitalize" style={{ color: 'var(--color-green-900)' }}>
+                        {m.first_name} {m.last_name}
                       </p>
                       <p className="text-xs mt-0.5" style={{ color: 'rgba(0,38,105,0.55)' }}>
                         {m.profile?.role_title ?? ""}

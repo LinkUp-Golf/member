@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
-import { capitalizeName } from '@/lib/utils'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
 import AppShell from '@/components/layout/AppShell'
@@ -79,8 +78,8 @@ export default function MyProfilePage() {
             size="xl"
           />
         </div>
-        <h1 className="font-sans font-black text-2xl text-white">
-          {capitalizeName(m.first_name)} {capitalizeName(m.last_name)}
+        <h1 className="font-sans font-black text-2xl text-white capitalize">
+          {m.first_name} {m.last_name}
         </h1>
         {m.profile?.role_title && (
           <p className="text-sm text-white/50 mt-1">

@@ -63,18 +63,6 @@ export function getAvatarColour(id: string): string {
   return AVATAR_COLOURS[index] ?? 'bg-green-800'
 }
 
-// ---- Name capitalization ------------------------------------
-// Capitalizes the first letter of each word, lowercases the rest.
-// Handles data that arrives in ALL-CAPS or all-lowercase from GHL.
-export function capitalizeName(name: string): string {
-  if (!name) return ''
-  return name
-    .trim()
-    .split(/\s+/)
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ')
-}
-
 // ---- Truncate text -----------------------------------------
 export function truncate(text: string, maxLength: number): string {
   const chars = [...text]
