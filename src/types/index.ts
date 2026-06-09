@@ -112,6 +112,7 @@ export interface MemberProfile {
   value_offered: string | null
   value_sought: string | null
   non_golf_hobbies: string | null
+  linkedin_url: string | null
   handicap_index: number | null
   preferred_play_times: string | null
   play_frequency: string | null
@@ -270,6 +271,10 @@ export interface FocusLinkupSubscription {
   id: string
   member_id: string
   industry_focus: IndustryCategory
+  custom_label: string | null
+  status: 'pending' | 'approved' | 'declined'
+  reviewed_at: string | null
+  reviewed_by: string | null
   created_at: string
 }
 

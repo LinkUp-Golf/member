@@ -51,7 +51,7 @@ export default function Avatar({ firstName, lastName, avatarUrl, size = 'md', cl
 
   return (
     <div
-      className={cn('avatar font-serif', SIZE_CLASSES[size], FONT_SIZES[size], className)}
+      className={cn('avatar font-sans font-black', SIZE_CLASSES[size], FONT_SIZES[size], className)}
       aria-label={`${first} ${last}`}
     >
       {initials}

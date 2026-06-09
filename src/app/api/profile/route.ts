@@ -31,7 +31,7 @@ export const PATCH = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   const allowed = [
     'display_name', 'avatar_url', 'business_name', 'business_description',
     'role_title', 'industry_category', 'value_offered', 'value_sought',
-    'non_golf_hobbies', 'handicap_index', 'preferred_play_times',
+    'non_golf_hobbies', 'linkedin_url', 'handicap_index', 'preferred_play_times',
     'play_frequency', 'open_to_golf_travel', 'family_golfers',
     'profile_visible', 'show_handicap',
   ]
