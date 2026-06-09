@@ -74,14 +74,16 @@ export function GroupMembersPanel({
   useEffect(() => {
     if (open) {
       setMounted(true)
-      // One rAF so the browser paints the initial off-screen position
-      // before we apply the "in" class — otherwise there is no transition.
-      const raf = requestAnimationFrame(() => setVisible(true))
-      return () => cancelAnimationFrame(raf)
+      // Double rAF: first ensures the DOM node exists, second ensures it's
+      // been painted in its off-screen position before we start the transition.
+      const ids: number[] = []
+      ids[0] = requestAnimationFrame(() => {
+        ids[1] = requestAnimationFrame(() => setVisible(true))
+      })
+      return () => ids.forEach(id => cancelAnimationFrame(id))
     } else {
       setVisible(false)
-      // Keep DOM alive for the full exit duration, then unmount
-      const t = setTimeout(() => setMounted(false), 300)
+      const t = setTimeout(() => setMounted(false), 320)
       return () => clearTimeout(t)
     }
   }, [open])
@@ -139,23 +141,32 @@ export function GroupMembersPanel({
       {/* Backdrop — fades in/out */}
       <button
         className={[
-          'fixed inset-0 z-40 w-full cursor-default',
-          'bg-black/30',
-          'transition-opacity duration-300',
+          'fixed inset-0 z-40 w-full cursor-default bg-black/30',
           visible ? 'opacity-100' : 'opacity-0',
         ].join(' ')}
+        style={{ transition: 'opacity 200ms ease-out', willChange: 'opacity' }}
         onClick={onClose}
         aria-label="Close panel"
         tabIndex={-1}
       />
 
-      {/* Panel — slides up from below the screen */}
+      {/* Outer — handles the slide transform only, no overflow-hidden here to
+          avoid iOS Safari clipping the element mid-animation */}
       <div
         className={[
-          'fixed inset-x-0 bottom-0 z-50 max-h-[75vh] flex flex-col rounded-t-2xl overflow-hidden',
-          'transition-transform duration-300 ease-out',
+          'fixed inset-x-0 bottom-0 z-50',
           visible ? 'translate-y-0' : 'translate-y-full',
         ].join(' ')}
+        style={{
+          transition: visible
+            ? 'transform 340ms cubic-bezier(0.32,0.72,0,1)'
+            : 'transform 240ms cubic-bezier(0.4,0,1,1)',
+          willChange: 'transform',
+        }}
+      >
+      {/* Inner — clips rounded corners and constrains height */}
+      <div
+        className="max-h-[75vh] flex flex-col rounded-t-2xl overflow-hidden"
         style={{ background: '#FAFAF7' }}
       >
         {/* Handle + header */}
@@ -293,7 +304,8 @@ export function GroupMembersPanel({
             </div>
           )}
         </div>
-      </div>
+      </div>{/* /inner clip */}
+      </div>{/* /outer slide */}
     </>
   )
 }

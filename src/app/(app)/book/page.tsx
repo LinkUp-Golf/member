@@ -1086,34 +1086,62 @@ const CANCEL_REASONS = [
 ]
 
 function CancelModal({
+  open,
   onConfirm,
   onDismiss,
   submitting,
 }: {
+  open: boolean
   onConfirm: (reason: string) => void
   onDismiss: () => void
   submitting: boolean
 }) {
+  const [mounted, setMounted] = useState(false)
+  const [visible, setVisible] = useState(false)
   const [selected, setSelected] = useState("")
   const [other, setOther] = useState("")
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true)
+      const ids: number[] = []
+      ids[0] = requestAnimationFrame(() => {
+        ids[1] = requestAnimationFrame(() => setVisible(true))
+      })
+      return () => ids.forEach(id => cancelAnimationFrame(id))
+    } else {
+      setVisible(false)
+      setSelected("")
+      setOther("")
+      const t = setTimeout(() => setMounted(false), 320)
+      return () => clearTimeout(t)
+    }
+  }, [open])
 
   const reason = selected === "Other" ? other.trim() : selected
   const canSubmit = !!reason && !submitting
 
+  if (!mounted) return null
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex flex-col justify-end"
-    >
+    <div className="fixed inset-0 z-50 flex flex-col justify-end">
       {/* Backdrop — dismiss on tap */}
       <button
         type="button"
         aria-label="Close"
-        className="absolute inset-0 w-full h-full"
-        style={{ background: "rgba(0,0,0,0.45)" }}
+        className={['absolute inset-0 w-full h-full', visible ? 'opacity-100' : 'opacity-0'].join(' ')}
+        style={{ background: "rgba(0,0,0,0.45)", transition: 'opacity 200ms ease-out', willChange: 'opacity' }}
         onClick={onDismiss}
       />
-      <div className="relative bg-white rounded-t-3xl px-5 pt-5 pb-8 space-y-4"
-        style={{ boxShadow: "0 -4px 32px rgba(0,0,0,0.12)" }}>
+      <div
+        className={['relative bg-white rounded-t-3xl px-5 pt-5 pb-8 space-y-4', visible ? 'translate-y-0' : 'translate-y-full'].join(' ')}
+        style={{
+          boxShadow: "0 -4px 32px rgba(0,0,0,0.12)",
+          transition: visible
+            ? 'transform 340ms cubic-bezier(0.32,0.72,0,1)'
+            : 'transform 240ms cubic-bezier(0.4,0,1,1)',
+          willChange: 'transform',
+        }}>
         <div className="flex items-center justify-between mb-1">
           <p className="font-sans font-black text-lg" style={{ color: "var(--color-green-900)" }}>
             Cancel booking
@@ -1183,6 +1211,28 @@ function CancelModal({
   )
 }
 
+type BookingGroup = {
+  primary: Booking
+  players: Booking[]
+}
+
+function groupBookings(bookings: Booking[]): BookingGroup[] {
+  const bySlot = new Map<string, Booking[]>()
+  for (const b of bookings) {
+    const key = `${b.booking_date}_${b.tee_time}`
+    const slot = bySlot.get(key) ?? []
+    slot.push(b)
+    bySlot.set(key, slot)
+  }
+  const groups: BookingGroup[] = []
+  for (const slot of bySlot.values()) {
+    const primary = slot.find((b) => b.guest_name === null) ?? slot[0]
+    if (!primary) continue
+    groups.push({ primary, players: slot.filter((b) => b.id !== primary.id) })
+  }
+  return groups
+}
+
 function MyBookingsTab({
   bookings,
   onRefresh,
@@ -1191,32 +1241,33 @@ function MyBookingsTab({
   onRefresh: () => void;
 }) {
   const [cancelling, setCancelling] = useState<string | null>(null);
-  const [cancelTarget, setCancelTarget] = useState<string | null>(null);
+  const [cancelGroup, setCancelGroup] = useState<BookingGroup | null>(null);
 
   const todayStr = format(new Date(), "yyyy-MM-dd");
-  const upcoming = bookings.filter(
-    (b) => b.booking_date >= todayStr && b.status !== "cancelled",
+  const allGroups = groupBookings(bookings);
+  const upcoming = allGroups.filter(
+    (g) => g.primary.booking_date >= todayStr && g.primary.status !== "cancelled",
   );
-  const past = bookings.filter((b) => b.booking_date < todayStr);
+  const past = allGroups.filter((g) => g.primary.booking_date < todayStr);
 
   async function confirmCancel(reason: string) {
-    if (!cancelTarget) return
-    setCancelling(cancelTarget)
-    setCancelTarget(null)
-    await apiClient.patch(`/api/bookings/${cancelTarget}`, { cancellationReason: reason })
+    if (!cancelGroup) return
+    const ids = [cancelGroup.primary.id, ...cancelGroup.players.map((p) => p.id)]
+    setCancelling(cancelGroup.primary.id)
+    setCancelGroup(null)
+    await Promise.all(ids.map((id) => apiClient.patch(`/api/bookings/${id}`, { cancellationReason: reason })))
     onRefresh()
     setCancelling(null)
   }
 
   return (
     <div className="px-5 py-5 pb-8">
-      {cancelTarget && (
-        <CancelModal
-          onConfirm={confirmCancel}
-          onDismiss={() => setCancelTarget(null)}
-          submitting={!!cancelling}
-        />
-      )}
+      <CancelModal
+        open={!!cancelGroup}
+        onConfirm={confirmCancel}
+        onDismiss={() => setCancelGroup(null)}
+        submitting={!!cancelling}
+      />
 
       {upcoming.length === 0 && past.length === 0 && (
         <EmptyState
@@ -1230,51 +1281,77 @@ function MyBookingsTab({
         <>
           <p className="section-label mb-3">Upcoming</p>
           <div className="space-y-2.5 mb-7">
-            {upcoming.map((b) => (
-              <div key={b.id} className="card p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p
-                      className="text-sm font-medium"
-                      style={{ color: "var(--color-green-900)" }}
-                    >
-                      {format(
-                        new Date(b.booking_date + "T12:00:00"),
-                        "EEE, MMM d",
+            {upcoming.map((group) => {
+              const totalAmount =
+                group.primary.amount_charged +
+                group.players.reduce((sum, p) => sum + p.amount_charged, 0);
+              const totalPlayers = 1 + group.players.length;
+
+              return (
+                <div key={group.primary.id} className="card p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p
+                        className="text-sm font-medium"
+                        style={{ color: "var(--color-green-900)" }}
+                      >
+                        {format(
+                          new Date(group.primary.booking_date + "T12:00:00"),
+                          "EEE, MMM d",
+                        )}
+                      </p>
+                      <p
+                        className="text-xs mt-0.5"
+                        style={{ color: "rgba(0,38,105,0.45)" }}
+                      >
+                        {formatTeeTime(group.primary.tee_time)} · $
+                        {totalAmount.toFixed(0)}
+                        {totalPlayers > 1 && ` · ${totalPlayers} players`}
+                      </p>
+
+                      {group.players.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {group.players.map((p) => (
+                            <span
+                              key={p.id}
+                              className="text-[11px] px-2 py-0.5 rounded-full font-medium"
+                              style={{
+                                background: "rgba(0,38,105,0.06)",
+                                color: "rgba(0,38,105,0.6)",
+                              }}
+                            >
+                              {p.guest_name}
+                            </span>
+                          ))}
+                        </div>
                       )}
-                    </p>
-                    <p
-                      className="text-xs mt-0.5"
-                      style={{ color: "rgba(0,38,105,0.45)" }}
-                    >
-                      {formatTeeTime(b.tee_time)} · $
-                      {b.amount_charged.toFixed(0)}
-                    </p>
-                    <div className="mt-2">
-                      <BookingStatusBadge status={b.status} />
+
+                      <div className="mt-2">
+                        <BookingStatusBadge status={group.primary.status} />
+                      </div>
                     </div>
+                    {canCancel(group.primary) && (
+                      <button
+                        onClick={() => setCancelGroup(group)}
+                        disabled={cancelling === group.primary.id}
+                        className="text-xs flex-shrink-0 py-1 px-2.5 rounded-lg border transition-colors mt-0.5"
+                        style={{
+                          color: "rgba(220,38,38,0.7)",
+                          borderColor: "rgba(220,38,38,0.15)",
+                          background: "rgba(220,38,38,0.04)",
+                        }}
+                      >
+                        {cancelling === group.primary.id ? (
+                          <Spinner className="w-3 h-3 text-red-400" />
+                        ) : (
+                          "Cancel"
+                        )}
+                      </button>
+                    )}
                   </div>
-                  {canCancel(b) && (
-                    <button
-                      onClick={() => setCancelTarget(b.id)}
-                      disabled={cancelling === b.id}
-                      className="text-xs flex-shrink-0 py-1 px-2.5 rounded-lg border transition-colors mt-0.5"
-                      style={{
-                        color: "rgba(220,38,38,0.7)",
-                        borderColor: "rgba(220,38,38,0.15)",
-                        background: "rgba(220,38,38,0.04)",
-                      }}
-                    >
-                      {cancelling === b.id ? (
-                        <Spinner className="w-3 h-3 text-red-400" />
-                      ) : (
-                        "Cancel"
-                      )}
-                    </button>
-                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
@@ -1283,14 +1360,14 @@ function MyBookingsTab({
         <>
           <p className="section-label mb-3">Past rounds</p>
           <div className="space-y-2">
-            {past.slice(0, 10).map((b) => (
-              <div key={b.id} className="card p-4" style={{ opacity: 0.55 }}>
+            {past.slice(0, 10).map((group) => (
+              <div key={group.primary.id} className="card p-4" style={{ opacity: 0.55 }}>
                 <p
                   className="text-sm"
                   style={{ color: "var(--color-green-900)" }}
                 >
                   {format(
-                    new Date(b.booking_date + "T12:00:00"),
+                    new Date(group.primary.booking_date + "T12:00:00"),
                     "EEE, MMM d, yyyy",
                   )}
                 </p>
@@ -1298,7 +1375,9 @@ function MyBookingsTab({
                   className="text-xs mt-0.5"
                   style={{ color: "rgba(0,38,105,0.5)" }}
                 >
-                  {formatTeeTime(b.tee_time)}
+                  {formatTeeTime(group.primary.tee_time)}
+                  {group.players.length > 0 &&
+                    ` · ${1 + group.players.length} players`}
                 </p>
               </div>
             ))}
