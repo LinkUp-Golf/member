@@ -26,16 +26,19 @@ export const GET = withAuth(async (
   const limit = Math.min(Number(searchParams.get('limit') ?? DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE)
   const before = searchParams.get('before')
 
-  // Verify the caller is a participant (admin client bypasses RLS recursion)
+  // Verify the caller is an active participant (admin client bypasses RLS recursion)
   const { data: participation } = await admin
     .from('conversation_participants')
-    .select('id')
+    .select('id, status')
     .eq('conversation_id', convId)
     .eq('member_id', ctx.userId)
     .single()
 
   if (!participation) {
     return NextResponse.json({ error: 'Not a participant' }, { status: 403 })
+  }
+  if (participation.status === 'pending') {
+    return NextResponse.json({ error: 'Invitation not yet accepted' }, { status: 403 })
   }
 
   let query = admin
@@ -80,16 +83,19 @@ export const POST = withAuth(async (
   const check = validateString(body.body, 'message', { min: 1, max: 4000 })
   if (!check.valid) return NextResponse.json({ error: check.errors[0] }, { status: 400 })
 
-  // Verify participation
+  // Verify the caller is an active participant
   const { data: participation } = await admin
     .from('conversation_participants')
-    .select('id')
+    .select('id, status')
     .eq('conversation_id', convId)
     .eq('member_id', ctx.userId)
     .single()
 
   if (!participation) {
     return NextResponse.json({ error: 'Not a participant' }, { status: 403 })
+  }
+  if (participation.status === 'pending') {
+    return NextResponse.json({ error: 'Invitation not yet accepted' }, { status: 403 })
   }
 
   const { data, error } = await admin

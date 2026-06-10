@@ -27,6 +27,7 @@ export type ReferralStatus = 'pending' | 'interviewed' | 'approved' | 'declined'
 export type GuestAccessStatus = 'pending' | 'approved' | 'denied' | 'revoked'
 export type ConversationType = 'direct' | 'group'
 export type ParticipantRole = 'member' | 'moderator'
+export type ParticipantStatus = 'pending' | 'active'
 export type RSVPStatus = 'attending' | 'maybe' | 'declined'
 
 export type IndustryCategory =
@@ -200,6 +201,7 @@ export interface ConversationParticipant {
   member_id: string
   joined_at: string
   last_read_at: string | null
+  status: ParticipantStatus
 }
 
 export interface Message {
@@ -361,9 +363,11 @@ export interface ConversationWithDetails extends Conversation {
     member: MemberSummary
     last_read_at: string | null
     role: ParticipantRole
+    status: ParticipantStatus
   }>
   last_message: MessageWithSender | null
   unread_count: number
+  my_status: ParticipantStatus
 }
 
 /** Full participant shape returned by GET /api/conversations/[id]/participants */
@@ -371,6 +375,7 @@ export interface GroupParticipant {
   member: MemberSummary
   role: ParticipantRole
   joined_at: string
+  status: ParticipantStatus
 }
 
 export interface AnnouncementWithAuthor extends Announcement {

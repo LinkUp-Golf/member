@@ -6,7 +6,7 @@ import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import type { AuthContext } from '@/lib/auth/types'
-import type { ConversationWithDetails, MessageWithSender, ParticipantRole } from '@/types'
+import type { ConversationWithDetails, MessageWithSender, ParticipantRole, ParticipantStatus } from '@/types'
 
 // GET /api/conversations — list all conversations for the authenticated user,
 // ordered by most-recent activity, with last_message and unread_count.
@@ -20,11 +20,13 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
     .select(`
       conversation_id,
       last_read_at,
+      status,
       conversation:conversations(
         id, type, name, course_id, created_by, created_at, updated_at,
         participants:conversation_participants(
           last_read_at,
           role,
+          status,
           member:members(
             id, first_name, last_name,
             profile:member_profiles(avatar_url)
@@ -74,7 +76,10 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
 
       // A conversation is unread if the last message was sent by someone else
       // and arrives after this user's last_read_at timestamp.
+      const myStatus = (p.status ?? 'active') as ParticipantStatus
+      // Pending members have no unread state — they haven't joined yet
       const hasUnread =
+        myStatus === 'active' &&
         !!lastMessage &&
         lastMessage.sender_id !== ctx.userId &&
         (!myLastRead || new Date(lastMessage.created_at) > new Date(myLastRead))
@@ -84,6 +89,7 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
       type RawParticipant = {
         last_read_at: string | null
         role: string
+        status: string
         member: { id: string; first_name: string; last_name: string; profile: { avatar_url: string | null } | null }
       }
       const participants = (conv.participants ?? []) as unknown as RawParticipant[]
@@ -94,9 +100,11 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
           member: cp.member,
           last_read_at: cp.last_read_at,
           role: (cp.role ?? 'member') as ParticipantRole,
+          status: (cp.status ?? 'active') as ParticipantStatus,
         })),
         last_message: lastMessage,
         unread_count: hasUnread ? 1 : 0,
+        my_status: myStatus,
       } as ConversationWithDetails
     })
     .filter((c): c is ConversationWithDetails => c !== null)
@@ -165,6 +173,8 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
         member_id: id,
         // Creator is moderator in group chats; direct chats have no moderation
         role: (type === 'group' && id === ctx.userId) ? 'moderator' : 'member',
+        // Invited members start as pending until they accept; creator is always active
+        status: (type === 'group' && id !== ctx.userId) ? 'pending' : 'active',
       }))
     )
 

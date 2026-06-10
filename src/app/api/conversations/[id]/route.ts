@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import type { AuthContext } from '@/lib/auth/types'
-import type { ConversationWithDetails, MessageWithSender, ParticipantRole } from '@/types'
+import type { ConversationWithDetails, MessageWithSender, ParticipantRole, ParticipantStatus } from '@/types'
 
 // GET /api/conversations/[id]
 export const GET = withAuth(async (
@@ -21,7 +21,7 @@ export const GET = withAuth(async (
   // Verify participation
   const { data: myParticipation } = await admin
     .from('conversation_participants')
-    .select('last_read_at, role')
+    .select('last_read_at, role, status')
     .eq('conversation_id', convId)
     .eq('member_id', ctx.userId)
     .single()
@@ -38,6 +38,7 @@ export const GET = withAuth(async (
       participants:conversation_participants(
         last_read_at,
         role,
+        status,
         member:members(
           id, first_name, last_name,
           profile:member_profiles(avatar_url)
@@ -83,6 +84,7 @@ export const GET = withAuth(async (
   type RawParticipant = {
     last_read_at: string | null
     role: string
+    status: string
     member: { id: string; first_name: string; last_name: string; profile: { avatar_url: string | null } | null } | null
   }
   const participants = (conv.participants ?? []) as unknown as RawParticipant[]
@@ -95,9 +97,11 @@ export const GET = withAuth(async (
         member: cp.member,
         last_read_at: cp.last_read_at,
         role: (cp.role ?? 'member') as ParticipantRole,
+        status: (cp.status ?? 'active') as ParticipantStatus,
       })),
     last_message: lastMessage,
     unread_count: hasUnread ? 1 : 0,
+    my_status: (myParticipation.status ?? 'active') as ParticipantStatus,
   }
 
   return NextResponse.json(result)

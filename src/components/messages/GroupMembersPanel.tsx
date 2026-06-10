@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
 import { apiClient } from '@/lib/api-client'
-import type { GroupParticipant, ParticipantRole } from '@/types'
+import type { GroupParticipant, MemberWithProfile, ParticipantRole, ParticipantStatus } from '@/types'
 
 interface Props {
   conversationId: string
@@ -31,6 +31,12 @@ export function GroupMembersPanel({
   const [loading, setLoading] = useState(false)
   const [actionFor, setActionFor] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+
+  // ---- Add member state -------------------------------------
+  const [addOpen, setAddOpen] = useState(false)
+  const [allMembers, setAllMembers] = useState<MemberWithProfile[]>([])
+  const [memberSearch, setMemberSearch] = useState('')
+  const [adding, setAdding] = useState<string | null>(null)
 
   // ---- Group name editing (moderators only) ------------------
   const [nameValue, setNameValue] = useState(conversationName ?? '')
@@ -97,7 +103,29 @@ export function GroupMembersPanel({
         setParticipants(res.data ?? [])
         setLoading(false)
       })
+    // Pre-fetch all members once the panel opens so add-member search is instant
+    apiClient
+      .get<MemberWithProfile[]>('/api/members?exclude_self=true')
+      .then(res => setAllMembers(res.data ?? []))
   }, [open, conversationId])
+
+  async function handleAddMember(memberId: string) {
+    setAdding(memberId)
+    const res = await apiClient.post(
+      `/api/conversations/${conversationId}/participants`,
+      { member_id: memberId }
+    )
+    setAdding(null)
+    if (!res.error) {
+      // Refresh participant list and close search
+      const updated = await apiClient.get<GroupParticipant[]>(
+        `/api/conversations/${conversationId}/participants`
+      )
+      setParticipants(updated.data ?? [])
+      setAddOpen(false)
+      setMemberSearch('')
+    }
+  }
 
   // Close action menu on outside click
   useEffect(() => {
@@ -213,6 +241,88 @@ export function GroupMembersPanel({
           </div>
         )}
 
+        {/* Add member — moderators only */}
+        {isModerator && (
+          <div className="border-b border-green-900/08">
+            {addOpen ? (
+              <div className="px-5 py-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <input
+                    type="search"
+                    placeholder="Search members…"
+                    value={memberSearch}
+                    onChange={e => setMemberSearch(e.target.value)}
+                    autoFocus
+                    className="flex-1 text-sm rounded-xl px-3 py-2 outline-none border border-green-900/15 focus:border-green-600 bg-white text-green-900 placeholder:text-green-900/30"
+                  />
+                  <button
+                    onClick={() => { setAddOpen(false); setMemberSearch('') }}
+                    className="w-7 h-7 flex items-center justify-center rounded-full text-green-900/40 hover:bg-green-100 text-lg leading-none"
+                  >
+                    ×
+                  </button>
+                </div>
+                {/* Filtered member results */}
+                <div className="max-h-48 overflow-y-auto rounded-xl border border-green-900/10 bg-white">
+                  {(() => {
+                    const existingIds = new Set(participants.map(p => p.member.id))
+                    const filtered = allMembers.filter(m => {
+                      if (existingIds.has(m.id)) return false
+                      if (!memberSearch.trim()) return true
+                      const q = memberSearch.toLowerCase()
+                      return `${m.first_name} ${m.last_name}`.toLowerCase().includes(q) ||
+                        m.profile?.business_name?.toLowerCase().includes(q)
+                    })
+                    if (!filtered.length) {
+                      return (
+                        <p className="px-4 py-3 text-xs text-green-900/40 text-center">
+                          {allMembers.length === 0 ? 'Loading…' : 'No members to add'}
+                        </p>
+                      )
+                    }
+                    return filtered.map(m => (
+                      <button
+                        key={m.id}
+                        onClick={() => handleAddMember(m.id)}
+                        disabled={adding === m.id}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-green-50 transition-colors text-left disabled:opacity-50 border-b border-green-900/05 last:border-0"
+                      >
+                        <Avatar
+                          firstName={m.first_name}
+                          lastName={m.last_name}
+                          avatarUrl={m.profile?.avatar_url}
+                          size="sm"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-green-900 capitalize truncate">
+                            {m.first_name} {m.last_name}
+                          </p>
+                          {m.profile?.business_name && (
+                            <p className="text-xs text-green-900/40 truncate">{m.profile.business_name}</p>
+                          )}
+                        </div>
+                        {adding === m.id && <Spinner className="w-4 h-4 text-green-700 flex-shrink-0" />}
+                      </button>
+                    ))
+                  })()}
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setAddOpen(true)}
+                className="w-full flex items-center gap-3 px-5 py-3 text-sm font-medium hover:bg-green-50 transition-colors text-left"
+                style={{ color: 'var(--color-green-800)' }}
+              >
+                <span className="w-8 h-8 rounded-full flex items-center justify-center text-lg flex-shrink-0"
+                  style={{ background: 'rgba(133,187,101,0.12)' }}>
+                  +
+                </span>
+                Add member
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Member list */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
@@ -252,6 +362,14 @@ export function GroupMembersPanel({
                             style={{ background: 'rgba(133,187,101,0.15)', color: '#3a6e1f' }}
                           >
                             Moderator
+                          </span>
+                        )}
+                        {(p as GroupParticipant & { status?: ParticipantStatus }).status === 'pending' && (
+                          <span
+                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                            style={{ background: 'rgba(212,174,89,0.15)', color: '#9a7a2a' }}
+                          >
+                            Invited
                           </span>
                         )}
                       </div>

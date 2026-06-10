@@ -349,10 +349,10 @@ export const mockConversations: Conversation[] = [
 ]
 
 export const mockParticipants: ConversationParticipant[] = [
-  { id: 'cp-001', conversation_id: 'conv-001', member_id: MOCK_USER_ID, joined_at: '2024-03-01T10:00:00Z', last_read_at: '2024-03-01T11:00:00Z' },
-  { id: 'cp-002', conversation_id: 'conv-001', member_id: MOCK_MEMBER_2_ID, joined_at: '2024-03-01T10:00:00Z', last_read_at: null },
-  { id: 'cp-003', conversation_id: 'conv-002', member_id: MOCK_USER_ID, joined_at: '2024-03-05T09:00:00Z', last_read_at: '2024-03-05T10:00:00Z' },
-  { id: 'cp-004', conversation_id: 'conv-002', member_id: MOCK_MEMBER_4_ID, joined_at: '2024-03-05T09:00:00Z', last_read_at: null },
+  { id: 'cp-001', conversation_id: 'conv-001', member_id: MOCK_USER_ID, joined_at: '2024-03-01T10:00:00Z', last_read_at: '2024-03-01T11:00:00Z', status: 'active' },
+  { id: 'cp-002', conversation_id: 'conv-001', member_id: MOCK_MEMBER_2_ID, joined_at: '2024-03-01T10:00:00Z', last_read_at: null, status: 'active' },
+  { id: 'cp-003', conversation_id: 'conv-002', member_id: MOCK_USER_ID, joined_at: '2024-03-05T09:00:00Z', last_read_at: '2024-03-05T10:00:00Z', status: 'active' },
+  { id: 'cp-004', conversation_id: 'conv-002', member_id: MOCK_MEMBER_4_ID, joined_at: '2024-03-05T09:00:00Z', last_read_at: null, status: 'active' },
 ]
 
 export const mockMessages: Message[] = [
