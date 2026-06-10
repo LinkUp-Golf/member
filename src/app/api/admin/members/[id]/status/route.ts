@@ -4,6 +4,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
+import { sendPushToMember, NotificationTemplates } from '@/lib/push'
 import type { AuthContext } from '@/lib/auth/types'
 
 type StatusAction = 'active' | 'suspended' | 'cancelled' | 'waitlist' | 'pending'
@@ -33,11 +34,11 @@ export const PATCH = withAuth(
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    // When activating, also activate the member's home course membership.
+    // When activating, also activate the member's home course membership and send welcome push.
     if (status === 'active') {
       const { data: member } = await admin
         .from('members')
-        .select('home_course_id')
+        .select('home_course_id, first_name')
         .eq('id', memberId)
         .single()
 
@@ -47,6 +48,13 @@ export const PATCH = withAuth(
           .update({ status: 'active' })
           .eq('member_id', memberId)
           .eq('course_id', member.home_course_id)
+      }
+
+      if (member?.first_name) {
+        sendPushToMember(
+          memberId,
+          NotificationTemplates.memberActivated(member.first_name)
+        ).catch(() => {})
       }
     }
 

@@ -6,6 +6,7 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { getCache } from '@/lib/cache'
 import { COURSE_PROMO_NS, coursePromoPrefix } from '@/lib/cache/keys'
+import { sendPushToCourse, sendPushToMembers, NotificationTemplates } from '@/lib/push'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(
@@ -53,11 +54,24 @@ export const POST = withAuth(
 
     // Promotions can be course-specific (course_id set) or global (null).
     // Bust the specific course cache when scoped, or all course caches when global.
+    const payload = NotificationTemplates.promotionAvailable(data.partner_name, data.title, data.id)
     if (data.course_id) {
       await getCache(COURSE_PROMO_NS).clear(coursePromoPrefix(data.course_id)).catch(() => {})
+      sendPushToCourse(data.course_id, payload).catch(() => {})
     } else {
       // Global promotion — affects every course's list. Clear the entire namespace.
       await getCache(COURSE_PROMO_NS).clear('course:promo:').catch(() => {})
+      // Notify all active members across all courses.
+      ;(async () => {
+        const admin = createAdminClient()
+        const { data: members } = await admin
+          .from('members')
+          .select('id')
+          .eq('membership_status', 'active')
+        if (members?.length) {
+          await sendPushToMembers(members.map(m => m.id), payload)
+        }
+      })().catch(() => {})
     }
 
     return NextResponse.json(data, { status: 201 })

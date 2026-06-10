@@ -28,6 +28,17 @@ export type GuestAccessStatus = 'pending' | 'approved' | 'denied' | 'revoked'
 export type ConversationType = 'direct' | 'group'
 export type ParticipantRole = 'member' | 'moderator'
 export type ParticipantStatus = 'pending' | 'active'
+export type NotificationType =
+  | 'new_member'
+  | 'booking'
+  | 'visiting_member'
+  | 'message'
+  | 'focus_linkup'
+  | 'play_suggestion'
+  | 'guest_access'
+  | 'referral'
+  | 'test'
+  | 'general'
 export type RSVPStatus = 'attending' | 'maybe' | 'declined'
 
 export type IndustryCategory =
@@ -435,4 +446,18 @@ export interface SessionUser {
   member: MemberWithProfile
   isAdmin: boolean
   activeCourseIds: string[]
+}
+
+// ---- Notification Log ---------------------------------------
+
+export interface NotificationLog {
+  id: string
+  member_id: string
+  type: NotificationType
+  title: string
+  body: string
+  data: Record<string, unknown> | null
+  url: string | null
+  read_at: string | null
+  created_at: string
 }

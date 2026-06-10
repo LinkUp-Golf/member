@@ -11,6 +11,7 @@ import EmptyState from "@/components/ui/EmptyState";
 import AppShell from '@/components/layout/AppShell';
 import InstallBanner from '@/components/ui/InstallBanner';
 import Icon, { type IconName } from '@/components/ui/Icon';
+import NotificationBell from '@/components/ui/NotificationBell';
 import { CardSkeleton, MemberRowSkeleton } from "@/components/ui/Loading";
 import type {
   Booking,
@@ -67,7 +68,11 @@ export default function HomePage() {
     <AppShell>
 
       {/* Hero banner */}
-      <div className="hero-banner">
+      <div className="hero-banner relative">
+        {/* Notification bell — top right, always visible */}
+        <div className="absolute top-3 right-4">
+          <NotificationBell variant="light" />
+        </div>
         <p className="text-[10px] uppercase tracking-[0.16em] mb-2.5" style={{ color: 'rgba(255,255,255,0.32)' }}>
           {greeting}
         </p>

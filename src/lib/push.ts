@@ -49,24 +49,24 @@ export async function sendPushToCourse(
 // ---- Notification templates ---------------------------------
 
 export const NotificationTemplates = {
-  newMember: (firstName: string, lastName: string, courseName: string): PushPayload => ({
+  newMember: (firstName: string, lastName: string, courseName: string, memberId?: string): PushPayload => ({
     title: `New member: ${firstName} ${lastName}`,
     body:  `${firstName} has joined the ${courseName} community. Tap to view their profile.`,
-    url:   '/members',
+    url:   memberId ? `/members/${memberId}` : '/members',
     tag:   'new-member',
   }),
 
-  bookingAnnouncement: (firstName: string, date: string, time: string): PushPayload => ({
+  bookingAnnouncement: (firstName: string, date: string, time: string, memberId?: string): PushPayload => ({
     title: `${firstName} is playing ${date}`,
     body:  `${firstName} booked a tee time at ${time}. Message them to join.`,
-    url:   '/messages',
+    url:   memberId ? `/members/${memberId}` : '/members',
     tag:   `booking-${date}`,
   }),
 
-  visitingMember: (firstName: string, lastName: string, from: string, until: string): PushPayload => ({
+  visitingMember: (firstName: string, lastName: string, from: string, until: string, memberId?: string): PushPayload => ({
     title: `${firstName} ${lastName} is visiting`,
     body:  `Visiting from ${from} to ${until}. Tap to invite them to play.`,
-    url:   '/members',
+    url:   memberId ? `/members/${memberId}` : '/members',
     tag:   `visit-${firstName.toLowerCase()}`,
   }),
 
@@ -80,14 +80,14 @@ export const NotificationTemplates = {
   focusLinkup: (title: string, date: string, weeksOut: number): PushPayload => ({
     title: `${weeksOut === 2 ? '2 weeks' : '1 week'} away: ${title}`,
     body:  `The ${title} is coming up on ${date}. Book your spot now.`,
-    url:   '/book',
+    url:   '/more/focus-linkups',
     tag:   `focus-linkup-${weeksOut}w`,
   }),
 
-  playSuggestion: (otherMemberName: string): PushPayload => ({
+  playSuggestion: (otherMemberName: string, suggestedMemberId?: string): PushPayload => ({
     title: `Play with ${otherMemberName}?`,
     body:  `You haven't played with ${otherMemberName} yet. Want to set up a round?`,
-    url:   '/members',
+    url:   suggestedMemberId ? `/members/${suggestedMemberId}` : '/members',
     tag:   `suggestion-${otherMemberName.toLowerCase().replace(' ', '-')}`,
   }),
 
@@ -103,5 +103,26 @@ export const NotificationTemplates = {
     body:  `Your referral ${referredName} is now a member. Book your introductory round together.`,
     url:   '/more/referrals',
     tag:   'referral-joined',
+  }),
+
+  announcementBroadcast: (title: string, type = 'admin_broadcast', announcementId?: string): PushPayload => ({
+    title: title.length > 60 ? title.slice(0, 60) + '…' : title,
+    body:  'A new announcement has been posted in your community.',
+    url:   announcementId ? `/more/announcements/${announcementId}` : '/more/announcements',
+    tag:   `announcement-${type}`,
+  }),
+
+  promotionAvailable: (partnerName: string, promoTitle: string, promotionId?: string): PushPayload => ({
+    title: `New offer: ${promoTitle.length > 50 ? promoTitle.slice(0, 50) + '…' : promoTitle}`,
+    body:  `${partnerName} has a new exclusive offer for LinkUp members.`,
+    url:   promotionId ? `/more/promotions/${promotionId}` : '/more/promotions',
+    tag:   `promotion-${partnerName.toLowerCase().replace(/\s+/g, '-').slice(0, 20)}`,
+  }),
+
+  memberActivated: (firstName: string): PushPayload => ({
+    title: `Welcome to LinkUp Golf, ${firstName}!`,
+    body:  'Your membership is now active. Explore the community, book a tee time, and connect with members.',
+    url:   '/home',
+    tag:   'member-activated',
   }),
 }

@@ -6,6 +6,7 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
+import { sendPushToCourse, NotificationTemplates } from '@/lib/push'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(
@@ -44,6 +45,13 @@ export const POST = withAuth(
 
     // Invalidate all cached variants for this course's announcements.
     await getCache(COURSE_ANN_NS).clear(courseAnnPrefix(body.course_id)).catch(() => {})
+
+    // Notify course members (fire-and-forget; excludes the author).
+    sendPushToCourse(
+      body.course_id,
+      NotificationTemplates.announcementBroadcast(data.title, data.type, data.id),
+      ctx.userId
+    ).catch(() => {})
 
     return NextResponse.json(data, { status: 201 })
   },

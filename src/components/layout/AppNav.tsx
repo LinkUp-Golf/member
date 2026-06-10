@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import Icon from '@/components/ui/Icon'
+import NotificationBell from '@/components/ui/NotificationBell'
 
 const NAV_ITEMS = [
   { href: '/home',     label: 'Home',     icon: 'home'     },
@@ -50,10 +51,14 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <div className="px-5 py-4 border-t" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
+        <div
+          className="px-4 py-3 border-t flex items-center justify-between"
+          style={{ borderColor: 'rgba(255,255,255,0.07)' }}
+        >
           <p className="text-xs" style={{ color: 'rgba(255,255,255,0.18)' }}>
             Park Hyatt Aviara
           </p>
+          <NotificationBell variant="light" />
         </div>
       </aside>
 

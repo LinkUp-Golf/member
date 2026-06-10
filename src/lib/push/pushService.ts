@@ -16,6 +16,8 @@ import {
   deleteStaleEndpoints,
 } from './subscriptionRepository'
 import type { PushPayload, SendResult, PushSubscriptionRow } from './types'
+import { createAdminClient } from '@/lib/supabase-server'
+import type { NotificationType } from '@/types'
 
 // ---- Retry configuration ------------------------------------
 
@@ -141,6 +143,43 @@ async function dispatchToSubscriptions(
   return { sent, failed, cleaned }
 }
 
+// ---- Notification log helper --------------------------------
+
+const TAG_TYPE_MAP: Record<string, NotificationType> = {
+  'new-member':    'new_member',
+  'booking':       'booking',
+  'visit':         'visiting_member',
+  'msg':           'message',
+  'focus-linkup':  'focus_linkup',
+  'suggestion':    'play_suggestion',
+  'guest-access':  'guest_access',
+  'referral':      'referral',
+  'test-notification': 'test',
+}
+
+function tagToType(tag?: string): NotificationType {
+  if (!tag) return 'general'
+  for (const [prefix, type] of Object.entries(TAG_TYPE_MAP)) {
+    if (tag === prefix || tag.startsWith(`${prefix}-`)) return type
+  }
+  return 'general'
+}
+
+async function logNotifications(memberIds: string[], payload: PushPayload): Promise<void> {
+  if (!memberIds.length) return
+  const admin = createAdminClient()
+  await admin.from('notification_log').insert(
+    memberIds.map(id => ({
+      member_id: id,
+      type:      tagToType(payload.tag),
+      title:     payload.title.slice(0, 255),
+      body:      payload.body.slice(0, 500),
+      data:      payload.data ?? null,
+      url:       payload.url ?? null,
+    }))
+  )
+}
+
 // ---- Public API ---------------------------------------------
 
 /** Send to all subscriptions for a single user */
@@ -148,6 +187,10 @@ export async function sendToUser(
   userId: string,
   payload: PushPayload
 ): Promise<SendResult> {
+  // Log before dispatch so the history entry exists even if push isn't enabled
+  logNotifications([userId], payload).catch(e =>
+    console.warn('[push] notification log failed', e)
+  )
   const subs = await findByUserId(userId)
   return dispatchToSubscriptions(subs, payload)
 }
@@ -158,6 +201,9 @@ export async function sendToUsers(
   payload: PushPayload
 ): Promise<SendResult> {
   if (!userIds.length) return { sent: 0, failed: 0, cleaned: 0 }
+  logNotifications(userIds, payload).catch(e =>
+    console.warn('[push] notification log failed', e)
+  )
   const subs = await findByUserIds(userIds)
   return dispatchToSubscriptions(subs, payload)
 }

@@ -31,7 +31,8 @@ const MORE_ITEMS: { group: string; items: { href: string; label: string; icon: I
   {
     group: 'Settings',
     items: [
-      { href: '/more/settings',      label: 'Notifications',  icon: { type: 'emoji', char: '🔔' },           desc: 'Manage push notification preferences' },
+      { href: '/more/notifications', label: 'Notification Log', icon: { type: 'emoji', char: '🔔' },          desc: 'View your notification history' },
+      { href: '/more/settings',      label: 'Preferences',      icon: { type: 'svg', name: 'more' },           desc: 'Manage push notification settings' },
     ],
   },
 ]
