@@ -100,7 +100,7 @@ export default function AdminBookingsPage() {
 
   const confirmed = bookings.filter(b => ['confirmed', 'payment_confirmed', 'availability_confirmed'].includes(b.status)).length
   const tentative = bookings.filter(b => b.status === 'tentative').length
-  const withGuest = bookings.filter(b => b.guest_name).length
+  const _withGuest = bookings.filter(b => b.guest_name).length
   const revenue = bookings.filter(b => ['confirmed', 'payment_confirmed'].includes(b.status)).reduce((sum, b) => sum + Number(b.amount_charged), 0)
   const memberAlloc = courseData ? courseData.max_rounds_per_month - courseData.reserved_rounds : 200
 

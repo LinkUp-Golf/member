@@ -24,7 +24,7 @@ export default function FocusLinkupsPage() {
   const router = useRouter()
   const [subs, setSubs] = useState<Sub[]>([])
   const [upcoming, setUpcoming] = useState<FocusLinkup[]>([])
-  const [loading, setLoading] = useState(true)
+  const [_loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
 

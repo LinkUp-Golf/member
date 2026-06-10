@@ -117,7 +117,7 @@ export function PushNotificationSettings() {
               Push notifications not supported
             </p>
             <p className="mt-1 text-xs text-gray-500">
-              Your browser doesn't support push notifications. Try Chrome, Edge, or
+              Your browser doesn&apos;t support push notifications. Try Chrome, Edge, or
               Samsung Internet on Android.
             </p>
           </div>
