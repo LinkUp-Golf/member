@@ -7,7 +7,14 @@
 export type MembershipStatus = 'active' | 'waitlist' | 'pending' | 'suspended' | 'cancelled'
 export type AccessType = 'home' | 'guest'
 export type CourseMembershipStatus = 'active' | 'pending' | 'expired'
-export type BookingStatus = 'confirmed' | 'pending' | 'cancelled' | 'waitlist'
+export type BookingStatus =
+  | 'tentative'
+  | 'availability_confirmed'
+  | 'payment_confirmed'
+  | 'confirmed'
+  | 'pending'
+  | 'cancelled'
+  | 'waitlist'
 export type AnnouncementType =
   | 'new_member'
   | 'booking'
@@ -105,6 +112,7 @@ export interface MemberProfile {
   value_offered: string | null
   value_sought: string | null
   non_golf_hobbies: string | null
+  linkedin_url: string | null
   handicap_index: number | null
   preferred_play_times: string | null
   play_frequency: string | null
@@ -127,15 +135,24 @@ export interface CourseMembership {
   created_at: string
 }
 
+export interface AdditionalPlayer {
+  firstName: string
+  lastName: string
+  mobile: string
+  email: string
+}
+
 export interface Booking {
   id: string
   ghl_booking_id: string | null
+  ghl_opportunity_id: string | null
   member_id: string
   course_id: string
   booking_date: string
   tee_time: string
   players: number
   guest_name: string | null
+  additional_players: AdditionalPlayer[]
   status: BookingStatus
   amount_charged: number
   stripe_payment_id: string | null
@@ -209,6 +226,7 @@ export interface Announcement {
   image_url: string | null
   video_url: string | null
   media_urls: string[]
+  focus_linkup_categories: string[]
   created_at: string
 }
 
@@ -253,6 +271,10 @@ export interface FocusLinkupSubscription {
   id: string
   member_id: string
   industry_focus: IndustryCategory
+  custom_label: string | null
+  status: 'pending' | 'approved' | 'declined'
+  reviewed_at: string | null
+  reviewed_by: string | null
   created_at: string
 }
 
@@ -371,6 +393,8 @@ export interface GHLBookingSlot {
   startTime: string
   endTime: string
   available: boolean
+  slots?: number
+  spotsOpen?: number
 }
 
 export interface GHLCalendarEvent {

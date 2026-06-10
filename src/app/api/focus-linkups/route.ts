@@ -51,12 +51,17 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
     // Subscriptions are user-specific — never cache, always fresh.
     createRouteHandlerClient(cookies())
       .from('focus_linkup_subscriptions')
-      .select('industry_focus')
+      .select('id, industry_focus, custom_label, status')
       .eq('member_id', ctx.userId),
   ])
 
   return NextResponse.json({
     linkups,
-    subscriptions: subsRes.data?.map(s => s.industry_focus) ?? [],
+    subscriptions: subsRes.data?.map(s => ({
+      id: s.id,
+      industry_focus: s.industry_focus,
+      custom_label: s.custom_label ?? null,
+      status: (s.status ?? 'approved') as 'pending' | 'approved' | 'declined',
+    })) ?? [],
   })
 })

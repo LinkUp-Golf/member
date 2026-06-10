@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { useProfile } from '@/hooks/useProfile'
-import { capitalizeName } from '@/lib/utils'
 import AppShell from '@/components/layout/AppShell'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
@@ -36,7 +35,7 @@ export default function ChatPage() {
 
   const { isOnline } = usePresence(id, user?.id ?? null)
 
-  const currentUserName = profile ? capitalizeName(profile.first_name) : ''
+  const currentUserName = profile?.first_name ?? ''
 
   const { typingUsers, sendTyping, stopTyping } = useTypingIndicator(
     id,
@@ -74,7 +73,7 @@ export default function ChatPage() {
   const convName =
     conversation?.type === 'group' && conversation.name
       ? conversation.name
-      : otherParticipants.map(p => capitalizeName(p.member?.first_name ?? '')).join(', ') || '…'
+      : otherParticipants.map(p => p.member?.first_name ?? '').join(', ') || '…'
 
   const isOtherOnline = headerParticipant ? isOnline(headerParticipant.member?.id ?? '') : false
 
@@ -136,7 +135,7 @@ export default function ChatPage() {
 
               {/* Name + status */}
               <div className="min-w-0">
-                <p className="text-sm font-black text-white truncate">{convName}</p>
+                <p className="text-sm font-black text-white truncate capitalize">{convName}</p>
                 <p className="text-xs text-white/40">
                   {conversation?.type === 'direct'
                     ? isOtherOnline ? 'Online' : 'Offline'
@@ -195,7 +194,7 @@ export default function ChatPage() {
             placeholder={
               conversation?.type === 'group'
                 ? 'Message group…'
-                : `Message ${capitalizeName(headerParticipant?.member?.first_name ?? '')}…`
+                : `Message ${headerParticipant?.member?.first_name ?? ''}…`
             }
             onSend={handleSend}
             onTypingStart={sendTyping}

@@ -8,6 +8,7 @@ import { Spinner } from '@/components/ui/Loading'
 import EmptyState from '@/components/ui/EmptyState'
 import AppShell from '@/components/layout/AppShell'
 import { INDUSTRY_CATEGORIES } from '@/types'
+import Select from '@/components/ui/Select'
 import { formatRelativeTime } from '@/lib/utils'
 import type { Referral } from '@/types'
 
@@ -167,10 +168,14 @@ function ReferralForm({
 
       <div>
         <label htmlFor="ref-category" className="text-xs text-green-900/50 mb-1.5 block">Their industry / role</label>
-        <select id="ref-category" className="input" value={category} onChange={e => setCategory(e.target.value)}>
-          <option value="">Select a category…</option>
-          {INDUSTRY_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
+        <Select
+          id="ref-category"
+          options={INDUSTRY_CATEGORIES.map(c => ({ value: c, label: c }))}
+          value={category}
+          onChange={setCategory}
+          placeholder="Select a category…"
+          searchPlaceholder="Search categories…"
+        />
       </div>
 
       <div>

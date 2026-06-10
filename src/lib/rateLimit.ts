@@ -69,3 +69,13 @@ export function apiRateLimit(memberId: string): RateLimitResult {
   // 120 API calls per minute per member (generous for real-time use)
   return rateLimit(`api:${memberId}`, { windowMs: 60_000, max: 120 })
 }
+
+export function pushSendRateLimit(callerId: string): RateLimitResult {
+  // 10 send calls per minute per caller (admin / cron only)
+  return rateLimit(`push-send:${callerId}`, { windowMs: 60_000, max: 10 })
+}
+
+export function pushSendToAllRateLimit(callerId: string): RateLimitResult {
+  // 2 broadcast calls per hour — prevent accidental spam to all users
+  return rateLimit(`push-send-all:${callerId}`, { windowMs: 60 * 60_000, max: 2 })
+}

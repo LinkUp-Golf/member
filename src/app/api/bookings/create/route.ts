@@ -2,208 +2,37 @@ export const dynamic = 'force-dynamic'
 
 // ============================================================
 // POST /api/bookings/create
-// 1. Verify member has access and booking window is valid
-// 2. Check guest quota (max 1/month)
-// 3. Create booking in GHL calendar
-// 4. Charge via GHL/Stripe
-// 5. Write booking to Supabase
-// 6. Queue post-booking community announcement
+// Creates a booking in the Avi-Play GHL pipeline (Tentative stage).
+// No payment is processed here — the existing GHL process handles
+// availability confirmation and payment link delivery via email.
+//
+// Flow:
+//   1. Validate member
+//   2. Create GHL calendar event (decrements slot count on Aviara calendar)
+//   3. Create Avi-Play pipeline opportunity at Tentative stage
+//   4. Write one booking row per player to Supabase (status = 'tentative')
+//   5. Post community announcement
+//
+// GET /api/bookings/create?date=YYYY-MM-DD
+//   Returns available tee-time slots from the GHL Aviara calendar.
 // ============================================================
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
-import { createBooking, chargeForBooking } from '@/lib/ghl/client'
+import { getAvailableSlots, getLocationTimezone } from '@/lib/ghl/client'
 import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
-import { format, differenceInDays } from 'date-fns'
+import { format } from 'date-fns'
 
-const BOOKING_PRICE_CENTS = 16000     // $160.00
-const BOOKING_WINDOW_MIN_DAYS = 3
-const BOOKING_WINDOW_MAX_DAYS = 60
+const BOOKING_PRICE = 160
 const AVIARA_CALENDAR_ID = process.env.GHL_AVIARA_CALENDAR_ID ?? ''
-
-export async function POST(request: NextRequest) {
-  const cookieStore = cookies()
-  const supabase = createRouteHandlerClient(cookieStore)
-
-  // Authenticate
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
-  }
-
-  const body = await request.json()
-  const { date, teeTime, players, guestName, focusLinkupId } = body
-
-  // Validate inputs
-  if (!date || !teeTime) {
-    return NextResponse.json({ error: 'Date and tee time are required' }, { status: 400 })
-  }
-
-  const bookingDate = new Date(date)
-  const today = new Date()
-  const daysOut = differenceInDays(bookingDate, today)
-
-  if (daysOut < BOOKING_WINDOW_MIN_DAYS || daysOut > BOOKING_WINDOW_MAX_DAYS) {
-    return NextResponse.json({
-      error: `Bookings must be between ${BOOKING_WINDOW_MIN_DAYS} and ${BOOKING_WINDOW_MAX_DAYS} days in advance`,
-    }, { status: 400 })
-  }
-
-  // Get member record with GHL contact ID
-  const { data: member } = await supabase
-    .from('members')
-    .select('id, ghl_contact_id, home_course_id, first_name, last_name')
-    .eq('id', user.id)
-    .single()
-
-  if (!member) {
-    return NextResponse.json({ error: 'Member not found' }, { status: 404 })
-  }
-
-  // Check guest quota — max 1 non-member guest per calendar month
-  if (guestName) {
-    const startOfMonth = new Date(bookingDate.getFullYear(), bookingDate.getMonth(), 1)
-    const endOfMonth = new Date(bookingDate.getFullYear(), bookingDate.getMonth() + 1, 0)
-
-    const { count } = await supabase
-      .from('bookings')
-      .select('id', { count: 'exact' })
-      .eq('member_id', user.id)
-      .not('guest_name', 'is', null)
-      .gte('booking_date', format(startOfMonth, 'yyyy-MM-dd'))
-      .lte('booking_date', format(endOfMonth, 'yyyy-MM-dd'))
-      .neq('status', 'cancelled')
-
-    if ((count ?? 0) >= 1) {
-      return NextResponse.json({
-        error: 'You have already brought a guest this month. The guest allowance resets on the 1st of each month.',
-      }, { status: 400 })
-    }
-  }
-
-  const adminSupabase = createAdminClient()
-
-  // Write a pending booking to Supabase first
-  const { data: pendingBooking, error: insertError } = await adminSupabase
-    .from('bookings')
-    .insert({
-      member_id: user.id,
-      course_id: member.home_course_id,
-      booking_date: format(bookingDate, 'yyyy-MM-dd'),
-      tee_time: teeTime,
-      players: players ?? 1,
-      guest_name: guestName ?? null,
-      status: 'pending',
-      amount_charged: BOOKING_PRICE_CENTS / 100,
-      focus_linkup_id: focusLinkupId ?? null,
-    })
-    .select('id')
-    .single()
-
-  if (insertError || !pendingBooking) {
-    return NextResponse.json({ error: 'Failed to create booking record' }, { status: 500 })
-  }
-
-  try {
-    // Build the GHL calendar event times
-    const [hours, minutes] = teeTime.split(':')
-    const startDateTime = new Date(bookingDate)
-    startDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0)
-    const endDateTime = new Date(startDateTime.getTime() + 4.5 * 60 * 60 * 1000) // 4.5hr round
-
-    const startISO = startDateTime.toISOString()
-    const endISO = endDateTime.toISOString()
-
-    // Create booking in GHL calendar
-    const ghlEventId = await createBooking({
-      calendarId: AVIARA_CALENDAR_ID,
-      contactId: member.ghl_contact_id,
-      startTime: startISO,
-      endTime: endISO,
-      title: `LinkUp Golf — ${member.first_name} ${member.last_name}${guestName ? ` + ${guestName}` : ''}`,
-      notes: guestName ? `Guest: ${guestName}` : undefined,
-    })
-
-    if (!ghlEventId) {
-      // Rollback — mark booking as cancelled
-      await adminSupabase
-        .from('bookings')
-        .update({ status: 'cancelled' })
-        .eq('id', pendingBooking.id)
-      return NextResponse.json({ error: 'Failed to create booking in calendar. Please try again.' }, { status: 500 })
-    }
-
-    // Charge the member via GHL/Stripe
-    const paymentId = await chargeForBooking({
-      contactId: member.ghl_contact_id,
-      amountCents: BOOKING_PRICE_CENTS,
-      description: `LinkUp Golf — ${format(bookingDate, 'MMMM d, yyyy')} at ${teeTime}`,
-    })
-
-    if (!paymentId) {
-      // Cancel the GHL booking and rollback
-      await adminSupabase
-        .from('bookings')
-        .update({ status: 'cancelled' })
-        .eq('id', pendingBooking.id)
-      return NextResponse.json({
-        error: 'Payment failed. Please check your payment method in your account settings.',
-      }, { status: 402 })
-    }
-
-    // Confirm the booking in Supabase
-    await adminSupabase
-      .from('bookings')
-      .update({
-        status: 'confirmed',
-        ghl_booking_id: ghlEventId,
-        stripe_payment_id: paymentId,
-      })
-      .eq('id', pendingBooking.id)
-
-    // Queue community announcement (auto-published, no moderation needed)
-    await adminSupabase
-      .from('announcements')
-      .insert({
-        course_id: member.home_course_id,
-        author_id: user.id,
-        type: 'booking',
-        title: `${member.first_name} ${member.last_name} is playing on ${format(bookingDate, 'EEEE, MMMM d')}`,
-        body: `${member.first_name} has booked a tee time at ${teeTime.slice(0, 5)} on ${format(bookingDate, 'EEEE, MMMM d')}. Want to join? Send them a message.`,
-        metadata: {
-          booking_id: pendingBooking.id,
-          booking_date: format(bookingDate, 'yyyy-MM-dd'),
-          tee_time: teeTime,
-          member_id: user.id,
-        },
-        status: 'published',
-        published_at: new Date().toISOString(),
-      })
-
-    // Booking auto-posts a community announcement — bust that course's cache.
-    await getCache(COURSE_ANN_NS).clear(courseAnnPrefix(member.home_course_id)).catch(() => {})
-
-    return NextResponse.json({
-      bookingId: pendingBooking.id,
-      ghlEventId,
-      message: 'Booking confirmed!',
-    })
-  } catch (err) {
-    console.error('Booking error:', err)
-    await adminSupabase
-      .from('bookings')
-      .update({ status: 'cancelled' })
-      .eq('id', pendingBooking.id)
-    return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 })
-  }
-}
+const AVIARA_CALENDAR_USER_ID = process.env.GHL_AVIARA_CALENDAR_USER_ID ?? ''
 
 // ============================================================
-// GET /api/bookings/available-slots?date=2026-05-15
-// Returns available tee times for a given date
+// GET /api/bookings/create?month=YYYY-MM&timezone=...
+// Returns all available slots for the month, keyed by date.
 // ============================================================
 export async function GET(request: NextRequest) {
   const cookieStore = cookies()
@@ -213,20 +42,163 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
   const { searchParams } = new URL(request.url)
-  const date = searchParams.get('date')
-  if (!date) return NextResponse.json({ error: 'Date required' }, { status: 400 })
+  const month = searchParams.get('month')
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return NextResponse.json({ error: 'month parameter required (YYYY-MM)' }, { status: 400 })
+  }
 
-  // In production, call getAvailableSlots from lib/ghl.ts with the Aviara calendar ID
-  // For now, return structured mock data in the correct format
-  const mockSlots = [
-    { startTime: `${date}T07:00:00`, endTime: `${date}T11:30:00`, available: true, spotsOpen: 3 },
-    { startTime: `${date}T07:30:00`, endTime: `${date}T12:00:00`, available: true, spotsOpen: 4 },
-    { startTime: `${date}T08:00:00`, endTime: `${date}T12:30:00`, available: true, spotsOpen: 2 },
-    { startTime: `${date}T09:15:00`, endTime: `${date}T13:45:00`, available: true, spotsOpen: 4 },
-    { startTime: `${date}T10:30:00`, endTime: `${date}T15:00:00`, available: true, spotsOpen: 1 },
-    { startTime: `${date}T13:00:00`, endTime: `${date}T17:30:00`, available: true, spotsOpen: 4 },
-    { startTime: `${date}T14:30:00`, endTime: `${date}T19:00:00`, available: false, spotsOpen: 0 },
+  // Client sends its own timezone; fall back to the GHL location timezone
+  const clientTz = searchParams.get('timezone') ?? ''
+  const timezone = clientTz || await getLocationTimezone(clientTz || undefined)
+
+  const [yearStr, monthStr] = month.split('-')
+  const year = parseInt(yearStr ?? '0', 10)
+  const monthIdx = parseInt(monthStr ?? '1', 10) - 1
+  const startDate = format(new Date(year, monthIdx, 1), 'yyyy-MM-dd')
+  const endDate = format(new Date(year, monthIdx + 1, 0), 'yyyy-MM-dd')
+
+  const slots = await getAvailableSlots({
+    calendarId: AVIARA_CALENDAR_ID,
+    startDate,
+    endDate,
+    timezone,
+    userId: AVIARA_CALENDAR_USER_ID || undefined,
+    sendSeatsPerSlot: true,
+  })
+
+  return NextResponse.json({ slots, timezone })
+}
+
+// ============================================================
+// POST — create booking → GHL calendar event + Avi-Play opportunity
+// ============================================================
+export async function POST(request: NextRequest) {
+  const cookieStore = cookies()
+  const supabase = createRouteHandlerClient(cookieStore)
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch (e) {
+    console.error('[booking/create] Failed to parse request body:', e)
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+  }
+
+  const { date, teeTime, focusLinkupId, additionalPlayers } = body as {
+    date: string
+    teeTime: string
+    focusLinkupId?: string
+    additionalPlayers?: { firstName: string; lastName: string; mobile: string; email: string }[]
+  }
+  const extraPlayers = additionalPlayers ?? []
+
+  console.log('[booking/create] Request:', { userId: user.id, date, teeTime, extraPlayers: extraPlayers.length })
+
+  if (!date || !teeTime) {
+    return NextResponse.json({ error: 'Date and tee time are required' }, { status: 400 })
+  }
+
+  const { data: member, error: memberError } = await supabase
+    .from('members')
+    .select('id, home_course_id, first_name, last_name')
+    .eq('id', user.id)
+    .single()
+
+  if (memberError || !member) {
+    console.error('[booking/create] Member lookup failed:', memberError)
+    return NextResponse.json({ error: 'Member not found' }, { status: 404 })
+  }
+
+  console.log('[booking/create] Member found:', { memberId: member.id, courseId: member.home_course_id })
+
+  const bookingDate = format(new Date(date), 'yyyy-MM-dd')
+  const adminSupabase = createAdminClient()
+  const memberName = `${member.first_name} ${member.last_name}`
+  const totalPlayers = 1 + extraPlayers.length
+
+  // Build one row for the primary member + one row per additional player
+  const rows = [
+    {
+      member_id: user.id,
+      course_id: member.home_course_id,
+      booking_date: bookingDate,
+      tee_time: teeTime,
+      players: 1,
+      guest_name: null as string | null,
+      additional_players: [] as typeof extraPlayers,
+      status: 'tentative',
+      amount_charged: BOOKING_PRICE,
+      focus_linkup_id: focusLinkupId ?? null,
+    },
+    ...extraPlayers.map(p => ({
+      member_id: user.id,
+      course_id: member.home_course_id,
+      booking_date: bookingDate,
+      tee_time: teeTime,
+      players: 1,
+      guest_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email,
+      additional_players: [p],
+      status: 'tentative',
+      amount_charged: BOOKING_PRICE,
+      focus_linkup_id: focusLinkupId ?? null,
+    })),
   ]
 
-  return NextResponse.json({ slots: mockSlots })
+  console.log('[booking/create] Inserting', rows.length, 'booking row(s)')
+
+  const { data: insertedBookings, error: insertError } = await adminSupabase
+    .from('bookings')
+    .insert(rows)
+    .select('id')
+
+  if (insertError || !insertedBookings?.length) {
+    console.error('[booking/create] Booking insert failed:', insertError)
+    return NextResponse.json(
+      { error: 'Failed to create booking records', detail: insertError?.message },
+      { status: 500 }
+    )
+  }
+
+  console.log('[booking/create] Bookings created:', insertedBookings.map(b => b.id))
+
+  const primaryBookingId = insertedBookings[0]?.id ?? ''
+
+  // Post community announcement — non-fatal if it fails
+  const playerSuffix = totalPlayers > 1 ? ` +${extraPlayers.length} guest${extraPlayers.length !== 1 ? 's' : ''}` : ''
+  const { error: annError } = await adminSupabase
+    .from('announcements')
+    .insert({
+      course_id: member.home_course_id,
+      author_id: user.id,
+      type: 'booking',
+      title: `${memberName}${playerSuffix} is playing on ${format(new Date(date + 'T12:00:00'), 'EEEE, MMMM d')}`,
+      body: `${member.first_name} has booked a tee time at ${teeTime.slice(0, 5)} on ${format(new Date(date + 'T12:00:00'), 'EEEE, MMMM d')}${totalPlayers > 1 ? ` for ${totalPlayers} players` : ''}. Want to join? Send them a message.`,
+      metadata: {
+        booking_id: primaryBookingId,
+        booking_date: bookingDate,
+        tee_time: teeTime,
+        member_id: user.id,
+      },
+      status: 'published',
+      published_at: new Date().toISOString(),
+    })
+
+  if (annError) {
+    console.error('[booking/create] Announcement insert failed (non-fatal):', annError)
+  }
+
+  await getCache(COURSE_ANN_NS).clear(courseAnnPrefix(member.home_course_id)).catch((e) => {
+    console.error('[booking/create] Cache clear failed (non-fatal):', e)
+  })
+
+  console.log('[booking/create] Success, primaryBookingId:', primaryBookingId)
+
+  return NextResponse.json({
+    bookingId: primaryBookingId,
+    bookingIds: insertedBookings.map(b => b.id),
+    message: 'Booking submitted. We will confirm availability and send your payment link by email.',
+  })
 }

@@ -146,6 +146,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [pendingCount, setPendingCount] = useState(0)
   const [guestCount, setGuestCount] = useState(0)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [drawerMounted, setDrawerMounted] = useState(false)
+  const [drawerVisible, setDrawerVisible] = useState(false)
 
   useEffect(() => {
     if (loading) return
@@ -179,6 +181,22 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     if (isAdmin) fetchCounts()
   }, [isAdmin, fetchCounts])
 
+  // Animate drawer open/close
+  useEffect(() => {
+    if (drawerOpen) {
+      setDrawerMounted(true)
+      const ids: number[] = []
+      ids[0] = requestAnimationFrame(() => {
+        ids[1] = requestAnimationFrame(() => setDrawerVisible(true))
+      })
+      return () => ids.forEach(id => cancelAnimationFrame(id))
+    } else {
+      setDrawerVisible(false)
+      const t = setTimeout(() => setDrawerMounted(false), 320)
+      return () => clearTimeout(t)
+    }
+  }, [drawerOpen])
+
   // Close drawer on route change
   useEffect(() => {
     setDrawerOpen(false)
@@ -199,17 +217,31 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       </aside>
 
       {/* ---- Mobile drawer overlay ---------------------------- */}
-      {drawerOpen && (
+      {drawerMounted && (
         <div className="fixed inset-0 z-50 md:hidden">
           {/* Backdrop */}
           <div
-            className="absolute inset-0 bg-black/50"
+            className={[
+              'absolute inset-0 bg-black/50',
+              drawerVisible ? 'opacity-100' : 'opacity-0',
+            ].join(' ')}
+            style={{ transition: 'opacity 200ms ease-out', willChange: 'opacity' }}
             role="presentation"
             onClick={() => setDrawerOpen(false)}
             onKeyDown={e => { if (e.key === 'Escape') setDrawerOpen(false) }}
           />
           {/* Drawer panel */}
-          <aside className="absolute left-0 top-0 bottom-0 w-72 bg-green-950 flex flex-col shadow-2xl">
+          <aside
+            className={[
+              'absolute left-0 top-0 bottom-0 w-72 bg-green-950 flex flex-col shadow-2xl',
+              drawerVisible ? 'translate-x-0' : '-translate-x-full',
+            ].join(' ')}
+            style={{
+              transition: drawerVisible
+                ? 'transform 340ms cubic-bezier(0.32,0.72,0,1)'
+                : 'transform 240ms cubic-bezier(0.4,0,1,1)',
+              willChange: 'transform',
+            }}>
             {/* Close button */}
             <button
               onClick={() => setDrawerOpen(false)}

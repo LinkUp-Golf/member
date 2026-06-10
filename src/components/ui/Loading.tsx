@@ -19,13 +19,13 @@ export function Spinner({ className }: { className?: string }) {
 export function FullScreenLoader() {
   return (
     <div className="flex items-center justify-center h-screen bg-cream">
-      <div className="flex flex-col items-center gap-4">
+      <div className="flex flex-col items-center gap-6">
         <Image
           src="/linkup-golf.webp"
           alt="LinkUp Golf"
-          width={56}
-          height={56}
-          className="rounded-xl"
+          width={120}
+          height={120}
+          className="rounded-2xl"
           priority
         />
         <Spinner className="text-green-700" />

@@ -7,6 +7,7 @@ import { Spinner } from '@/components/ui/Loading'
 import AppShell from '@/components/layout/AppShell'
 import { formatBookingDate, formatRelativeTime } from '@/lib/utils'
 import type { Course, GuestAccessRequest } from '@/types'
+import Select from '@/components/ui/Select'
 
 const STATUS_LABELS: Record<string, { label: string; colour: string }> = {
   pending:  { label: 'Pending review', colour: 'text-yellow-600 bg-yellow-50' },
@@ -182,9 +183,14 @@ function GuestAccessForm({
 
       <div>
         <label htmlFor="ga-course" className="text-xs text-green-900/50 mb-1.5 block">Destination community</label>
-        <select id="ga-course" className="input" value={courseId} onChange={e => setCourseId(e.target.value)}>
-          {courses.map(c => <option key={c.id} value={c.id}>{c.name} — {c.city}</option>)}
-        </select>
+        <Select
+          id="ga-course"
+          options={courses.map(c => ({ value: c.id, label: `${c.name} — ${c.city}` }))}
+          value={courseId}
+          onChange={setCourseId}
+          placeholder="Select a course…"
+          searchPlaceholder="Search courses…"
+        />
       </div>
 
       <div className="grid grid-cols-2 gap-3">

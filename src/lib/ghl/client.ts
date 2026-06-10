@@ -131,20 +131,75 @@ export async function triggerWorkflow(params: {
 
 // ---- Calendar (raw fetch — not yet in SDK) ------------------
 
-export async function getAvailableSlots(
-  calendarId: string,
-  startDate: string,
-  endDate: string
-): Promise<GHLBookingSlot[]> {
+// Cached location timezone — fetched once per process lifetime.
+// GHL: GET /locations/:locationId/timezones → { timezones: string[] }
+// The first entry is the location's configured timezone.
+let _locationTimezone: string | null = null
+
+// fallback is used when GHL returns no timezone data; callers should pass the
+// user's request timezone so we never silently fall through to a wrong offset.
+export async function getLocationTimezone(fallback?: string): Promise<string> {
+  if (_locationTimezone) return _locationTimezone
   try {
-    const start = new Date(startDate).getTime()
-    const end = new Date(endDate).getTime() + 86400000
-    const data = await ghlFetch<{ slots: GHLBookingSlot[] }>(
-      `/calendars/${calendarId}/free-slots?startDate=${start}&endDate=${end}&timezone=America/Los_Angeles`
+    const data = await ghlFetch<{ timezones: string[] }>(
+      `/locations/${GHL_LOCATION_ID}/timezones`
     )
-    return data.slots ?? []
+    const tz = Array.isArray(data.timezones) ? data.timezones[0] : null
+    if (tz) {
+      _locationTimezone = tz
+      return tz
+    }
+  } catch (err) {
+    logger.warn('getLocationTimezone failed', { action: 'ghl_location_timezone', errorMessage: String(err) })
+  }
+  return fallback ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+}
+
+// Response shape: { "YYYY-MM-DD": { slots: { "ISO_DATETIME": spotsOpen } }, traceId: "..." }
+// Returns a map of date string → slot array so the UI can show the full month at once.
+export async function getAvailableSlots(params: {
+  calendarId: string
+  startDate: string  // YYYY-MM-DD
+  endDate: string    // YYYY-MM-DD
+  timezone: string
+  userId?: string
+  sendSeatsPerSlot?: boolean
+}): Promise<Record<string, GHLBookingSlot[]>> {
+  try {
+    const startMs = new Date(params.startDate).getTime()
+    const endMs = new Date(params.endDate + 'T23:59:59').getTime()
+
+    const qs = new URLSearchParams({
+      startDate: String(startMs),
+      endDate: String(endMs),
+      timezone: params.timezone,
+    })
+    if (params.userId) qs.set('userId', params.userId)
+    if (params.sendSeatsPerSlot) qs.set('sendSeatsPerSlot', 'true')
+
+    const data = await ghlFetch<Record<string, { slots: Record<string, number> } | string>>(
+      `/calendars/${params.calendarId}/free-slots?${qs}`
+    )
+
+    const result: Record<string, GHLBookingSlot[]> = {}
+    for (const [dateKey, value] of Object.entries(data)) {
+      if (dateKey === 'traceId' || typeof value !== 'object' || !value.slots) continue
+      result[dateKey] = []
+      for (const [startTime, spotsOpen] of Object.entries(value.slots)) {
+        const slotEndMs = new Date(startTime).getTime() + 4.5 * 60 * 60 * 1000
+        result[dateKey].push({
+          startTime,
+          endTime: new Date(slotEndMs).toISOString(),
+          available: spotsOpen > 0,
+          spotsOpen,
+        })
+      }
+      result[dateKey].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+    }
+
+    return result
   } catch {
-    return []
+    return {}
   }
 }
 
@@ -154,6 +209,7 @@ export async function createBooking(params: {
   startTime: string
   endTime: string
   title: string
+  timezone: string
   notes?: string
 }): Promise<string | null> {
   try {
@@ -166,6 +222,7 @@ export async function createBooking(params: {
         startTime: params.startTime,
         endTime: params.endTime,
         title: params.title,
+        timezone: params.timezone,
         notes: params.notes ?? '',
       }),
     })
@@ -245,6 +302,59 @@ export async function listContactsByTag(tag: string): Promise<GHLContact[]> {
   }
 
   return all
+}
+
+// ---- Avi-Play Pipeline (Opportunities) ----------------------
+
+export async function createOpportunity(params: {
+  contactId: string
+  title: string
+  pipelineId: string
+  stageId: string
+  monetaryValue?: number
+  notes?: string
+}): Promise<string | null> {
+  try {
+    const data = await ghlFetch<{ opportunity: { id: string } }>('/opportunities/', {
+      method: 'POST',
+      body: JSON.stringify({
+        locationId: GHL_LOCATION_ID,
+        contactId: params.contactId,
+        name: params.title,
+        pipelineId: params.pipelineId,
+        pipelineStageId: params.stageId,
+        monetaryValue: params.monetaryValue ?? 0,
+        status: 'open',
+        customFields: params.notes
+          ? [{ key: 'notes', field_value: params.notes }]
+          : undefined,
+      }),
+    })
+    return data.opportunity?.id ?? null
+  } catch (err) {
+    logger.warn('createOpportunity failed', { action: 'ghl_opportunity_create', errorMessage: String(err) })
+    return null
+  }
+}
+
+export async function updateOpportunityStage(
+  opportunityId: string,
+  stageId: string,
+  status?: 'open' | 'won' | 'lost' | 'abandoned'
+): Promise<boolean> {
+  try {
+    await ghlFetch(`/opportunities/${opportunityId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        pipelineStageId: stageId,
+        ...(status ? { status } : {}),
+      }),
+    })
+    return true
+  } catch (err) {
+    logger.warn('updateOpportunityStage failed', { action: 'ghl_opportunity_update', errorMessage: String(err) })
+    return false
+  }
 }
 
 // ---- Workflow ID constants ----------------------------------

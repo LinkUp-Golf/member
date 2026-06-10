@@ -5,7 +5,6 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useProfile } from "@/hooks/useProfile"
 import { apiClient } from "@/lib/api-client";
-import { capitalizeName } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
 import { Spinner } from "@/components/ui/Loading";
 import AppShell from "@/components/layout/AppShell";
@@ -17,12 +16,14 @@ export default function MemberProfilePage() {
   const { user } = useProfile();
   const [member, setMember] = useState<MemberWithProfile | null>(null);
   const [playedTogether, setPlayedTogether] = useState(false);
+  const [focusGroups, setFocusGroups] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadMember = useCallback(async () => {
     const response = await apiClient.get<{
       member: MemberWithProfile;
       hasPlayedWith: boolean;
+      focusLinkupGroups: string[];
     }>(`/api/members/${id}`);
 
     if (response.error || !response.data) {
@@ -32,6 +33,7 @@ export default function MemberProfilePage() {
 
     setMember(response.data.member);
     setPlayedTogether(response.data.hasPlayedWith);
+    setFocusGroups(response.data.focusLinkupGroups ?? []);
     setLoading(false);
   }, [id, router]);
 
@@ -68,7 +70,7 @@ export default function MemberProfilePage() {
 
   return (
     <AppShell
-      title={`${capitalizeName(member.first_name)} ${capitalizeName(member.last_name)}`}
+      title={`${member.first_name} ${member.last_name}`}
       description={p?.role_title ?? "Member"}
     >
       {/* Profile header */}
@@ -81,8 +83,8 @@ export default function MemberProfilePage() {
             size="xl"
           />
         </div>
-        <h1 className="font-sans font-black text-2xl text-white">
-          {capitalizeName(member.first_name)} {capitalizeName(member.last_name)}
+        <h1 className="font-sans font-black text-2xl text-white capitalize">
+          {member.first_name} {member.last_name}
         </h1>
         {p?.role_title && (
           <p className="text-sm text-white/50 mt-1">
@@ -99,11 +101,6 @@ export default function MemberProfilePage() {
           {member.home_course?.city && (
             <span className="profile-tag">{member.home_course.city}</span>
           )}
-          {p?.handicap_index !== null &&
-            p?.handicap_index !== undefined &&
-            p?.show_handicap && (
-              <span className="profile-tag">HCP {p.handicap_index}</span>
-            )}
           {playedTogether && (
             <span className="profile-tag">⛳ Played together</span>
           )}
@@ -138,7 +135,7 @@ export default function MemberProfilePage() {
           <span className="text-lg">💡</span>
           <div>
             <p className="text-sm text-green-900 font-medium">
-              You haven&apos;t played with {capitalizeName(member.first_name)}{" "}
+              You haven&apos;t played with <span className="capitalize">{member.first_name}</span>{" "}
               yet
             </p>
             <p className="text-xs text-green-900/55 mt-0.5">
@@ -151,9 +148,9 @@ export default function MemberProfilePage() {
       {/* Profile sections */}
       <div className="pb-6">
 
-        {/* Professional background */}
+        {/* Professional profile */}
         <div className="px-5 py-4 border-b border-green-900/08">
-          <p className="text-xs uppercase tracking-widest text-green-900/40 mb-3">Professional background</p>
+          <p className="text-xs uppercase tracking-widest text-green-900/40 mb-3">Professional profile</p>
           <div className="flex items-center gap-2 mb-2">
             <span className="text-xs font-medium text-green-900/50">Industry</span>
             {p?.industry_category
@@ -164,64 +161,61 @@ export default function MemberProfilePage() {
           <p className="text-sm text-green-900 leading-relaxed mt-2">
             {p?.business_description ?? <span className="text-green-900/25 italic">No description yet</span>}
           </p>
+          {p?.linkedin_url && (
+            <a
+              href={p.linkedin_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 mt-3 text-xs text-green-700 hover:text-green-900"
+            >
+              <LinkedInIcon /> LinkedIn profile
+            </a>
+          )}
         </div>
 
-        {/* Networking */}
+        {/* Community */}
         <div className="px-5 py-4 border-b border-green-900/08">
-          <p className="text-xs uppercase tracking-widest text-green-900/40 mb-3">Networking</p>
+          <p className="text-xs uppercase tracking-widest text-green-900/40 mb-3">Community</p>
           <div className="mb-3">
-            <p className="text-xs text-green-900/50 mb-1">What they bring</p>
+            <p className="text-xs text-green-900/50 mb-1">What I bring</p>
             <p className="text-sm text-green-900 leading-relaxed">
               {p?.value_offered ?? <span className="text-green-900/25 italic">Not filled in</span>}
             </p>
           </div>
           <div>
-            <p className="text-xs text-green-900/50 mb-1">What they&apos;re looking for</p>
+            <p className="text-xs text-green-900/50 mb-1">What I&apos;m looking for</p>
             <p className="text-sm text-green-900 leading-relaxed">
               {p?.value_sought ?? <span className="text-green-900/25 italic">Not filled in</span>}
             </p>
           </div>
         </div>
 
-        {/* Golf details */}
+        {/* Hobbies */}
         <div className="px-5 py-4 border-b border-green-900/08">
-          <p className="text-xs uppercase tracking-widest text-green-900/40 mb-3">Golf details</p>
-          <div className="grid grid-cols-2 gap-2 mb-3">
-            <GolfStat
-              value={p?.handicap_index !== null && p?.handicap_index !== undefined && p?.show_handicap ? String(p.handicap_index) : '—'}
-              label="Handicap"
-            />
-            <GolfStat value={p?.play_frequency ?? '—'} label="Rounds / month" />
-            <GolfStat value={p?.preferred_play_times ?? '—'} label="Preferred time" />
-            <GolfStat value={p?.open_to_golf_travel ? 'Yes' : 'No'} label="Golf travel" />
-          </div>
-          <p className="text-sm text-green-900/60 leading-relaxed">
-            {p?.family_golfers ?? <span className="text-green-900/25 italic">No additional info</span>}
-          </p>
-        </div>
-
-        {/* Personal */}
-        <div className="px-5 py-4 border-b border-green-900/08">
-          <p className="text-xs uppercase tracking-widest text-green-900/40 mb-2">Beyond the office</p>
+          <p className="text-xs uppercase tracking-widest text-green-900/40 mb-2">Hobbies</p>
           <p className="text-sm text-green-900 leading-relaxed">
             {p?.non_golf_hobbies ?? <span className="text-green-900/25 italic">Not filled in</span>}
           </p>
         </div>
 
+        {/* Focus LinkUps groups */}
+        <div className="px-5 py-4 border-b border-green-900/08">
+          <p className="text-xs uppercase tracking-widest text-green-900/40 mb-3">Focus LinkUps groups</p>
+          {focusGroups.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {focusGroups.map(g => (
+                <span key={g} className="text-xs bg-green-50 text-green-900 px-2.5 py-1 rounded-full border border-green-900/10">
+                  {g}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-green-900/25 italic">No Focus LinkUp groups</p>
+          )}
+        </div>
+
       </div>
     </AppShell>
-  );
-}
-
-// ---- Sub-components -----------------------------------------
-
-
-function GolfStat({ value, label }: { value: string; label: string }) {
-  return (
-    <div className="bg-green-50 rounded-xl p-3 text-center">
-      <p className="font-sans font-black text-xl text-green-900">{value}</p>
-      <p className="text-xs text-green-900/40 mt-1 tracking-wide">{label}</p>
-    </div>
   );
 }
 
@@ -257,6 +251,13 @@ function CalendarIcon() {
         strokeLinejoin="round"
         d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5m-9-6h.008v.008H12v-.008zM12 15h.008v.008H12V15zm0 2.25h.008v.008H12v-.008zM9.75 15h.008v.008H9.75V15zm0 2.25h.008v.008H9.75v-.008zM7.5 15h.008v.008H7.5V15zm0 2.25h.008v.008H7.5v-.008zm6.75-4.5h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V15zm0 2.25h.008v.008h-.008v-.008zm2.25-4.5h.008v.008H16.5v-.008zm0 2.25h.008v.008H16.5V15z"
       />
+    </svg>
+  );
+}
+function LinkedInIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
     </svg>
   );
 }

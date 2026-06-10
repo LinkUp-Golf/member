@@ -3,11 +3,11 @@
 import { useState, useEffect } from 'react'
 import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
-import { capitalizeName } from '@/lib/utils'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
 import AppShell from '@/components/layout/AppShell'
 import { INDUSTRY_CATEGORIES } from '@/types'
+import Select from '@/components/ui/Select'
 import type { MemberProfile } from '@/types'
 
 export default function MyProfilePage() {
@@ -15,12 +15,25 @@ export default function MyProfilePage() {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState<Partial<MemberProfile>>({})
+  const [focusGroups, setFocusGroups] = useState<string[]>([])
 
   useEffect(() => {
     if (profile?.profile) {
       setForm(profile.profile)
     }
   }, [profile])
+
+  useEffect(() => {
+    apiClient.get<{ subscriptions: { industry_focus: string; custom_label: string | null; status: string }[] }>('/api/focus-linkups').then(res => {
+      if (res.data?.subscriptions) {
+        setFocusGroups(
+          res.data.subscriptions
+            .filter(s => s.status === 'approved')
+            .map(s => s.industry_focus === 'Other' && s.custom_label ? s.custom_label : s.industry_focus)
+        )
+      }
+    })
+  }, [])
 
   function set(field: keyof MemberProfile, value: unknown) {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -39,12 +52,7 @@ export default function MyProfilePage() {
       value_offered: form.value_offered,
       value_sought: form.value_sought,
       non_golf_hobbies: form.non_golf_hobbies,
-      handicap_index: form.handicap_index ?? null,
-      show_handicap: form.show_handicap ?? false,
-      preferred_play_times: form.preferred_play_times,
-      play_frequency: form.play_frequency,
-      open_to_golf_travel: form.open_to_golf_travel ?? false,
-      family_golfers: form.family_golfers,
+      linkedin_url: form.linkedin_url ?? null,
       profile_visible: form.profile_visible ?? true,
     })
 
@@ -70,8 +78,8 @@ export default function MyProfilePage() {
             size="xl"
           />
         </div>
-        <h1 className="font-sans font-black text-2xl text-white">
-          {capitalizeName(m.first_name)} {capitalizeName(m.last_name)}
+        <h1 className="font-sans font-black text-2xl text-white capitalize">
+          {m.first_name} {m.last_name}
         </h1>
         {m.profile?.role_title && (
           <p className="text-sm text-white/50 mt-1">
@@ -122,47 +130,48 @@ export default function MyProfilePage() {
       {/* Profile fields */}
       <div className="pb-8">
         <Field
-          label="About my business"
+          label="Intro message"
           value={form.business_description}
           editing={editing}
           multiline
-          placeholder="Describe what your business does, your experience, and what makes you distinctive…"
+          placeholder="Share a brief intro — who you are, what you do, and what makes you distinctive…"
           onChange={v => set('business_description', v)}
         />
 
         <Field
-          label="My role & company"
+          label="Title"
           value={form.role_title}
           editing={editing}
-          placeholder="e.g. CEO, McKenna Infrastructure Group"
+          placeholder="e.g. CEO"
           onChange={v => set('role_title', v)}
-          extra={
-            editing ? (
-              <input
-                className="input mt-2"
-                placeholder="Business name"
-                value={form.business_name ?? ''}
-                onChange={e => set('business_name', e.target.value)}
-              />
-            ) : form.business_name ? (
-              <p className="text-sm text-green-900/60 mt-1">{form.business_name}</p>
-            ) : null
-          }
+        />
+
+        <Field
+          label="Organization"
+          value={form.business_name}
+          editing={editing}
+          placeholder="e.g. McKenna Infrastructure Group"
+          onChange={v => set('business_name', v)}
+        />
+
+        <Field
+          label="LinkedIn profile"
+          value={form.linkedin_url}
+          editing={editing}
+          placeholder="https://linkedin.com/in/yourprofile"
+          onChange={v => set('linkedin_url', v)}
         />
 
         {editing && (
           <div className="px-5 py-4 border-b border-green-900/08">
             <p className="text-xs uppercase tracking-widest text-green-900/40 mb-2">Industry category</p>
-            <select
-              className="input"
+            <Select
+              options={INDUSTRY_CATEGORIES.map(c => ({ value: c, label: c }))}
               value={form.industry_category ?? ''}
-              onChange={e => set('industry_category', e.target.value)}
-            >
-              <option value="">Select a category…</option>
-              {INDUSTRY_CATEGORIES.map(c => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
+              onChange={v => set('industry_category', v)}
+              placeholder="Select a category…"
+              searchPlaceholder="Search categories…"
+            />
           </div>
         )}
 
@@ -185,7 +194,7 @@ export default function MyProfilePage() {
         />
 
         <Field
-          label="Beyond the office"
+          label="Hobbies"
           value={form.non_golf_hobbies}
           editing={editing}
           multiline
@@ -193,85 +202,19 @@ export default function MyProfilePage() {
           onChange={v => set('non_golf_hobbies', v)}
         />
 
-        {/* Golf life */}
+        {/* Focus LinkUps groups */}
         <div className="px-5 py-4 border-b border-green-900/08">
-          <p className="text-xs uppercase tracking-widest text-green-900/40 mb-3">Golf life</p>
-
-          {editing ? (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label htmlFor="profile-handicap" className="text-xs text-green-900/50 mb-1 block">Handicap (optional)</label>
-                  <input
-                    id="profile-handicap"
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="54"
-                    className="input"
-                    placeholder="e.g. 11.4"
-                    value={form.handicap_index ?? ''}
-                    onChange={e => set('handicap_index', e.target.value ? parseFloat(e.target.value) : null)}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="profile-play-freq" className="text-xs text-green-900/50 mb-1 block">Play frequency</label>
-                  <input
-                    id="profile-play-freq"
-                    className="input"
-                    placeholder="e.g. 2–3× per month"
-                    value={form.play_frequency ?? ''}
-                    onChange={e => set('play_frequency', e.target.value)}
-                  />
-                </div>
-              </div>
-              <div>
-                <label htmlFor="profile-tee-times" className="text-xs text-green-900/50 mb-1 block">Preferred tee times</label>
-                <input id="profile-tee-times"
-                  className="input"
-                  placeholder="e.g. Early mornings, weekdays"
-                  value={form.preferred_play_times ?? ''}
-                  onChange={e => set('preferred_play_times', e.target.value)}
-                />
-              </div>
-              <div className="flex items-center gap-3">
-                <Toggle
-                  label="Open to golf travel"
-                  checked={form.open_to_golf_travel ?? false}
-                  onChange={v => set('open_to_golf_travel', v)}
-                />
-                <Toggle
-                  label="Show handicap"
-                  checked={form.show_handicap ?? false}
-                  onChange={v => set('show_handicap', v)}
-                />
-              </div>
-              <div>
-                <label htmlFor="profile-family" className="text-xs text-green-900/50 mb-1 block">Family golf details</label>
-                <textarea
-                  id="profile-family"
-                  className="input resize-none"
-                  rows={2}
-                  placeholder="e.g. Wife plays occasionally. Son (14) is learning."
-                  value={form.family_golfers ?? ''}
-                  onChange={e => set('family_golfers', e.target.value)}
-                />
-              </div>
+          <p className="text-xs uppercase tracking-widest text-green-900/40 mb-3">Focus LinkUps groups</p>
+          {focusGroups.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {focusGroups.map(g => (
+                <span key={g} className="text-xs bg-green-50 text-green-900 px-2.5 py-1 rounded-full border border-green-900/10">
+                  {g}
+                </span>
+              ))}
             </div>
           ) : (
-            <>
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                {form.handicap_index !== null && form.handicap_index !== undefined && form.show_handicap && (
-                  <GolfStat value={String(form.handicap_index)} label="Handicap" />
-                )}
-                {form.play_frequency && <GolfStat value={form.play_frequency} label="Frequency" />}
-                {form.preferred_play_times && <GolfStat value={form.preferred_play_times} label="Preferred" />}
-                <GolfStat value={form.open_to_golf_travel ? 'Yes' : 'No'} label="Golf travel" />
-              </div>
-              {form.family_golfers && (
-                <p className="text-sm text-green-900/60 leading-relaxed">{form.family_golfers}</p>
-              )}
-            </>
+            <p className="text-sm text-green-900/30 italic">Not subscribed to any groups — manage in Focus LinkUps</p>
           )}
         </div>
 
@@ -293,7 +236,7 @@ export default function MyProfilePage() {
 // ---- Sub-components -----------------------------------------
 
 function Field({
-  label, value, editing, multiline, placeholder, onChange, extra,
+  label, value, editing, multiline, placeholder, onChange,
 }: {
   label: string
   value?: string | null
@@ -301,50 +244,34 @@ function Field({
   multiline?: boolean
   placeholder?: string
   onChange: (v: string) => void
-  extra?: React.ReactNode
 }) {
   return (
     <div className="px-5 py-4 border-b border-green-900/08">
       <p className="text-xs uppercase tracking-widest text-green-900/40 mb-2">{label}</p>
       {editing ? (
-        <>
-          {multiline ? (
-            <textarea
-              className="input resize-none"
-              rows={3}
-              placeholder={placeholder}
-              value={value ?? ''}
-              onChange={e => onChange(e.target.value)}
-            />
-          ) : (
-            <input
-              className="input"
-              placeholder={placeholder}
-              value={value ?? ''}
-              onChange={e => onChange(e.target.value)}
-            />
-          )}
-          {extra}
-        </>
+        multiline ? (
+          <textarea
+            className="input resize-none"
+            rows={3}
+            placeholder={placeholder}
+            value={value ?? ''}
+            onChange={e => onChange(e.target.value)}
+          />
+        ) : (
+          <input
+            className="input"
+            placeholder={placeholder}
+            value={value ?? ''}
+            onChange={e => onChange(e.target.value)}
+          />
+        )
       ) : (
-        <>
-          {value ? (
-            <p className="text-sm text-green-900 leading-relaxed">{value}</p>
-          ) : (
-            <p className="text-sm text-green-900/30 italic">Not set — tap Edit to add</p>
-          )}
-          {extra}
-        </>
+        value ? (
+          <p className="text-sm text-green-900 leading-relaxed">{value}</p>
+        ) : (
+          <p className="text-sm text-green-900/30 italic">Not set — tap Edit to add</p>
+        )
       )}
-    </div>
-  )
-}
-
-function GolfStat({ value, label }: { value: string; label: string }) {
-  return (
-    <div className="bg-green-50 rounded-xl p-3 text-center">
-      <p className="font-sans font-black text-xl text-green-900">{value}</p>
-      <p className="text-xs text-green-900/40 mt-1">{label}</p>
     </div>
   )
 }

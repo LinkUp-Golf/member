@@ -69,11 +69,12 @@ class ApiClient {
       try { errorBody = await res.json() } catch { /* empty */ }
 
       const errObj = typeof errorBody.error === 'object' ? errorBody.error : null
+      const errMsg = typeof errorBody.error === 'string' ? errorBody.error : errObj?.message
       return {
         data: null,
         error: {
           code: errObj?.code ?? 'REQUEST_FAILED',
-          message: errObj?.message ?? `Request failed with status ${res.status}`,
+          message: errMsg ?? `Request failed with status ${res.status}`,
         },
         status: res.status,
       }

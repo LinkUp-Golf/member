@@ -6,7 +6,7 @@ import {
   AdminPageHeader, AdminTable, AdminTr, AdminTd, Badge,
   AdminButton, StatCard,
 } from '@/components/admin/AdminUI'
-import { formatRelativeTime, capitalizeName } from '@/lib/utils'
+import { formatRelativeTime } from '@/lib/utils'
 import { differenceInDays } from 'date-fns'
 import type { ReferralStatus } from '@/types'
 
@@ -118,16 +118,16 @@ export default function AdminReferralsPage() {
           return (
             <AdminTr key={r.id}>
               <AdminTd>
-                <p className="font-medium text-gray-900">
-                  {capitalizeName(r.referring_member?.first_name ?? '')} {capitalizeName(r.referring_member?.last_name ?? '')}
+                <p className="font-medium text-gray-900 capitalize">
+                  {r.referring_member?.first_name ?? ''} {r.referring_member?.last_name ?? ''}
                 </p>
                 <p className="text-xs text-gray-400">{r.referring_member?.email}</p>
               </AdminTd>
               <AdminTd>
                 {r.referred_member ? (
                   <>
-                    <p className="font-medium text-gray-900">
-                      {capitalizeName(r.referred_member.first_name)} {capitalizeName(r.referred_member.last_name)}
+                    <p className="font-medium text-gray-900 capitalize">
+                      {r.referred_member.first_name} {r.referred_member.last_name}
                     </p>
                     <p className="text-xs text-gray-400">{r.referred_member.email}</p>
                   </>

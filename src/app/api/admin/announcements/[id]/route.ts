@@ -21,6 +21,7 @@ export const PATCH = withAuth(
       image_url?: string | null
       video_url?: string | null
       media_urls?: string[]
+      focus_linkup_categories?: string[]
     }
 
     const update: Record<string, unknown> = {}
@@ -31,6 +32,7 @@ export const PATCH = withAuth(
     if ('image_url' in body) update.image_url = body.image_url
     if ('video_url' in body) update.video_url = body.video_url
     if ('media_urls' in body) update.media_urls = body.media_urls ?? []
+    if ('focus_linkup_categories' in body) update.focus_linkup_categories = body.focus_linkup_categories ?? []
 
     const admin = createAdminClient()
     const { data, error } = await admin

@@ -11,7 +11,6 @@ import {
   AdminButton,
 } from "@/components/admin/AdminUI";
 import { format, formatDistanceToNow } from "date-fns";
-import { capitalizeName } from "@/lib/utils";
 import type { MemberWithProfile } from "@/types";
 
 type FilterStatus =
@@ -31,6 +30,9 @@ export default function AdminMembersPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
   const [selected, setSelected] = useState<MemberWithProfile | null>(null);
+  const [panelMounted, setPanelMounted] = useState(false);
+  const [panelVisible, setPanelVisible] = useState(false);
+  const [panelData, setPanelData] = useState<MemberWithProfile | null>(null);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<{
@@ -43,6 +45,26 @@ export default function AdminMembersPage() {
   useEffect(() => {
     loadMembers();
   }, []);
+
+  // Animate panel open/close; panelData persists during the exit transition
+  useEffect(() => {
+    if (selected) {
+      setPanelData(selected);
+      setPanelMounted(true);
+      const ids: number[] = [];
+      ids[0] = requestAnimationFrame(() => {
+        ids[1] = requestAnimationFrame(() => setPanelVisible(true));
+      });
+      return () => ids.forEach((id) => cancelAnimationFrame(id));
+    } else {
+      setPanelVisible(false);
+      const t = setTimeout(() => {
+        setPanelMounted(false);
+        setPanelData(null);
+      }, 320);
+      return () => clearTimeout(t);
+    }
+  }, [selected]);
 
   useEffect(() => {
     let result = members;
@@ -257,9 +279,9 @@ export default function AdminMembersPage() {
               <AdminTr key={m.id} onClick={() => setSelected(m)}>
                 <AdminTd>
                   <div>
-                    <p className="font-medium text-gray-900">
-                      {capitalizeName(m.first_name)}{" "}
-                      {capitalizeName(m.last_name)}
+                    <p className="font-medium text-gray-900 capitalize">
+                      {m.first_name}{" "}
+                      {m.last_name}
                     </p>
                     <p className="text-xs text-gray-400">{m.email}</p>
                     {m.profile?.business_name && (
@@ -347,11 +369,15 @@ export default function AdminMembersPage() {
         </div>
 
         {/* Member detail panel — bottom sheet on mobile, inline on desktop */}
-        {selected && (
+        {panelMounted && panelData && (
           <>
             {/* Mobile backdrop */}
             <div
-              className="fixed inset-0 bg-black/40 z-40 lg:hidden"
+              className={[
+                "fixed inset-0 bg-black/40 z-40 lg:hidden",
+                panelVisible ? "opacity-100" : "opacity-0",
+              ].join(" ")}
+              style={{ transition: "opacity 200ms ease-out", willChange: "opacity" }}
               role="presentation"
               onClick={() => setSelected(null)}
               onKeyDown={(e) => {
@@ -359,17 +385,27 @@ export default function AdminMembersPage() {
               }}
             />
             {/* Sheet / panel */}
-            <div className="fixed bottom-0 left-0 right-0 z-50 lg:static lg:z-auto lg:w-72 lg:flex-shrink-0">
+            <div
+              className={[
+                "fixed bottom-0 left-0 right-0 z-50 lg:static lg:z-auto lg:w-72 lg:flex-shrink-0 lg:transform-none",
+                panelVisible ? "translate-y-0" : "translate-y-full",
+              ].join(" ")}
+              style={{
+                transition: panelVisible
+                  ? "transform 340ms cubic-bezier(0.32,0.72,0,1)"
+                  : "transform 240ms cubic-bezier(0.4,0,1,1)",
+                willChange: "transform",
+              }}>
               <div className="bg-white rounded-t-2xl lg:rounded-xl border-t lg:border border-gray-200 shadow-2xl lg:shadow-sm max-h-[85vh] overflow-y-auto">
                 <div className="p-4 sm:p-5">
                   <div className="flex items-start justify-between mb-4">
                     <div>
-                      <p className="font-semibold text-gray-900">
-                        {capitalizeName(selected.first_name)}{" "}
-                        {capitalizeName(selected.last_name)}
+                      <p className="font-semibold text-gray-900 capitalize">
+                        {panelData.first_name}{" "}
+                        {panelData.last_name}
                       </p>
                       <p className="text-xs text-gray-400 mt-0.5">
-                        {selected.email}
+                        {panelData.email}
                       </p>
                     </div>
                     <button
@@ -382,56 +418,56 @@ export default function AdminMembersPage() {
 
                   <div className="space-y-3 text-sm">
                     <DetailRow label="Status">
-                      <StatusBadge status={selected.membership_status} />
+                      <StatusBadge status={panelData.membership_status} />
                     </DetailRow>
                     <DetailRow label="Category">
-                      {selected.profile?.industry_category ?? "—"}
+                      {panelData.profile?.industry_category ?? "—"}
                     </DetailRow>
                     <DetailRow label="Business">
-                      {selected.profile?.business_name ?? "—"}
+                      {panelData.profile?.business_name ?? "—"}
                     </DetailRow>
                     <DetailRow label="Role">
-                      {selected.profile?.role_title ?? "—"}
+                      {panelData.profile?.role_title ?? "—"}
                     </DetailRow>
                     <DetailRow label="Last sign in">
-                      {selected.last_sign_in
-                        ? formatDistanceToNow(new Date(selected.last_sign_in), {
+                      {panelData.last_sign_in
+                        ? formatDistanceToNow(new Date(panelData.last_sign_in), {
                             addSuffix: true,
                           })
                         : "Never"}
                     </DetailRow>
                     <DetailRow label="GHL ID">
                       <span className="font-mono text-xs text-gray-400">
-                        {selected.ghl_contact_id}
+                        {panelData.ghl_contact_id}
                       </span>
                     </DetailRow>
 
-                    {selected.profile?.handicap_index &&
-                      selected.profile?.show_handicap && (
+                    {panelData.profile?.handicap_index &&
+                      panelData.profile?.show_handicap && (
                         <DetailRow label="Handicap">
-                          {selected.profile.handicap_index}
+                          {panelData.profile.handicap_index}
                         </DetailRow>
                       )}
                   </div>
 
-                  {selected.profile?.value_offered && (
+                  {panelData.profile?.value_offered && (
                     <div className="mt-4 pt-4 border-t border-gray-100">
                       <p className="text-xs text-gray-400 uppercase tracking-wider mb-1.5">
                         Value offered
                       </p>
                       <p className="text-xs text-gray-600 leading-relaxed">
-                        {selected.profile.value_offered}
+                        {panelData.profile.value_offered}
                       </p>
                     </div>
                   )}
 
-                  {selected.profile?.value_sought && (
+                  {panelData.profile?.value_sought && (
                     <div className="mt-3">
                       <p className="text-xs text-gray-400 uppercase tracking-wider mb-1.5">
                         Looking for
                       </p>
                       <p className="text-xs text-gray-600 leading-relaxed">
-                        {selected.profile.value_sought}
+                        {panelData.profile.value_sought}
                       </p>
                     </div>
                   )}
@@ -441,40 +477,40 @@ export default function AdminMembersPage() {
                     <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">
                       Actions
                     </p>
-                    {(selected.membership_status === "waitlist" ||
-                      selected.membership_status === "pending") && (
+                    {(panelData.membership_status === "waitlist" ||
+                      panelData.membership_status === "pending") && (
                       <AdminButton
                         label="Approve membership"
-                        onClick={() => updateStatus(selected.id, "active")}
+                        onClick={() => updateStatus(panelData.id, "active")}
                         variant="gold"
                         disabled={saving}
                       />
                     )}
-                    {selected.membership_status === "active" &&
-                      selected.id !== currentUserId && (
+                    {panelData.membership_status === "active" &&
+                      panelData.id !== currentUserId && (
                         <AdminButton
                           label="Suspend membership"
-                          onClick={() => updateStatus(selected.id, "suspended")}
+                          onClick={() => updateStatus(panelData.id, "suspended")}
                           variant="danger"
                           disabled={saving}
                         />
                       )}
-                    {selected.membership_status === "suspended" && (
+                    {panelData.membership_status === "suspended" && (
                       <AdminButton
                         label="Reinstate membership"
-                        onClick={() => updateStatus(selected.id, "active")}
+                        onClick={() => updateStatus(panelData.id, "active")}
                         variant="primary"
                         disabled={saving}
                       />
                     )}
                     <AdminButton
                       label={
-                        selected.is_admin
+                        panelData.is_admin
                           ? "Remove admin access"
                           : "Grant admin access"
                       }
                       onClick={() =>
-                        toggleAdmin(selected.id, selected.is_admin)
+                        toggleAdmin(panelData.id, panelData.is_admin)
                       }
                       variant="ghost"
                       disabled={saving}
