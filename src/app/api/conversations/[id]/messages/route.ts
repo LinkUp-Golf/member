@@ -6,6 +6,7 @@ import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { validateString } from '@/lib/validation'
+import { messageRateLimit, messageBurstLimit } from '@/lib/rateLimit'
 import type { AuthContext } from '@/lib/auth/types'
 
 const DEFAULT_PAGE_SIZE = 30
@@ -96,6 +97,50 @@ export const POST = withAuth(async (
   }
   if (participation.status === 'pending') {
     return NextResponse.json({ error: 'Invitation not yet accepted' }, { status: 403 })
+  }
+
+  // Check if the member is messaging-muted by an admin
+  const { data: memberRow } = await admin
+    .from('members')
+    .select('messaging_muted_until')
+    .eq('id', ctx.userId)
+    .single()
+
+  if (memberRow?.messaging_muted_until && new Date(memberRow.messaging_muted_until) > new Date()) {
+    return NextResponse.json(
+      { error: 'Your messaging has been temporarily restricted. Contact an admin for help.' },
+      { status: 403 }
+    )
+  }
+
+  // Rate limits — per-minute global + per-conversation burst
+  const globalLimit = messageRateLimit(ctx.userId)
+  if (!globalLimit.allowed) {
+    return NextResponse.json(
+      { error: 'Too many messages. Please slow down.' },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(globalLimit.resetAt),
+          'Retry-After': String(Math.ceil((globalLimit.resetAt - Date.now()) / 1000)),
+        },
+      }
+    )
+  }
+  const burstLimit = messageBurstLimit(ctx.userId, convId)
+  if (!burstLimit.allowed) {
+    return NextResponse.json(
+      { error: 'Sending too fast in this conversation. Please wait a moment.' },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(burstLimit.resetAt),
+          'Retry-After': String(Math.ceil((burstLimit.resetAt - Date.now()) / 1000)),
+        },
+      }
+    )
   }
 
   const { data, error } = await admin

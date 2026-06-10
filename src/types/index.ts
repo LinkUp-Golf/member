@@ -97,6 +97,7 @@ export interface Member {
   is_admin: boolean
   warning_count?: number
   suspended_until?: string | null
+  messaging_muted_until?: string | null
   last_sign_in?: string | null
   created_at: string
   updated_at: string

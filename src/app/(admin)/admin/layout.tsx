@@ -24,6 +24,7 @@ const NAV_GROUPS = [
       { href: '/admin/moderation',       label: 'Moderation Queue',  icon: '▪', badge: true },
       { href: '/admin/guest-access',     label: 'Guest Access',      icon: '▪', badge: true },
       { href: '/admin/referrals',        label: 'Referral Pipeline', icon: '▪' },
+      { href: '/admin/messaging',        label: 'Messaging Controls', icon: '▪' },
     ],
   },
   {

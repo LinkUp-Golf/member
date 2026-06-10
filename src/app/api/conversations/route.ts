@@ -6,6 +6,7 @@ import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import type { AuthContext } from '@/lib/auth/types'
+import { inviteRateLimit } from '@/lib/rateLimit'
 import type { ConversationWithDetails, MessageWithSender, ParticipantRole, ParticipantStatus } from '@/types'
 
 // GET /api/conversations — list all conversations for the authenticated user,
@@ -126,6 +127,37 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
   if (!participant_ids?.length) {
     return NextResponse.json({ error: 'participant_ids is required' }, { status: 400 })
+  }
+
+  // For group chats the creator is sending invitations — apply mute + rate limit
+  if (type === 'group') {
+    const { data: memberRow } = await admin
+      .from('members')
+      .select('messaging_muted_until')
+      .eq('id', ctx.userId)
+      .single()
+
+    if (memberRow?.messaging_muted_until && new Date(memberRow.messaging_muted_until) > new Date()) {
+      return NextResponse.json(
+        { error: 'Your messaging has been temporarily restricted. Contact an admin for help.' },
+        { status: 403 }
+      )
+    }
+
+    const limit = inviteRateLimit(ctx.userId)
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: 'Too many invitations. Please wait before creating more group chats.' },
+        {
+          status: 429,
+          headers: {
+            'X-RateLimit-Remaining': '0',
+            'X-RateLimit-Reset': String(limit.resetAt),
+            'Retry-After': String(Math.ceil((limit.resetAt - Date.now()) / 1000)),
+          },
+        }
+      )
+    }
   }
 
   // For direct messages: find and return an existing conversation if one exists

@@ -4,6 +4,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
+import { inviteRateLimit } from '@/lib/rateLimit'
 import type { AuthContext } from '@/lib/auth/types'
 
 // GET /api/conversations/[id]/participants
@@ -75,6 +76,35 @@ export const POST = withAuth(async (
   if (!myParticipant) return NextResponse.json({ error: 'Not a participant' }, { status: 403 })
   if (myParticipant.role !== 'moderator') {
     return NextResponse.json({ error: 'Only moderators can add members' }, { status: 403 })
+  }
+
+  // Mute check and invite rate limit for the moderator sending the invite
+  const { data: moderatorRow } = await admin
+    .from('members')
+    .select('messaging_muted_until')
+    .eq('id', ctx.userId)
+    .single()
+
+  if (moderatorRow?.messaging_muted_until && new Date(moderatorRow.messaging_muted_until) > new Date()) {
+    return NextResponse.json(
+      { error: 'Your messaging has been temporarily restricted. Contact an admin for help.' },
+      { status: 403 }
+    )
+  }
+
+  const limit = inviteRateLimit(ctx.userId)
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: 'Too many invitations sent. Please wait before adding more members.' },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(limit.resetAt),
+          'Retry-After': String(Math.ceil((limit.resetAt - Date.now()) / 1000)),
+        },
+      }
+    )
   }
 
   // Prevent duplicate participant rows
