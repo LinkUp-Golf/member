@@ -281,9 +281,9 @@ export async function cancelBooking(eventId: string, contactId?: string): Promis
       body: JSON.stringify({
         appointmentStatus: 'cancelled',
         ...(contactId ? { contact: { id: contactId } } : {}),
-        toNotify: false,
+        toNotify: true,
         channel: 'web_app',
-        source: 'calendar_page',
+        source: GHL_OPPORTUNITY_SOURCE,
       }),
     })
     return true
