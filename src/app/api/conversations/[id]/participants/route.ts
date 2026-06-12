@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { inviteRateLimit } from '@/lib/rateLimit'
+import { sendPushToMember, NotificationTemplates } from '@/lib/push'
 import type { AuthContext } from '@/lib/auth/types'
 
 // GET /api/conversations/[id]/participants
@@ -124,6 +125,20 @@ export const POST = withAuth(async (
     .insert({ conversation_id: convId, member_id, role: 'member', status: 'pending' })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Notify the invited member (fire-and-forget)
+  ;(async () => {
+    const [{ data: conv }, { data: inviter }] = await Promise.all([
+      admin.from('conversations').select('name').eq('id', convId).single(),
+      admin.from('members').select('first_name').eq('id', ctx.userId).single(),
+    ])
+    const groupName = conv?.name ?? 'a group'
+    const inviterName = inviter?.first_name ?? 'Someone'
+    await sendPushToMember(
+      member_id,
+      NotificationTemplates.groupChatInvite(inviterName, groupName, convId)
+    )
+  })().catch(() => {})
 
   return NextResponse.json({ ok: true }, { status: 201 })
 })

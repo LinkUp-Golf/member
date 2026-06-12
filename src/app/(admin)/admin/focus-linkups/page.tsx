@@ -77,11 +77,11 @@ export default function AdminFocusLinkupsPage() {
   }
 
   async function reviewRequest(id: string, action: 'approved' | 'declined') {
-    const supabase = createClient();
-    await supabase
-      .from("focus_linkup_subscriptions")
-      .update({ status: action, reviewed_at: new Date().toISOString() })
-      .eq("id", id);
+    await fetch('/api/admin/focus-linkups', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status: action }),
+    });
     setCustomRequests(prev =>
       prev.map(r => r.id === id ? { ...r, status: action } : r)
     );

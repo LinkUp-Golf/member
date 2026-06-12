@@ -34,5 +34,23 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json(data)
+  const rows = data ?? []
+
+  // Attach booker first name to rows where the current user was invited (not the booker)
+  const invitedRows = rows.filter(b => b.player_member_id === ctx.userId)
+  if (invitedRows.length > 0) {
+    const bookerIds = [...new Set(invitedRows.map(b => b.member_id))]
+    const { data: bookers } = await supabase
+      .from('members')
+      .select('id, first_name')
+      .in('id', bookerIds)
+    const nameById = Object.fromEntries((bookers ?? []).map(m => [m.id as string, m.first_name as string]))
+    return NextResponse.json(rows.map(b =>
+      b.player_member_id === ctx.userId
+        ? { ...b, booker_name: nameById[b.member_id] ?? null }
+        : b
+    ))
+  }
+
+  return NextResponse.json(rows)
 })

@@ -12,8 +12,11 @@ import type { NotificationLog, NotificationType } from '@/types'
 const TYPE_ICONS: Record<NotificationType, string> = {
   new_member:      '👋',
   booking:         '⛳',
+  booking_invite:  '⛳',
+  payment_ready:   '💳',
   visiting_member: '✈️',
   message:         '💬',
+  group_invite:    '👥',
   focus_linkup:    '🎯',
   play_suggestion: '🏌️',
   guest_access:    '🔑',
@@ -25,8 +28,11 @@ const TYPE_ICONS: Record<NotificationType, string> = {
 const TYPE_LABELS: Record<NotificationType, string> = {
   new_member:      'New member',
   booking:         'Tee time',
+  booking_invite:  'Booking invite',
+  payment_ready:   'Payment ready',
   visiting_member: 'Visiting member',
   message:         'Message',
+  group_invite:    'Group invite',
   focus_linkup:    'Focus LinkUp',
   play_suggestion: 'Play suggestion',
   guest_access:    'Guest access',

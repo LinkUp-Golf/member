@@ -146,14 +146,17 @@ async function dispatchToSubscriptions(
 // ---- Notification log helper --------------------------------
 
 const TAG_TYPE_MAP: Record<string, NotificationType> = {
-  'new-member':    'new_member',
-  'booking':       'booking',
-  'visit':         'visiting_member',
-  'msg':           'message',
-  'focus-linkup':  'focus_linkup',
-  'suggestion':    'play_suggestion',
-  'guest-access':  'guest_access',
-  'referral':      'referral',
+  'new-member':       'new_member',
+  'booking':          'booking',
+  'booking-invite':   'booking_invite',
+  'payment-ready':    'payment_ready',
+  'visit':            'visiting_member',
+  'msg':              'message',
+  'group-invite':     'group_invite',
+  'focus-linkup':     'focus_linkup',
+  'suggestion':       'play_suggestion',
+  'guest-access':     'guest_access',
+  'referral':         'referral',
   'test-notification': 'test',
 }
 
@@ -206,6 +209,11 @@ export async function sendToUsers(
   )
   const subs = await findByUserIds(userIds)
   return dispatchToSubscriptions(subs, payload)
+}
+
+/** Log a notification without dispatching a web push (for in-app only) */
+export async function logNotificationsOnly(memberIds: string[], payload: PushPayload): Promise<void> {
+  return logNotifications(memberIds, payload)
 }
 
 /** Send to every subscription in the database */

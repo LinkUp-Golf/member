@@ -45,6 +45,8 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase-server'
 import { cancelBooking } from '@/lib/ghl/client'
 import { logger } from '@/lib/logger'
+import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { format } from 'date-fns'
 
 type BookingEvent = 'availability_confirmed' | 'payment_confirmed' | 'cancelled'
 
@@ -125,6 +127,23 @@ export async function POST(request: NextRequest) {
     action: 'ghl_booking_webhook',
     metadata: { event, bookingId: primary.id },
   })
+
+  // Notify member when availability is confirmed — payment is now due
+  if (event === 'availability_confirmed') {
+    const { data: bookingRow } = await supabase
+      .from('bookings')
+      .select('booking_date, tee_time')
+      .eq('id', primary.id)
+      .single()
+    if (bookingRow) {
+      const displayDate = format(new Date(`${bookingRow.booking_date}T12:00:00`), 'EEEE, MMMM d')
+      const displayTime = (bookingRow.tee_time as string).slice(0, 5)
+      sendPushToMember(
+        primary.member_id,
+        NotificationTemplates.bookingPaymentReady(displayDate, displayTime)
+      ).catch(() => {})
+    }
+  }
 
   // Mark GHL appointment as cancelled when the event is cancelled
   if (event === 'cancelled' && primary.ghl_booking_id) {

@@ -6,7 +6,7 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
-import { sendPushToCourse, NotificationTemplates } from '@/lib/push'
+import { sendPushToCourse, sendPushToFocusMembers, NotificationTemplates } from '@/lib/push'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const PATCH = withAuth(
@@ -66,10 +66,11 @@ export const PATCH = withAuth(
 
     // Send push if this is a fresh publish (moderation approval), not an edit of existing post.
     if (isApproving && !wasAlreadyPublished && data.course_id) {
-      sendPushToCourse(
-        data.course_id,
-        NotificationTemplates.announcementBroadcast(data.title, data.type, data.id),
-        ctx.userId
+      const notifPayload = NotificationTemplates.announcementBroadcast(data.title, data.body, data.type, data.id)
+      const categories: string[] = data.focus_linkup_categories ?? []
+      ;(categories.length
+        ? sendPushToFocusMembers(data.course_id, categories, notifPayload, ctx.userId)
+        : sendPushToCourse(data.course_id, notifPayload, ctx.userId)
       ).catch(() => {})
     }
 

@@ -23,6 +23,7 @@ import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-serv
 import { getAvailableSlots, createBooking, getContactByEmail, createContact } from '@/lib/ghl/client'
 import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
+import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
 import { format } from 'date-fns'
 import {
   BOOKING_PRICE_USD,
@@ -287,6 +288,18 @@ export async function POST(request: NextRequest) {
   void getCache(COURSE_ANN_NS).clear(courseAnnPrefix(member.home_course_id)).catch((e) => {
     console.error('[booking/create] Cache clear failed (non-fatal):', e)
   })
+
+  // Notify members who were invited as additional players
+  const invitedMemberIds = extraPlayers
+    .map(p => p.memberId)
+    .filter((id): id is string => Boolean(id))
+  if (invitedMemberIds.length) {
+    const displayTime = timeNormalized.slice(0, 5)
+    void sendPushToMembers(
+      invitedMemberIds,
+      NotificationTemplates.bookingInvite(member.first_name, displayDate, displayTime)
+    ).catch(() => {})
+  }
 
   console.log('[booking/create] Success, primaryBookingId:', primaryBookingId)
 
