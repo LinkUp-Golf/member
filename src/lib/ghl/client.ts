@@ -270,14 +270,22 @@ export async function createBooking(params: {
       }),
     }
   )
-  const id = data.id
-  if (!id) throw new GHLError('createBooking returned no event id', ErrorCode.GHL_UNAVAILABLE)
-  return id
+  if (!data.id) throw new GHLError('createBooking returned no event id', ErrorCode.GHL_UNAVAILABLE)
+  return data.id
 }
 
-export async function cancelBooking(eventId: string): Promise<boolean> {
+export async function cancelBooking(eventId: string, contactId?: string): Promise<boolean> {
   try {
-    await ghlFetch(`/calendars/events/${eventId}`, { method: 'DELETE' })
+    await ghlFetch(`/calendars/events/appointments/${eventId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        appointmentStatus: 'cancelled',
+        ...(contactId ? { contact: { id: contactId } } : {}),
+        toNotify: false,
+        channel: 'web_app',
+        source: 'calendar_page',
+      }),
+    })
     return true
   } catch {
     return false
