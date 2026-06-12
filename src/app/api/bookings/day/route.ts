@@ -13,6 +13,7 @@ export interface DayPlayer {
   avatar_url: string | null
   tee_time: string
   players: number
+  is_self: boolean
 }
 
 // GET /api/bookings/day?date=YYYY-MM-DD
@@ -41,7 +42,6 @@ export const GET = withAuth(
       .eq('booking_date', date)
       .is('guest_name', null)
       .in('status', ['availability_confirmed', 'payment_confirmed', 'confirmed'])
-      .neq('member_id', ctx.userId)
 
     const players: DayPlayer[] = (bookings ?? []).map((b) => {
       const m = b.members as unknown as {
@@ -58,6 +58,7 @@ export const GET = withAuth(
         avatar_url: profile?.avatar_url ?? null,
         tee_time: b.tee_time,
         players: b.players,
+        is_self: m.id === ctx.userId,
       }
     })
 

@@ -46,6 +46,7 @@ interface DayPlayer {
   avatar_url: string | null;
   tee_time: string;
   players: number;
+  is_self: boolean;
 }
 
 const BOOKING_MIN_DAYS = 0;
@@ -671,8 +672,9 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
   }, [mounted]);
 
   const prof = detail?.profile;
-  const displayName =
-    prof?.display_name || `${player.first_name} ${player.last_name}`.trim();
+  const displayName = player.is_self
+    ? 'You'
+    : prof?.display_name || `${player.first_name} ${player.last_name}`.trim();
   const initials =
     `${player.first_name[0] ?? ""}${player.last_name[0] ?? ""}`.toUpperCase();
   const avatarUrl = prof?.avatar_url ?? player.avatar_url;
@@ -681,8 +683,9 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
     <>
       <button
         type="button"
-        onClick={openPopover}
+        onClick={player.is_self ? undefined : openPopover}
         className="flex flex-col items-center gap-1 flex-shrink-0 w-14 transition-opacity active:opacity-60"
+        style={{ cursor: player.is_self ? 'default' : undefined }}
       >
         {avatarUrl ? (
           <Image
