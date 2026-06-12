@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
   // ── Find primary booking by GHL appointment ID ─────────────
   const { data: primary, error: findError } = await supabase
     .from('bookings')
-    .select('id, ghl_booking_id, status')
+    .select('id, member_id, ghl_booking_id, status')
     .eq('ghl_booking_id', ghlBookingId)
     .maybeSingle()
 
@@ -126,9 +126,14 @@ export async function POST(request: NextRequest) {
     metadata: { event, bookingId: primary.id },
   })
 
-  // ── Cancel the individual GHL appointment when cancelled ────
+  // Mark GHL appointment as cancelled when the event is cancelled
   if (event === 'cancelled' && primary.ghl_booking_id) {
-    await cancelBooking(primary.ghl_booking_id).catch(() => {})
+    const { data: bookingMember } = await supabase
+      .from('members')
+      .select('ghl_contact_id')
+      .eq('id', primary.member_id)
+      .single()
+    await cancelBooking(primary.ghl_booking_id, bookingMember?.ghl_contact_id ?? undefined).catch(() => {})
   }
 
   return NextResponse.json({ received: true, matched: true, updated: 1 })
