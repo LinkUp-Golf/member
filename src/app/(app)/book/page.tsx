@@ -44,6 +44,7 @@ interface DayPlayer {
   first_name: string;
   last_name: string;
   avatar_url: string | null;
+  booking_date: string;
   tee_time: string;
   players: number;
   is_self: boolean;
@@ -190,7 +191,8 @@ export default function BookPage() {
       return;
     }
     setLoadingDayPlayers(true);
-    fetch(`/api/bookings/day?date=${selectedDate}`)
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    fetch(`/api/bookings/day?date=${selectedDate}&timezone=${encodeURIComponent(tz)}`)
       .then((r) => r.json())
       .then((d) => setDayPlayers(Array.isArray(d.players) ? d.players : []))
       .catch(() => setDayPlayers([]))
@@ -678,6 +680,8 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
   const initials =
     `${player.first_name[0] ?? ""}${player.last_name[0] ?? ""}`.toUpperCase();
   const avatarUrl = prof?.avatar_url ?? player.avatar_url;
+  const localDate = bookingToLocalDate(player.booking_date, player.tee_time);
+  const localTeeTime = `${String(localDate.getHours()).padStart(2, '0')}:${String(localDate.getMinutes()).padStart(2, '0')}:00`;
 
   return (
     <>
@@ -716,7 +720,7 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
           className="text-[9px] text-center"
           style={{ color: "rgba(0,38,105,0.38)" }}
         >
-          {formatTeeTime(player.tee_time)}
+          {formatTeeTime(localTeeTime)}
         </span>
       </button>
 
@@ -855,7 +859,7 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
                       className="font-sans font-black text-sm"
                       style={{ color: "var(--color-green-900)" }}
                     >
-                      {formatTeeTime(player.tee_time)}
+                      {formatTeeTime(localTeeTime)}
                     </p>
                   </div>
                   {player.players > 1 && (
