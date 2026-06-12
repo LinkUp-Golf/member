@@ -23,12 +23,12 @@ export const PATCH = withAuth(async (
   const body = await req.json().catch(() => ({})) as { cancellationReason?: string }
   const cancellationReason = body.cancellationReason?.trim() ?? null
 
-  // Fetch booking to get GHL IDs — RLS ensures member owns it
+  // Fetch booking — allow both the booker and the guest member to act on it
   const { data: booking, error: fetchError } = await supabase
     .from('bookings')
     .select('id, ghl_booking_id, ghl_opportunity_id, status')
     .eq('id', id)
-    .eq('member_id', ctx.userId)
+    .or(`member_id.eq.${ctx.userId},player_member_id.eq.${ctx.userId}`)
     .single()
 
   if (fetchError || !booking) {

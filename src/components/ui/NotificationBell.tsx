@@ -46,7 +46,7 @@ export default function NotificationBell({ className, variant = 'light' }: Props
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [user, fetchUnread])
+  }, [user, fetchUnread, instanceId])
 
   const iconColor = variant === 'light' ? 'text-white/70 hover:text-white' : 'text-green-900/60 hover:text-green-900'
 

@@ -8,7 +8,7 @@
 // Keys are GHL contact tags; values are Supabase course slugs.
 export const COURSE_TAG_MAP = {
   'avi member':          'aviara',
-  'avi member - active': 'aviara',
+  'avi member - active': 'aviara', // id to trigger ghl workflow
 } as const satisfies Record<string, string>
 
 export type CourseTag = keyof typeof COURSE_TAG_MAP

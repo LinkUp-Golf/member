@@ -153,6 +153,7 @@ export interface AdditionalPlayer {
   lastName: string
   mobile: string
   email: string
+  memberId?: string
 }
 
 export interface Booking {
@@ -165,6 +166,7 @@ export interface Booking {
   tee_time: string
   players: number
   guest_name: string | null
+  player_member_id: string | null
   additional_players: AdditionalPlayer[]
   status: BookingStatus
   amount_charged: number
