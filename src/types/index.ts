@@ -31,8 +31,11 @@ export type ParticipantStatus = 'pending' | 'active'
 export type NotificationType =
   | 'new_member'
   | 'booking'
+  | 'booking_invite'
+  | 'payment_ready'
   | 'visiting_member'
   | 'message'
+  | 'group_invite'
   | 'focus_linkup'
   | 'play_suggestion'
   | 'guest_access'
@@ -174,6 +177,7 @@ export interface Booking {
   focus_linkup_id: string | null
   admin_notes?: string | null
   created_at: string
+  booker_name?: string | null
 }
 
 export interface PlayHistory {

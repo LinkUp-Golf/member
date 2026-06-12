@@ -11,6 +11,7 @@ export {
   sendToUser   as sendPushToMember,
   sendToUsers  as sendPushToMembers,
   sendToAll    as sendPushToAll,
+  logNotificationsOnly,
 } from './push/pushService'
 
 import { createAdminClient } from '@/lib/supabase-server'
@@ -44,6 +45,51 @@ export async function sendPushToCourse(
 
   const userIds = members.map((m: { member_id: string }) => m.member_id)
   return sendToUsers(userIds, payload)
+}
+
+// Sends to course members whose focus linkup subscriptions overlap with
+// focusCategories. Falls back to all course members when the list is empty.
+export async function sendPushToFocusMembers(
+  courseId: string,
+  focusCategories: string[],
+  payload: PushPayload,
+  excludeUserId?: string
+): Promise<SendResult> {
+  if (!focusCategories.length) {
+    return sendPushToCourse(courseId, payload, excludeUserId)
+  }
+
+  const supabase = createAdminClient()
+
+  let memberQuery = supabase
+    .from('course_memberships')
+    .select('member_id')
+    .eq('course_id', courseId)
+    .eq('status', 'active')
+  if (excludeUserId) memberQuery = memberQuery.neq('member_id', excludeUserId)
+
+  const { data: courseMembers } = await memberQuery
+  if (!courseMembers?.length) return { sent: 0, failed: 0, cleaned: 0 }
+
+  const courseMemberIds = courseMembers.map((m: { member_id: string }) => m.member_id)
+
+  const { data: subs } = await supabase
+    .from('focus_linkup_subscriptions')
+    .select('member_id, industry_focus, custom_label, status')
+    .in('member_id', courseMemberIds)
+
+  const subscribedIds = [...new Set(
+    (subs ?? [])
+      .filter((s: { industry_focus: string; custom_label: string | null; status: string }) => {
+        if (focusCategories.includes(s.industry_focus) && s.status !== 'declined') return true
+        if (s.custom_label && focusCategories.includes(s.custom_label) && s.status === 'approved') return true
+        return false
+      })
+      .map((s: { member_id: string }) => s.member_id)
+  )]
+
+  if (!subscribedIds.length) return { sent: 0, failed: 0, cleaned: 0 }
+  return sendToUsers(subscribedIds, payload)
 }
 
 // ---- Notification templates ---------------------------------
@@ -105,9 +151,9 @@ export const NotificationTemplates = {
     tag:   'referral-joined',
   }),
 
-  announcementBroadcast: (title: string, type = 'admin_broadcast', announcementId?: string): PushPayload => ({
+  announcementBroadcast: (title: string, body: string, type = 'admin_broadcast', announcementId?: string): PushPayload => ({
     title: title.length > 60 ? title.slice(0, 60) + '…' : title,
-    body:  'A new announcement has been posted in your community.',
+    body:  body.length > 150 ? body.slice(0, 150) + '…' : body,
     url:   announcementId ? `/more/announcements/${announcementId}` : '/more/announcements',
     tag:   `announcement-${type}`,
   }),
@@ -124,5 +170,26 @@ export const NotificationTemplates = {
     body:  'Your membership is now active. Explore the community, book a tee time, and connect with members.',
     url:   '/home',
     tag:   'member-activated',
+  }),
+
+  bookingInvite: (bookerFirstName: string, date: string, time: string): PushPayload => ({
+    title: `${bookerFirstName} invited you to play`,
+    body:  `You've been added to a tee time on ${date} at ${time}. Check My Bookings for details.`,
+    url:   '/book',
+    tag:   'booking-invite',
+  }),
+
+  bookingPaymentReady: (date: string, time: string): PushPayload => ({
+    title: 'Your tee time is confirmed — pay now',
+    body:  `Your booking on ${date} at ${time} is ready for payment. Tap to complete your booking.`,
+    url:   '/book',
+    tag:   'payment-ready',
+  }),
+
+  groupChatInvite: (inviterFirstName: string, groupName: string, conversationId: string): PushPayload => ({
+    title: `${inviterFirstName} invited you to a group`,
+    body:  `You've been invited to join "${groupName}". Tap to accept or decline.`,
+    url:   `/messages/${conversationId}`,
+    tag:   `group-invite-${conversationId}`,
   }),
 }

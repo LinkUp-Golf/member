@@ -6,7 +6,7 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
-import { sendPushToCourse, NotificationTemplates } from '@/lib/push'
+import { sendPushToCourse, sendPushToFocusMembers, NotificationTemplates } from '@/lib/push'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(
@@ -47,10 +47,12 @@ export const POST = withAuth(
     await getCache(COURSE_ANN_NS).clear(courseAnnPrefix(body.course_id)).catch(() => {})
 
     // Notify course members (fire-and-forget; excludes the author).
-    sendPushToCourse(
-      body.course_id,
-      NotificationTemplates.announcementBroadcast(data.title, data.type, data.id),
-      ctx.userId
+    // When focus_linkup_categories are set, only notify subscribed members.
+    const notifPayload = NotificationTemplates.announcementBroadcast(data.title, data.body, data.type, data.id)
+    const categories: string[] = body.focus_linkup_categories ?? []
+    ;(categories.length
+      ? sendPushToFocusMembers(body.course_id, categories, notifPayload, ctx.userId)
+      : sendPushToCourse(body.course_id, notifPayload, ctx.userId)
     ).catch(() => {})
 
     return NextResponse.json(data, { status: 201 })

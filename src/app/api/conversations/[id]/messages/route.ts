@@ -7,6 +7,7 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { validateString } from '@/lib/validation'
 import { messageRateLimit, messageBurstLimit } from '@/lib/rateLimit'
+import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
 import type { AuthContext } from '@/lib/auth/types'
 
 const DEFAULT_PAGE_SIZE = 30
@@ -150,6 +151,21 @@ export const POST = withAuth(async (
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Notify other active participants (fire-and-forget)
+  const senderName = [data.sender?.first_name, data.sender?.last_name].filter(Boolean).join(' ') || 'Someone'
+  ;(async () => {
+    const { data: participants } = await admin
+      .from('conversation_participants')
+      .select('member_id')
+      .eq('conversation_id', convId)
+      .eq('status', 'active')
+      .neq('member_id', ctx.userId)
+    const recipientIds = (participants ?? []).map((p: { member_id: string }) => p.member_id)
+    if (recipientIds.length) {
+      await sendPushToMembers(recipientIds, NotificationTemplates.newMessage(senderName, body.body, convId))
+    }
+  })().catch(() => {})
 
   return NextResponse.json(data, { status: 201 })
 })
