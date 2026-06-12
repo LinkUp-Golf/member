@@ -10,9 +10,9 @@ import { HighLevel } from '@gohighlevel/api-client'
 import type { GHLContact, GHLCalendarEvent, GHLBookingSlot } from '@/types'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
 import { logger } from '@/lib/logger'
+import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GOLF_ROUND_DURATION_MINUTES } from '@/lib/constants'
 
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID ?? ''
-const GHL_BASE_URL = 'https://services.leadconnectorhq.com'
 
 // ---- SDK client (singleton) ---------------------------------
 // Initialized lazily so the process startup doesn't fail if the
@@ -34,7 +34,7 @@ async function ghlFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     headers: {
       Authorization: `Bearer ${process.env.GHL_API_KEY}`,
       'Content-Type': 'application/json',
-      Version: '2021-07-28',
+      Version: GHL_API_VERSION,
       ...options.headers,
     },
   })
@@ -69,6 +69,30 @@ export async function getContactById(contactId: string): Promise<GHLContact | nu
     return contact ?? null
   } catch (err) {
     logger.warn('getContactById failed', { action: 'ghl_contact_lookup', errorMessage: String(err) })
+    return null
+  }
+}
+
+export async function createContact(params: {
+  firstName: string
+  lastName: string
+  email: string
+  phone?: string | null
+}): Promise<string | null> {
+  try {
+    const data = await ghlFetch<{ contact: { id: string } }>('/contacts', {
+      method: 'POST',
+      body: JSON.stringify({
+        locationId: GHL_LOCATION_ID,
+        firstName: params.firstName,
+        lastName: params.lastName,
+        email: params.email,
+        ...(params.phone ? { phone: params.phone } : {}),
+      }),
+    })
+    return data.contact?.id ?? null
+  } catch (err) {
+    logger.warn('createContact failed', { action: 'ghl_contact_create', errorMessage: String(err) })
     return null
   }
 }
@@ -131,48 +155,124 @@ export async function triggerWorkflow(params: {
 
 // ---- Calendar (raw fetch — not yet in SDK) ------------------
 
-export async function getAvailableSlots(
-  calendarId: string,
-  startDate: string,
-  endDate: string
-): Promise<GHLBookingSlot[]> {
+// Cached location timezone — fetched once per process lifetime.
+// GHL: GET /locations/:locationId/timezones → { timezones: string[] }
+// The first entry is the location's configured timezone.
+let _locationTimezone: string | null = null
+
+// fallback is used when GHL returns no timezone data; callers should pass the
+// user's request timezone so we never silently fall through to a wrong offset.
+export async function getLocationTimezone(fallback?: string): Promise<string> {
+  if (_locationTimezone) return _locationTimezone
   try {
-    const start = new Date(startDate).getTime()
-    const end = new Date(endDate).getTime() + 86400000
-    const data = await ghlFetch<{ slots: GHLBookingSlot[] }>(
-      `/calendars/${calendarId}/free-slots?startDate=${start}&endDate=${end}&timezone=America/Los_Angeles`
+    const data = await ghlFetch<{ timezones: string[] }>(
+      `/locations/${GHL_LOCATION_ID}/timezones`
     )
-    return data.slots ?? []
+    const tz = Array.isArray(data.timezones) ? data.timezones[0] : null
+    if (tz) {
+      _locationTimezone = tz
+      return tz
+    }
+  } catch (err) {
+    logger.warn('getLocationTimezone failed', { action: 'ghl_location_timezone', errorMessage: String(err) })
+  }
+  return fallback ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+}
+
+// Response shape: { "YYYY-MM-DD": { slots: { "ISO_DATETIME": spotsOpen } }, traceId: "..." }
+// Returns a map of date string → slot array so the UI can show the full month at once.
+export async function getAvailableSlots(params: {
+  calendarId: string
+  startDate: string  // YYYY-MM-DD
+  endDate: string    // YYYY-MM-DD
+  timezone: string
+  userId?: string
+  sendSeatsPerSlot?: boolean
+}): Promise<Record<string, GHLBookingSlot[]>> {
+  try {
+    const startMs = new Date(params.startDate).getTime()
+    const endMs = new Date(params.endDate + 'T23:59:59').getTime()
+
+    const qs = new URLSearchParams({
+      startDate: String(startMs),
+      endDate: String(endMs),
+      timezone: params.timezone,
+    })
+    if (params.userId) qs.set('userId', params.userId)
+    if (params.sendSeatsPerSlot) qs.set('sendSeatsPerSlot', 'true')
+
+    const data = await ghlFetch<Record<string, { slots: Record<string, number> } | string>>(
+      `/calendars/${params.calendarId}/free-slots?${qs}`
+    )
+
+    const result: Record<string, GHLBookingSlot[]> = {}
+    for (const [dateKey, value] of Object.entries(data)) {
+      if (dateKey === 'traceId' || typeof value !== 'object' || !value.slots) continue
+      result[dateKey] = []
+      for (const [startTime, spotsOpen] of Object.entries(value.slots)) {
+        const slotEndMs = new Date(startTime).getTime() + GOLF_ROUND_DURATION_MINUTES * 60 * 1000
+        result[dateKey].push({
+          startTime,
+          endTime: new Date(slotEndMs).toISOString(),
+          available: spotsOpen > 0,
+          spotsOpen,
+        })
+      }
+      result[dateKey].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+    }
+
+    return result
   } catch {
-    return []
+    return {}
   }
 }
 
 export async function createBooking(params: {
   calendarId: string
-  contactId: string
-  startTime: string
-  endTime: string
+  contact: { id: string; email: string; phone?: string | null }
+  startTime: string   // "YYYY-MM-DDTHH:MM:SS±HHMM"
+  endTime: string     // "YYYY-MM-DDTHH:MM:SS±HHMM"
   title: string
-  notes?: string
-}): Promise<string | null> {
-  try {
-    const data = await ghlFetch<{ event: GHLCalendarEvent }>('/calendars/events', {
+  timezone: string
+  address?: string
+}): Promise<string> {
+  const data = await ghlFetch<{ id: string }>(
+    '/calendars/events/appointments',
+    {
       method: 'POST',
       body: JSON.stringify({
         calendarId: params.calendarId,
         locationId: GHL_LOCATION_ID,
-        contactId: params.contactId,
+        contactId: params.contact.id,
+        contact: {
+          id: params.contact.id,
+          email: params.contact.email,
+          phone: params.contact.phone ?? null,
+        },
+        title: params.title,
+        calendarNotes: '',
+        internalNote: '',
         startTime: params.startTime,
         endTime: params.endTime,
-        title: params.title,
-        notes: params.notes ?? '',
+        selectedTimezone: params.timezone,
+        appointmentStatus: 'confirmed',
+        ignoreFreeSlotValidation: true,
+        ignoreDateRange: true,
+        toNotify: true,
+        source: GHL_OPPORTUNITY_SOURCE,
+        channel: 'web_app',
+        calendarProviderId: GHL_CALENDAR_PROVIDER_ID,
+        userId: GHL_DEFAULT_ASSIGNEE_ID,
+        assignedUserId: GHL_DEFAULT_ASSIGNEE_ID,
+        address: params.address ?? '',
+        overrideLocationConfig: false,
+        isCustomRecurring: false,
       }),
-    })
-    return data.event?.id ?? null
-  } catch {
-    return null
-  }
+    }
+  )
+  const id = data.id
+  if (!id) throw new GHLError('createBooking returned no event id', ErrorCode.GHL_UNAVAILABLE)
+  return id
 }
 
 export async function cancelBooking(eventId: string): Promise<boolean> {
@@ -245,6 +345,55 @@ export async function listContactsByTag(tag: string): Promise<GHLContact[]> {
   }
 
   return all
+}
+
+// ---- Avi-Play Pipeline (Opportunities) ----------------------
+
+export async function createOpportunity(params: {
+  contactId: string
+  title: string
+  pipelineId: string
+  stageId: string
+  monetaryValue?: number
+  customFields?: Array<{ id: string; fieldValue: string }>
+}): Promise<string> {
+  const data = await ghlFetch<{ opportunity: { id: string } }>('/opportunities/', {
+    method: 'POST',
+    body: JSON.stringify({
+      pipelineId: params.pipelineId,
+      locationId: GHL_LOCATION_ID,
+      name: params.title,
+      pipelineStageId: params.stageId,
+      status: 'open',
+      contactId: params.contactId,
+      source: GHL_OPPORTUNITY_SOURCE,
+      assignedTo: GHL_DEFAULT_ASSIGNEE_ID,
+      ...(params.monetaryValue !== undefined ? { monetaryValue: params.monetaryValue } : {}),
+      ...(params.customFields?.length ? { customFields: params.customFields } : {}),
+    }),
+  })
+  if (!data.opportunity?.id) throw new GHLError('createOpportunity returned no id', ErrorCode.GHL_UNAVAILABLE)
+  return data.opportunity.id
+}
+
+export async function updateOpportunityStage(
+  opportunityId: string,
+  stageId: string,
+  status?: 'open' | 'won' | 'lost' | 'abandoned'
+): Promise<boolean> {
+  try {
+    await ghlFetch(`/opportunities/${opportunityId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        pipelineStageId: stageId,
+        ...(status ? { status } : {}),
+      }),
+    })
+    return true
+  } catch (err) {
+    logger.warn('updateOpportunityStage failed', { action: 'ghl_opportunity_update', errorMessage: String(err) })
+    return false
+  }
 }
 
 // ---- Workflow ID constants ----------------------------------

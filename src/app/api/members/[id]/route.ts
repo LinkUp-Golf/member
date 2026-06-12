@@ -31,7 +31,9 @@ export const GET = withAuth(async (
   if (!memberId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
   const cache    = getCache(MEMBER_DETAIL_NS)
 
-  const [memberData, playedRes] = await Promise.all([
+  const supabase = createRouteHandlerClient(cookies())
+
+  const [memberData, playedRes, subsRes] = await Promise.all([
     // Cached: public profile visible to any authenticated member.
     withCache(
       cache,
@@ -50,12 +52,19 @@ export const GET = withAuth(async (
     ),
 
     // Live: user-specific — never cache.
-    createRouteHandlerClient(cookies())
+    supabase
       .from('play_history')
       .select('id')
       .eq('member_id', ctx.userId)
       .contains('played_with', [memberId])
       .limit(1),
+
+    // Member's focus linkup subscriptions — not user-specific, but not worth caching.
+    createAdminClient()
+      .from('focus_linkup_subscriptions')
+      .select('industry_focus, custom_label, status')
+      .eq('member_id', memberId)
+      .eq('status', 'approved'),
   ])
 
   if (!memberData) {
@@ -65,5 +74,8 @@ export const GET = withAuth(async (
   return NextResponse.json({
     member: memberData,
     hasPlayedWith: (playedRes.data?.length ?? 0) > 0,
+    focusLinkupGroups: subsRes.data?.map(s =>
+      s.industry_focus === 'Other' && s.custom_label ? s.custom_label : s.industry_focus
+    ) ?? [],
   })
 })

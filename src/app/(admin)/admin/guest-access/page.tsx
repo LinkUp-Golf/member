@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useProfile } from '@/hooks/useProfile'
 import { createClient } from '@/lib/supabase'
 import { AdminPageHeader, AdminTable, AdminTr, AdminTd, Badge, AdminButton } from '@/components/admin/AdminUI'
-import { formatBookingDate, formatRelativeTime, capitalizeName } from '@/lib/utils'
+import { formatBookingDate, formatRelativeTime } from '@/lib/utils'
 import type { GuestAccessStatus } from '@/types'
 
 interface GuestAccessRow {
@@ -196,8 +196,8 @@ export default function AdminGuestAccessPage() {
           return (
             <AdminTr key={r.id}>
               <AdminTd>
-                <p className="font-medium text-gray-900">
-                  {capitalizeName(r.requesting_member?.first_name ?? '')} {capitalizeName(r.requesting_member?.last_name ?? '')}
+                <p className="font-medium text-gray-900 capitalize">
+                  {r.requesting_member?.first_name ?? ''} {r.requesting_member?.last_name ?? ''}
                 </p>
                 <p className="text-xs text-gray-400">{r.requesting_member?.profile?.role_title}</p>
                 <p className="text-xs text-gray-400">{r.requesting_member?.profile?.business_name}</p>

@@ -6,10 +6,11 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
+import { sendPushToCourse, NotificationTemplates } from '@/lib/push'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const PATCH = withAuth(
-  async (req: NextRequest, _ctx: AuthContext, routeCtx?: { params: Record<string, string> }) => {
+  async (req: NextRequest, ctx: AuthContext, routeCtx?: { params: Record<string, string> }) => {
     const id = routeCtx?.params?.['id']
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
@@ -21,6 +22,22 @@ export const PATCH = withAuth(
       image_url?: string | null
       video_url?: string | null
       media_urls?: string[]
+      focus_linkup_categories?: string[]
+    }
+
+    // Detect moderation approval: status transitioning to 'published'
+    const isApproving = body.status === 'published'
+
+    // If approving, check the current status to avoid re-notifying already-published posts
+    let wasAlreadyPublished = false
+    const admin = createAdminClient()
+    if (isApproving) {
+      const { data: current } = await admin
+        .from('announcements')
+        .select('status')
+        .eq('id', id)
+        .single()
+      wasAlreadyPublished = current?.status === 'published'
     }
 
     const update: Record<string, unknown> = {}
@@ -31,8 +48,8 @@ export const PATCH = withAuth(
     if ('image_url' in body) update.image_url = body.image_url
     if ('video_url' in body) update.video_url = body.video_url
     if ('media_urls' in body) update.media_urls = body.media_urls ?? []
+    if ('focus_linkup_categories' in body) update.focus_linkup_categories = body.focus_linkup_categories ?? []
 
-    const admin = createAdminClient()
     const { data, error } = await admin
       .from('announcements')
       .update(update)
@@ -45,6 +62,15 @@ export const PATCH = withAuth(
     // data includes course_id — bust only that course's announcement cache.
     if (data.course_id) {
       await getCache(COURSE_ANN_NS).clear(courseAnnPrefix(data.course_id)).catch(() => {})
+    }
+
+    // Send push if this is a fresh publish (moderation approval), not an edit of existing post.
+    if (isApproving && !wasAlreadyPublished && data.course_id) {
+      sendPushToCourse(
+        data.course_id,
+        NotificationTemplates.announcementBroadcast(data.title, data.type, data.id),
+        ctx.userId
+      ).catch(() => {})
     }
 
     return NextResponse.json(data)

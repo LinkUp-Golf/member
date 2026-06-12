@@ -6,6 +6,7 @@ import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { validateString } from '@/lib/validation'
+import { messageRateLimit, messageBurstLimit } from '@/lib/rateLimit'
 import type { AuthContext } from '@/lib/auth/types'
 
 const DEFAULT_PAGE_SIZE = 30
@@ -26,16 +27,19 @@ export const GET = withAuth(async (
   const limit = Math.min(Number(searchParams.get('limit') ?? DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE)
   const before = searchParams.get('before')
 
-  // Verify the caller is a participant (admin client bypasses RLS recursion)
+  // Verify the caller is an active participant (admin client bypasses RLS recursion)
   const { data: participation } = await admin
     .from('conversation_participants')
-    .select('id')
+    .select('id, status')
     .eq('conversation_id', convId)
     .eq('member_id', ctx.userId)
     .single()
 
   if (!participation) {
     return NextResponse.json({ error: 'Not a participant' }, { status: 403 })
+  }
+  if (participation.status === 'pending') {
+    return NextResponse.json({ error: 'Invitation not yet accepted' }, { status: 403 })
   }
 
   let query = admin
@@ -80,16 +84,63 @@ export const POST = withAuth(async (
   const check = validateString(body.body, 'message', { min: 1, max: 4000 })
   if (!check.valid) return NextResponse.json({ error: check.errors[0] }, { status: 400 })
 
-  // Verify participation
+  // Verify the caller is an active participant
   const { data: participation } = await admin
     .from('conversation_participants')
-    .select('id')
+    .select('id, status')
     .eq('conversation_id', convId)
     .eq('member_id', ctx.userId)
     .single()
 
   if (!participation) {
     return NextResponse.json({ error: 'Not a participant' }, { status: 403 })
+  }
+  if (participation.status === 'pending') {
+    return NextResponse.json({ error: 'Invitation not yet accepted' }, { status: 403 })
+  }
+
+  // Check if the member is messaging-muted by an admin
+  const { data: memberRow } = await admin
+    .from('members')
+    .select('messaging_muted_until')
+    .eq('id', ctx.userId)
+    .single()
+
+  if (memberRow?.messaging_muted_until && new Date(memberRow.messaging_muted_until) > new Date()) {
+    return NextResponse.json(
+      { error: 'Your messaging has been temporarily restricted. Contact an admin for help.' },
+      { status: 403 }
+    )
+  }
+
+  // Rate limits — per-minute global + per-conversation burst
+  const globalLimit = messageRateLimit(ctx.userId)
+  if (!globalLimit.allowed) {
+    return NextResponse.json(
+      { error: 'Too many messages. Please slow down.' },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(globalLimit.resetAt),
+          'Retry-After': String(Math.ceil((globalLimit.resetAt - Date.now()) / 1000)),
+        },
+      }
+    )
+  }
+  const burstLimit = messageBurstLimit(ctx.userId, convId)
+  if (!burstLimit.allowed) {
+    return NextResponse.json(
+      { error: 'Sending too fast in this conversation. Please wait a moment.' },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(burstLimit.resetAt),
+          'Retry-After': String(Math.ceil((burstLimit.resetAt - Date.now()) / 1000)),
+        },
+      }
+    )
   }
 
   const { data, error } = await admin

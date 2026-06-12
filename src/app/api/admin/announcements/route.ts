@@ -6,6 +6,7 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
+import { sendPushToCourse, NotificationTemplates } from '@/lib/push'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(
@@ -18,6 +19,7 @@ export const POST = withAuth(
       image_url?: string | null
       video_url?: string | null
       media_urls?: string[]
+      focus_linkup_categories?: string[]
     }
 
     if (!body.title?.trim() || !body.body?.trim() || !body.course_id) {
@@ -36,12 +38,20 @@ export const POST = withAuth(
       image_url: body.image_url ?? null,
       video_url: body.video_url ?? null,
       media_urls: body.media_urls ?? [],
+      focus_linkup_categories: body.focus_linkup_categories ?? [],
     }).select().single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     // Invalidate all cached variants for this course's announcements.
     await getCache(COURSE_ANN_NS).clear(courseAnnPrefix(body.course_id)).catch(() => {})
+
+    // Notify course members (fire-and-forget; excludes the author).
+    sendPushToCourse(
+      body.course_id,
+      NotificationTemplates.announcementBroadcast(data.title, data.type, data.id),
+      ctx.userId
+    ).catch(() => {})
 
     return NextResponse.json(data, { status: 201 })
   },

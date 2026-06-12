@@ -4,11 +4,14 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
-import { createRouteHandlerClient } from '@/lib/supabase-server'
+import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
+import { cancelBooking, updateOpportunityStage } from '@/lib/ghl/client'
 import type { AuthContext } from '@/lib/auth/types'
 
+const AVI_PLAY_CANCELLED_STAGE_ID = process.env.GHL_AVI_PLAY_CANCELLED_STAGE_ID ?? ''
+
 export const PATCH = withAuth(async (
-  _req: NextRequest,
+  req: NextRequest,
   ctx: AuthContext,
   routeCtx?: { params: Record<string, string> }
 ) => {
@@ -17,13 +20,41 @@ export const PATCH = withAuth(async (
   const id = routeCtx?.params?.['id']
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-  const { error } = await supabase
-    .from('bookings')
-    .update({ status: 'cancelled' })
-    .eq('id', id)
-    .eq('member_id', ctx.userId)   // RLS + explicit ownership check
+  const body = await req.json().catch(() => ({})) as { cancellationReason?: string }
+  const cancellationReason = body.cancellationReason?.trim() ?? null
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  // Fetch booking — allow both the booker and the guest member to act on it
+  const { data: booking, error: fetchError } = await supabase
+    .from('bookings')
+    .select('id, ghl_booking_id, ghl_opportunity_id, status')
+    .eq('id', id)
+    .or(`member_id.eq.${ctx.userId},player_member_id.eq.${ctx.userId}`)
+    .single()
+
+  if (fetchError || !booking) {
+    return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+  }
+
+  if (booking.status === 'cancelled') {
+    return NextResponse.json({ error: 'Booking is already cancelled' }, { status: 400 })
+  }
+
+  // Mark cancelled in Supabase first
+  const adminSupabase = createAdminClient()
+  const { error: updateError } = await adminSupabase
+    .from('bookings')
+    .update({ status: 'cancelled', cancellation_reason: cancellationReason })
+    .eq('id', id)
+
+  if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 })
+
+  // Best-effort: cancel GHL calendar event and move opportunity to Cancelled stage
+  if (booking.ghl_booking_id) {
+    await cancelBooking(booking.ghl_booking_id).catch(() => {})
+  }
+  if (booking.ghl_opportunity_id && AVI_PLAY_CANCELLED_STAGE_ID) {
+    await updateOpportunityStage(booking.ghl_opportunity_id, AVI_PLAY_CANCELLED_STAGE_ID, 'lost').catch(() => {})
+  }
 
   return NextResponse.json({ success: true })
 })

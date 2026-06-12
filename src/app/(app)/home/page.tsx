@@ -5,11 +5,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
-import { formatBookingDate, formatTeeTime, truncate, capitalizeName, formatRelativeTime } from "@/lib/utils";
+import { formatBookingDate, formatTeeTime, truncate, formatRelativeTime } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
 import EmptyState from "@/components/ui/EmptyState";
 import AppShell from '@/components/layout/AppShell';
 import InstallBanner from '@/components/ui/InstallBanner';
+import Icon, { type IconName } from '@/components/ui/Icon';
+import NotificationBell from '@/components/ui/NotificationBell';
 import { CardSkeleton, MemberRowSkeleton } from "@/components/ui/Loading";
 import type {
   Booking,
@@ -27,7 +29,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
 
   const [greeting, setGreeting] = useState('');
-  const firstName = capitalizeName(profile?.first_name ?? "");
+  const firstName = profile?.first_name ?? "";
 
   useEffect(() => {
     setGreeting(getGreeting());
@@ -66,14 +68,18 @@ export default function HomePage() {
     <AppShell>
 
       {/* Hero banner */}
-      <div className="hero-banner">
+      <div className="hero-banner relative">
+        {/* Notification bell — top right, always visible */}
+        <div className="absolute top-3 right-4">
+          <NotificationBell variant="light" />
+        </div>
         <p className="text-[10px] uppercase tracking-[0.16em] mb-2.5" style={{ color: 'rgba(255,255,255,0.32)' }}>
           {greeting}
         </p>
         <h1 className="font-sans font-black leading-tight mb-5" style={{ fontSize: '2.1rem', color: 'white' }}>
           Welcome back,{' '}
           <br />
-          <em style={{ color: 'var(--color-gold)', fontStyle: 'normal' }}>
+          <em className="capitalize" style={{ color: 'var(--color-gold)', fontStyle: 'normal' }}>
             {firstName || "Guest"}.
           </em>
         </h1>
@@ -89,8 +95,8 @@ export default function HomePage() {
             style={{ background: 'rgba(255,255,255,0.07)', borderColor: 'rgba(133,187,101,0.22)' }}
           >
             <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ background: 'rgba(133,187,101,0.15)' }}>
-              <GolfIcon />
+              style={{ background: 'rgba(133,187,101,0.15)', color: 'var(--color-gold)' }}>
+              <Icon name="next-round" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-[10px] uppercase tracking-[0.12em] mb-1" style={{ color: 'rgba(255,255,255,0.32)' }}>
@@ -116,8 +122,8 @@ export default function HomePage() {
             style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.08)' }}
           >
             <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ background: 'rgba(255,255,255,0.07)' }}>
-              <CalendarIcon />
+              style={{ background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.35)' }}>
+              <Icon name="tee-time" />
             </div>
             <div>
               <p className="text-sm" style={{ color: 'rgba(255,255,255,0.55)' }}>No upcoming rounds</p>
@@ -185,8 +191,8 @@ export default function HomePage() {
                       size="md"
                     />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium" style={{ color: 'var(--color-green-900)' }}>
-                        {capitalizeName(m.first_name)} {capitalizeName(m.last_name)}
+                      <p className="text-sm font-medium capitalize" style={{ color: 'var(--color-green-900)' }}>
+                        {m.first_name} {m.last_name}
                       </p>
                       <p className="text-xs mt-0.5" style={{ color: 'rgba(0,38,105,0.55)' }}>
                         {m.profile?.role_title ?? ""}
@@ -277,25 +283,25 @@ function StackIcon() {
   )
 }
 
-const ANNOUNCEMENT_TYPES: Record<string, { icon: string; color: string }> = {
-  new_member:      { icon: "👋", color: "rgba(133,187,101,0.12)" },
-  booking:         { icon: "⛳", color: "rgba(0,38,105,0.07)" },
-  visiting_member: { icon: "✈️", color: "rgba(26,85,173,0.08)" },
-  member_event:    { icon: "📅", color: "rgba(0,38,105,0.07)" },
-  admin_broadcast: { icon: "📢", color: "rgba(133,187,101,0.12)" },
-  focus_linkup:    { icon: "🎯", color: "rgba(0,38,105,0.07)" },
-};
+const ANNOUNCEMENT_TYPES: Record<string, { icon: IconName; color: string; iconColor: string }> = {
+  new_member:      { icon: 'new-member',       color: 'rgba(133,187,101,0.12)', iconColor: 'var(--color-green-700)' },
+  booking:         { icon: 'tee-time',          color: 'rgba(0,38,105,0.07)',    iconColor: 'rgba(0,38,105,0.5)' },
+  visiting_member: { icon: 'visiting-member',   color: 'rgba(26,85,173,0.08)',   iconColor: 'rgba(26,85,173,0.6)' },
+  member_event:    { icon: 'next-round',        color: 'rgba(0,38,105,0.07)',    iconColor: 'rgba(0,38,105,0.5)' },
+  admin_broadcast: { icon: 'announcement',      color: 'rgba(133,187,101,0.12)', iconColor: 'var(--color-green-700)' },
+  focus_linkup:    { icon: 'focus-linkup',      color: 'rgba(0,38,105,0.07)',    iconColor: 'rgba(0,38,105,0.5)' },
+}
 
 function AnnouncementCard({ announcement }: { announcement: Announcement }) {
-  const meta = ANNOUNCEMENT_TYPES[announcement.type] ?? { icon: "📌", color: "rgba(0,38,105,0.07)" };
+  const meta = ANNOUNCEMENT_TYPES[announcement.type] ?? { icon: 'announcement' as IconName, color: 'rgba(0,38,105,0.07)', iconColor: 'rgba(0,38,105,0.5)' }
 
   return (
     <Link href={`/more/announcements/${announcement.id}`} className="card p-4 flex gap-3 items-start">
       <div
-        className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0 mt-0.5"
-        style={{ background: meta.color }}
+        className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
+        style={{ background: meta.color, color: meta.iconColor }}
       >
-        {meta.icon}
+        <Icon name={meta.icon} className="w-5 h-5" />
       </div>
       <div className="flex-1 min-w-0">
         <p
@@ -373,28 +379,6 @@ function PromoCard({ promo }: { promo: Promotion }) {
   )
 }
 
-function GolfIcon() {
-  return (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-      strokeWidth={1.5} style={{ color: 'var(--color-gold)' }}>
-      <circle cx="12" cy="18" r="3" />
-      <path strokeLinecap="round" d="M12 15V4" />
-      <path strokeLinecap="round" d="M12 4l5 3-5 3" />
-    </svg>
-  );
-}
-
-function CalendarIcon() {
-  return (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-      strokeWidth={1.5} style={{ color: 'rgba(255,255,255,0.35)' }}>
-      <rect x="3" y="4" width="18" height="18" rx="2" />
-      <line x1="16" y1="2" x2="16" y2="6" />
-      <line x1="8" y1="2" x2="8" y2="6" />
-      <line x1="3" y1="10" x2="21" y2="10" />
-    </svg>
-  );
-}
 
 function getGreeting(): string {
   const h = new Date().getHours();

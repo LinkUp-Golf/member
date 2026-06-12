@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
-import { shortCategory, truncate, capitalizeName } from "@/lib/utils";
+import { shortCategory, truncate } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
 import AppShell from "@/components/layout/AppShell";
 import { MemberRowSkeleton } from "@/components/ui/Loading";
@@ -182,10 +182,10 @@ function MemberRow({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
           <p
-            className="text-sm font-medium"
+            className="text-sm font-medium capitalize"
             style={{ color: "var(--color-green-900)" }}
           >
-            {capitalizeName(m.first_name)} {capitalizeName(m.last_name)}
+            {m.first_name} {m.last_name}
           </p>
           {isMe && (
             <span

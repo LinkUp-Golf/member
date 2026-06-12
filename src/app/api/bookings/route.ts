@@ -19,13 +19,13 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   let query = supabase
     .from('bookings')
     .select('*')
-    .eq('member_id', ctx.userId)
+    .or(`member_id.eq.${ctx.userId},player_member_id.eq.${ctx.userId}`)
     .neq('status', 'cancelled')
     .order('booking_date', { ascending: true })
 
   if (upcoming) {
     query = query
-      .eq('status', 'confirmed')
+      .in('status', ['tentative', 'availability_confirmed', 'payment_confirmed', 'confirmed'])
       .gte('booking_date', new Date().toISOString().slice(0, 10))
   }
 

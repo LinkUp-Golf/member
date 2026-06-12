@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
+import Select from "@/components/ui/Select";
 import { createClient } from "@/lib/supabase";
 import { COURSE_SLUGS } from "@/lib/ghl/tags";
 import {
@@ -15,8 +16,9 @@ import {
   Badge,
 } from "@/components/admin/AdminUI";
 import FormField from "@/components/admin/FormField";
-import { formatRelativeTime, capitalizeName } from "@/lib/utils";
+import { formatRelativeTime } from "@/lib/utils";
 import MultiMediaUpload, { type MediaFile } from "@/components/ui/MultiMediaUpload";
+import { INDUSTRY_CATEGORIES } from "@/types";
 import type { AnnouncementType, ModerationStatus } from "@/types";
 
 interface AnnouncementRow {
@@ -30,6 +32,7 @@ interface AnnouncementRow {
   image_url: string | null;
   video_url: string | null;
   media_urls: string[];
+  focus_linkup_categories: string[];
   author: { first_name: string; last_name: string } | null;
 }
 
@@ -40,6 +43,7 @@ interface AnnouncementPayload {
   image_url: string | null;
   video_url: string | null;
   media_urls: string[];
+  focus_linkup_categories: string[];
 }
 
 const TYPE_OPTIONS = [
@@ -198,9 +202,9 @@ export default function AdminAnnouncementsPage() {
               </p>
             </AdminTd>
             <AdminTd>
-              <span className="text-sm text-gray-600">
-                {capitalizeName(a.author?.first_name ?? "")}{" "}
-                {capitalizeName(a.author?.last_name ?? "")}
+              <span className="text-sm text-gray-600 capitalize">
+                {a.author?.first_name ?? ""}{" "}
+                {a.author?.last_name ?? ""}
               </span>
             </AdminTd>
             <AdminTd>
@@ -287,6 +291,8 @@ function AnnouncementForm({
   const {
     register,
     handleSubmit: rhfSubmit,
+    watch,
+    control,
     formState: { errors, isSubmitting },
     setError: _setFieldError,
   } = useForm<AnnouncementFormValues>({
@@ -297,12 +303,22 @@ function AnnouncementForm({
     },
   })
 
+  const watchedType = watch('type')
+  const [focusCategories, setFocusCategories] = useState<string[]>(
+    () => initial?.focus_linkup_categories ?? []
+  )
   const [mediaFiles, setMediaFiles] = useState<MediaFile[]>(() => initial ? initMediaFiles(initial) : [])
   const [uploadStatus, setUploadStatus] = useState<string | null>(null)
   const [serverError, setServerError] = useState<string | null>(null)
 
   const isEditing = !!initial
   const saving = isSubmitting
+
+  function toggleFocusCategory(cat: string) {
+    setFocusCategories(prev =>
+      prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
+    )
+  }
 
   function handleCancel() {
     mediaFiles.forEach(f => { if (f.file) URL.revokeObjectURL(f.previewUrl) })
@@ -349,6 +365,7 @@ function AnnouncementForm({
         image_url: resolved.find(m => m.mediaType === 'image')?.url ?? null,
         video_url: resolved.find(m => m.mediaType === 'video')?.url ?? null,
         media_urls: resolved.map(m => m.url),
+        focus_linkup_categories: values.type === 'focus_linkup' ? focusCategories : [],
       })
       if (err) { await cleanup(); setServerError(err) }
     } catch (e) {
@@ -367,14 +384,48 @@ function AnnouncementForm({
       <form onSubmit={rhfSubmit(onValid)} noValidate>
         <div className="space-y-4">
           <FormField label="Announcement type" htmlFor="broadcast-type" required>
-            <select
-              id="broadcast-type"
-              className={inputCls(false)}
-              {...register('type', { required: true })}
-            >
-              {TYPE_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
+            <Controller
+              name="type"
+              control={control}
+              rules={{ required: true }}
+              render={({ field }) => (
+                <Select
+                  id="broadcast-type"
+                  options={TYPE_OPTIONS.map(t => ({ value: t.value, label: t.label }))}
+                  value={field.value}
+                  onChange={field.onChange}
+                  triggerClassName={inputCls(false) + ' flex items-center justify-between gap-2 text-left'}
+                />
+              )}
+            />
           </FormField>
+
+          {watchedType === 'focus_linkup' && (
+            <FormField label="Target audience" htmlFor="focus-cats">
+              <p className="text-xs text-gray-400 mb-2">
+                Select the Focus LinkUp categories to notify. Leave empty to send to all members.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {INDUSTRY_CATEGORIES.map(cat => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => toggleFocusCategory(cat)}
+                    className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                      focusCategories.includes(cat)
+                        ? 'bg-green-900 text-white border-green-900'
+                        : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+              {focusCategories.length === 0 && (
+                <p className="text-xs text-amber-600 mt-1.5">No categories selected — announcement will reach all members.</p>
+              )}
+            </FormField>
+          )}
 
           <FormField label="Title" htmlFor="broadcast-title" required error={errors.title?.message}>
             <input
@@ -414,7 +465,9 @@ function AnnouncementForm({
 
           {!isEditing && (
             <p className="text-xs text-gray-400">
-              This will be published immediately and visible to all Aviara members.
+              {watchedType === 'focus_linkup' && focusCategories.length > 0
+                ? `Only members subscribed to: ${focusCategories.join(', ')} will see this.`
+                : 'This will be published immediately and visible to all Aviara members.'}
             </p>
           )}
 

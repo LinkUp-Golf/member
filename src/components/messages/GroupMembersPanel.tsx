@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
 import { apiClient } from '@/lib/api-client'
-import { capitalizeName } from '@/lib/utils'
-import type { GroupParticipant, ParticipantRole } from '@/types'
+import type { GroupParticipant, MemberWithProfile, ParticipantRole, ParticipantStatus } from '@/types'
 
 interface Props {
   conversationId: string
@@ -32,6 +31,12 @@ export function GroupMembersPanel({
   const [loading, setLoading] = useState(false)
   const [actionFor, setActionFor] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+
+  // ---- Add member state -------------------------------------
+  const [addOpen, setAddOpen] = useState(false)
+  const [allMembers, setAllMembers] = useState<MemberWithProfile[]>([])
+  const [memberSearch, setMemberSearch] = useState('')
+  const [adding, setAdding] = useState<string | null>(null)
 
   // ---- Group name editing (moderators only) ------------------
   const [nameValue, setNameValue] = useState(conversationName ?? '')
@@ -74,14 +79,16 @@ export function GroupMembersPanel({
   useEffect(() => {
     if (open) {
       setMounted(true)
-      // One rAF so the browser paints the initial off-screen position
-      // before we apply the "in" class — otherwise there is no transition.
-      const raf = requestAnimationFrame(() => setVisible(true))
-      return () => cancelAnimationFrame(raf)
+      // Double rAF: first ensures the DOM node exists, second ensures it's
+      // been painted in its off-screen position before we start the transition.
+      const ids: number[] = []
+      ids[0] = requestAnimationFrame(() => {
+        ids[1] = requestAnimationFrame(() => setVisible(true))
+      })
+      return () => ids.forEach(id => cancelAnimationFrame(id))
     } else {
       setVisible(false)
-      // Keep DOM alive for the full exit duration, then unmount
-      const t = setTimeout(() => setMounted(false), 300)
+      const t = setTimeout(() => setMounted(false), 320)
       return () => clearTimeout(t)
     }
   }, [open])
@@ -96,7 +103,29 @@ export function GroupMembersPanel({
         setParticipants(res.data ?? [])
         setLoading(false)
       })
+    // Pre-fetch all members once the panel opens so add-member search is instant
+    apiClient
+      .get<MemberWithProfile[]>('/api/members?exclude_self=true')
+      .then(res => setAllMembers(res.data ?? []))
   }, [open, conversationId])
+
+  async function handleAddMember(memberId: string) {
+    setAdding(memberId)
+    const res = await apiClient.post(
+      `/api/conversations/${conversationId}/participants`,
+      { member_id: memberId }
+    )
+    setAdding(null)
+    if (!res.error) {
+      // Refresh participant list and close search
+      const updated = await apiClient.get<GroupParticipant[]>(
+        `/api/conversations/${conversationId}/participants`
+      )
+      setParticipants(updated.data ?? [])
+      setAddOpen(false)
+      setMemberSearch('')
+    }
+  }
 
   // Close action menu on outside click
   useEffect(() => {
@@ -139,23 +168,32 @@ export function GroupMembersPanel({
       {/* Backdrop — fades in/out */}
       <button
         className={[
-          'fixed inset-0 z-40 w-full cursor-default',
-          'bg-black/30',
-          'transition-opacity duration-300',
+          'fixed inset-0 z-40 w-full cursor-default bg-black/30',
           visible ? 'opacity-100' : 'opacity-0',
         ].join(' ')}
+        style={{ transition: 'opacity 200ms ease-out', willChange: 'opacity' }}
         onClick={onClose}
         aria-label="Close panel"
         tabIndex={-1}
       />
 
-      {/* Panel — slides up from below the screen */}
+      {/* Outer — handles the slide transform only, no overflow-hidden here to
+          avoid iOS Safari clipping the element mid-animation */}
       <div
         className={[
-          'fixed inset-x-0 bottom-0 z-50 max-h-[75vh] flex flex-col rounded-t-2xl overflow-hidden',
-          'transition-transform duration-300 ease-out',
+          'fixed inset-x-0 bottom-0 z-50',
           visible ? 'translate-y-0' : 'translate-y-full',
         ].join(' ')}
+        style={{
+          transition: visible
+            ? 'transform 340ms cubic-bezier(0.32,0.72,0,1)'
+            : 'transform 240ms cubic-bezier(0.4,0,1,1)',
+          willChange: 'transform',
+        }}
+      >
+      {/* Inner — clips rounded corners and constrains height */}
+      <div
+        className="max-h-[75vh] flex flex-col rounded-t-2xl overflow-hidden"
         style={{ background: '#FAFAF7' }}
       >
         {/* Handle + header */}
@@ -203,6 +241,88 @@ export function GroupMembersPanel({
           </div>
         )}
 
+        {/* Add member — moderators only */}
+        {isModerator && (
+          <div className="border-b border-green-900/08">
+            {addOpen ? (
+              <div className="px-5 py-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <input
+                    type="search"
+                    placeholder="Search members…"
+                    value={memberSearch}
+                    onChange={e => setMemberSearch(e.target.value)}
+                    autoFocus
+                    className="flex-1 text-sm rounded-xl px-3 py-2 outline-none border border-green-900/15 focus:border-green-600 bg-white text-green-900 placeholder:text-green-900/30"
+                  />
+                  <button
+                    onClick={() => { setAddOpen(false); setMemberSearch('') }}
+                    className="w-7 h-7 flex items-center justify-center rounded-full text-green-900/40 hover:bg-green-100 text-lg leading-none"
+                  >
+                    ×
+                  </button>
+                </div>
+                {/* Filtered member results */}
+                <div className="max-h-48 overflow-y-auto rounded-xl border border-green-900/10 bg-white">
+                  {(() => {
+                    const existingIds = new Set(participants.map(p => p.member.id))
+                    const filtered = allMembers.filter(m => {
+                      if (existingIds.has(m.id)) return false
+                      if (!memberSearch.trim()) return true
+                      const q = memberSearch.toLowerCase()
+                      return `${m.first_name} ${m.last_name}`.toLowerCase().includes(q) ||
+                        m.profile?.business_name?.toLowerCase().includes(q)
+                    })
+                    if (!filtered.length) {
+                      return (
+                        <p className="px-4 py-3 text-xs text-green-900/40 text-center">
+                          {allMembers.length === 0 ? 'Loading…' : 'No members to add'}
+                        </p>
+                      )
+                    }
+                    return filtered.map(m => (
+                      <button
+                        key={m.id}
+                        onClick={() => handleAddMember(m.id)}
+                        disabled={adding === m.id}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-green-50 transition-colors text-left disabled:opacity-50 border-b border-green-900/05 last:border-0"
+                      >
+                        <Avatar
+                          firstName={m.first_name}
+                          lastName={m.last_name}
+                          avatarUrl={m.profile?.avatar_url}
+                          size="sm"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-green-900 capitalize truncate">
+                            {m.first_name} {m.last_name}
+                          </p>
+                          {m.profile?.business_name && (
+                            <p className="text-xs text-green-900/40 truncate">{m.profile.business_name}</p>
+                          )}
+                        </div>
+                        {adding === m.id && <Spinner className="w-4 h-4 text-green-700 flex-shrink-0" />}
+                      </button>
+                    ))
+                  })()}
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setAddOpen(true)}
+                className="w-full flex items-center gap-3 px-5 py-3 text-sm font-medium hover:bg-green-50 transition-colors text-left"
+                style={{ color: 'var(--color-green-800)' }}
+              >
+                <span className="w-8 h-8 rounded-full flex items-center justify-center text-lg flex-shrink-0"
+                  style={{ background: 'rgba(133,187,101,0.12)' }}>
+                  +
+                </span>
+                Add member
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Member list */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
@@ -230,8 +350,8 @@ export function GroupMembersPanel({
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-medium text-green-900">
-                          {capitalizeName(p.member.first_name)} {capitalizeName(p.member.last_name)}
+                        <p className="text-sm font-medium text-green-900 capitalize">
+                          {p.member.first_name} {p.member.last_name}
                           {isMe && (
                             <span className="text-green-900/40 font-normal"> (you)</span>
                           )}
@@ -242,6 +362,14 @@ export function GroupMembersPanel({
                             style={{ background: 'rgba(133,187,101,0.15)', color: '#3a6e1f' }}
                           >
                             Moderator
+                          </span>
+                        )}
+                        {(p as GroupParticipant & { status?: ParticipantStatus }).status === 'pending' && (
+                          <span
+                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                            style={{ background: 'rgba(212,174,89,0.15)', color: '#9a7a2a' }}
+                          >
+                            Invited
                           </span>
                         )}
                       </div>
@@ -293,7 +421,8 @@ export function GroupMembersPanel({
             </div>
           )}
         </div>
-      </div>
+      </div>{/* /inner clip */}
+      </div>{/* /outer slide */}
     </>
   )
 }

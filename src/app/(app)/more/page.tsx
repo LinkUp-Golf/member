@@ -2,35 +2,47 @@
 
 import Link from 'next/link'
 import { useProfile } from '@/hooks/useProfile'
-import { capitalizeName } from '@/lib/utils'
 import Avatar from '@/components/ui/Avatar'
 import AppShell from '@/components/layout/AppShell'
+import Icon, { type IconName } from '@/components/ui/Icon'
 
-const MORE_ITEMS = [
+type SvgIcon = { type: 'svg'; name: IconName }
+type EmojiIcon = { type: 'emoji'; char: string }
+type ItemIcon = SvgIcon | EmojiIcon
+
+const MORE_ITEMS: { group: string; items: { href: string; label: string; icon: ItemIcon; desc: string }[] }[] = [
   {
     group: 'My account',
     items: [
-      { href: '/more/profile',       label: 'My Profile',          icon: '👤', desc: 'Edit your details and golf life' },
-      { href: '/more/focus-linkups', label: 'Focus LinkUps',       icon: '🎯', desc: 'Manage your category subscriptions' },
-      { href: '/more/referrals',     label: 'Refer a Member',      icon: '🤝', desc: 'Invite someone to the community' },
-      { href: '/more/guest-access',  label: 'Guest Access',        icon: '✈️',  desc: 'Request access to another course' },
+      { href: '/more/profile',       label: 'My Profile',     icon: { type: 'svg', name: 'members' },          desc: 'Edit your details and golf life' },
+      { href: '/more/focus-linkups', label: 'Focus LinkUps',  icon: { type: 'svg', name: 'focus-linkup' },     desc: 'Manage your category subscriptions' },
+      { href: '/more/referrals',     label: 'Refer a Member', icon: { type: 'svg', name: 'new-member' },       desc: 'Invite someone to the community' },
+      { href: '/more/guest-access',  label: 'Guest Access',   icon: { type: 'svg', name: 'visiting-member' },  desc: 'Request access to another course' },
     ],
   },
   {
     group: 'Community',
     items: [
-      { href: '/more/events',        label: 'Member Events',       icon: '📅', desc: 'Browse and submit community events' },
-      { href: '/more/announcements', label: 'Announcements',       icon: '📢', desc: 'Community news and updates' },
-      { href: '/more/promotions',    label: 'Member Offers',       icon: '🎁', desc: 'Exclusive deals for members' },
+      { href: '/more/events',        label: 'Member Events',  icon: { type: 'svg', name: 'next-round' },    desc: 'Browse and submit community events' },
+      { href: '/more/announcements', label: 'Announcements',  icon: { type: 'svg', name: 'announcement' },  desc: 'Community news and updates' },
+      { href: '/more/promotions',    label: 'Member Offers',  icon: { type: 'emoji', char: '🎁' },           desc: 'Exclusive deals for members' },
     ],
   },
   {
     group: 'Settings',
     items: [
-      { href: '/more/settings',      label: 'Notifications',       icon: '🔔', desc: 'Manage push notification preferences' },
+      { href: '/more/notifications', label: 'Notification Log', icon: { type: 'emoji', char: '🔔' },          desc: 'View your notification history' },
+      { href: '/more/settings',      label: 'Preferences',      icon: { type: 'svg', name: 'more' },           desc: 'Manage push notification settings' },
     ],
   },
 ]
+
+function ItemIconEl({ icon }: { icon: ItemIcon }) {
+  if (icon.type === 'svg') {
+    return <Icon name={icon.name} className="w-5 h-5" />
+  }
+  return <span className="text-lg leading-none">{icon.char}</span>
+}
 
 export default function MorePage() {
   const { profile, signOut } = useProfile()
@@ -53,8 +65,8 @@ export default function MorePage() {
             size="lg"
           />
           <div className="flex-1 min-w-0">
-            <p className="font-semibold text-base" style={{ color: 'var(--color-green-900)' }}>
-              {capitalizeName(m.first_name)} {capitalizeName(m.last_name)}
+            <p className="font-semibold text-base capitalize" style={{ color: 'var(--color-green-900)' }}>
+              {m.first_name} {m.last_name}
             </p>
             <p className="text-sm mt-0.5" style={{ color: 'rgba(0,38,105,0.5)' }}>
               {m.profile?.role_title ?? 'Complete your profile'}
@@ -87,9 +99,9 @@ export default function MorePage() {
                       : 'none',
                   }}
                 >
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
-                    style={{ background: 'rgba(0,38,105,0.05)' }}>
-                    {item.icon}
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: 'rgba(0,38,105,0.05)', color: 'rgba(0,38,105,0.55)' }}>
+                    <ItemIconEl icon={item.icon} />
                   </div>
                   <div className="flex-1">
                     <p className="text-sm font-medium" style={{ color: 'var(--color-green-900)' }}>

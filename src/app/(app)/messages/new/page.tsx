@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
-import { capitalizeName } from '@/lib/utils'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
 import EmptyState from '@/components/ui/EmptyState'
@@ -98,9 +97,9 @@ export default function NewConversationPage() {
               <button
                 key={id}
                 onClick={() => toggleMember(id)}
-                className="flex items-center gap-1.5 bg-green-100 text-green-900 rounded-full px-3 py-1 text-xs font-medium"
+                className="flex items-center gap-1.5 bg-green-100 text-green-900 rounded-full px-3 py-1 text-xs font-medium capitalize"
               >
-                {capitalizeName(m.first_name)} {capitalizeName(m.last_name)}
+                {m.first_name} {m.last_name}
                 <span className="text-green-900/50 text-base leading-none">×</span>
               </button>
             )
@@ -158,8 +157,8 @@ export default function NewConversationPage() {
                     size="md"
                   />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-green-900">
-                      {capitalizeName(m.first_name)} {capitalizeName(m.last_name)}
+                    <p className="text-sm font-medium text-green-900 capitalize">
+                      {m.first_name} {m.last_name}
                     </p>
                     <p className="text-xs text-green-900/50 truncate mt-0.5">
                       {[m.profile?.role_title, m.profile?.business_name].filter(Boolean).join(' · ')}

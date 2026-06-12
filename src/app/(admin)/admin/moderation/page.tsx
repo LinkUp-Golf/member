@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase'
 import {
   AdminPageHeader, AdminCard, AdminButton, Badge,
 } from '@/components/admin/AdminUI'
-import { formatRelativeTime, formatBookingDate, capitalizeName } from '@/lib/utils'
+import { formatRelativeTime, formatBookingDate } from '@/lib/utils'
 
 interface RawMember {
   id: string
@@ -103,7 +103,7 @@ export default function AdminModerationPage() {
       type: 'event' as const,
       title: e.title,
       body: e.description,
-      author: e.organizer ? `${capitalizeName(e.organizer.first_name)} ${capitalizeName(e.organizer.last_name)}` : 'Unknown',
+      author: e.organizer ? `${e.organizer.first_name} ${e.organizer.last_name}` : 'Unknown',
       authorId: e.organizer?.id ?? e.organizer_id,
       authorStatus: e.organizer?.membership_status ?? 'active',
       warningCount: e.organizer?.warning_count ?? 0,
@@ -121,7 +121,7 @@ export default function AdminModerationPage() {
       type: 'announcement' as const,
       title: a.title,
       body: a.body,
-      author: a.author ? `${capitalizeName(a.author.first_name)} ${capitalizeName(a.author.last_name)}` : 'Unknown',
+      author: a.author ? `${a.author.first_name} ${a.author.last_name}` : 'Unknown',
       authorId: a.author?.id ?? a.author_id,
       authorStatus: a.author?.membership_status ?? 'active',
       warningCount: a.author?.warning_count ?? 0,
@@ -251,7 +251,7 @@ export default function AdminModerationPage() {
                         label={item.type === 'event' ? '📅 Member event' : '📢 Announcement'}
                         colour={item.type === 'event' ? 'blue' : 'gold'}
                       />
-                      <span className="text-xs text-gray-500 font-medium">{item.author}</span>
+                      <span className="text-xs text-gray-500 font-medium capitalize">{item.author}</span>
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${STATUS_COLOURS[item.authorStatus] ?? 'bg-gray-100 text-gray-500'}`}>
                         {item.authorStatus}
                       </span>

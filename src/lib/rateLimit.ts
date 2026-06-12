@@ -69,3 +69,28 @@ export function apiRateLimit(memberId: string): RateLimitResult {
   // 120 API calls per minute per member (generous for real-time use)
   return rateLimit(`api:${memberId}`, { windowMs: 60_000, max: 120 })
 }
+
+export function pushSendRateLimit(callerId: string): RateLimitResult {
+  // 10 send calls per minute per caller (admin / cron only)
+  return rateLimit(`push-send:${callerId}`, { windowMs: 60_000, max: 10 })
+}
+
+export function pushSendToAllRateLimit(callerId: string): RateLimitResult {
+  // 2 broadcast calls per hour — prevent accidental spam to all users
+  return rateLimit(`push-send-all:${callerId}`, { windowMs: 60 * 60_000, max: 2 })
+}
+
+export function messageRateLimit(memberId: string): RateLimitResult {
+  // 30 messages per minute per member (global across all conversations)
+  return rateLimit(`msg:global:${memberId}`, { windowMs: 60_000, max: 30 })
+}
+
+export function messageBurstLimit(memberId: string, convId: string): RateLimitResult {
+  // 10 messages per 15 seconds per member per conversation (burst protection)
+  return rateLimit(`msg:conv:${memberId}:${convId}`, { windowMs: 15_000, max: 10 })
+}
+
+export function inviteRateLimit(memberId: string): RateLimitResult {
+  // 10 invitations per hour per member
+  return rateLimit(`invite:${memberId}`, { windowMs: 60 * 60_000, max: 10 })
+}

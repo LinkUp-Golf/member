@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import Avatar from '@/components/ui/Avatar'
 import { PresenceIndicator } from './PresenceIndicator'
-import { formatMessageTime, truncate, capitalizeName } from '@/lib/utils'
+import { formatMessageTime, truncate } from '@/lib/utils'
 import type { ConversationWithDetails } from '@/types'
 
 interface Props {
@@ -19,7 +19,7 @@ export function ConversationItem({ conversation: conv, currentUserId, isOnline }
   const displayName =
     conv.type === 'group' && conv.name
       ? conv.name
-      : others.map(m => capitalizeName(m.first_name)).join(', ') || 'Unknown'
+      : others.map(m => m.first_name).join(', ') || 'Unknown'
 
   const hasUnread = (conv.unread_count ?? 0) > 0
   const lastMsg = conv.last_message
@@ -62,7 +62,7 @@ export function ConversationItem({ conversation: conv, currentUserId, isOnline }
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline justify-between mb-0.5">
           <span
-            className="text-sm truncate"
+            className="text-sm truncate capitalize"
             style={{
               color: 'var(--color-green-900)',
               fontWeight: hasUnread ? 600 : 500,

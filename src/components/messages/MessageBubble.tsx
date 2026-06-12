@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Avatar from "@/components/ui/Avatar";
-import { capitalizeName, formatMessageTime } from "@/lib/utils";
+import { formatMessageTime } from "@/lib/utils";
 import type { OptimisticMessage } from "@/types";
 
 interface Props {
@@ -136,8 +136,8 @@ export function MessageBubble({
       >
         {/* Sender name (group chats, first in run) */}
         {showSenderInfo && !isMe && isGroup && (
-          <p className="text-xs text-green-900/40 mb-0.5 ml-1">
-            {capitalizeName(msg.sender.first_name)}
+          <p className="text-xs text-green-900/40 mb-0.5 ml-1 capitalize">
+            {msg.sender.first_name}
           </p>
         )}
 

@@ -9,6 +9,7 @@ import { usePresence } from '@/hooks/usePresence'
 import AppShell from '@/components/layout/AppShell'
 import { MemberRowSkeleton } from '@/components/ui/Loading'
 import { ConversationItem } from '@/components/messages/ConversationItem'
+import { InviteItem } from '@/components/messages/InviteItem'
 import type { ConversationWithDetails } from '@/types'
 
 export default function MessagesPage() {
@@ -25,6 +26,9 @@ export default function MessagesPage() {
   // One presence channel for the whole inbox (uses userId as key per user)
   const { isOnline } = usePresence('inbox', user?.id ?? null)
 
+  const pendingInvites = conversations.filter(c => c.my_status === 'pending')
+  const activeConversations = conversations.filter(c => c.my_status !== 'pending')
+
   const loadConversations = useCallback(async () => {
     if (!user) return
     const res = await apiClient.get<ConversationWithDetails[]>('/api/conversations')
@@ -36,11 +40,17 @@ export default function MessagesPage() {
     if (!user) return
     loadConversations()
 
-    // Refresh the list whenever a new message arrives in any conversation
+    // Refresh when new messages arrive or when invitation status changes
     const supabase = createClient()
     const channel = supabase
       .channel('inbox:messages')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
+        loadConversations()
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversation_participants' }, () => {
+        loadConversations()
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversation_participants' }, () => {
         loadConversations()
       })
       .subscribe()
@@ -70,11 +80,37 @@ export default function MessagesPage() {
         <div className="pt-1">
           {Array.from({ length: 5 }).map((_, i) => <MemberRowSkeleton key={i} />)}
         </div>
-      ) : conversations.length === 0 ? (
+      ) : pendingInvites.length === 0 && activeConversations.length === 0 ? (
         <EmptyInbox onCompose={() => router.push('/messages/new')} />
       ) : (
         <div>
-          {conversations.map(conv => {
+          {pendingInvites.length > 0 && (
+            <div>
+              <p
+                className="px-5 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wider"
+                style={{ color: 'rgba(0,38,105,0.4)' }}
+              >
+                Invitations
+              </p>
+              {pendingInvites.map(conv => (
+                <InviteItem
+                  key={conv.id}
+                  conversation={conv}
+                  currentUserId={user?.id ?? ''}
+                  onRespond={() => loadConversations()}
+                />
+              ))}
+              {activeConversations.length > 0 && (
+                <p
+                  className="px-5 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wider"
+                  style={{ color: 'rgba(0,38,105,0.4)' }}
+                >
+                  Messages
+                </p>
+              )}
+            </div>
+          )}
+          {activeConversations.map(conv => {
             const directOther = conv.type === 'direct'
               ? conv.participants.find(p => p.member.id !== user?.id)?.member
               : null

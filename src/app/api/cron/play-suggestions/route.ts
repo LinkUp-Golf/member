@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
         if (suggested && member) {
           const { sent } = await sendPushToMember(
             memberId,
-            NotificationTemplates.playSuggestion(`${suggested.first_name} ${suggested.last_name}`)
+            NotificationTemplates.playSuggestion(`${suggested.first_name} ${suggested.last_name}`, pick)
           )
           notificationsSent += sent
         }

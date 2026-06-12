@@ -7,7 +7,14 @@
 export type MembershipStatus = 'active' | 'waitlist' | 'pending' | 'suspended' | 'cancelled'
 export type AccessType = 'home' | 'guest'
 export type CourseMembershipStatus = 'active' | 'pending' | 'expired'
-export type BookingStatus = 'confirmed' | 'pending' | 'cancelled' | 'waitlist'
+export type BookingStatus =
+  | 'tentative'
+  | 'availability_confirmed'
+  | 'payment_confirmed'
+  | 'confirmed'
+  | 'pending'
+  | 'cancelled'
+  | 'waitlist'
 export type AnnouncementType =
   | 'new_member'
   | 'booking'
@@ -20,6 +27,18 @@ export type ReferralStatus = 'pending' | 'interviewed' | 'approved' | 'declined'
 export type GuestAccessStatus = 'pending' | 'approved' | 'denied' | 'revoked'
 export type ConversationType = 'direct' | 'group'
 export type ParticipantRole = 'member' | 'moderator'
+export type ParticipantStatus = 'pending' | 'active'
+export type NotificationType =
+  | 'new_member'
+  | 'booking'
+  | 'visiting_member'
+  | 'message'
+  | 'focus_linkup'
+  | 'play_suggestion'
+  | 'guest_access'
+  | 'referral'
+  | 'test'
+  | 'general'
 export type RSVPStatus = 'attending' | 'maybe' | 'declined'
 
 export type IndustryCategory =
@@ -89,6 +108,7 @@ export interface Member {
   is_admin: boolean
   warning_count?: number
   suspended_until?: string | null
+  messaging_muted_until?: string | null
   last_sign_in?: string | null
   created_at: string
   updated_at: string
@@ -105,6 +125,7 @@ export interface MemberProfile {
   value_offered: string | null
   value_sought: string | null
   non_golf_hobbies: string | null
+  linkedin_url: string | null
   handicap_index: number | null
   preferred_play_times: string | null
   play_frequency: string | null
@@ -127,15 +148,26 @@ export interface CourseMembership {
   created_at: string
 }
 
+export interface AdditionalPlayer {
+  firstName: string
+  lastName: string
+  mobile: string
+  email: string
+  memberId?: string
+}
+
 export interface Booking {
   id: string
   ghl_booking_id: string | null
+  ghl_opportunity_id: string | null
   member_id: string
   course_id: string
   booking_date: string
   tee_time: string
   players: number
   guest_name: string | null
+  player_member_id: string | null
+  additional_players: AdditionalPlayer[]
   status: BookingStatus
   amount_charged: number
   stripe_payment_id: string | null
@@ -183,6 +215,7 @@ export interface ConversationParticipant {
   member_id: string
   joined_at: string
   last_read_at: string | null
+  status: ParticipantStatus
 }
 
 export interface Message {
@@ -209,6 +242,7 @@ export interface Announcement {
   image_url: string | null
   video_url: string | null
   media_urls: string[]
+  focus_linkup_categories: string[]
   created_at: string
 }
 
@@ -253,6 +287,10 @@ export interface FocusLinkupSubscription {
   id: string
   member_id: string
   industry_focus: IndustryCategory
+  custom_label: string | null
+  status: 'pending' | 'approved' | 'declined'
+  reviewed_at: string | null
+  reviewed_by: string | null
   created_at: string
 }
 
@@ -339,9 +377,11 @@ export interface ConversationWithDetails extends Conversation {
     member: MemberSummary
     last_read_at: string | null
     role: ParticipantRole
+    status: ParticipantStatus
   }>
   last_message: MessageWithSender | null
   unread_count: number
+  my_status: ParticipantStatus
 }
 
 /** Full participant shape returned by GET /api/conversations/[id]/participants */
@@ -349,6 +389,7 @@ export interface GroupParticipant {
   member: MemberSummary
   role: ParticipantRole
   joined_at: string
+  status: ParticipantStatus
 }
 
 export interface AnnouncementWithAuthor extends Announcement {
@@ -371,6 +412,8 @@ export interface GHLBookingSlot {
   startTime: string
   endTime: string
   available: boolean
+  slots?: number
+  spotsOpen?: number
 }
 
 export interface GHLCalendarEvent {
@@ -405,4 +448,18 @@ export interface SessionUser {
   member: MemberWithProfile
   isAdmin: boolean
   activeCourseIds: string[]
+}
+
+// ---- Notification Log ---------------------------------------
+
+export interface NotificationLog {
+  id: string
+  member_id: string
+  type: NotificationType
+  title: string
+  body: string
+  data: Record<string, unknown> | null
+  url: string | null
+  read_at: string | null
+  created_at: string
 }

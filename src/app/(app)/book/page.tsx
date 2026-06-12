@@ -1,492 +1,2347 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { useProfile } from '@/hooks/useProfile'
-import { apiClient } from '@/lib/api-client'
-import AppShell from '@/components/layout/AppShell'
-import { Spinner } from '@/components/ui/Loading'
-import EmptyState from '@/components/ui/EmptyState'
-import { getBookingDates, formatTeeTime, cn } from '@/lib/utils'
-import { format, isSameDay } from 'date-fns'
-import type { Booking } from '@/types'
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
+import { useForm, useFieldArray } from "react-hook-form";
+import { useProfile } from "@/hooks/useProfile";
+import { apiClient } from "@/lib/api-client";
+import AppShell from "@/components/layout/AppShell";
+import { Spinner } from "@/components/ui/Loading";
+import EmptyState from "@/components/ui/EmptyState";
+import Image from "next/image";
+import { formatTeeTime, cn } from "@/lib/utils";
+import Select from "@/components/ui/Select";
+import {
+  format,
+  parse,
+  addDays,
+  addMinutes,
+  addMonths,
+  differenceInHours,
+  getDaysInMonth,
+  startOfMonth,
+} from "date-fns";
+import type { Booking, GHLBookingSlot, AdditionalPlayer, MemberWithProfile } from "@/types";
+import { BOOKING_PRICE_USD, POLICY_TIERS, GOLF_ROUND_DURATION_MINUTES, AVIARA_TIMEZONE, BOOKING_PAYMENT_URL } from "@/lib/constants";
 
-interface Slot {
-  startTime: string
-  endTime: string
-  available: boolean
-  spotsOpen: number
+
+type Step = "select" | "confirm" | "success";
+
+interface DayPlayer {
+  member_id: string
+  first_name: string
+  last_name: string
+  avatar_url: string | null
+  tee_time: string
+  players: number
 }
 
-type Step = 'select' | 'confirm' | 'success'
+const BOOKING_MIN_DAYS = 0;
+
+const FALLBACK_TIMEZONES = [
+  "America/Los_Angeles",
+  "America/Denver",
+  "America/Chicago",
+  "America/New_York",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+  "Asia/Manila",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "Asia/Shanghai",
+  "Asia/Kolkata",
+  "Asia/Dubai",
+  "Europe/London",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+  "UTC",
+];
+
+function getBrowserTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return "UTC";
+  }
+}
+
+function getAllTimezones(): string[] {
+  try {
+    const all = (
+      Intl as unknown as { supportedValuesOf?: (k: string) => string[] }
+    ).supportedValuesOf?.("timeZone");
+    if (all && all.length > 0) return all;
+  } catch {
+    /* ignore */
+  }
+  return FALLBACK_TIMEZONES;
+}
+
+function formatSlotTime(isoString: string): string {
+  return formatTeeTime(isoString.split("T")[1]?.slice(0, 8) ?? "");
+}
+
+function slotEndTime(startIso: string): string {
+  const timeStr = startIso.split("T")[1]?.slice(0, 8) ?? "00:00:00";
+  return format(
+    addMinutes(parse(timeStr, "HH:mm:ss", new Date()), GOLF_ROUND_DURATION_MINUTES),
+    "h:mm a",
+  );
+}
 
 export default function BookPage() {
-  const { user } = useProfile()
+  const { user } = useProfile();
 
-  const [dates] = useState(() => getBookingDates())
-  const [selectedDate, setSelectedDate] = useState<Date>(dates[0] ?? new Date())
-  const [slots, setSlots] = useState<Slot[]>([])
-  const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null)
-  const [loadingSlots, setLoadingSlots] = useState(false)
-  const [step, setStep] = useState<Step>('select')
-  const [guestName, setGuestName] = useState('')
-  const [includeGuest, setIncludeGuest] = useState(false)
-  const [booking, setBooking] = useState(false)
-  const [error, setError] = useState('')
-  const [confirmedBooking, setConfirmedBooking] = useState<{ date: string; time: string } | null>(null)
-  const [myBookings, setMyBookings] = useState<Booking[]>([])
-  const [activeTab, setActiveTab] = useState<'book' | 'myBookings'>('book')
+  const today = useMemo(() => new Date(), []);
 
-  useEffect(() => {
-    if (user) loadMyBookings()
-  }, [user])
+  // Timezone — default to user's browser timezone
+  const [timezone, setTimezone] = useState<string>(getBrowserTimezone);
+  const timezones = useMemo(getAllTimezones, []);
 
-  useEffect(() => {
-    if (selectedDate) loadSlots(selectedDate)
-  }, [selectedDate])
+  // Month navigation — start at the month containing the first bookable date
+  const [currentMonth, setCurrentMonth] = useState<Date>(() =>
+    startOfMonth(addDays(new Date(), BOOKING_MIN_DAYS)),
+  );
 
-  async function loadSlots(date: Date) {
-    setLoadingSlots(true)
-    setSelectedSlot(null)
-    const dateStr = format(date, 'yyyy-MM-dd')
+  // Slots keyed by YYYY-MM-DD
+  const [monthSlots, setMonthSlots] = useState<
+    Record<string, GHLBookingSlot[]>
+  >({});
+  const [loadingMonth, setLoadingMonth] = useState(false);
+
+  // Selection — preselect today on load
+  const [selectedDate, setSelectedDate] = useState<string>(() =>
+    format(new Date(), "yyyy-MM-dd"),
+  );
+  const [selectedSlot, setSelectedSlot] = useState<GHLBookingSlot | null>(null);
+
+  // Booking flow
+  const [step, setStep] = useState<Step>("select");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [confirmedBooking, setConfirmedBooking] = useState<{
+    date: string;
+    time: string;
+    players: number;
+  } | null>(null);
+
+  // My bookings tab
+  const [myBookings, setMyBookings] = useState<Booking[]>([]);
+  const [activeTab, setActiveTab] = useState<"book" | "myBookings">("book");
+
+  // Who's playing on the selected date
+  const [dayPlayers, setDayPlayers] = useState<DayPlayer[]>([]);
+  const [loadingDayPlayers, setLoadingDayPlayers] = useState(false);
+
+  const fetchMonthSlots = useCallback(async () => {
+    setLoadingMonth(true);
+    setSelectedSlot(null);
+    // When navigating to a different month, default to today if it falls in that
+    // month, otherwise clear so the user picks a new date.
+    const monthStr = format(currentMonth, "yyyy-MM");
+    setSelectedDate((prev) => {
+      if (prev.startsWith(monthStr)) return prev;
+      const todayInThisMonth = format(new Date(), "yyyy-MM-dd").startsWith(
+        monthStr,
+      );
+      return todayInThisMonth ? format(new Date(), "yyyy-MM-dd") : "";
+    });
     try {
-      const res = await fetch(`/api/bookings/create?date=${dateStr}`)
-      const data = await res.json()
-      setSlots(data.slots ?? [])
+      const res = await fetch(
+        `/api/bookings/create?month=${monthStr}&timezone=${encodeURIComponent(timezone)}`,
+      );
+      const data = await res.json();
+      setMonthSlots(data.slots ?? {});
     } catch {
-      setSlots([])
+      setMonthSlots({});
     }
-    setLoadingSlots(false)
-  }
+    setLoadingMonth(false);
+  }, [currentMonth, timezone]);
+
+  useEffect(() => {
+    fetchMonthSlots();
+  }, [fetchMonthSlots]);
+  useEffect(() => {
+    if (user) loadMyBookings();
+  }, [user]);
+  useEffect(() => {
+    if (!selectedDate || !user) { setDayPlayers([]); return; }
+    setLoadingDayPlayers(true);
+    fetch(`/api/bookings/day?date=${selectedDate}`)
+      .then(r => r.json())
+      .then(d => setDayPlayers(Array.isArray(d.players) ? d.players : []))
+      .catch(() => setDayPlayers([]))
+      .finally(() => setLoadingDayPlayers(false));
+  }, [selectedDate, user]);
+
+  // These must stay above the early returns to satisfy the rules of hooks
+  const todayStr = useMemo(() => {
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: AVIARA_TIMEZONE }).formatToParts(today);
+    const get = (t: string) => parts.find(p => p.type === t)?.value ?? "00";
+    return `${get("year")}-${get("month")}-${get("day")}`;
+  }, [today]);
+  const firstInWindowRef = useRef<HTMLButtonElement>(null);
+  const selectedDateRef = useRef<HTMLButtonElement>(null);
+  const firstInWindowDateStr = useMemo(() => {
+    const y = currentMonth.getFullYear();
+    const m = currentMonth.getMonth();
+    const days = getDaysInMonth(currentMonth);
+    for (let d = 1; d <= days; d++) {
+      const dateStr = format(new Date(y, m, d), "yyyy-MM-dd");
+      if (dateStr >= format(today, "yyyy-MM-dd")) return dateStr;
+    }
+    return null;
+  }, [currentMonth, today]);
+  useEffect(() => {
+    if (loadingMonth || step !== "select" || activeTab !== "book") return;
+    // Prefer scrolling to the selected date; fall back to first bookable date
+    const target = selectedDateRef.current ?? firstInWindowRef.current;
+    target?.scrollIntoView({ behavior: "instant", block: "nearest", inline: "start" });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingMonth, step, activeTab]);
 
   async function loadMyBookings() {
-    const response = await apiClient.get<Booking[]>('/api/bookings')
-    setMyBookings(response.data ?? [])
+    const response = await apiClient.get<Booking[]>("/api/bookings");
+    setMyBookings(response.data ?? []);
   }
 
-  async function confirmBooking() {
-    if (!selectedSlot || !user) return
-    setBooking(true)
-    setError('')
+  async function submitBooking(additionalPlayers: AdditionalPlayer[]) {
+    if (!selectedSlot || !user || !selectedDate) return;
+    setSubmitting(true);
+    setError("");
 
-    const [datePart = '', timePart = ''] = selectedSlot.startTime.split('T')
-    const timeStr = timePart.slice(0, 8)
-
-    const res = await fetch('/api/bookings/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    const res = await fetch("/api/bookings/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        date: datePart,
-        teeTime: timeStr,
-        players: includeGuest ? 2 : 1,
-        guestName: includeGuest && guestName.trim() ? guestName.trim() : null,
+        startTime: selectedSlot.startTime,
+        players: 1 + additionalPlayers.length,
+        additionalPlayers,
       }),
-    })
+    });
 
-    const data = await res.json()
-
+    const data = await res.json();
     if (res.ok) {
       setConfirmedBooking({
-        date: format(selectedDate, 'EEEE, MMMM d'),
-        time: formatTeeTime(timeStr),
-      })
-      setStep('success')
-      loadMyBookings()
+        date: format(new Date(selectedDate + "T12:00:00"), "EEEE, MMMM d"),
+        time: formatSlotTime(selectedSlot.startTime),
+        players: 1 + additionalPlayers.length,
+      });
+      if (Array.isArray(data.bookings)) {
+        setMyBookings(prev => [...(data.bookings as Booking[]), ...prev]);
+      }
+      setStep("success");
+      fetchMonthSlots();
     } else {
-      setError(data.error ?? 'Something went wrong. Please try again.')
+      setError(data.error ?? "Something went wrong. Please try again.");
     }
-    setBooking(false)
+    setSubmitting(false);
   }
 
-  if (step === 'success' && confirmedBooking) {
-    return <SuccessScreen booking={confirmedBooking} onDone={() => { setStep('select'); setSelectedSlot(null) }} />
+  if (step === "success" && confirmedBooking) {
+    return (
+      <SuccessScreen
+        booking={confirmedBooking}
+        onDone={() => {
+          setStep("select");
+          setSelectedSlot(null);
+        }}
+      />
+    );
   }
 
-  if (step === 'confirm' && selectedSlot) {
+  if (step === "confirm" && selectedSlot && selectedDate) {
     return (
       <ConfirmScreen
         slot={selectedSlot}
         date={selectedDate}
-        includeGuest={includeGuest}
-        guestName={guestName}
+        timezone={timezone}
         error={error}
-        booking={booking}
-        onToggleGuest={() => setIncludeGuest(v => !v)}
-        onGuestName={setGuestName}
-        onConfirm={confirmBooking}
+        submitting={submitting}
+        onSubmit={submitBooking}
+        onBack={() => setStep("select")}
       />
-    )
+    );
   }
+
+  // ---- Calendar helpers ----
+  const year = currentMonth.getFullYear();
+  const month = currentMonth.getMonth();
+  const daysInMonth = getDaysInMonth(currentMonth);
+
+  const minMonthStr = format(
+    startOfMonth(addDays(today, BOOKING_MIN_DAYS)),
+    "yyyy-MM",
+  );
+  const currentMonthStr = format(currentMonth, "yyyy-MM");
+  const canGoPrev = currentMonthStr > minMonthStr;
+  const canGoNext = true;
+
+  function getDateStr(day: number) {
+    return format(new Date(year, month, day), "yyyy-MM-dd");
+  }
+
+  function hasDaySlots(day: number): boolean {
+    return (monthSlots[getDateStr(day)] ?? []).some(
+      (s) => (s.spotsOpen ?? 0) > 0,
+    );
+  }
+
+  // All days of the month as Date objects (for display)
+  const monthDays = Array.from(
+    { length: daysInMonth },
+    (_, i) => new Date(year, month, i + 1),
+  );
+
+  const selectedDateSlots = selectedDate
+    ? (monthSlots[selectedDate] ?? [])
+    : [];
 
   return (
     <AppShell title="Book" description="Park Hyatt Aviara">
-
       {/* Tabs */}
-      <div className="flex border-b bg-white" style={{ borderColor: 'rgba(0,38,105,0.07)' }}>
-        {(['book', 'myBookings'] as const).map(tab => (
+      <div
+        className="flex border-b bg-white"
+        style={{ borderColor: "rgba(0,38,105,0.07)" }}
+      >
+        {(["book", "myBookings"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={cn(
-              'flex-1 py-3.5 text-sm font-medium transition-all border-b-2',
-              activeTab === tab
-                ? 'border-green-900 text-green-900'
-                : 'border-transparent'
+              "flex-1 py-3.5 text-sm font-medium transition-all border-b-2",
+              activeTab === tab ? "border-green-900" : "border-transparent",
             )}
-            style={{ color: activeTab === tab ? 'var(--color-green-900)' : 'rgba(0,38,105,0.35)' }}
+            style={{
+              color:
+                activeTab === tab
+                  ? "var(--color-green-900)"
+                  : "rgba(0,38,105,0.35)",
+            }}
           >
-            {tab === 'book' ? 'Book a round' : 'My bookings'}
+            {tab === "book" ? "Book a round" : "My bookings"}
           </button>
         ))}
       </div>
 
-      {activeTab === 'book' ? (
-        <div className="pb-8">
-          {/* Date picker */}
-          <div className="px-5 pt-5 pb-3">
-            <p className="section-label mb-3">Select a date</p>
-            <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
-              {dates.map(date => {
-                const active = isSameDay(date, selectedDate)
-                return (
-                  <button
-                    key={date.toISOString()}
-                    onClick={() => setSelectedDate(date)}
-                    className={cn(
-                      'flex-shrink-0 flex flex-col items-center px-3 py-3 rounded-2xl border min-w-[56px] transition-all duration-150',
-                      active
-                        ? 'border-green-900'
-                        : 'bg-white border-green-900/08'
-                    )}
-                    style={active ? { background: 'var(--color-green-900)' } : {}}
-                  >
-                    <span className="text-[10px] uppercase tracking-wider font-medium"
-                      style={{ color: active ? 'rgba(133,187,101,0.8)' : 'rgba(0,38,105,0.38)' }}>
-                      {format(date, 'EEE')}
-                    </span>
-                    <span className="font-sans font-black text-2xl mt-0.5"
-                      style={{ color: active ? 'white' : 'var(--color-green-900)' }}>
-                      {format(date, 'd')}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
+      {activeTab === "book" ? (
+        <div className="pb-8 md:max-w-2xl md:mx-auto">
+          {/* Timezone selector */}
+          <div className="px-5 md:px-8 pt-4 pb-1 flex items-center gap-2">
+            <span
+              className="text-xs flex-shrink-0"
+              style={{ color: "rgba(0,38,105,0.4)" }}
+            >
+              Timezone
+            </span>
+            <Select
+              options={timezones.map(tz => ({ value: tz, label: tz.replace(/_/g, ' ') }))}
+              value={timezone}
+              onChange={setTimezone}
+              className="flex-1 min-w-0"
+              triggerClassName="w-full flex items-center justify-between gap-1.5 text-xs py-1.5 px-2.5 rounded-xl border border-green-900/10 bg-white text-green-900 focus:outline-none focus:ring-2 focus:ring-green-900/20 truncate"
+              searchPlaceholder="Search timezone…"
+            />
           </div>
 
-          {/* Tee times */}
-          <div className="px-5 pt-2">
-            <p className="section-label mb-3">
-              Tee times — {format(selectedDate, 'EEE, MMM d')}
+          {/* Month navigation */}
+          <div className="px-5 md:px-8 pt-3 pb-2 flex items-center justify-between">
+            <button
+              onClick={() => setCurrentMonth((m) => addMonths(m, -1))}
+              disabled={!canGoPrev}
+              className="w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-20"
+              style={{ background: "rgba(0,38,105,0.05)" }}
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2.5}
+                style={{ color: "var(--color-green-900)" }}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M15.75 19.5L8.25 12l7.5-7.5"
+                />
+              </svg>
+            </button>
+
+            <p
+              className="font-sans font-black text-lg"
+              style={{ color: "var(--color-green-900)" }}
+            >
+              {format(currentMonth, "MMMM yyyy")}
             </p>
 
-            {loadingSlots ? (
+            <button
+              onClick={() => setCurrentMonth((m) => addMonths(m, 1))}
+              disabled={!canGoNext}
+              className="w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-20"
+              style={{ background: "rgba(0,38,105,0.05)" }}
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2.5}
+                style={{ color: "var(--color-green-900)" }}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M8.25 4.5l7.5 7.5-7.5 7.5"
+                />
+              </svg>
+            </button>
+          </div>
+
+          {/* Date pill strip */}
+          <div className="px-5 md:px-8 pb-3">
+            {loadingMonth ? (
               <div className="flex justify-center py-10">
                 <Spinner className="text-green-700" />
               </div>
-            ) : slots.length === 0 ? (
-              <div className="py-4">
-                <EmptyState icon="⛳" title="No tee times available" description="There are no open slots for this date. Try another day." />
-              </div>
             ) : (
-              <div className="space-y-2">
-                {slots.some(s => parseInt(s.startTime.split('T')[1] ?? '0') < 12) && (
-                  <div className="divider-label mb-1">Morning</div>
-                )}
-                {slots.filter(s => {
-                  const h = parseInt(s.startTime.split('T')[1]?.split(':')[0] ?? '0', 10)
-                  return h < 12
-                }).map((slot, i) => (
-                  <SlotRow
-                    key={i}
-                    slot={slot}
-                    selected={selectedSlot?.startTime === slot.startTime}
-                    onSelect={() => setSelectedSlot(slot)}
-                  />
-                ))}
+              <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
+                {monthDays.map((date) => {
+                  const day = date.getDate();
+                  const dateStr = getDateStr(day);
+                  const isPast = dateStr < todayStr;
+                  const isToday = dateStr === todayStr;
+                  const inView = !isPast;
+                  const hasSlots = hasDaySlots(day);
+                  const active = selectedDate === dateStr;
 
-                {slots.some(s => parseInt(s.startTime.split('T')[1] ?? '0') >= 12) && (
-                  <div className="divider-label mt-4 mb-1">Afternoon</div>
-                )}
-                {slots.filter(s => {
-                  const h = parseInt(s.startTime.split('T')[1]?.split(':')[0] ?? '0', 10)
-                  return h >= 12
-                }).map((slot, i) => (
-                  <SlotRow
-                    key={i}
-                    slot={slot}
-                    selected={selectedSlot?.startTime === slot.startTime}
-                    onSelect={() => setSelectedSlot(slot)}
-                  />
-                ))}
+                  // Today (regardless of slots) stays clickable; everything else
+                  // requires slots to be clickable.
+                  const canClick = isToday || (inView && hasSlots);
+
+                  return (
+                    <button
+                      key={dateStr}
+                      ref={
+                        dateStr === selectedDate
+                          ? selectedDateRef
+                          : dateStr === firstInWindowDateStr
+                            ? firstInWindowRef
+                            : undefined
+                      }
+                      onClick={
+                        canClick
+                          ? () => {
+                              setSelectedDate(dateStr);
+                              setSelectedSlot(null);
+                            }
+                          : undefined
+                      }
+                      disabled={!canClick}
+                      className={cn(
+                        "flex-shrink-0 flex flex-col items-center px-3 py-3 rounded-2xl border min-w-[56px] transition-all duration-150",
+                        !canClick && !isToday && "cursor-not-allowed",
+                        isPast || !inView
+                          ? "opacity-50"
+                          : !hasSlots && "opacity-60",
+                        active
+                          ? "border-green-900"
+                          : "bg-white border-green-900/08",
+                      )}
+                      style={
+                        active
+                          ? {
+                              background: "var(--color-green-900)",
+                              opacity: hasSlots ? 1 : 0.45,
+                            }
+                          : {}
+                      }
+                    >
+                      <span
+                        className="text-[10px] uppercase tracking-wider font-medium"
+                        style={{
+                          color: active
+                            ? "rgba(133,187,101,0.8)"
+                            : "rgba(0,38,105,0.38)",
+                        }}
+                      >
+                        {format(date, "EEE")}
+                      </span>
+                      <span
+                        className="font-sans font-black text-2xl mt-0.5"
+                        style={{
+                          color: active ? "white" : "var(--color-green-900)",
+                        }}
+                      >
+                        {format(date, "d")}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             )}
-
-            {/* Proceed button */}
-            {selectedSlot && (
-              <button
-                onClick={() => setStep('confirm')}
-                className="btn btn-gold btn-full mt-6"
-              >
-                Continue — {formatTeeTime(selectedSlot.startTime.split('T')[1]?.slice(0, 8) ?? '')} →
-              </button>
-            )}
-
-            <p className="text-xs text-center mt-5 leading-relaxed" style={{ color: 'rgba(0,38,105,0.28)' }}>
-              Bookings open 3–60 days in advance · $160 per round
-              <br />
-              One non-member guest permitted per month
-            </p>
           </div>
+
+          {/* Who's playing on selected date */}
+          {selectedDate && !loadingMonth && (dayPlayers.length > 0 || loadingDayPlayers) && (
+            <div className="px-5 md:px-8 pb-1">
+              <p className="section-label mb-2">
+                {loadingDayPlayers ? "Who's playing…" : `Who's playing · ${dayPlayers.length}`}
+              </p>
+              {loadingDayPlayers ? (
+                <div className="flex gap-2">
+                  {[1,2,3,4,5,6].map(i => (
+                    <div key={i} className="flex flex-col items-center gap-1.5 animate-pulse flex-1 min-w-0">
+                      <div className="w-10 h-10 rounded-full mx-auto" style={{ background: "rgba(0,38,105,0.08)" }} />
+                      <div className="w-8 h-2 rounded-full mx-auto" style={{ background: "rgba(0,38,105,0.08)" }} />
+                      <div className="w-6 h-1.5 rounded-full mx-auto" style={{ background: "rgba(0,38,105,0.05)" }} />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-1">
+                  {dayPlayers.map(p => (
+                    <DayPlayerBubble key={p.member_id} player={p} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tee time slots for selected date */}
+          {selectedDate && !loadingMonth && (
+            <div className="px-5 md:px-8 pt-5">
+              <p className="section-label mb-3">
+                Tee times —{" "}
+                {format(new Date(selectedDate + "T12:00:00"), "EEE, MMM d")}
+              </p>
+
+              {selectedDateSlots.length === 0 ? (
+                <EmptyState
+                  icon="⛳"
+                  title="No tee times"
+                  description="No open slots for this date."
+                />
+              ) : (
+                <div className="space-y-2">
+                  {selectedDateSlots.map((slot) => (
+                    <SlotRow
+                      key={slot.startTime}
+                      slot={slot}
+                      selected={selectedSlot?.startTime === slot.startTime}
+                      onSelect={() => setSelectedSlot(slot)}
+                      onContinue={() => setStep("confirm")}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <p
+            className="text-xs text-center mt-6 px-5 md:px-8 leading-relaxed"
+            style={{ color: "rgba(0,38,105,0.25)" }}
+          >
+            Select a date and tee time to submit a booking request.
+            <br />
+            Availability is confirmed by the team — payment link sent by email.
+          </p>
         </div>
       ) : (
-        <MyBookingsTab bookings={myBookings} onRefresh={loadMyBookings} />
+        <MyBookingsTab bookings={myBookings} onRefresh={loadMyBookings} onSwitchToBook={() => setActiveTab('book')} />
       )}
     </AppShell>
-  )
+  );
+}
+
+// ---- Day player bubble + popover ----------------------------
+
+interface MemberDetail {
+  id: string
+  first_name: string
+  last_name: string
+  email: string
+  profile: {
+    display_name: string
+    avatar_url: string | null
+    business_name: string | null
+    role_title: string | null
+    handicap_index: number | null
+    show_handicap: boolean
+    industry_category: string | null
+    value_offered: string | null
+    preferred_play_times: string | null
+    play_frequency: string | null
+    open_to_golf_travel: boolean
+    non_golf_hobbies: string | null
+  } | null
+}
+
+function DayPlayerBubble({ player }: { player: DayPlayer }) {
+  const [detail, setDetail] = useState<MemberDetail | null>(null);
+  const [hasPlayedWith, setHasPlayedWith] = useState(false);
+  const [focusGroups, setFocusGroups] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [visible, setVisible] = useState(false);
+
+  function openPopover() {
+    setMounted(true);
+    if (!detail) {
+      setLoading(true);
+      fetch(`/api/members/${player.member_id}`)
+        .then(r => r.json())
+        .then(d => {
+          setDetail(d.member ?? null);
+          setHasPlayedWith(!!d.hasPlayedWith);
+          setFocusGroups(Array.isArray(d.focusLinkupGroups) ? d.focusLinkupGroups : []);
+        })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }
+  }
+
+  function closePopover() {
+    setVisible(false);
+    const t = setTimeout(() => setMounted(false), 300);
+    return () => clearTimeout(t);
+  }
+
+  useEffect(() => {
+    if (!mounted) return;
+    const ids: number[] = [];
+    ids[0] = requestAnimationFrame(() => {
+      ids[1] = requestAnimationFrame(() => setVisible(true));
+    });
+    return () => ids.forEach(id => cancelAnimationFrame(id));
+  }, [mounted]);
+
+  const prof = detail?.profile;
+  const displayName = prof?.display_name || `${player.first_name} ${player.last_name}`.trim();
+  const initials = `${player.first_name[0] ?? ''}${player.last_name[0] ?? ''}`.toUpperCase();
+  const avatarUrl = prof?.avatar_url ?? player.avatar_url;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={openPopover}
+        className="flex flex-col items-center gap-1 flex-shrink-0 w-14 transition-opacity active:opacity-60"
+      >
+        {avatarUrl ? (
+          <Image src={avatarUrl} alt="" width={40} height={40} className="w-10 h-10 rounded-full object-cover" />
+        ) : (
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold"
+            style={{ background: "rgba(133,187,101,0.15)", color: "var(--color-green-700)" }}
+          >
+            {initials}
+          </div>
+        )}
+        <span className="text-[10px] font-medium text-center leading-tight truncate w-full" style={{ color: "var(--color-green-900)" }}>
+          {player.first_name}
+        </span>
+        <span className="text-[9px] text-center" style={{ color: "rgba(0,38,105,0.38)" }}>
+          {formatTeeTime(player.tee_time)}
+        </span>
+      </button>
+
+      {mounted && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center md:p-6">
+          <button
+            type="button"
+            aria-label="Close"
+            className="absolute inset-0 w-full h-full"
+            style={{
+              background: "rgba(0,0,0,0.45)",
+              opacity: visible ? 1 : 0,
+              transition: "opacity 200ms ease-out",
+            }}
+            onClick={closePopover}
+          />
+          <div
+            className="relative bg-white rounded-t-3xl md:rounded-3xl pt-5 pb-8 w-full md:max-w-md"
+            style={{
+              boxShadow: "0 -4px 32px rgba(0,0,0,0.12)",
+              transform: visible ? "translateY(0)" : "translateY(100%)",
+              transition: visible
+                ? "transform 340ms cubic-bezier(0.32,0.72,0,1)"
+                : "transform 240ms cubic-bezier(0.4,0,1,1)",
+              willChange: "transform",
+              maxHeight: "85vh",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            {/* Drag handle */}
+            <div className="flex justify-center mb-4 flex-shrink-0">
+              <div className="w-10 h-1 rounded-full" style={{ background: "rgba(0,38,105,0.12)" }} />
+            </div>
+
+            {loading ? (
+              <div className="flex flex-col items-center py-10 gap-3 px-5">
+                <div className="w-16 h-16 rounded-2xl animate-pulse" style={{ background: "rgba(0,38,105,0.08)" }} />
+                <div className="w-36 h-3.5 rounded-full animate-pulse" style={{ background: "rgba(0,38,105,0.08)" }} />
+                <div className="w-24 h-2.5 rounded-full animate-pulse" style={{ background: "rgba(0,38,105,0.06)" }} />
+                <div className="w-full h-16 rounded-2xl animate-pulse mt-2" style={{ background: "rgba(0,38,105,0.05)" }} />
+              </div>
+            ) : (
+              <div className="overflow-y-auto flex-1 px-5 space-y-4">
+                {/* Header */}
+                <div className="flex items-start gap-4">
+                  {avatarUrl ? (
+                    <Image src={avatarUrl} alt="" width={60} height={60} className="w-15 h-15 rounded-2xl object-cover flex-shrink-0" style={{ width: 60, height: 60 }} />
+                  ) : (
+                    <div
+                      className="rounded-2xl flex items-center justify-center text-xl font-bold flex-shrink-0"
+                      style={{ width: 60, height: 60, background: "rgba(133,187,101,0.15)", color: "var(--color-green-700)" }}
+                    >
+                      {initials}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0 pt-0.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-sans font-black text-lg leading-tight" style={{ color: "var(--color-green-900)" }}>
+                        {displayName}
+                      </p>
+                      {hasPlayedWith && (
+                        <span
+                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
+                          style={{ background: "rgba(133,187,101,0.15)", color: "var(--color-green-700)" }}
+                        >
+                          Played before
+                        </span>
+                      )}
+                    </div>
+                    {prof?.role_title && (
+                      <p className="text-sm mt-0.5" style={{ color: "rgba(0,38,105,0.55)" }}>{prof.role_title}</p>
+                    )}
+                    {prof?.business_name && (
+                      <p className="text-xs mt-0.5 truncate" style={{ color: "rgba(0,38,105,0.4)" }}>{prof.business_name}</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Stats strip */}
+                <div className="flex rounded-2xl overflow-hidden" style={{ background: "rgba(0,38,105,0.04)" }}>
+                  <div className="flex-1 py-3 text-center">
+                    <p className="text-[9px] uppercase tracking-wider mb-0.5" style={{ color: "rgba(0,38,105,0.38)" }}>Tee time</p>
+                    <p className="font-sans font-black text-sm" style={{ color: "var(--color-green-900)" }}>{formatTeeTime(player.tee_time)}</p>
+                  </div>
+                  {player.players > 1 && (
+                    <>
+                      <div className="w-px my-2.5" style={{ background: "rgba(0,38,105,0.08)" }} />
+                      <div className="flex-1 py-3 text-center">
+                        <p className="text-[9px] uppercase tracking-wider mb-0.5" style={{ color: "rgba(0,38,105,0.38)" }}>Group</p>
+                        <p className="font-sans font-black text-sm" style={{ color: "var(--color-green-900)" }}>{player.players} players</p>
+                      </div>
+                    </>
+                  )}
+                  {prof?.show_handicap && prof?.handicap_index != null && (
+                    <>
+                      <div className="w-px my-2.5" style={{ background: "rgba(0,38,105,0.08)" }} />
+                      <div className="flex-1 py-3 text-center">
+                        <p className="text-[9px] uppercase tracking-wider mb-0.5" style={{ color: "rgba(0,38,105,0.38)" }}>HCP</p>
+                        <p className="font-sans font-black text-sm" style={{ color: "var(--color-green-900)" }}>{prof.handicap_index}</p>
+                      </div>
+                    </>
+                  )}
+                  {prof?.open_to_golf_travel && (
+                    <>
+                      <div className="w-px my-2.5" style={{ background: "rgba(0,38,105,0.08)" }} />
+                      <div className="flex-1 py-3 text-center">
+                        <p className="text-[9px] uppercase tracking-wider mb-0.5" style={{ color: "rgba(0,38,105,0.38)" }}>Golf travel</p>
+                        <p className="text-sm" style={{ color: "var(--color-green-700)" }}>✓ Open</p>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Value offered */}
+                {prof?.value_offered && (
+                  <div className="rounded-2xl px-4 py-3.5" style={{ background: "rgba(0,38,105,0.03)", border: "1px solid rgba(0,38,105,0.06)" }}>
+                    <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "rgba(0,38,105,0.38)" }}>What they bring</p>
+                    <p className="text-sm leading-relaxed" style={{ color: "rgba(0,38,105,0.7)" }}>{prof.value_offered}</p>
+                  </div>
+                )}
+
+                {/* Play preferences */}
+                {(prof?.play_frequency || prof?.preferred_play_times) && (
+                  <div className="rounded-2xl px-4 py-3.5" style={{ background: "rgba(0,38,105,0.03)", border: "1px solid rgba(0,38,105,0.06)" }}>
+                    <p className="text-[10px] uppercase tracking-wider mb-2" style={{ color: "rgba(0,38,105,0.38)" }}>Play habits</p>
+                    <div className="space-y-1.5">
+                      {prof?.play_frequency && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>Frequency</span>
+                          <span className="text-xs font-medium" style={{ color: "var(--color-green-900)" }}>{prof.play_frequency}</span>
+                        </div>
+                      )}
+                      {prof?.preferred_play_times && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>Prefers</span>
+                          <span className="text-xs font-medium" style={{ color: "var(--color-green-900)" }}>{prof.preferred_play_times}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Focus linkup groups */}
+                {focusGroups.length > 0 && (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider mb-2" style={{ color: "rgba(0,38,105,0.38)" }}>Focus groups</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {focusGroups.map(g => (
+                        <span
+                          key={g}
+                          className="text-xs font-medium px-2.5 py-1 rounded-full"
+                          style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+                        >
+                          {g}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Non-golf hobbies */}
+                {prof?.non_golf_hobbies && (
+                  <div className="rounded-2xl px-4 py-3.5" style={{ background: "rgba(0,38,105,0.03)", border: "1px solid rgba(0,38,105,0.06)" }}>
+                    <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "rgba(0,38,105,0.38)" }}>Beyond the course</p>
+                    <p className="text-sm leading-relaxed" style={{ color: "rgba(0,38,105,0.7)" }}>{prof.non_golf_hobbies}</p>
+                  </div>
+                )}
+
+                {/* CTA */}
+                <a
+                  href={`/members/${player.member_id}`}
+                  className="btn btn-primary btn-full text-center block"
+                >
+                  View profile
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ---- Reusable member profile sheet --------------------------
+
+function MemberProfileSheet({ memberId, onClose }: { memberId: string | null; onClose: () => void }) {
+  const [detail, setDetail] = useState<MemberDetail | null>(null);
+  const [hasPlayedWith, setHasPlayedWith] = useState(false);
+  const [focusGroups, setFocusGroups] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (memberId) {
+      setDetail(null);
+      setHasPlayedWith(false);
+      setFocusGroups([]);
+      setMounted(true);
+      setLoading(true);
+      fetch(`/api/members/${memberId}`)
+        .then(r => r.json())
+        .then(d => {
+          setDetail(d.member ?? null);
+          setHasPlayedWith(!!d.hasPlayedWith);
+          setFocusGroups(Array.isArray(d.focusLinkupGroups) ? d.focusLinkupGroups : []);
+        })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+      return;
+    }
+    setVisible(false);
+    const t = setTimeout(() => { setMounted(false); setDetail(null); }, 320);
+    return () => clearTimeout(t);
+  }, [memberId]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    const ids: number[] = [];
+    ids[0] = requestAnimationFrame(() => {
+      ids[1] = requestAnimationFrame(() => setVisible(true));
+    });
+    return () => ids.forEach(id => cancelAnimationFrame(id));
+  }, [mounted]);
+
+  if (!mounted) return null;
+
+  const prof = detail?.profile;
+  const displayName = prof?.display_name || (detail ? `${detail.first_name} ${detail.last_name}`.trim() : '');
+  const initials = detail ? `${detail.first_name[0] ?? ''}${detail.last_name[0] ?? ''}`.toUpperCase() : '?';
+  const avatarUrl = prof?.avatar_url ?? null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center md:p-6">
+      <button
+        type="button"
+        aria-label="Close"
+        className="absolute inset-0 w-full h-full"
+        style={{ background: "rgba(0,0,0,0.45)", opacity: visible ? 1 : 0, transition: "opacity 200ms ease-out" }}
+        onClick={onClose}
+      />
+      <div
+        className="relative bg-white rounded-t-3xl md:rounded-3xl pt-5 pb-8 w-full md:max-w-md"
+        style={{
+          boxShadow: "0 -4px 32px rgba(0,0,0,0.12)",
+          transform: visible ? "translateY(0)" : "translateY(100%)",
+          transition: visible ? "transform 340ms cubic-bezier(0.32,0.72,0,1)" : "transform 240ms cubic-bezier(0.4,0,1,1)",
+          willChange: "transform",
+          maxHeight: "85vh",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div className="flex justify-center mb-4 flex-shrink-0">
+          <div className="w-10 h-1 rounded-full" style={{ background: "rgba(0,38,105,0.12)" }} />
+        </div>
+
+        {loading ? (
+          <div className="flex flex-col items-center py-10 gap-3 px-5">
+            <div className="w-16 h-16 rounded-2xl animate-pulse" style={{ background: "rgba(0,38,105,0.08)" }} />
+            <div className="w-36 h-3.5 rounded-full animate-pulse" style={{ background: "rgba(0,38,105,0.08)" }} />
+            <div className="w-24 h-2.5 rounded-full animate-pulse" style={{ background: "rgba(0,38,105,0.06)" }} />
+            <div className="w-full h-16 rounded-2xl animate-pulse mt-2" style={{ background: "rgba(0,38,105,0.05)" }} />
+          </div>
+        ) : (
+          <div className="overflow-y-auto flex-1 px-5 space-y-4">
+            {/* Header */}
+            <div className="flex items-start gap-4">
+              {avatarUrl ? (
+                <Image src={avatarUrl} alt="" width={60} height={60} className="rounded-2xl object-cover flex-shrink-0" style={{ width: 60, height: 60 }} />
+              ) : (
+                <div
+                  className="rounded-2xl flex items-center justify-center text-xl font-bold flex-shrink-0"
+                  style={{ width: 60, height: 60, background: "rgba(133,187,101,0.15)", color: "var(--color-green-700)" }}
+                >
+                  {initials}
+                </div>
+              )}
+              <div className="flex-1 min-w-0 pt-0.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="font-sans font-black text-lg leading-tight" style={{ color: "var(--color-green-900)" }}>
+                    {displayName}
+                  </p>
+                  {hasPlayedWith && (
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(133,187,101,0.15)", color: "var(--color-green-700)" }}>
+                      Played before
+                    </span>
+                  )}
+                </div>
+                {prof?.role_title && (
+                  <p className="text-sm mt-0.5" style={{ color: "rgba(0,38,105,0.55)" }}>{prof.role_title}</p>
+                )}
+                {prof?.business_name && (
+                  <p className="text-xs mt-0.5 truncate" style={{ color: "rgba(0,38,105,0.4)" }}>{prof.business_name}</p>
+                )}
+              </div>
+            </div>
+
+            {/* Stats strip */}
+            {(prof?.show_handicap && prof?.handicap_index != null) || prof?.open_to_golf_travel ? (
+              <div className="flex rounded-2xl overflow-hidden" style={{ background: "rgba(0,38,105,0.04)" }}>
+                {prof?.show_handicap && prof?.handicap_index != null && (
+                  <div className="flex-1 py-3 text-center">
+                    <p className="text-[9px] uppercase tracking-wider mb-0.5" style={{ color: "rgba(0,38,105,0.38)" }}>HCP</p>
+                    <p className="font-sans font-black text-sm" style={{ color: "var(--color-green-900)" }}>{prof.handicap_index}</p>
+                  </div>
+                )}
+                {prof?.open_to_golf_travel && (
+                  <>
+                    {prof?.show_handicap && prof?.handicap_index != null && (
+                      <div className="w-px my-2.5" style={{ background: "rgba(0,38,105,0.08)" }} />
+                    )}
+                    <div className="flex-1 py-3 text-center">
+                      <p className="text-[9px] uppercase tracking-wider mb-0.5" style={{ color: "rgba(0,38,105,0.38)" }}>Golf travel</p>
+                      <p className="text-sm" style={{ color: "var(--color-green-700)" }}>✓ Open</p>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : null}
+
+            {prof?.value_offered && (
+              <div className="rounded-2xl px-4 py-3.5" style={{ background: "rgba(0,38,105,0.03)", border: "1px solid rgba(0,38,105,0.06)" }}>
+                <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "rgba(0,38,105,0.38)" }}>What they bring</p>
+                <p className="text-sm leading-relaxed" style={{ color: "rgba(0,38,105,0.7)" }}>{prof.value_offered}</p>
+              </div>
+            )}
+
+            {(prof?.play_frequency || prof?.preferred_play_times) && (
+              <div className="rounded-2xl px-4 py-3.5" style={{ background: "rgba(0,38,105,0.03)", border: "1px solid rgba(0,38,105,0.06)" }}>
+                <p className="text-[10px] uppercase tracking-wider mb-2" style={{ color: "rgba(0,38,105,0.38)" }}>Play habits</p>
+                <div className="space-y-1.5">
+                  {prof?.play_frequency && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>Frequency</span>
+                      <span className="text-xs font-medium" style={{ color: "var(--color-green-900)" }}>{prof.play_frequency}</span>
+                    </div>
+                  )}
+                  {prof?.preferred_play_times && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>Prefers</span>
+                      <span className="text-xs font-medium" style={{ color: "var(--color-green-900)" }}>{prof.preferred_play_times}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {focusGroups.length > 0 && (
+              <div>
+                <p className="text-[10px] uppercase tracking-wider mb-2" style={{ color: "rgba(0,38,105,0.38)" }}>Focus groups</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {focusGroups.map(g => (
+                    <span key={g} className="text-xs font-medium px-2.5 py-1 rounded-full" style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}>
+                      {g}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {prof?.non_golf_hobbies && (
+              <div className="rounded-2xl px-4 py-3.5" style={{ background: "rgba(0,38,105,0.03)", border: "1px solid rgba(0,38,105,0.06)" }}>
+                <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: "rgba(0,38,105,0.38)" }}>Beyond the course</p>
+                <p className="text-sm leading-relaxed" style={{ color: "rgba(0,38,105,0.7)" }}>{prof.non_golf_hobbies}</p>
+              </div>
+            )}
+
+            {memberId && (
+              <a href={`/members/${memberId}`} className="btn btn-primary btn-full text-center block">
+                View profile
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ---- Slot row -----------------------------------------------
 
-function SlotRow({ slot, selected, onSelect }: { slot: Slot; selected: boolean; onSelect: () => void }) {
-  const timeStr = slot.startTime.split('T')[1]?.slice(0, 8) ?? ''
-  const full = !slot.available || slot.spotsOpen === 0
+function SlotRow({
+  slot,
+  selected,
+  onSelect,
+  onContinue,
+}: {
+  slot: GHLBookingSlot;
+  selected: boolean;
+  onSelect: () => void;
+  onContinue: () => void;
+}) {
+  const full = !slot.available || (slot.spotsOpen ?? 0) === 0;
 
   return (
     <button
-      onClick={full ? undefined : onSelect}
+      onClick={full ? undefined : selected ? onContinue : onSelect}
       disabled={full}
       className={cn(
-        'w-full flex items-center justify-between px-5 py-4 rounded-2xl border transition-all duration-150 text-left',
+        "w-full flex items-center justify-between px-5 py-4 rounded-2xl border transition-all duration-150 text-left",
         full
-          ? 'opacity-45 cursor-not-allowed'
+          ? "opacity-40 cursor-not-allowed"
           : selected
-            ? ''
-            : 'bg-white hover:border-green-900/20'
+            ? ""
+            : "bg-white hover:border-green-900/20",
       )}
       style={
         full
-          ? { background: 'rgba(0,38,105,0.03)', borderColor: 'rgba(0,38,105,0.06)' }
+          ? {
+              background: "rgba(0,38,105,0.03)",
+              borderColor: "rgba(0,38,105,0.06)",
+            }
           : selected
-            ? { background: 'rgba(133,187,101,0.06)', borderColor: 'var(--color-gold)', boxShadow: '0 0 0 1px var(--color-gold)' }
-            : { borderColor: 'rgba(0,38,105,0.09)' }
+            ? {
+                background: "rgba(133,187,101,0.06)",
+                borderColor: "var(--color-gold)",
+                boxShadow: "0 0 0 1px var(--color-gold)",
+              }
+            : { borderColor: "rgba(0,38,105,0.09)" }
       }
     >
       <div>
-        <span className="font-sans font-black text-2xl" style={{ color: 'var(--color-green-900)' }}>
-          {formatTeeTime(timeStr)}
+        <span
+          className="font-sans font-black text-2xl"
+          style={{ color: "var(--color-green-900)" }}
+        >
+          {formatSlotTime(slot.startTime)}
         </span>
-        <p className="text-xs mt-0.5" style={{ color: 'rgba(0,38,105,0.42)' }}>
-          18 holes · Member rate · $160
+        <p className="text-xs mt-0.5" style={{ color: "rgba(0,38,105,0.42)" }}>
+          Until ~{slotEndTime(slot.startTime)}
+          {!full && (
+            <span
+              style={{
+                color:
+                  (slot.spotsOpen ?? 0) <= 3
+                    ? "#92640a"
+                    : "rgba(0,38,105,0.42)",
+              }}
+            >
+              {" · "}
+              {slot.spotsOpen} spot{slot.spotsOpen !== 1 ? "s" : ""} open
+            </span>
+          )}
         </p>
       </div>
-      <div className="text-right">
+      <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">
         {full ? (
-          <span className="text-xs" style={{ color: 'rgba(0,38,105,0.35)' }}>Full</span>
-        ) : selected ? (
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-medium" style={{ color: 'var(--color-gold-dark)' }}>Selected</span>
-            <div className="w-4 h-4 rounded-full flex items-center justify-center"
-              style={{ background: 'var(--color-gold)' }}>
-              <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={3}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-              </svg>
-            </div>
-          </div>
-        ) : (
-          <span className="text-xs font-medium" style={{ color: slot.spotsOpen <= 2 ? '#639948' : 'rgba(0,38,105,0.5)' }}>
-            {slot.spotsOpen} spot{slot.spotsOpen !== 1 ? 's' : ''} open
+          <span className="text-xs" style={{ color: "rgba(0,38,105,0.35)" }}>
+            Full
           </span>
+        ) : selected ? (
+          <>
+            <span
+              className="text-sm font-semibold"
+              style={{ color: "var(--color-gold-dark)" }}
+            >
+              Book
+            </span>
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2.5}
+              style={{ color: "var(--color-gold-dark)" }}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"
+              />
+            </svg>
+          </>
+        ) : (
+          <svg
+            className="w-4 h-4 opacity-20"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+            style={{ color: "var(--color-green-900)" }}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M8.25 4.5l7.5 7.5-7.5 7.5"
+            />
+          </svg>
         )}
       </div>
     </button>
-  )
+  );
 }
 
 // ---- Confirmation screen ------------------------------------
 
+type PlayersForm = { players: AdditionalPlayer[] }
+type PlayerMode = 'member' | 'new'
+
+const PHONE_RE = /^[+]?[\d][\d\s\-()+.]{6,19}$/
+
+const inputBase =
+  "w-full px-3 py-2 text-sm rounded-xl border bg-white outline-none transition-colors focus:border-green-700"
+const inputStyle = { borderColor: "rgba(0,38,105,0.12)", color: "var(--color-green-900)" }
+const errStyle = { borderColor: "rgba(220,38,38,0.5)" }
+
+
 function ConfirmScreen({
-  slot, date, includeGuest, guestName, error, booking,
-  onToggleGuest, onGuestName, onConfirm,
+  slot,
+  date,
+  timezone,
+  error,
+  submitting,
+  onSubmit,
+  onBack,
 }: {
-  slot: Slot
-  date: Date
-  includeGuest: boolean
-  guestName: string
-  error: string
-  booking: boolean
-  onToggleGuest: () => void
-  onGuestName: (v: string) => void
-  onConfirm: () => void
+  slot: GHLBookingSlot;
+  date: string;
+  timezone: string;
+  error: string;
+  submitting: boolean;
+  onSubmit: (additionalPlayers: AdditionalPlayer[]) => void;
+  onBack: () => void;
 }) {
-  const timeStr = slot.startTime.split('T')[1]?.slice(0, 8) ?? ''
+  const maxAdditional = Math.max(0, (slot.spotsOpen ?? 1) - 1);
+  const [collapsed, setCollapsed] = useState<boolean[]>([]);
+  const [playerModes, setPlayerModes] = useState<PlayerMode[]>([]);
+  const [playerSelections, setPlayerSelections] = useState<Array<MemberWithProfile | null>>([]);
+  const [members, setMembers] = useState<MemberWithProfile[]>([]);
+
+  useEffect(() => {
+    fetch('/api/members?exclude_self=true')
+      .then(r => r.json())
+      .then(d => setMembers(Array.isArray(d) ? d : []))
+      .catch(() => {})
+  }, [])
+
+  const {
+    control,
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    formState: { errors, isValid },
+  } = useForm<PlayersForm>({
+    defaultValues: { players: [] },
+    mode: "onChange",
+  });
+
+  const { fields, append, remove } = useFieldArray({ control, name: "players" });
+  const watchedPlayers = watch("players");
+
+  function addPlayer() {
+    if (fields.length >= maxAdditional) return;
+    append({ firstName: "", lastName: "", mobile: "", email: "" });
+    setCollapsed(prev => [...prev, false]);
+    setPlayerModes(prev => [...prev, 'member']);
+    setPlayerSelections(prev => [...prev, null]);
+  }
+
+  function removePlayer(i: number) {
+    remove(i);
+    setCollapsed(prev => prev.filter((_, idx) => idx !== i));
+    setPlayerModes(prev => prev.filter((_, idx) => idx !== i));
+    setPlayerSelections(prev => prev.filter((_, idx) => idx !== i));
+  }
+
+  function toggleCollapsed(i: number) {
+    // Don't allow collapse in member mode with no selection
+    if ((playerModes[i] ?? 'member') === 'member' && !playerSelections[i]) return;
+    setCollapsed(prev => prev.map((c, idx) => idx === i ? !c : c));
+  }
+
+  function togglePlayerMode(i: number) {
+    const current = playerModes[i] ?? 'member';
+    if (current === 'member') {
+      // switching to new — clear any selection
+      setPlayerSelections(prev => prev.map((s, idx) => idx === i ? null : s));
+      setValue(`players.${i}.firstName`, '', { shouldValidate: false });
+      setValue(`players.${i}.lastName`, '', { shouldValidate: false });
+      setValue(`players.${i}.email`, '', { shouldValidate: false });
+      setValue(`players.${i}.mobile`, '', { shouldValidate: false });
+      setCollapsed(prev => prev.map((c, idx) => idx === i ? false : c));
+    } else {
+      // switching back to member — clear form
+      setPlayerSelections(prev => prev.map((s, idx) => idx === i ? null : s));
+      setValue(`players.${i}.firstName`, '', { shouldValidate: false });
+      setValue(`players.${i}.lastName`, '', { shouldValidate: false });
+      setValue(`players.${i}.email`, '', { shouldValidate: false });
+      setValue(`players.${i}.mobile`, '', { shouldValidate: false });
+      setCollapsed(prev => prev.map((c, idx) => idx === i ? false : c));
+    }
+    setPlayerModes(prev => prev.map((m, idx) => idx === i ? (m === 'member' ? 'new' : 'member') : m));
+  }
+
+  function selectMember(i: number, member: MemberWithProfile) {
+    setValue(`players.${i}.firstName`, member.first_name, { shouldValidate: true });
+    setValue(`players.${i}.lastName`, member.last_name, { shouldValidate: true });
+    setValue(`players.${i}.email`, member.email, { shouldValidate: true });
+    setValue(`players.${i}.mobile`, member.phone ?? '', { shouldValidate: true });
+    setPlayerSelections(prev => prev.map((s, idx) => idx === i ? member : s));
+    if (member.phone) {
+      setCollapsed(prev => prev.map((c, idx) => idx === i ? true : c));
+    }
+  }
+
+  function clearMemberSelection(i: number) {
+    setPlayerSelections(prev => prev.map((s, idx) => idx === i ? null : s));
+    setValue(`players.${i}.firstName`, '', { shouldValidate: false });
+    setValue(`players.${i}.lastName`, '', { shouldValidate: false });
+    setValue(`players.${i}.email`, '', { shouldValidate: false });
+    setValue(`players.${i}.mobile`, '', { shouldValidate: false });
+    setCollapsed(prev => prev.map((c, idx) => idx === i ? false : c));
+  }
+
+  function playerLabel(i: number): string {
+    const selection = playerSelections[i];
+    if (selection) return `${selection.first_name} ${selection.last_name}`.trim();
+    const p = watchedPlayers[i];
+    if (!p) return `Player ${i + 2}`;
+    const name = [p.firstName, p.lastName].filter(Boolean).join(" ").trim();
+    if (name) return name;
+    if (p.email) return p.email;
+    return `Player ${i + 2}`;
+  }
+
+  // Ids already chosen (to exclude from autocomplete)
+  const selectedMemberIds = playerSelections.flatMap(s => s ? [s.id] : []);
 
   return (
     <div>
       <div className="top-bar flex items-center justify-between">
-        <h1 className="text-sm font-medium" style={{ color: 'white' }}>
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-sm"
+          style={{ color: "rgba(255,255,255,0.75)" }}
+        >
+          ← Back
+        </button>
+        <h1 className="text-sm font-medium" style={{ color: "white" }}>
           Confirm Booking
         </h1>
+        <div className="w-12" />
       </div>
 
-      <div className="px-5 py-6 space-y-4">
-        {/* Booking summary card */}
-        <div className="card p-5 space-y-3.5">
-          <p className="section-label !mb-0">Booking details</p>
-          <div className="space-y-3 pt-1">
-            <DetailRow label="Course" value="Park Hyatt Aviara" />
-            <DetailRow label="Date" value={format(date, 'EEEE, MMMM d, yyyy')} />
-            <DetailRow label="Tee time" value={formatTeeTime(timeStr)} />
-            <DetailRow label="Players" value={includeGuest ? '2 (you + guest)' : '1 (you)'} />
-          </div>
-          <div className="pt-3 border-t flex justify-between items-center"
-            style={{ borderColor: 'rgba(0,38,105,0.07)' }}>
-            <span className="text-sm font-medium" style={{ color: 'var(--color-green-900)' }}>Total</span>
-            <span className="font-sans font-black text-2xl" style={{ color: 'var(--color-green-900)' }}>
-              $160
+      <form onSubmit={handleSubmit((data) => onSubmit(data.players.map((p, i) => ({ ...p, memberId: playerSelections[i]?.id }))))} noValidate>
+      <div className="px-5 md:px-8 py-6 space-y-5 md:max-w-2xl md:mx-auto">
+        {/* Booking hero */}
+        <div className="card p-5">
+          <p
+            className="text-xs uppercase tracking-widest mb-3"
+            style={{ color: "rgba(0,38,105,0.35)", letterSpacing: "0.12em" }}
+          >
+            Park Hyatt Aviara
+          </p>
+          <p
+            className="font-sans font-black"
+            style={{
+              fontSize: "2.25rem",
+              color: "var(--color-green-900)",
+              lineHeight: 1,
+            }}
+          >
+            {formatSlotTime(slot.startTime)}
+          </p>
+          <p className="text-sm mt-1.5" style={{ color: "rgba(0,38,105,0.6)" }}>
+            {format(new Date(date + "T12:00:00"), "EEEE, MMMM d, yyyy")}
+          </p>
+          <div
+            className="flex items-center gap-3 mt-3 pt-3 border-t"
+            style={{ borderColor: "rgba(0,38,105,0.07)" }}
+          >
+            <span className="text-xs" style={{ color: "rgba(0,38,105,0.38)" }}>
+              {timezone.replace(/_/g, " ")}
+            </span>
+            <span style={{ color: "rgba(0,38,105,0.18)" }}>·</span>
+            <span className="text-xs" style={{ color: "rgba(0,38,105,0.38)" }}>
+              ${BOOKING_PRICE_USD} per player
             </span>
           </div>
-          <p className="text-xs" style={{ color: 'rgba(0,38,105,0.35)' }}>
-            Charged to your card on file. Cancellation policy applies.
-          </p>
         </div>
 
-        {/* Guest option */}
-        <div className="card p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium" style={{ color: 'var(--color-green-900)' }}>Bring a guest</p>
-              <p className="text-xs mt-0.5" style={{ color: 'rgba(0,38,105,0.42)' }}>
-                One non-member guest per month at member rate
-              </p>
-            </div>
-            <Toggle checked={includeGuest} onChange={onToggleGuest} />
+        {/* Players */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <p className="section-label">Players</p>
+            <span className="text-xs" style={{ color: "rgba(0,38,105,0.35)" }}>
+              {1 + fields.length} / {1 + maxAdditional} spots
+            </span>
           </div>
-          {includeGuest && (
-            <input
-              type="text"
-              placeholder="Guest name (required)"
-              value={guestName}
-              onChange={e => onGuestName(e.target.value)}
-              className="input mt-4"
-              autoFocus
-            />
+
+          {/* Booking member (you) */}
+          <div className="card px-4 py-3 mb-2 flex items-center gap-3">
+            <div
+              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+              style={{ background: "rgba(133,187,101,0.15)", color: "var(--color-green-700)" }}
+            >
+              1
+            </div>
+            <p className="text-sm font-medium" style={{ color: "var(--color-green-900)" }}>You</p>
+            <span className="ml-auto text-xs" style={{ color: "rgba(0,38,105,0.35)" }}>Primary</span>
+          </div>
+
+          {/* Additional players */}
+          {fields.map((field, i) => {
+            const isCollapsed = collapsed[i] ?? false;
+            const mode = playerModes[i] ?? 'member';
+            const selection = playerSelections[i] ?? null;
+            const fieldErrors = errors.players?.[i];
+            const p = watchedPlayers[i];
+            const filled = p?.mobile && p?.email && !fieldErrors;
+            const canCollapse = mode === 'new' || !!selection;
+
+            return (
+              <div key={field.id} className="card mb-2">
+                {/* Header row */}
+                <div className="flex items-center gap-2 px-4 py-3">
+                  <button
+                    type="button"
+                    className={cn("flex-1 flex items-center gap-2 text-left min-w-0", !canCollapse && "cursor-default")}
+                    onClick={() => canCollapse && toggleCollapsed(i)}
+                  >
+                    <div
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                      style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+                    >
+                      {i + 2}
+                    </div>
+                    <span className="text-sm font-medium flex-1 truncate capitalize" style={{ color: "var(--color-green-900)" }}>
+                      {playerLabel(i)}
+                    </span>
+                    {isCollapsed && filled && (
+                      <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 16 16" fill="none"
+                        style={{ color: "var(--color-green-700)" }}>
+                        <path d="M2.5 8.5l3.5 3.5 7.5-8" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                    {canCollapse && (
+                      <svg
+                        className={cn("w-4 h-4 flex-shrink-0 transition-transform duration-200", isCollapsed ? "" : "rotate-180")}
+                        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                        style={{ color: "rgba(0,38,105,0.35)" }}
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                      </svg>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removePlayer(i)}
+                    className="text-xs px-2 py-1 rounded-lg transition-colors flex-shrink-0"
+                    style={{ color: "rgba(220,38,38,0.65)", background: "rgba(220,38,38,0.06)" }}
+                  >
+                    Remove
+                  </button>
+                </div>
+
+                {/* Collapsible body */}
+                {!isCollapsed && (
+                  <div className="px-4 pb-4 space-y-3 border-t" style={{ borderColor: "rgba(0,38,105,0.07)" }}>
+                    {mode === 'member' && !selection ? (
+                      // Member search — no selection yet
+                      <>
+                        <div className="pt-3">
+                          <MemberAutocomplete
+                            members={members}
+                            excludeIds={selectedMemberIds}
+                            onSelect={(m) => selectMember(i, m)}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => togglePlayerMode(i)}
+                          className="text-xs"
+                          style={{ color: "rgba(0,38,105,0.4)" }}
+                        >
+                          Enter details manually instead →
+                        </button>
+                      </>
+                    ) : mode === 'member' && selection ? (
+                      // Member selected
+                      <>
+                        <div className="pt-3 flex items-center gap-3">
+                          {selection.profile?.avatar_url ? (
+                            <Image
+                              src={selection.profile.avatar_url}
+                              alt=""
+                              width={32}
+                              height={32}
+                              className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                            />
+                          ) : (
+                            <div
+                              className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold"
+                              style={{ background: "rgba(133,187,101,0.15)", color: "var(--color-green-700)" }}
+                            >
+                              <span className="uppercase">{selection.first_name[0]}{selection.last_name[0]}</span>
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium capitalize" style={{ color: "var(--color-green-900)" }}>
+                              {selection.first_name} {selection.last_name}
+                            </p>
+                            <p className="text-xs truncate" style={{ color: "rgba(0,38,105,0.45)" }}>
+                              {selection.email}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => clearMemberSelection(i)}
+                            className="text-xs px-2 py-1 rounded-lg flex-shrink-0"
+                            style={{ color: "rgba(0,38,105,0.45)", background: "rgba(0,38,105,0.05)" }}
+                          >
+                            Change
+                          </button>
+                        </div>
+                        {/* Show phone input only if member has no phone on file */}
+                        {!selection.phone && (
+                          <div>
+                            <input
+                              placeholder="Mobile *"
+                              type="tel"
+                              className={cn(inputBase, fieldErrors?.mobile ? "border-red-300" : "")}
+                              style={fieldErrors?.mobile ? errStyle : inputStyle}
+                              {...register(`players.${i}.mobile`, {
+                                required: "Mobile is required",
+                                validate: (v) =>
+                                  PHONE_RE.test(v.trim()) || "Enter a valid mobile number",
+                              })}
+                            />
+                            {fieldErrors?.mobile && (
+                              <p className="text-xs mt-1" style={{ color: "rgba(220,38,38,0.8)" }}>
+                                {fieldErrors.mobile.message}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      // New player mode — manual form
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => togglePlayerMode(i)}
+                          className="pt-3 block text-xs"
+                          style={{ color: "rgba(0,38,105,0.4)" }}
+                        >
+                          ← Search existing members
+                        </button>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            placeholder="First name"
+                            className={inputBase}
+                            style={inputStyle}
+                            {...register(`players.${i}.firstName`)}
+                          />
+                          <input
+                            placeholder="Last name"
+                            className={inputBase}
+                            style={inputStyle}
+                            {...register(`players.${i}.lastName`)}
+                          />
+                        </div>
+                        <div>
+                          <input
+                            placeholder="Mobile *"
+                            type="tel"
+                            className={cn(inputBase, fieldErrors?.mobile ? "border-red-300" : "")}
+                            style={fieldErrors?.mobile ? errStyle : inputStyle}
+                            {...register(`players.${i}.mobile`, {
+                              required: "Mobile is required",
+                              validate: (v) =>
+                                PHONE_RE.test(v.trim()) || "Enter a valid mobile number",
+                            })}
+                          />
+                          {fieldErrors?.mobile && (
+                            <p className="text-xs mt-1" style={{ color: "rgba(220,38,38,0.8)" }}>
+                              {fieldErrors.mobile.message}
+                            </p>
+                          )}
+                        </div>
+                        <div>
+                          <input
+                            placeholder="Email *"
+                            type="email"
+                            className={cn(inputBase, fieldErrors?.email ? "border-red-300" : "")}
+                            style={fieldErrors?.email ? errStyle : inputStyle}
+                            {...register(`players.${i}.email`, {
+                              required: "Email is required",
+                              pattern: {
+                                value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                                message: "Enter a valid email address",
+                              },
+                            })}
+                          />
+                          {fieldErrors?.email && (
+                            <p className="text-xs mt-1" style={{ color: "rgba(220,38,38,0.8)" }}>
+                              {fieldErrors.email.message}
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {fields.length < maxAdditional && (
+            <button
+              type="button"
+              onClick={addPlayer}
+              className="w-full py-3 rounded-2xl border-2 border-dashed text-sm font-medium transition-colors mt-1"
+              style={{ borderColor: "rgba(0,38,105,0.12)", color: "rgba(0,38,105,0.4)" }}
+            >
+              + Add another player
+            </button>
+          )}
+
+          {maxAdditional === 0 && (
+            <p className="text-xs text-center mt-1" style={{ color: "rgba(0,38,105,0.35)" }}>
+              This slot has only 1 spot remaining.
+            </p>
           )}
         </div>
 
-        {/* Error */}
+        {/* What happens next */}
+        <div className="px-1 space-y-2.5">
+          <p className="section-label">What happens next</p>
+          {[
+            "Availability verified with the course",
+            "Payment link sent to your email",
+            "Payment confirms your booking",
+          ].map((s, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <span
+                className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
+                style={{ background: "rgba(133,187,101,0.12)", color: "var(--color-green-700)" }}
+              >
+                {i + 1}
+              </span>
+              <span className="text-sm" style={{ color: "rgba(0,38,105,0.5)" }}>{s}</span>
+            </div>
+          ))}
+        </div>
+
         {error && (
-          <div className="rounded-2xl border px-5 py-4"
-            style={{ background: 'rgba(239,68,68,0.05)', borderColor: 'rgba(239,68,68,0.15)' }}>
+          <div
+            className="rounded-2xl border px-5 py-4"
+            style={{ background: "rgba(239,68,68,0.05)", borderColor: "rgba(239,68,68,0.15)" }}
+          >
             <p className="text-sm text-red-600">{error}</p>
           </div>
         )}
 
-        {/* Confirm button */}
         <button
-          onClick={onConfirm}
-          disabled={booking || (includeGuest && !guestName.trim())}
-          className="btn btn-gold btn-full mt-2 disabled:opacity-50"
+          type="submit"
+          disabled={submitting || !isValid}
+          className="btn btn-gold btn-full disabled:opacity-50"
         >
-          {booking ? (
-            <><Spinner className="w-4 h-4 text-green-900" /> Processing…</>
+          {submitting ? (
+            <><Spinner className="w-4 h-4 text-green-900" /> Submitting…</>
           ) : (
-            'Confirm & pay $160'
+            `Submit booking request${fields.length > 0 ? ` · ${1 + fields.length} players` : ""}`
           )}
         </button>
 
-        <p className="text-xs text-center" style={{ color: 'rgba(0,38,105,0.28)' }}>
-          Your community will be notified of your booking.
+        <p
+          className="text-xs text-center"
+          style={{ color: "rgba(0,38,105,0.28)" }}
+        >
+          No payment charged now.
         </p>
       </div>
+      </form>
+    </div>
+  );
+}
+
+// ---- Member autocomplete ------------------------------------
+
+function MemberAutocomplete({
+  members,
+  excludeIds,
+  onSelect,
+}: {
+  members: MemberWithProfile[]
+  excludeIds: string[]
+  onSelect: (m: MemberWithProfile) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const [dropdownRect, setDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  function measureInput() {
+    if (inputRef.current) {
+      const r = inputRef.current.getBoundingClientRect()
+      setDropdownRect({ top: r.bottom + 4, left: r.left, width: r.width })
+    }
+  }
+
+  useEffect(() => {
+    function handleOutside(e: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    function handleScroll(e: Event) {
+      // Allow scrolling inside the dropdown itself
+      if (dropdownRef.current?.contains(e.target as Node)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', handleOutside)
+    document.addEventListener('scroll', handleScroll, true)
+    return () => {
+      document.removeEventListener('mousedown', handleOutside)
+      document.removeEventListener('scroll', handleScroll, true)
+    }
+  }, [])
+
+  const VISIBLE_ROWS = 4
+  const ROW_HEIGHT = 52 // px — matches py-2.5 + content height
+
+  const filtered = query.trim().length >= 1
+    ? members
+        .filter(m => {
+          if (excludeIds.includes(m.id)) return false
+          const q = query.toLowerCase()
+          return (
+            `${m.first_name} ${m.last_name}`.toLowerCase().includes(q) ||
+            m.email.toLowerCase().includes(q)
+          )
+        })
+        .slice(0, 20)
+    : []
+
+  return (
+    <div ref={wrapperRef}>
+      <input
+        ref={inputRef}
+        type="text"
+        value={query}
+        autoComplete="off"
+        placeholder="Search members…"
+        className={inputBase}
+        style={inputStyle}
+        onChange={e => { setQuery(e.target.value); setOpen(true); measureInput() }}
+        onFocus={() => { setOpen(true); measureInput() }}
+      />
+      {open && filtered.length > 0 && dropdownRect && (
+        <div
+          ref={dropdownRef}
+          className="bg-white rounded-xl border shadow-lg"
+          style={{
+            position: 'fixed',
+            top: dropdownRect.top,
+            left: dropdownRect.left,
+            width: dropdownRect.width,
+            zIndex: 9999,
+            borderColor: "rgba(0,38,105,0.12)",
+            maxHeight: VISIBLE_ROWS * ROW_HEIGHT,
+            overflowY: filtered.length > VISIBLE_ROWS ? 'auto' : 'hidden',
+          }}
+        >
+          {filtered.map(m => (
+            <button
+              key={m.id}
+              type="button"
+              onMouseDown={e => {
+                e.preventDefault()
+                onSelect(m)
+                setQuery('')
+                setOpen(false)
+              }}
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-green-50"
+            >
+              {m.profile?.avatar_url ? (
+                <Image
+                  src={m.profile.avatar_url}
+                  alt=""
+                  width={28}
+                  height={28}
+                  className="w-7 h-7 rounded-full object-cover flex-shrink-0"
+                />
+              ) : (
+                <div
+                  className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold uppercase"
+                  style={{ background: "rgba(133,187,101,0.15)", color: "var(--color-green-700)" }}
+                >
+                  {m.first_name[0]}{m.last_name[0]}
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate capitalize" style={{ color: "var(--color-green-900)" }}>
+                  {m.first_name} {m.last_name}
+                </p>
+                <p className="text-xs truncate" style={{ color: "rgba(0,38,105,0.45)" }}>
+                  {m.email}
+                </p>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
 // ---- Success screen -----------------------------------------
 
-function SuccessScreen({ booking, onDone }: { booking: { date: string; time: string }; onDone: () => void }) {
+function SuccessScreen({
+  booking,
+  onDone,
+}: {
+  booking: { date: string; time: string; players: number };
+  onDone: () => void;
+}) {
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen px-8 text-center"
-      style={{ background: 'var(--color-cream)' }}>
-      <div className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl mb-6 mx-auto"
-        style={{ background: 'rgba(133,187,101,0.12)', border: '1px solid rgba(133,187,101,0.2)' }}>
+    <div
+      className="flex flex-col items-center justify-center min-h-screen px-8 text-center"
+      style={{ background: "var(--color-cream)" }}
+    >
+      <div
+        className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl mb-6"
+        style={{
+          background: "rgba(133,187,101,0.12)",
+          border: "1px solid rgba(133,187,101,0.2)",
+        }}
+      >
         ⛳
       </div>
-      <h1 className="font-sans font-black mb-2" style={{ fontSize: '2rem', color: 'var(--color-green-900)' }}>
-        You&apos;re booked!
+      <h1
+        className="font-sans font-black mb-2"
+        style={{ fontSize: "2rem", color: "var(--color-green-900)" }}
+      >
+        Request submitted!
       </h1>
-      <p className="text-sm mb-1" style={{ color: 'rgba(0,38,105,0.5)' }}>
+      <p className="text-sm mb-1" style={{ color: "rgba(0,38,105,0.5)" }}>
         {booking.date} at {booking.time}
       </p>
-      <p className="text-sm mb-8" style={{ color: 'rgba(0,38,105,0.5)' }}>
+      <p className="text-sm mb-1" style={{ color: "rgba(0,38,105,0.5)" }}>
         Park Hyatt Aviara
       </p>
-      <div className="card p-5 w-full max-w-sm mb-8 text-left">
-        <p className="text-xs uppercase tracking-widest mb-2" style={{ color: 'rgba(0,38,105,0.35)', letterSpacing: '0.14em' }}>
+      {booking.players > 1 && (
+        <p className="text-sm mb-8" style={{ color: "rgba(0,38,105,0.45)" }}>
+          {booking.players} players
+        </p>
+      )}
+      {booking.players <= 1 && <div className="mb-8" />}
+      <div className="card p-5 w-full max-w-sm mb-8 text-left space-y-2">
+        <p
+          className="text-xs uppercase tracking-widest mb-3"
+          style={{ color: "rgba(0,38,105,0.35)", letterSpacing: "0.14em" }}
+        >
           What&apos;s next
         </p>
-        <p className="text-sm leading-relaxed" style={{ color: 'rgba(0,38,105,0.6)' }}>
-          Your community has been notified — fellow members can reach out to join your round.
+        <p
+          className="text-sm leading-relaxed"
+          style={{ color: "rgba(0,38,105,0.6)" }}
+        >
+          We&apos;ll verify availability with the course and send a payment link
+          to your email.
+        </p>
+        <p
+          className="text-sm leading-relaxed"
+          style={{ color: "rgba(0,38,105,0.6)" }}
+        >
+          Your booking is confirmed once payment is complete.
         </p>
       </div>
       <button onClick={onDone} className="btn btn-primary">
         Back to booking
       </button>
     </div>
-  )
+  );
 }
 
 // ---- My bookings tab ----------------------------------------
 
-function MyBookingsTab({ bookings, onRefresh }: { bookings: Booking[]; onRefresh: () => void }) {
-  const [cancelling, setCancelling] = useState<string | null>(null)
+const STATUS_LABELS: Record<
+  string,
+  { label: string; color: string; bg: string }
+> = {
+  tentative: {
+    label: "Pending",
+    color: "#92640a",
+    bg: "rgba(234,179,8,0.08)",
+  },
+  availability_confirmed: {
+    label: "Payment due",
+    color: "#166534",
+    bg: "rgba(34,197,94,0.08)",
+  },
+  payment_confirmed: {
+    label: "Payment confirmed",
+    color: "#166534",
+    bg: "rgba(34,197,94,0.08)",
+  },
+  confirmed: {
+    label: "Confirmed",
+    color: "#166534",
+    bg: "rgba(34,197,94,0.08)",
+  },
+  pending: { label: "Pending", color: "#92640a", bg: "rgba(234,179,8,0.08)" },
+  cancelled: {
+    label: "Cancelled",
+    color: "#6b7280",
+    bg: "rgba(107,114,128,0.08)",
+  },
+};
 
-  const upcoming = bookings.filter(b =>
-    b.booking_date >= format(new Date(), 'yyyy-MM-dd') && b.status !== 'cancelled'
-  )
-  const past = bookings.filter(b =>
-    b.booking_date < format(new Date(), 'yyyy-MM-dd')
-  )
+function BookingStatusBadge({ status }: { status: string }) {
+  const s = STATUS_LABELS[status] ?? {
+    label: status,
+    color: "#6b7280",
+    bg: "rgba(107,114,128,0.08)",
+  };
+  return (
+    <span
+      className="text-xs font-medium px-2 py-0.5 rounded-full"
+      style={{ color: s.color, background: s.bg }}
+    >
+      {s.label}
+    </span>
+  );
+}
 
-  async function cancelBooking(bookingId: string) {
-    if (!confirm('Cancel this booking? This action cannot be undone.')) return
-    setCancelling(bookingId)
-    await apiClient.patch(`/api/bookings/${bookingId}`, {})
+
+function getPolicyTier(bookingDateTime: string) {
+  const hours = differenceInHours(new Date(bookingDateTime), new Date())
+  if (hours >= 72) return POLICY_TIERS[0]
+  if (hours >= 48) return POLICY_TIERS[1]
+  return POLICY_TIERS[2]
+}
+
+function CancelModal({
+  open,
+  bookingDateTime,
+  title,
+  onConfirm,
+  onReschedule,
+  onDismiss,
+  submitting,
+}: {
+  open: boolean
+  bookingDateTime: string
+  title: string
+  onConfirm: (reason: string) => void
+  onReschedule?: (reason: string) => void
+  onDismiss: () => void
+  submitting: boolean
+}) {
+  const [mounted, setMounted] = useState(false)
+  const [visible, setVisible] = useState(false)
+  const [reason, setReason] = useState("")
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true)
+      const ids: number[] = []
+      ids[0] = requestAnimationFrame(() => {
+        ids[1] = requestAnimationFrame(() => setVisible(true))
+      })
+      return () => ids.forEach(id => cancelAnimationFrame(id))
+    } else {
+      setVisible(false)
+      setReason("")
+      const t = setTimeout(() => setMounted(false), 320)
+      return () => clearTimeout(t)
+    }
+  }, [open])
+
+  const canSubmit = reason.trim().length >= 3 && !submitting
+  const activeTier = bookingDateTime ? getPolicyTier(bookingDateTime) : null
+
+  if (!mounted) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center md:p-6">
+      <button
+        type="button"
+        aria-label="Close"
+        className={['absolute inset-0 w-full h-full', visible ? 'opacity-100' : 'opacity-0'].join(' ')}
+        style={{ background: "rgba(0,0,0,0.45)", transition: 'opacity 200ms ease-out', willChange: 'opacity' }}
+        onClick={onDismiss}
+      />
+      <div
+        className={['relative bg-white rounded-t-3xl md:rounded-3xl px-5 pt-5 pb-8 space-y-4 w-full md:max-w-md', visible ? 'translate-y-0' : 'translate-y-full'].join(' ')}
+        style={{
+          boxShadow: "0 -4px 32px rgba(0,0,0,0.12)",
+          transition: visible
+            ? 'transform 340ms cubic-bezier(0.32,0.72,0,1)'
+            : 'transform 240ms cubic-bezier(0.4,0,1,1)',
+          willChange: 'transform',
+        }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <p className="font-sans font-black text-lg" style={{ color: "var(--color-green-900)" }}>
+            {title}
+          </p>
+          <button onClick={onDismiss} className="w-8 h-8 rounded-full flex items-center justify-center"
+            style={{ background: "rgba(0,38,105,0.06)", color: "rgba(0,38,105,0.5)" }}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Cancellation policy */}
+        <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(0,38,105,0.08)" }}>
+          <div className="px-4 py-2.5" style={{ background: "rgba(0,38,105,0.03)" }}>
+            <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: "rgba(0,38,105,0.4)" }}>
+              Cancellation policy
+            </p>
+          </div>
+          {POLICY_TIERS.map((tier) => {
+            const isActive = activeTier === tier
+            return (
+              <div
+                key={tier.label}
+                className="flex items-start gap-3 px-4 py-3"
+                style={{
+                  background: isActive ? tier.bg : 'white',
+                  borderTop: "1px solid rgba(0,38,105,0.06)",
+                }}
+              >
+                <div
+                  className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5"
+                  style={{ background: isActive ? tier.color : "rgba(0,38,105,0.15)" }}
+                />
+                <div className="flex-1 min-w-0">
+                  <p
+                    className="text-xs font-semibold"
+                    style={{ color: isActive ? tier.color : "rgba(0,38,105,0.45)" }}
+                  >
+                    {tier.label}
+                  </p>
+                  <p
+                    className="text-xs mt-0.5"
+                    style={{ color: isActive ? tier.color : "rgba(0,38,105,0.35)" }}
+                  >
+                    {tier.desc}
+                  </p>
+                </div>
+                {isActive && (
+                  <span
+                    className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
+                    style={{ background: tier.bg, color: tier.color }}
+                  >
+                    {tier.credit}
+                  </span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Reason */}
+        <div>
+          <label htmlFor="cancel-reason" className="text-xs mb-1.5 block" style={{ color: "rgba(0,38,105,0.45)" }}>
+            Reason for cancelling
+          </label>
+          <textarea
+            id="cancel-reason"
+            autoFocus
+            rows={3}
+            placeholder="Let us know why…"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            className="w-full px-3 py-2.5 text-sm rounded-xl border outline-none resize-none transition-colors focus:border-green-700"
+            style={{ borderColor: "rgba(0,38,105,0.12)", color: "var(--color-green-900)" }}
+          />
+        </div>
+
+        {/* Actions */}
+        <div className={cn("flex gap-2.5", onReschedule ? "" : "")}>
+          {onReschedule && (
+            <button
+              onClick={() => canSubmit && onReschedule(reason.trim())}
+              disabled={!canSubmit}
+              className="flex-1 py-3.5 rounded-2xl text-sm font-semibold border disabled:opacity-40 transition-colors"
+              style={{ borderColor: "rgba(0,38,105,0.15)", color: "var(--color-green-900)" }}
+            >
+              {submitting ? <Spinner className="w-4 h-4 mx-auto text-green-900" /> : 'Reschedule'}
+            </button>
+          )}
+          <button
+            onClick={() => canSubmit && onConfirm(reason.trim())}
+            disabled={!canSubmit}
+            className={cn("py-3.5 rounded-2xl text-sm font-semibold disabled:opacity-40", onReschedule ? "flex-1" : "w-full")}
+            style={{
+              background: canSubmit ? "rgba(220,38,38,0.9)" : "rgba(220,38,38,0.4)",
+              color: "white",
+            }}
+          >
+            {submitting ? <Spinner className="w-4 h-4 text-white mx-auto" /> : 'Confirm cancellation'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+type BookingGroup = {
+  primary: Booking
+  players: Booking[]
+}
+
+// Converts a booking's stored Aviara-timezone date+time to the user's local Date.
+function bookingToLocalDate(bookingDate: string, teeTime: string): Date {
+  const ref = new Date(`${bookingDate}T12:00:00Z`)
+  const offsetStr = new Intl.DateTimeFormat("en-US", {
+    timeZone: AVIARA_TIMEZONE,
+    timeZoneName: "shortOffset",
+  }).formatToParts(ref).find(p => p.type === "timeZoneName")?.value ?? "GMT-7"
+  const m = offsetStr.match(/GMT([+-])(\d+)(?::(\d+))?/)
+  const tzOffset = m
+    ? `${m[1]}${(m[2] ?? "7").padStart(2, "0")}:${(m[3] ?? "0").padStart(2, "0")}`
+    : "-07:00"
+  return new Date(`${bookingDate}T${teeTime}${tzOffset}`)
+}
+
+function groupBookings(bookings: Booking[]): BookingGroup[] {
+  const bySlot = new Map<string, Booking[]>()
+  for (const b of bookings) {
+    const key = `${b.booking_date}_${b.tee_time}`
+    const slot = bySlot.get(key) ?? []
+    slot.push(b)
+    bySlot.set(key, slot)
+  }
+  const groups: BookingGroup[] = []
+  for (const slot of bySlot.values()) {
+    const primary = slot.find((b) => b.guest_name === null) ?? slot[0]
+    if (!primary) continue
+    groups.push({ primary, players: slot.filter((b) => b.id !== primary.id) })
+  }
+  return groups
+}
+
+interface CancelTarget {
+  ids: string[]
+  bookingDateTime: string
+  title: string
+  allowReschedule: boolean
+}
+
+function MyBookingsTab({
+  bookings,
+  onRefresh,
+  onSwitchToBook,
+}: {
+  bookings: Booking[];
+  onRefresh: () => void;
+  onSwitchToBook: () => void;
+}) {
+  const { user, profile } = useProfile();
+  const [cancelling, setCancelling] = useState<string | null>(null);
+  const [openMenu, setOpenMenu] = useState<{ id: string; top: number; right: number } | null>(null);
+  const [profileMemberId, setProfileMemberId] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handleOutside(e: MouseEvent) {
+      if (
+        openMenu &&
+        !(e.target as Element).closest(`[data-menu-id="${openMenu.id}"]`) &&
+        !(e.target as Element).closest(`[data-menu-portal="${openMenu.id}"]`)
+      ) {
+        setOpenMenu(null);
+      }
+    }
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [openMenu]);
+  const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
+
+  const now = new Date();
+  const allGroups = groupBookings(bookings);
+  const upcoming = allGroups.filter(
+    (g) => bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) >= now && g.primary.status !== "cancelled",
+  );
+  const past = allGroups.filter(
+    (g) => bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) < now,
+  );
+
+  async function confirmCancel(reason: string) {
+    if (!cancelTarget) return
+    const { ids } = cancelTarget
+    setCancelling(ids[0] ?? null)
+    setCancelTarget(null)
+    await Promise.all(ids.map(id => apiClient.patch(`/api/bookings/${id}`, { cancellationReason: reason })))
     onRefresh()
     setCancelling(null)
   }
 
+  async function confirmReschedule(reason: string) {
+    if (!cancelTarget) return
+    const { ids } = cancelTarget
+    setCancelling(ids[0] ?? null)
+    setCancelTarget(null)
+    await Promise.all(ids.map(id => apiClient.patch(`/api/bookings/${id}`, { cancellationReason: `Reschedule — ${reason}` })))
+    onRefresh()
+    setCancelling(null)
+    onSwitchToBook()
+  }
+
   return (
-    <div className="px-5 py-5 pb-8">
+    <div className="px-5 md:px-8 py-5 pb-8 md:max-w-2xl md:mx-auto">
+      <MemberProfileSheet memberId={profileMemberId} onClose={() => setProfileMemberId(null)} />
+      <CancelModal
+        open={!!cancelTarget}
+        bookingDateTime={cancelTarget?.bookingDateTime ?? ''}
+        title={cancelTarget?.title ?? 'Cancel booking'}
+        onConfirm={confirmCancel}
+        onReschedule={cancelTarget?.allowReschedule ? confirmReschedule : undefined}
+        onDismiss={() => setCancelTarget(null)}
+        submitting={!!cancelling}
+      />
+
       {upcoming.length === 0 && past.length === 0 && (
-        <EmptyState icon="🗓️" title="No bookings yet" description="Book your first round using the tee time selector above." />
+        <EmptyState
+          icon="🗓️"
+          title="No bookings yet"
+          description="Book your first round using the calendar above."
+        />
       )}
 
       {upcoming.length > 0 && (
         <>
           <p className="section-label mb-3">Upcoming</p>
           <div className="space-y-2.5 mb-7">
-            {upcoming.map(b => (
-              <div key={b.id} className="card p-5 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium" style={{ color: 'var(--color-green-900)' }}>
-                    {format(new Date(b.booking_date + 'T12:00:00'), 'EEE, MMM d')}
-                  </p>
-                  <p className="text-xs mt-0.5" style={{ color: 'rgba(0,38,105,0.45)' }}>
-                    {formatTeeTime(b.tee_time)} · ${b.amount_charged.toFixed(0)}
-                    {b.guest_name ? ` · Guest: ${b.guest_name}` : ''}
-                  </p>
+            {upcoming.map((group) => {
+              const activePlayers = group.players.filter(p => p.status !== 'cancelled');
+              const totalAmount =
+                group.primary.amount_charged +
+                activePlayers.reduce((sum, p) => sum + p.amount_charged, 0);
+              const totalPlayers = 1 + activePlayers.length;
+
+              const iAmBooker = group.primary.member_id === user?.id;
+              const allPlayers = [
+                {
+                  id: group.primary.id,
+                  name: 'You',
+                  booking: group.primary,
+                  isInvited: group.primary.guest_name !== null, // true when viewing from guest's perspective
+                },
+                ...activePlayers.map(p => ({
+                  id: p.id,
+                  name: p.guest_name ?? (p.member_id === user?.id ? 'You' : 'Guest'),
+                  booking: p,
+                  isInvited: true, // all non-primary rows are invited guests
+                })),
+              ];
+
+              const playerCanAct = (b: typeof group.primary) =>
+                differenceInHours(bookingToLocalDate(b.booking_date, b.tee_time), new Date()) > 0 &&
+                !['tentative', 'cancelled', 'confirmed'].includes(b.status);
+
+              return (
+                <div key={group.primary.id} className="card overflow-hidden">
+                  {/* Booking header */}
+                  <div className="px-5 pt-5 pb-4">
+                    <p className="text-sm font-medium" style={{ color: "var(--color-green-900)" }}>
+                      {format(bookingToLocalDate(group.primary.booking_date, group.primary.tee_time), "EEE, MMM d")}
+                    </p>
+                    <p className="text-xs mt-0.5" style={{ color: "rgba(0,38,105,0.45)" }}>
+                      {format(bookingToLocalDate(group.primary.booking_date, group.primary.tee_time), "h:mm a")} · ${totalAmount.toFixed(0)}
+                      {totalPlayers > 1 && ` · ${totalPlayers} players`}
+                    </p>
+                  </div>
+
+                  {/* Per-player rows */}
+                  <div className="border-t" style={{ borderColor: "rgba(0,38,105,0.07)" }}>
+                    {allPlayers.map((player, idx) => {
+                      const dt = bookingToLocalDate(player.booking.booking_date, player.booking.tee_time).toISOString();
+                      const canAct = playerCanAct(player.booking);
+                      return (
+                        <div
+                          key={player.id}
+                          className="flex items-center gap-3 px-5 py-3"
+                          style={{ borderTop: idx === 0 ? 'none' : '1px solid rgba(0,38,105,0.05)' }}
+                        >
+                          {/* Avatar — opens member profile sheet */}
+                          {(() => {
+                            const memberId = player.name === 'You'
+                              ? (user?.id ?? null)
+                              : (player.booking.player_member_id ?? null);
+                            const raw = player.name === 'You'
+                              ? `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim()
+                              : player.name;
+                            const parts = raw.split(/\s+/).filter(Boolean);
+                            const initials = parts.length >= 2
+                              ? `${parts[0]?.[0] ?? ''}${parts[parts.length - 1]?.[0] ?? ''}`.toUpperCase()
+                              : (parts[0]?.[0] ?? '?').toUpperCase();
+                            const avatarUrl = player.name === 'You' ? (profile?.profile?.avatar_url ?? null) : null;
+                            return (
+                              <button
+                                onClick={() => memberId && setProfileMemberId(memberId)}
+                                className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 overflow-hidden"
+                                style={{
+                                  background: "rgba(0,38,105,0.08)",
+                                  color: "var(--color-green-900)",
+                                  cursor: memberId ? 'pointer' : 'default',
+                                }}
+                              >
+                                {avatarUrl ? (
+                                  <Image src={avatarUrl} alt="" width={28} height={28} className="w-full h-full object-cover" />
+                                ) : initials}
+                              </button>
+                            );
+                          })()}
+
+                          <div className="flex-1 flex items-center gap-1.5 min-w-0">
+                            <span className="text-sm font-medium truncate capitalize" style={{ color: "var(--color-green-900)" }}>
+                              {player.name}
+                            </span>
+                            {/* "Invited" pill — shown on guest rows */}
+                            {player.isInvited && (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(234,179,8,0.1)", color: "#92640a" }}>
+                                Invited
+                              </span>
+                            )}
+                            {/* "Invited X" — shown on booker's own row when they have guests */}
+                            {!player.isInvited && iAmBooker && activePlayers.length > 0 && (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5" style={{ background: "rgba(0,38,105,0.06)", color: "rgba(0,38,105,0.55)" }}>
+                                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                                  <path d="M5.5 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM1 14s-.5 0-.5-.5C.5 11 2.5 9 5.5 9s5 2 5 4.5c0 .5-.5.5-.5.5H1ZM12 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM14.5 13.5h-2c0-1.1-.4-2.1-1-2.9.4-.1.7-.1 1-.1 2 0 3.5 1.6 3.5 3.5 0 .27-.23.5-.5.5Z"/>
+                                </svg>
+                                +{activePlayers.length}
+                              </span>
+                            )}
+                          </div>
+
+                          {player.booking.status === 'availability_confirmed' ? (
+                            <a
+                              href={BOOKING_PAYMENT_URL}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs font-semibold flex items-center gap-0.5 flex-shrink-0"
+                              style={{ color: "#92640a" }}
+                            >
+                              Pay now
+                              <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                                <path d="M2.5 6h7m-3-3 3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            </a>
+                          ) : (
+                            <BookingStatusBadge status={player.booking.status} />
+                          )}
+
+                          {/* 3-dot menu per player */}
+                          {canAct && (
+                            <div className="flex-shrink-0" data-menu-id={player.id}>
+                              <button
+                                onClick={(e) => {
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  setOpenMenu(prev => prev?.id === player.id ? null : { id: player.id, top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                                }}
+                                className="w-6 h-6 flex items-center justify-center rounded-md transition-colors"
+                                style={{ color: "rgba(0,38,105,0.3)", background: openMenu?.id === player.id ? "rgba(0,38,105,0.06)" : "transparent" }}
+                              >
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                                  <circle cx="8" cy="3" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="8" cy="13" r="1.2"/>
+                                </svg>
+                              </button>
+                              {openMenu?.id === player.id && createPortal(
+                                <div
+                                  data-menu-portal={player.id}
+                                  className="rounded-xl shadow-lg border overflow-hidden z-50"
+                                  style={{ position: 'fixed', top: openMenu.top, right: openMenu.right, minWidth: 155, background: "white", borderColor: "rgba(0,38,105,0.08)" }}
+                                >
+                                  <button
+                                    onClick={() => { setOpenMenu(null); setCancelTarget({ ids: [player.id], bookingDateTime: dt, title: 'Cancel booking', allowReschedule: false }); }}
+                                    className="w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-red-50"
+                                    style={{ color: "rgba(220,38,38,0.8)" }}
+                                  >
+                                    Cancel booking
+                                  </button>
+                                </div>,
+                                document.body
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
                 </div>
-                <button
-                  onClick={() => cancelBooking(b.id)}
-                  disabled={cancelling === b.id}
-                  className="text-xs flex-shrink-0 py-1 px-2.5 rounded-lg border transition-colors"
-                  style={{ color: 'rgba(220,38,38,0.7)', borderColor: 'rgba(220,38,38,0.15)', background: 'rgba(220,38,38,0.04)' }}
-                >
-                  {cancelling === b.id ? <Spinner className="w-3 h-3 text-red-400" /> : 'Cancel'}
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
@@ -495,14 +2350,21 @@ function MyBookingsTab({ bookings, onRefresh }: { bookings: Booking[]; onRefresh
         <>
           <p className="section-label mb-3">Past rounds</p>
           <div className="space-y-2">
-            {past.slice(0, 10).map(b => (
-              <div key={b.id} className="card p-4" style={{ opacity: 0.55 }}>
-                <p className="text-sm" style={{ color: 'var(--color-green-900)' }}>
-                  {format(new Date(b.booking_date + 'T12:00:00'), 'EEE, MMM d, yyyy')}
+            {past.slice(0, 10).map((group) => (
+              <div key={group.primary.id} className="card p-4" style={{ opacity: 0.55 }}>
+                <p
+                  className="text-sm"
+                  style={{ color: "var(--color-green-900)" }}
+                >
+                  {format(bookingToLocalDate(group.primary.booking_date, group.primary.tee_time), "EEE, MMM d, yyyy")}
                 </p>
-                <p className="text-xs mt-0.5" style={{ color: 'rgba(0,38,105,0.5)' }}>
-                  {formatTeeTime(b.tee_time)}
-                  {b.guest_name ? ` · Guest: ${b.guest_name}` : ''}
+                <p
+                  className="text-xs mt-0.5"
+                  style={{ color: "rgba(0,38,105,0.5)" }}
+                >
+                  {format(bookingToLocalDate(group.primary.booking_date, group.primary.tee_time), "h:mm a")}
+                  {group.players.length > 0 &&
+                    ` · ${1 + group.players.length} players`}
                 </p>
               </div>
             ))}
@@ -510,37 +2372,7 @@ function MyBookingsTab({ bookings, onRefresh }: { bookings: Booking[]; onRefresh
         </>
       )}
     </div>
-  )
+  );
 }
 
-// ---- Shared sub-components ----------------------------------
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex justify-between items-start gap-4">
-      <span className="text-xs flex-shrink-0" style={{ color: 'rgba(0,38,105,0.42)' }}>{label}</span>
-      <span className="text-sm text-right" style={{ color: 'var(--color-green-900)' }}>{value}</span>
-    </div>
-  )
-}
-
-function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
-  return (
-    <button
-      onClick={onChange}
-      className="w-12 h-6 rounded-full transition-all duration-200 flex-shrink-0 relative"
-      style={{
-        background: checked ? 'var(--color-green-700)' : 'rgba(0,38,105,0.12)',
-        boxShadow: checked ? 'inset 0 1px 3px rgba(0,0,0,0.15)' : 'none',
-      }}
-      role="switch"
-      aria-checked={checked}
-    >
-      <span className={cn(
-        'absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-200',
-        checked ? 'translate-x-6' : 'translate-x-0.5'
-      )} />
-    </button>
-  )
-}
-
+// ---- Shared -----------------------------------------------
