@@ -26,22 +26,21 @@ export const GET = withAuth(
 
     const admin = createAdminClient()
 
-    const { data: membership } = await admin
-      .from('course_memberships')
-      .select('course_id')
-      .eq('member_id', ctx.userId)
-      .eq('status', 'active')
-      .maybeSingle()
+    const { data: member } = await admin
+      .from('members')
+      .select('home_course_id')
+      .eq('id', ctx.userId)
+      .single()
 
-    if (!membership) return NextResponse.json({ players: [] })
+    if (!member) return NextResponse.json({ players: [] })
 
     const { data: bookings } = await admin
       .from('bookings')
       .select('member_id, tee_time, players, members!inner(id, first_name, last_name, profile:member_profiles(avatar_url))')
-      .eq('course_id', membership.course_id)
+      .eq('course_id', member.home_course_id)
       .eq('booking_date', date)
       .is('guest_name', null)
-      .neq('status', 'cancelled')
+      .in('status', ['availability_confirmed', 'payment_confirmed', 'confirmed'])
       .neq('member_id', ctx.userId)
 
     const players: DayPlayer[] = (bookings ?? []).map((b) => {
