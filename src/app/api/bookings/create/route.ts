@@ -23,8 +23,14 @@ import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-serv
 import { getAvailableSlots, createBooking, getContactByEmail, createContact } from '@/lib/ghl/client'
 import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
-import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
+import { sendPushToMembers, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
+import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { format } from 'date-fns'
+import type { AdditionalPlayer } from '@/types'
+
+// Total players per booking is capped at 4 (mirrors validateBookingPayload),
+// so at most 3 additional players may accompany the primary booker.
+const MAX_ADDITIONAL_PLAYERS = 3
 import {
   BOOKING_PRICE_USD,
   AVIARA_TIMEZONE,
@@ -95,13 +101,44 @@ export async function POST(request: NextRequest) {
   const { startTime: slotStartTime, focusLinkupId, additionalPlayers } = body as {
     startTime: string
     focusLinkupId?: string
-    additionalPlayers?: { firstName: string; lastName: string; mobile: string; email: string; memberId?: string }[]
+    additionalPlayers?: AdditionalPlayer[]
   }
-  const extraPlayers = additionalPlayers ?? []
+  const rawExtraPlayers = additionalPlayers ?? []
 
   if (!slotStartTime) {
     return NextResponse.json({ error: 'startTime is required' }, { status: 400 })
   }
+
+  // Cap the group server-side — the client limit is advisory only.
+  if (rawExtraPlayers.length > MAX_ADDITIONAL_PLAYERS) {
+    return NextResponse.json({ error: 'A booking can include at most 4 players' }, { status: 400 })
+  }
+
+  // Players added without a member account are non-member invites: they need a
+  // valid email and phone (names are optional) and trigger an admin alert.
+  for (const p of rawExtraPlayers) {
+    if (!validateEmail(p.email).valid) {
+      return NextResponse.json({ error: 'A valid email is required for each added player' }, { status: 400 })
+    }
+    for (const name of [p.firstName, p.lastName]) {
+      if (name && !validateString(name, 'name', { max: 100 }).valid) {
+        return NextResponse.json({ error: 'Player names must be 100 characters or fewer' }, { status: 400 })
+      }
+    }
+    const isNonMember = p.isNonMember || !p.memberId
+    if (isNonMember && (typeof p.mobile !== 'string' || p.mobile.trim().length < 7)) {
+      return NextResponse.json({ error: 'A phone number is required for each non-member guest' }, { status: 400 })
+    }
+  }
+
+  // Strip any HTML from free-text names before they reach GHL, the bookings
+  // table, or the admin CSV export.
+  const extraPlayers: AdditionalPlayer[] = rawExtraPlayers.map((p) => ({
+    ...p,
+    firstName: p.firstName ? sanitiseText(p.firstName) : p.firstName,
+    lastName: p.lastName ? sanitiseText(p.lastName) : p.lastName,
+  }))
+  const nonMemberPlayers = extraPlayers.filter((p) => p.isNonMember || !p.memberId)
 
   console.log('[booking/create] Request:', { userId: user.id, slotStartTime, extraPlayers: extraPlayers.length })
 
@@ -298,6 +335,18 @@ export async function POST(request: NextRequest) {
     void sendPushToMembers(
       invitedMemberIds,
       NotificationTemplates.bookingInvite(member.first_name, displayDate, displayTime)
+    ).catch(() => {})
+  }
+
+  // Alert admins when a non-member was invited so they can follow up on access.
+  if (nonMemberPlayers.length) {
+    void sendPushToAdmins(
+      NotificationTemplates.nonMemberBookingRequest(
+        memberName,
+        nonMemberPlayers.length,
+        displayDate,
+        timeNormalized.slice(0, 5)
+      )
     ).catch(() => {})
   }
 

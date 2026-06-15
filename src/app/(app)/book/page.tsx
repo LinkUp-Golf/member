@@ -36,6 +36,15 @@ import {
   BOOKING_PAYMENT_URL,
   GHL_CANCEL_BOOKING_URL,
 } from "@/lib/constants";
+import { validateEmail } from "@/lib/validation";
+
+type PlayerKind = "member" | "non_member";
+
+// A phone number is required for non-member invites; keep the check lenient
+// (digits/format vary) but reject obviously-too-short values.
+function isValidGuestPhone(value: string | undefined): boolean {
+  return typeof value === "string" && value.trim().length >= 7;
+}
 
 type Step = "select" | "confirm" | "success";
 
@@ -1591,6 +1600,9 @@ function ConfirmScreen({
   const [playerSelections, setPlayerSelections] = useState<
     Array<MemberWithProfile | null>
   >([]);
+  // Per-row entry mode. Member is the default; non-member captures a guest's
+  // name/phone/email and flags the booking for admin review.
+  const [playerKinds, setPlayerKinds] = useState<PlayerKind[]>([]);
   const [members, setMembers] = useState<MemberWithProfile[]>([]);
   const inviteApplied = useRef(false);
 
@@ -1605,11 +1617,14 @@ function ConfirmScreen({
     control,
     handleSubmit,
     setValue,
-    formState: { isValid },
+    register,
+    watch,
   } = useForm<PlayersForm>({
     defaultValues: { players: [] },
     mode: "onChange",
   });
+
+  const watchedPlayers = watch("players");
 
   const { fields, append, remove } = useFieldArray({
     control,
@@ -1632,6 +1647,7 @@ function ConfirmScreen({
     });
     setCollapsed((prev) => [...prev, true]);
     setPlayerSelections((prev) => [...prev, member]);
+    setPlayerKinds((prev) => [...prev, "member"]);
   }, [members, inviteMemberId, maxAdditional, append]);
 
   function addPlayer() {
@@ -1639,13 +1655,39 @@ function ConfirmScreen({
     append({ firstName: "", lastName: "", mobile: "", email: "" });
     setCollapsed((prev) => [...prev, false]);
     setPlayerSelections((prev) => [...prev, null]);
+    setPlayerKinds((prev) => [...prev, "member"]);
   }
 
   function removePlayer(i: number) {
     remove(i);
     setCollapsed((prev) => prev.filter((_, idx) => idx !== i));
     setPlayerSelections((prev) => prev.filter((_, idx) => idx !== i));
+    setPlayerKinds((prev) => prev.filter((_, idx) => idx !== i));
   }
+
+  // Switch a row between member-search and non-member entry, clearing any
+  // captured values so the two modes never bleed into each other.
+  function setPlayerKind(i: number, kind: PlayerKind) {
+    setPlayerKinds((prev) => prev.map((k, idx) => (idx === i ? kind : k)));
+    setPlayerSelections((prev) => prev.map((s, idx) => (idx === i ? null : s)));
+    setCollapsed((prev) => prev.map((c, idx) => (idx === i ? false : c)));
+    setValue(`players.${i}.firstName`, "", { shouldValidate: false });
+    setValue(`players.${i}.lastName`, "", { shouldValidate: false });
+    setValue(`players.${i}.email`, "", { shouldValidate: false });
+    setValue(`players.${i}.mobile`, "", { shouldValidate: false });
+  }
+
+  // A row is valid when a member is selected, or — for non-members — a valid
+  // email and phone have been entered (names are optional).
+  function rowValid(i: number): boolean {
+    if (playerKinds[i] === "non_member") {
+      const p = watchedPlayers?.[i];
+      return validateEmail(p?.email).valid && isValidGuestPhone(p?.mobile);
+    }
+    return !!playerSelections[i];
+  }
+
+  const allRowsValid = fields.every((_, i) => rowValid(i));
 
   function toggleCollapsed(i: number) {
     if (!playerSelections[i]) return;
@@ -1684,6 +1726,11 @@ function ConfirmScreen({
     const selection = playerSelections[i];
     if (selection)
       return `${selection.first_name} ${selection.last_name}`.trim();
+    if (playerKinds[i] === "non_member") {
+      const p = watchedPlayers?.[i];
+      const name = `${p?.firstName ?? ""} ${p?.lastName ?? ""}`.trim();
+      return name || `Guest ${i + 2}`;
+    }
     return `Player ${i + 2}`;
   }
 
@@ -1713,6 +1760,7 @@ function ConfirmScreen({
             data.players.map((p, i) => ({
               ...p,
               memberId: playerSelections[i]?.id,
+              isNonMember: playerKinds[i] === "non_member",
             })),
           ),
         )}
@@ -1804,7 +1852,17 @@ function ConfirmScreen({
             {fields.map((field, i) => {
               const isCollapsed = collapsed[i] ?? false;
               const selection = playerSelections[i] ?? null;
+              const kind = playerKinds[i] ?? "member";
               const canCollapse = !!selection;
+              const watched = watchedPlayers?.[i];
+              const emailInvalid =
+                kind === "non_member" &&
+                !!watched?.email?.trim() &&
+                !validateEmail(watched.email).valid;
+              const phoneInvalid =
+                kind === "non_member" &&
+                !!watched?.mobile?.trim() &&
+                !isValidGuestPhone(watched.mobile);
 
               return (
                 <div key={field.id} className="card mb-2">
@@ -1888,18 +1946,86 @@ function ConfirmScreen({
                       className="px-4 pb-4 space-y-3 border-t"
                       style={{ borderColor: "rgba(0,38,105,0.07)" }}
                     >
-                      {!selection ? (
+                      {kind === "member" && !selection ? (
                         // Member search — no selection yet
-                        <div className="pt-3">
+                        <div className="pt-3 space-y-3">
                           <MemberAutocomplete
                             members={members}
                             excludeIds={selectedMemberIds}
                             onSelect={(m) => selectMember(i, m)}
                           />
+                          <button
+                            type="button"
+                            onClick={() => setPlayerKind(i, "non_member")}
+                            className="text-xs font-medium"
+                            style={{ color: "var(--color-green-700)" }}
+                          >
+                            + Add a non-member instead
+                          </button>
+                        </div>
+                      ) : kind === "non_member" ? (
+                        // Non-member guest entry
+                        <div className="pt-3 space-y-3">
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              {...register(`players.${i}.firstName`)}
+                              placeholder="First name (optional)"
+                              autoComplete="off"
+                              className={inputBase}
+                              style={inputStyle}
+                            />
+                            <input
+                              {...register(`players.${i}.lastName`)}
+                              placeholder="Last name (optional)"
+                              autoComplete="off"
+                              className={inputBase}
+                              style={inputStyle}
+                            />
+                          </div>
+                          <div>
+                            <input
+                              {...register(`players.${i}.mobile`)}
+                              type="tel"
+                              inputMode="tel"
+                              placeholder="Phone number (required)"
+                              autoComplete="off"
+                              className={inputBase}
+                              style={inputStyle}
+                            />
+                            {phoneInvalid && (
+                              <p className="text-xs mt-1 text-red-600">
+                                Enter a valid phone number.
+                              </p>
+                            )}
+                          </div>
+                          <div>
+                            <input
+                              {...register(`players.${i}.email`)}
+                              type="email"
+                              inputMode="email"
+                              placeholder="Email (required)"
+                              autoComplete="off"
+                              className={inputBase}
+                              style={inputStyle}
+                            />
+                            {emailInvalid && (
+                              <p className="text-xs mt-1 text-red-600">
+                                Enter a valid email address.
+                              </p>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setPlayerKind(i, "member")}
+                            className="text-xs font-medium"
+                            style={{ color: "var(--color-green-700)" }}
+                          >
+                            Search members instead
+                          </button>
                         </div>
                       ) : (
                         // Member selected
-                        <>
+                        selection && (
                           <div className="pt-3 flex items-center gap-3">
                             {selection.profile?.avatar_url ? (
                               <Image
@@ -1949,7 +2075,7 @@ function ConfirmScreen({
                               Change
                             </button>
                           </div>
-                        </>
+                        )
                       )}
                     </div>
                   )}
@@ -2023,7 +2149,7 @@ function ConfirmScreen({
 
           <button
             type="submit"
-            disabled={submitting || !isValid}
+            disabled={submitting || !allRowsValid}
             className="btn btn-gold btn-full disabled:opacity-50"
           >
             {submitting ? (
