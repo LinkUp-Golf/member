@@ -157,6 +157,8 @@ export interface AdditionalPlayer {
   mobile: string
   email: string
   memberId?: string
+  /** True when this player was added as a non-member invite (no member account). */
+  isNonMember?: boolean
 }
 
 export interface Booking {
