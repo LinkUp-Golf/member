@@ -148,7 +148,7 @@ export default function AdminBookingsPage() {
   const prevMonth = () => setMonth(m => subMonths(m, 1))
 
   return (
-    <div className="p-4 sm:p-8 max-w-6xl">
+    <div className="p-4 sm:p-8">
       <AdminPageHeader
         title="Booking Overview"
         description="Park Hyatt Aviara"

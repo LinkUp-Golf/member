@@ -69,7 +69,7 @@ export default function AdminReferralsPage() {
   STAGES.forEach(s => { counts[s] = referrals.filter(r => r.status === s).length })
 
   return (
-    <div className="p-4 sm:p-8 max-w-6xl">
+    <div className="p-4 sm:p-8">
       <AdminPageHeader
         title="Referral Pipeline"
         description={`${counts.pending ?? 0} pending · ${counts.interviewed ?? 0} interviewed · ${counts.joined ?? 0} joined`}

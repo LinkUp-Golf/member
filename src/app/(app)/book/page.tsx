@@ -153,6 +153,7 @@ export default function BookPage() {
     date: string;
     time: string;
     players: number;
+    pendingNonMembers: number;
   } | null>(null);
 
   // My bookings tab
@@ -266,6 +267,10 @@ export default function BookPage() {
         date: format(new Date(selectedDate + "T12:00:00"), "EEEE, MMMM d"),
         time: formatSlotTime(selectedSlot.startTime),
         players: 1 + additionalPlayers.length,
+        pendingNonMembers:
+          typeof data.pendingNonMembers === "number"
+            ? data.pendingNonMembers
+            : additionalPlayers.filter((p) => p.isNonMember).length,
       });
       if (Array.isArray(data.bookings)) {
         setMyBookings((prev) => [...(data.bookings as Booking[]), ...prev]);
@@ -301,6 +306,7 @@ export default function BookPage() {
         onSubmit={submitBooking}
         onBack={() => setStep("select")}
         inviteMemberId={inviteMemberId}
+        bookerEmail={user?.email ?? ""}
       />
     );
   }
@@ -1585,6 +1591,7 @@ function ConfirmScreen({
   onSubmit,
   onBack,
   inviteMemberId,
+  bookerEmail,
 }: {
   slot: GHLBookingSlot;
   date: string;
@@ -1594,6 +1601,7 @@ function ConfirmScreen({
   onSubmit: (additionalPlayers: AdditionalPlayer[]) => void;
   onBack: () => void;
   inviteMemberId?: string | null;
+  bookerEmail: string;
 }) {
   const maxAdditional = Math.max(0, (slot.spotsOpen ?? 1) - 1);
   const [collapsed, setCollapsed] = useState<boolean[]>([]);
@@ -1619,12 +1627,33 @@ function ConfirmScreen({
     setValue,
     register,
     watch,
+    clearErrors,
+    formState: { errors },
   } = useForm<PlayersForm>({
     defaultValues: { players: [] },
     mode: "onChange",
   });
 
   const watchedPlayers = watch("players");
+
+  // Shared RHF validators for non-member guest fields. Returning a string makes
+  // react-hook-form surface it as the field error message.
+  const normalisedBookerEmail = bookerEmail.trim().toLowerCase();
+
+  function validateGuestEmail(value: string | undefined): true | string {
+    if (!value || !validateEmail(value).valid) return "Enter a valid email address";
+    if (
+      normalisedBookerEmail &&
+      value.trim().toLowerCase() === normalisedBookerEmail
+    ) {
+      return "That's your email — you're already on this tee time";
+    }
+    return true;
+  }
+
+  function validateGuestPhone(value: string | undefined): true | string {
+    return isValidGuestPhone(value) ? true : "Enter a valid phone number";
+  }
 
   const { fields, append, remove } = useFieldArray({
     control,
@@ -1675,6 +1704,12 @@ function ConfirmScreen({
     setValue(`players.${i}.lastName`, "", { shouldValidate: false });
     setValue(`players.${i}.email`, "", { shouldValidate: false });
     setValue(`players.${i}.mobile`, "", { shouldValidate: false });
+    clearErrors([
+      `players.${i}.firstName`,
+      `players.${i}.lastName`,
+      `players.${i}.email`,
+      `players.${i}.mobile`,
+    ]);
   }
 
   // A row is valid when a member is selected, or — for non-members — a valid
@@ -1682,7 +1717,7 @@ function ConfirmScreen({
   function rowValid(i: number): boolean {
     if (playerKinds[i] === "non_member") {
       const p = watchedPlayers?.[i];
-      return validateEmail(p?.email).valid && isValidGuestPhone(p?.mobile);
+      return validateGuestEmail(p?.email) === true && validateGuestPhone(p?.mobile) === true;
     }
     return !!playerSelections[i];
   }
@@ -1854,15 +1889,7 @@ function ConfirmScreen({
               const selection = playerSelections[i] ?? null;
               const kind = playerKinds[i] ?? "member";
               const canCollapse = !!selection;
-              const watched = watchedPlayers?.[i];
-              const emailInvalid =
-                kind === "non_member" &&
-                !!watched?.email?.trim() &&
-                !validateEmail(watched.email).valid;
-              const phoneInvalid =
-                kind === "non_member" &&
-                !!watched?.mobile?.trim() &&
-                !isValidGuestPhone(watched.mobile);
+              const rowErrors = errors.players?.[i];
 
               return (
                 <div key={field.id} className="card mb-2">
@@ -1946,136 +1973,186 @@ function ConfirmScreen({
                       className="px-4 pb-4 space-y-3 border-t"
                       style={{ borderColor: "rgba(0,38,105,0.07)" }}
                     >
-                      {kind === "member" && !selection ? (
-                        // Member search — no selection yet
-                        <div className="pt-3 space-y-3">
-                          <MemberAutocomplete
-                            members={members}
-                            excludeIds={selectedMemberIds}
-                            onSelect={(m) => selectMember(i, m)}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setPlayerKind(i, "non_member")}
-                            className="text-xs font-medium"
-                            style={{ color: "var(--color-green-700)" }}
-                          >
-                            + Add a non-member instead
-                          </button>
-                        </div>
-                      ) : kind === "non_member" ? (
-                        // Non-member guest entry
-                        <div className="pt-3 space-y-3">
-                          <div className="grid grid-cols-2 gap-2">
-                            <input
-                              {...register(`players.${i}.firstName`)}
-                              placeholder="First name (optional)"
-                              autoComplete="off"
-                              className={inputBase}
-                              style={inputStyle}
+                      {selection ? (
+                        // Member selected
+                        <div className="pt-3 flex items-center gap-3">
+                          {selection.profile?.avatar_url ? (
+                            <Image
+                              src={selection.profile.avatar_url}
+                              alt=""
+                              width={32}
+                              height={32}
+                              className="w-8 h-8 rounded-full object-cover flex-shrink-0"
                             />
-                            <input
-                              {...register(`players.${i}.lastName`)}
-                              placeholder="Last name (optional)"
-                              autoComplete="off"
-                              className={inputBase}
-                              style={inputStyle}
-                            />
-                          </div>
-                          <div>
-                            <input
-                              {...register(`players.${i}.mobile`)}
-                              type="tel"
-                              inputMode="tel"
-                              placeholder="Phone number (required)"
-                              autoComplete="off"
-                              className={inputBase}
-                              style={inputStyle}
-                            />
-                            {phoneInvalid && (
-                              <p className="text-xs mt-1 text-red-600">
-                                Enter a valid phone number.
-                              </p>
-                            )}
-                          </div>
-                          <div>
-                            <input
-                              {...register(`players.${i}.email`)}
-                              type="email"
-                              inputMode="email"
-                              placeholder="Email (required)"
-                              autoComplete="off"
-                              className={inputBase}
-                              style={inputStyle}
-                            />
-                            {emailInvalid && (
-                              <p className="text-xs mt-1 text-red-600">
-                                Enter a valid email address.
-                              </p>
-                            )}
+                          ) : (
+                            <div
+                              className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold"
+                              style={{
+                                background: "rgba(133,187,101,0.15)",
+                                color: "var(--color-green-700)",
+                              }}
+                            >
+                              <span className="uppercase">
+                                {selection.first_name[0]}
+                                {selection.last_name[0]}
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p
+                              className="text-sm font-medium capitalize"
+                              style={{ color: "var(--color-green-900)" }}
+                            >
+                              {selection.first_name} {selection.last_name}
+                            </p>
+                            <p
+                              className="text-xs truncate"
+                              style={{ color: "rgba(0,38,105,0.45)" }}
+                            >
+                              {selection.email}
+                            </p>
                           </div>
                           <button
                             type="button"
-                            onClick={() => setPlayerKind(i, "member")}
-                            className="text-xs font-medium"
-                            style={{ color: "var(--color-green-700)" }}
+                            onClick={() => clearMemberSelection(i)}
+                            className="text-xs px-2 py-1 rounded-lg flex-shrink-0"
+                            style={{
+                              color: "rgba(0,38,105,0.45)",
+                              background: "rgba(0,38,105,0.05)",
+                            }}
                           >
-                            Search members instead
+                            Change
                           </button>
                         </div>
                       ) : (
-                        // Member selected
-                        selection && (
-                          <div className="pt-3 flex items-center gap-3">
-                            {selection.profile?.avatar_url ? (
-                              <Image
-                                src={selection.profile.avatar_url}
-                                alt=""
-                                width={32}
-                                height={32}
-                                className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                              />
-                            ) : (
-                              <div
-                                className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold"
-                                style={{
-                                  background: "rgba(133,187,101,0.15)",
-                                  color: "var(--color-green-700)",
-                                }}
-                              >
-                                <span className="uppercase">
-                                  {selection.first_name[0]}
-                                  {selection.last_name[0]}
-                                </span>
-                              </div>
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <p
-                                className="text-sm font-medium capitalize"
-                                style={{ color: "var(--color-green-900)" }}
-                              >
-                                {selection.first_name} {selection.last_name}
-                              </p>
-                              <p
-                                className="text-xs truncate"
-                                style={{ color: "rgba(0,38,105,0.45)" }}
-                              >
-                                {selection.email}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => clearMemberSelection(i)}
-                              className="text-xs px-2 py-1 rounded-lg flex-shrink-0"
-                              style={{
-                                color: "rgba(0,38,105,0.45)",
-                                background: "rgba(0,38,105,0.05)",
-                              }}
-                            >
-                              Change
-                            </button>
+                        <div className="pt-3 space-y-3">
+                          {/* Member / Non-member segmented toggle */}
+                          <div
+                            className="flex gap-1 p-1 rounded-xl"
+                            style={{ background: "rgba(0,38,105,0.05)" }}
+                          >
+                            {(
+                              [
+                                ["member", "Member"],
+                                ["non_member", "Non-member"],
+                              ] as [PlayerKind, string][]
+                            ).map(([k, label]) => {
+                              const active = kind === k;
+                              return (
+                                <button
+                                  key={k}
+                                  type="button"
+                                  onClick={() => {
+                                    if (kind !== k) setPlayerKind(i, k);
+                                  }}
+                                  className="flex-1 py-2 text-xs font-semibold rounded-lg transition-all"
+                                  style={
+                                    active
+                                      ? {
+                                          background: "white",
+                                          color: "var(--color-green-900)",
+                                          boxShadow:
+                                            "0 1px 3px rgba(0,38,105,0.12)",
+                                        }
+                                      : { color: "rgba(0,38,105,0.5)" }
+                                  }
+                                >
+                                  {label}
+                                </button>
+                              );
+                            })}
                           </div>
-                        )
+
+                          {kind === "member" ? (
+                            <MemberAutocomplete
+                              members={members}
+                              excludeIds={selectedMemberIds}
+                              onSelect={(m) => selectMember(i, m)}
+                            />
+                          ) : (
+                            <>
+                              <div className="grid grid-cols-2 gap-2">
+                                <input
+                                  {...register(`players.${i}.firstName`, {
+                                    maxLength: {
+                                      value: 100,
+                                      message: "Max 100 characters",
+                                    },
+                                  })}
+                                  placeholder="First name (optional)"
+                                  autoComplete="off"
+                                  className={inputBase}
+                                  style={inputStyle}
+                                />
+                                <input
+                                  {...register(`players.${i}.lastName`, {
+                                    maxLength: {
+                                      value: 100,
+                                      message: "Max 100 characters",
+                                    },
+                                  })}
+                                  placeholder="Last name (optional)"
+                                  autoComplete="off"
+                                  className={inputBase}
+                                  style={inputStyle}
+                                />
+                              </div>
+                              <div>
+                                <input
+                                  {...register(`players.${i}.mobile`, {
+                                    validate: (v) =>
+                                      playerKinds[i] !== "non_member" ||
+                                      validateGuestPhone(v),
+                                  })}
+                                  type="tel"
+                                  inputMode="tel"
+                                  placeholder="Phone number (required)"
+                                  autoComplete="off"
+                                  className={inputBase}
+                                  style={
+                                    rowErrors?.mobile
+                                      ? { ...inputStyle, borderColor: "#dc2626" }
+                                      : inputStyle
+                                  }
+                                />
+                                {rowErrors?.mobile && (
+                                  <p className="text-xs mt-1 text-red-600">
+                                    {rowErrors.mobile.message}
+                                  </p>
+                                )}
+                              </div>
+                              <div>
+                                <input
+                                  {...register(`players.${i}.email`, {
+                                    validate: (v) =>
+                                      playerKinds[i] !== "non_member" ||
+                                      validateGuestEmail(v),
+                                  })}
+                                  type="email"
+                                  inputMode="email"
+                                  placeholder="Email (required)"
+                                  autoComplete="off"
+                                  className={inputBase}
+                                  style={
+                                    rowErrors?.email
+                                      ? { ...inputStyle, borderColor: "#dc2626" }
+                                      : inputStyle
+                                  }
+                                />
+                                {rowErrors?.email && (
+                                  <p className="text-xs mt-1 text-red-600">
+                                    {rowErrors.email.message}
+                                  </p>
+                                )}
+                              </div>
+                              {(rowErrors?.firstName || rowErrors?.lastName) && (
+                                <p className="text-xs text-red-600">
+                                  {(rowErrors.firstName || rowErrors.lastName)?.message}
+                                </p>
+                              )}
+                            </>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
@@ -2332,7 +2409,7 @@ function SuccessScreen({
   booking,
   onDone,
 }: {
-  booking: { date: string; time: string; players: number };
+  booking: { date: string; time: string; players: number; pendingNonMembers: number };
   onDone: () => void;
 }) {
   return (
@@ -2387,6 +2464,20 @@ function SuccessScreen({
         >
           Your booking is confirmed once payment is complete.
         </p>
+        {booking.pendingNonMembers > 0 && (
+          <p
+            className="text-sm leading-relaxed pt-2 mt-2 border-t"
+            style={{
+              color: "rgba(0,38,105,0.6)",
+              borderColor: "rgba(0,38,105,0.08)",
+            }}
+          >
+            {booking.pendingNonMembers} non-member guest
+            {booking.pendingNonMembers !== 1 ? "s" : ""} need
+            {booking.pendingNonMembers !== 1 ? "" : "s"} admin approval. We&apos;ll
+            let you know once they&apos;re confirmed.
+          </p>
+        )}
       </div>
       <button onClick={onDone} className="btn btn-primary">
         Back to booking
@@ -2401,6 +2492,11 @@ const STATUS_LABELS: Record<
   string,
   { label: string; color: string; bg: string }
 > = {
+  awaiting_approval: {
+    label: "Awaiting admin approval",
+    color: "#92640a",
+    bg: "rgba(234,179,8,0.08)",
+  },
   tentative: {
     label: "Pending",
     color: "#92640a",
@@ -2787,7 +2883,7 @@ function MyBookingsTab({
                   bookingToLocalDate(b.booking_date, b.tee_time),
                   new Date(),
                 ) > 0 &&
-                !["tentative", "cancelled", "confirmed"].includes(b.status);
+                !["awaiting_approval", "tentative", "cancelled", "confirmed"].includes(b.status);
 
               return (
                 <div key={group.primary.id} className="card overflow-hidden">

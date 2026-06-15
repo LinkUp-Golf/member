@@ -212,9 +212,23 @@ export const NotificationTemplates = {
   }),
 
   nonMemberBookingRequest: (bookerName: string, guestCount: number, date: string, time: string): PushPayload => ({
-    title: 'Non-member invite request',
-    body:  `${bookerName} added ${guestCount} non-member${guestCount !== 1 ? 's' : ''} to a tee time on ${date} at ${time}. Review in admin bookings.`,
-    url:   '/admin/bookings',
-    tag:   'booking',
+    title: 'Non-member booking request',
+    body:  `${bookerName} wants to bring ${guestCount} non-member${guestCount !== 1 ? 's' : ''} to a tee time on ${date} at ${time}. Tap to review.`,
+    url:   '/admin/booking-requests',
+    tag:   'booking-request',
+  }),
+
+  nonMemberBookingApproved: (guestName: string, date: string, time: string): PushPayload => ({
+    title: 'Guest approved',
+    body:  `${guestName} has been approved to join your tee time on ${date} at ${time}.`,
+    url:   '/book',
+    tag:   'booking-request-decision',
+  }),
+
+  nonMemberBookingRejected: (guestName: string, date: string, time: string): PushPayload => ({
+    title: 'Guest request declined',
+    body:  `Your request to bring ${guestName} to the tee time on ${date} at ${time} wasn't approved. Tap for details.`,
+    url:   '/book',
+    tag:   'booking-request-decision',
   }),
 }

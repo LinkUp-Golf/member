@@ -20,7 +20,8 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
-import { getAvailableSlots, createBooking, getContactByEmail, createContact } from '@/lib/ghl/client'
+import { getAvailableSlots, createBooking, getContactByEmail } from '@/lib/ghl/client'
+import { resolveAviaraAppointmentIso } from '@/lib/ghl/booking-time'
 import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
 import { sendPushToMembers, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
@@ -35,7 +36,6 @@ import {
   BOOKING_PRICE_USD,
   AVIARA_TIMEZONE,
   AVIARA_ADDRESS,
-  GOLF_ROUND_DURATION_MINUTES,
 } from '@/lib/constants'
 
 const AVIARA_CALENDAR_ID = process.env.GHL_AVIARA_CALENDAR_ID ?? ''
@@ -138,9 +138,17 @@ export async function POST(request: NextRequest) {
     firstName: p.firstName ? sanitiseText(p.firstName) : p.firstName,
     lastName: p.lastName ? sanitiseText(p.lastName) : p.lastName,
   }))
+  // Non-members are NOT booked in GHL here — they're held as pending requests
+  // for admin approval. Only the booker and existing-member guests are booked.
   const nonMemberPlayers = extraPlayers.filter((p) => p.isNonMember || !p.memberId)
+  const memberPlayers = extraPlayers.filter((p) => !(p.isNonMember || !p.memberId))
 
-  console.log('[booking/create] Request:', { userId: user.id, slotStartTime, extraPlayers: extraPlayers.length })
+  console.log('[booking/create] Request:', {
+    userId: user.id,
+    slotStartTime,
+    memberGuests: memberPlayers.length,
+    nonMemberGuests: nonMemberPlayers.length,
+  })
 
   // Convert slot ISO datetime to date + time in AVIARA_TIMEZONE, regardless of the
   // timezone the client used when fetching slots.
@@ -175,21 +183,77 @@ export async function POST(request: NextRequest) {
 
   const adminSupabase = createAdminClient()
   const memberName = `${member.first_name} ${member.last_name}`
-  const totalPlayers = 1 + extraPlayers.length
+  // Non-members are pending approval, so they don't count toward the confirmed
+  // group size used for the GHL booking and community announcement.
+  const totalPlayers = 1 + memberPlayers.length
+
+  // ---- Validate everyone up front, before touching GHL --------------------
+  // Fail fast with a clear message rather than getting partway through and
+  // hitting an opaque GHL error.
+
+  // 1. The booker must have a GHL contact to create their appointment.
+  if (!member.ghl_contact_id) {
+    return NextResponse.json(
+      { error: "Your account isn't set up for booking yet. Please contact support." },
+      { status: 422 }
+    )
+  }
+
+  // 2. Resolve every member guest from the database (don't trust client-supplied
+  //    details) and confirm each exists and has a GHL contact.
+  const memberGuestIds = [...new Set(memberPlayers.map(p => p.memberId).filter((id): id is string => Boolean(id)))]
+  const memberRowById: Record<string, { id: string; ghl_contact_id: string | null; email: string; phone: string | null; first_name: string; last_name: string }> = {}
+  if (memberGuestIds.length) {
+    const { data: guestRows } = await adminSupabase
+      .from('members')
+      .select('id, ghl_contact_id, email, phone, first_name, last_name')
+      .in('id', memberGuestIds)
+    for (const row of guestRows ?? []) memberRowById[row.id] = row
+
+    for (const p of memberPlayers) {
+      const row = p.memberId ? memberRowById[p.memberId] : undefined
+      if (!row) {
+        return NextResponse.json(
+          { error: 'A selected member could not be found. Please remove and re-add them.' },
+          { status: 422 }
+        )
+      }
+      if (!row.ghl_contact_id) {
+        return NextResponse.json(
+          { error: `${row.first_name} ${row.last_name} can't be booked yet — please remove them and try again.` },
+          { status: 422 }
+        )
+      }
+    }
+  }
+
+  // 3. A non-member must be genuinely new. Reject any whose email already belongs to
+  // a LinkUp member or an existing GHL contact (those should be added via member
+  // search, not as a guest). Run before any GHL appointment is created.
+  for (const p of nonMemberPlayers) {
+    const { data: memberMatches } = await adminSupabase
+      .from('members')
+      .select('id')
+      .ilike('email', p.email)
+      .limit(1)
+    if (memberMatches && memberMatches.length > 0) {
+      return NextResponse.json(
+        { error: `${p.email} is already a LinkUp member — add them using member search instead.` },
+        { status: 409 }
+      )
+    }
+
+    const existingContact = await getContactByEmail(p.email)
+    if (existingContact) {
+      return NextResponse.json(
+        { error: `${p.email} already exists in our system. Please use a different email or add them as a member.` },
+        { status: 409 }
+      )
+    }
+  }
 
   // Build start/end ISO strings with AVIARA_TIMEZONE offset — format: "YYYY-MM-DDTHH:MM:SS±HHMM"
-  const noonUtc = new Date(`${bookingDate}T12:00:00Z`)
-  const offsetRaw = new Intl.DateTimeFormat('en-US', { timeZone: AVIARA_TIMEZONE, timeZoneName: 'shortOffset' })
-    .formatToParts(noonUtc)
-    .find(p => p.type === 'timeZoneName')?.value ?? 'GMT+0'
-  const offsetMatch = offsetRaw.match(/GMT([+-])(\d+)(?::(\d+))?/)
-  const tzOffset = offsetMatch
-    ? `${offsetMatch[1]}${(offsetMatch[2] ?? '0').padStart(2, '0')}${(offsetMatch[3] ?? '0').padStart(2, '0')}`
-    : '+0000'
-  const startIso = `${bookingDate}T${timeNormalized}${tzOffset}`
-  const [th, tm] = timeNormalized.split(':').map(Number)
-  const endMinutes = (th ?? 0) * 60 + (tm ?? 0) + GOLF_ROUND_DURATION_MINUTES
-  const endIso = `${bookingDate}T${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}:00${tzOffset}`
+  const { startIso, endIso } = resolveAviaraAppointmentIso(bookingDate, timeNormalized)
 
   const bookingParams = {
     calendarId: AVIARA_CALENDAR_ID,
@@ -221,26 +285,22 @@ export async function POST(request: NextRequest) {
 
   console.log('[booking/create] GHL appointment created for primary:', primaryGhlId)
 
-  // Step 1b: Create GHL appointments for each guest in parallel (non-fatal)
-  const guestGhlIds = await Promise.all(
-    extraPlayers.map(async (p) => {
+  // Step 1b: Create GHL appointments for each member guest in parallel (non-fatal),
+  // using their validated GHL contact from the database. Non-member guests are
+  // intentionally skipped — they only reach GHL once an admin sets them up.
+  const memberGhlIds = await Promise.all(
+    memberPlayers.map(async (p) => {
+      const row = p.memberId ? memberRowById[p.memberId] : undefined
+      if (!row?.ghl_contact_id) return null
       try {
-        const existing = await getContactByEmail(p.email)
-        const contactId = existing?.id ?? await createContact({
-          firstName: p.firstName,
-          lastName: p.lastName,
-          email: p.email,
-          phone: p.mobile || null,
-        })
-        if (!contactId) return null
         const ghlId = await createBooking({
           ...bookingParams,
-          contact: { id: contactId, email: p.email, phone: p.mobile || null },
+          contact: { id: row.ghl_contact_id, email: row.email, phone: row.phone ?? null },
         })
-        console.log('[booking/create] GHL appointment created for guest:', p.email, ghlId)
+        console.log('[booking/create] GHL appointment created for guest:', row.email, ghlId)
         return ghlId
       } catch (err) {
-        console.warn('[booking/create] Guest GHL appointment failed (non-fatal):', p.email, String(err))
+        console.warn('[booking/create] Guest GHL appointment failed (non-fatal):', row.email, String(err))
         return null
       }
     })
@@ -261,7 +321,7 @@ export async function POST(request: NextRequest) {
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: primaryGhlId,
     },
-    ...extraPlayers.map((p, i) => ({
+    ...memberPlayers.map((p, i) => ({
       member_id: user.id,
       course_id: member.home_course_id,
       booking_date: bookingDate,
@@ -273,7 +333,24 @@ export async function POST(request: NextRequest) {
       status: 'tentative',
       amount_charged: BOOKING_PRICE_USD,
       focus_linkup_id: focusLinkupId ?? null,
-      ghl_booking_id: guestGhlIds[i] ?? null,
+      ghl_booking_id: memberGhlIds[i] ?? null,
+    })),
+    // Non-members are held for admin review: a booking row in 'awaiting_approval'
+    // with no GHL appointment. An admin "sets it up" (creates the GHL contact +
+    // appointment, status → tentative) or rejects it (status → cancelled).
+    ...nonMemberPlayers.map((p) => ({
+      member_id: user.id,
+      course_id: member.home_course_id,
+      booking_date: bookingDate,
+      tee_time: timeNormalized,
+      players: 1,
+      guest_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email,
+      player_member_id: null,
+      additional_players: [p],
+      status: 'awaiting_approval',
+      amount_charged: BOOKING_PRICE_USD,
+      focus_linkup_id: focusLinkupId ?? null,
+      ghl_booking_id: null,
     })),
   ]
 
@@ -294,11 +371,12 @@ export async function POST(request: NextRequest) {
 
   console.log('[booking/create] Bookings created:', insertedBookings.map(b => b.id))
 
-  const primaryBookingId = insertedBookings[0]?.id ?? ''
+  const primaryBookingId =
+    (insertedBookings.find(b => b.guest_name === null) ?? insertedBookings[0])?.id ?? ''
 
   // Both GHL appointment and Supabase rows are committed — respond immediately.
   // Announcement + cache invalidation are non-critical and run after the response.
-  const playerSuffix = totalPlayers > 1 ? ` +${extraPlayers.length} guest${extraPlayers.length !== 1 ? 's' : ''}` : ''
+  const playerSuffix = totalPlayers > 1 ? ` +${memberPlayers.length} guest${memberPlayers.length !== 1 ? 's' : ''}` : ''
   const displayDate = format(new Date(`${bookingDate}T12:00:00`), 'EEEE, MMMM d')
 
   void adminSupabase
@@ -327,7 +405,7 @@ export async function POST(request: NextRequest) {
   })
 
   // Notify members who were invited as additional players
-  const invitedMemberIds = extraPlayers
+  const invitedMemberIds = memberPlayers
     .map(p => p.memberId)
     .filter((id): id is string => Boolean(id))
   if (invitedMemberIds.length) {
@@ -338,7 +416,8 @@ export async function POST(request: NextRequest) {
     ).catch(() => {})
   }
 
-  // Alert admins when a non-member was invited so they can follow up on access.
+  // Alert admins so they can set up (or reject) each non-member guest. The
+  // 'awaiting_approval' booking rows above are the moderation queue.
   if (nonMemberPlayers.length) {
     void sendPushToAdmins(
       NotificationTemplates.nonMemberBookingRequest(
@@ -352,9 +431,14 @@ export async function POST(request: NextRequest) {
 
   console.log('[booking/create] Success, primaryBookingId:', primaryBookingId)
 
+  const message = nonMemberPlayers.length
+    ? `Booking submitted. ${nonMemberPlayers.length} non-member guest${nonMemberPlayers.length !== 1 ? 's' : ''} ${nonMemberPlayers.length !== 1 ? 'are' : 'is'} pending admin approval — we'll confirm availability and send your payment link by email.`
+    : 'Booking submitted. We will confirm availability and send your payment link by email.'
+
   return NextResponse.json({
     bookingId: primaryBookingId,
     bookings: insertedBookings,
-    message: 'Booking submitted. We will confirm availability and send your payment link by email.',
+    pendingNonMembers: nonMemberPlayers.length,
+    message,
   })
 }
