@@ -47,6 +47,24 @@ export async function sendPushToCourse(
   return sendToUsers(userIds, payload)
 }
 
+// ---- sendPushToAdmins ---------------------------------------
+// Fetches all admin member IDs (is_admin = true), then dispatches.
+// Used to alert admins about requests that need their attention.
+
+export async function sendPushToAdmins(payload: PushPayload): Promise<SendResult> {
+  const supabase = createAdminClient()
+
+  const { data: admins } = await supabase
+    .from('members')
+    .select('id')
+    .eq('is_admin', true)
+
+  if (!admins?.length) return { sent: 0, failed: 0, cleaned: 0 }
+
+  const userIds = admins.map((m: { id: string }) => m.id)
+  return sendToUsers(userIds, payload)
+}
+
 // Sends to course members whose focus linkup subscriptions overlap with
 // focusCategories. Falls back to all course members when the list is empty.
 export async function sendPushToFocusMembers(
@@ -191,5 +209,26 @@ export const NotificationTemplates = {
     body:  `You've been invited to join "${groupName}". Tap to accept or decline.`,
     url:   `/messages/${conversationId}`,
     tag:   `group-invite-${conversationId}`,
+  }),
+
+  nonMemberBookingRequest: (bookerName: string, guestCount: number, date: string, time: string): PushPayload => ({
+    title: 'Non-member booking request',
+    body:  `${bookerName} wants to bring ${guestCount} non-member${guestCount !== 1 ? 's' : ''} to a tee time on ${date} at ${time}. Tap to review.`,
+    url:   '/admin/booking-requests',
+    tag:   'booking-request',
+  }),
+
+  nonMemberBookingApproved: (guestName: string, date: string, time: string): PushPayload => ({
+    title: 'Guest approved',
+    body:  `${guestName} has been approved to join your tee time on ${date} at ${time}.`,
+    url:   '/book',
+    tag:   'booking-request-decision',
+  }),
+
+  nonMemberBookingRejected: (guestName: string, date: string, time: string): PushPayload => ({
+    title: 'Guest request declined',
+    body:  `Your request to bring ${guestName} to the tee time on ${date} at ${time} wasn't approved. Tap for details.`,
+    url:   '/book',
+    tag:   'booking-request-decision',
   }),
 }

@@ -212,7 +212,7 @@ export default function AdminModerationPage() {
   const isProcessing = (key: string) => processing === key || processing === `${key}-warn` || processing === `${key}-suspend` || processing === `${key}-unsuspend`
 
   return (
-    <div className="p-4 sm:p-8 max-w-4xl">
+    <div className="p-4 sm:p-8">
       <AdminPageHeader
         title="Moderation Queue"
         description={loading ? '' : `${items.length} item${items.length !== 1 ? 's' : ''} awaiting review`}

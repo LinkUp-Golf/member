@@ -25,6 +25,7 @@ interface DashboardData {
   reservedRounds: number;
   pendingModeration: number;
   pendingGuestAccess: number;
+  pendingBookingRequests: number;
   recentMembers: Array<{
     id: string;
     first_name: string;
@@ -74,6 +75,7 @@ export default function AdminDashboard() {
       roundsRes,
       moderationRes,
       guestRes,
+      bookingReqRes,
       recentMembersRes,
       recentBookingsRes,
     ] = await Promise.all([
@@ -110,6 +112,11 @@ export default function AdminDashboard() {
         .in("target_course_id", courseIds)
         .eq("status", "pending"),
       supabase
+        .from("bookings")
+        .select("id", { count: "exact" })
+        .in("course_id", courseIds)
+        .eq("status", "awaiting_approval"),
+      supabase
         .from("members")
         .select("id, first_name, last_name, created_at, membership_status")
         .in("home_course_id", courseIds)
@@ -139,6 +146,7 @@ export default function AdminDashboard() {
       reservedRounds,
       pendingModeration: moderationRes.count ?? 0,
       pendingGuestAccess: guestRes.count ?? 0,
+      pendingBookingRequests: bookingReqRes.count ?? 0,
       recentMembers: recentMembersRes.data ?? [],
       recentBookings: (recentBookingsRes.data ??
         []) as unknown as DashboardData["recentBookings"],
@@ -162,7 +170,10 @@ export default function AdminDashboard() {
   }
 
   const pendingActions =
-    data.pendingModeration + data.pendingGuestAccess + data.pendingCount;
+    data.pendingModeration +
+    data.pendingGuestAccess +
+    data.pendingBookingRequests +
+    data.pendingCount;
 
   return (
     <div className="p-4 sm:p-8">
@@ -184,6 +195,8 @@ export default function AdminDashboard() {
                 `${data.pendingModeration} moderation · `}
               {data.pendingGuestAccess > 0 &&
                 `${data.pendingGuestAccess} guest access · `}
+              {data.pendingBookingRequests > 0 &&
+                `${data.pendingBookingRequests} booking requests · `}
               {data.pendingCount > 0 &&
                 `${data.pendingCount} member applications`}
             </p>
@@ -229,6 +242,12 @@ export default function AdminDashboard() {
           value={data.pendingGuestAccess}
           sub="Travel requests awaiting approval"
           colour={data.pendingGuestAccess > 0 ? "gold" : "gray"}
+        />
+        <StatCard
+          label="Booking requests"
+          value={data.pendingBookingRequests}
+          sub="Non-member guests awaiting approval"
+          colour={data.pendingBookingRequests > 0 ? "gold" : "gray"}
         />
       </div>
 

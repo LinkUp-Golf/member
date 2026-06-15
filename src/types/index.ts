@@ -8,6 +8,7 @@ export type MembershipStatus = 'active' | 'waitlist' | 'pending' | 'suspended' |
 export type AccessType = 'home' | 'guest'
 export type CourseMembershipStatus = 'active' | 'pending' | 'expired'
 export type BookingStatus =
+  | 'awaiting_approval'
   | 'tentative'
   | 'availability_confirmed'
   | 'payment_confirmed'
@@ -157,6 +158,8 @@ export interface AdditionalPlayer {
   mobile: string
   email: string
   memberId?: string
+  /** True when this player was added as a non-member invite (no member account). */
+  isNonMember?: boolean
 }
 
 export interface Booking {

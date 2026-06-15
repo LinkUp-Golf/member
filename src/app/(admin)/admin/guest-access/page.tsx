@@ -153,7 +153,7 @@ export default function AdminGuestAccessPage() {
   }, [requests])
 
   return (
-    <div className="p-4 sm:p-8 max-w-6xl">
+    <div className="p-4 sm:p-8">
       <AdminPageHeader
         title="Guest Access"
         description={`${counts.pending} request${counts.pending !== 1 ? 's' : ''} pending review · ${counts.approved} active`}

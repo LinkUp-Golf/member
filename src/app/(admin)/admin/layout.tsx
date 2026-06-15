@@ -31,6 +31,7 @@ const NAV_GROUPS = [
     label: 'Golf',
     items: [
       { href: '/admin/bookings',         label: 'Booking Overview',  icon: '▪' },
+      { href: '/admin/booking-requests', label: 'Booking Requests',  icon: '▪', badge: true },
       { href: '/admin/focus-linkups',    label: 'Focus LinkUps',     icon: '▪' },
     ],
   },
@@ -47,12 +48,14 @@ function NavContent({
   pathname,
   pendingCount,
   guestCount,
+  bookingReqCount,
   user,
   onNavigate,
 }: {
   pathname: string
   pendingCount: number
   guestCount: number
+  bookingReqCount: number
   user: { email: string }
   onNavigate?: () => void
 }) {
@@ -94,6 +97,8 @@ function NavContent({
                   ? pendingCount
                   : item.href.includes('guest')
                   ? guestCount
+                  : item.href.includes('booking-requests')
+                  ? bookingReqCount
                   : 0
                 : 0
 
@@ -146,6 +151,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname()
   const [pendingCount, setPendingCount] = useState(0)
   const [guestCount, setGuestCount] = useState(0)
+  const [bookingReqCount, setBookingReqCount] = useState(0)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerMounted, setDrawerMounted] = useState(false)
   const [drawerVisible, setDrawerVisible] = useState(false)
@@ -168,14 +174,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       .in('slug', COURSE_SLUGS)
     if (!courses?.length) return
     const courseIds = courses.map(c => c.id)
-    const [modRes, guestRes] = await Promise.all([
+    const [modRes, guestRes, bookingReqRes] = await Promise.all([
       supabase.from('announcements').select('id', { count: 'exact', head: true })
         .in('course_id', courseIds).eq('status', 'pending_review'),
       supabase.from('guest_access_requests').select('id', { count: 'exact', head: true })
         .in('target_course_id', courseIds).eq('status', 'pending'),
+      supabase.from('bookings').select('id', { count: 'exact', head: true })
+        .in('course_id', courseIds).eq('status', 'awaiting_approval'),
     ])
     setPendingCount(modRes.count ?? 0)
     setGuestCount(guestRes.count ?? 0)
+    setBookingReqCount(bookingReqRes.count ?? 0)
   }, [])
 
   useEffect(() => {
@@ -213,6 +222,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           pathname={pathname}
           pendingCount={pendingCount}
           guestCount={guestCount}
+          bookingReqCount={bookingReqCount}
           user={{ email: user.email ?? '' }}
         />
       </aside>
@@ -257,6 +267,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               pathname={pathname}
               pendingCount={pendingCount}
               guestCount={guestCount}
+              bookingReqCount={bookingReqCount}
               user={{ email: user.email ?? '' }}
               onNavigate={() => setDrawerOpen(false)}
             />
@@ -287,9 +298,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </Link>
         </header>
 
-        {/* Page content */}
+        {/* Page content — centered, capped at max-w-6xl across all admin pages */}
         <main className="flex-1 overflow-y-auto">
-          {children}
+          <div className="max-w-6xl mx-auto">
+            {children}
+          </div>
         </main>
       </div>
     </div>

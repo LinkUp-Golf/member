@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase";
+import { apiClient } from "@/lib/api-client";
 import { COURSE_SLUGS } from "@/lib/ghl/tags";
 import {
   AdminPageHeader,
@@ -76,15 +77,38 @@ export default function AdminFocusLinkupsPage() {
     setLoading(false);
   }
 
-  async function reviewRequest(id: string, action: 'approved' | 'declined') {
-    await fetch('/api/admin/focus-linkups', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, status: action }),
-    });
+  async function reviewRequest(id: string, action: 'pending' | 'approved' | 'declined') {
+    const { error } = await apiClient.patch('/api/admin/focus-linkups', { id, status: action });
+    if (error) {
+      alert(error.message);
+      return;
+    }
     setCustomRequests(prev =>
       prev.map(r => r.id === id ? { ...r, status: action } : r)
     );
+  }
+
+  async function editLabel(id: string, current: string) {
+    const next = prompt('Rename custom group', current)?.trim();
+    if (!next || next === current) return;
+    const { error } = await apiClient.patch('/api/admin/focus-linkups', { id, custom_label: next });
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    setCustomRequests(prev =>
+      prev.map(r => r.id === id ? { ...r, custom_label: next } : r)
+    );
+  }
+
+  async function deleteRequest(id: string) {
+    if (!confirm('Delete this custom group request? This cannot be undone.')) return;
+    const { error } = await apiClient.delete('/api/admin/focus-linkups', { id });
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    setCustomRequests(prev => prev.filter(r => r.id !== id));
   }
 
   async function deleteLinkup(id: string) {
@@ -262,24 +286,52 @@ export default function AdminFocusLinkupsPage() {
               </span>
             </AdminTd>
             <AdminTd>
-              {r.status === 'pending' ? (
-                <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                {r.status === 'pending' && (
+                  <>
+                    <AdminButton
+                      label="Approve"
+                      onClick={() => reviewRequest(r.id, 'approved')}
+                      variant="ghost"
+                      size="sm"
+                    />
+                    <AdminButton
+                      label="Decline"
+                      onClick={() => reviewRequest(r.id, 'declined')}
+                      variant="danger"
+                      size="sm"
+                    />
+                  </>
+                )}
+                {r.status === 'approved' && (
+                  <AdminButton
+                    label="Revoke"
+                    onClick={() => reviewRequest(r.id, 'declined')}
+                    variant="danger"
+                    size="sm"
+                  />
+                )}
+                {r.status === 'declined' && (
                   <AdminButton
                     label="Approve"
                     onClick={() => reviewRequest(r.id, 'approved')}
                     variant="ghost"
                     size="sm"
                   />
-                  <AdminButton
-                    label="Decline"
-                    onClick={() => reviewRequest(r.id, 'declined')}
-                    variant="danger"
-                    size="sm"
-                  />
-                </div>
-              ) : (
-                <span className="text-xs text-gray-300">—</span>
-              )}
+                )}
+                <AdminButton
+                  label="Edit"
+                  onClick={() => editLabel(r.id, r.custom_label)}
+                  variant="ghost"
+                  size="sm"
+                />
+                <AdminButton
+                  label="Delete"
+                  onClick={() => deleteRequest(r.id)}
+                  variant="danger"
+                  size="sm"
+                />
+              </div>
             </AdminTd>
           </AdminTr>
         ))}
