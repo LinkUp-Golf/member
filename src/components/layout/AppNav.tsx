@@ -14,6 +14,9 @@ const NAV_ITEMS = [
   { href: '/more',     label: 'More',     icon: 'more'     },
 ] as const
 
+// Messages moves to the top-bar header on mobile; bottom nav shows 4 items
+const BOTTOM_NAV_ITEMS = NAV_ITEMS.filter(i => i.href !== '/messages')
+
 // Sidebar (tablet+) and bottom nav (mobile) — both need usePathname for
 // active-state highlighting, so this is the minimal client boundary.
 export default function AppNav({ children }: { children: React.ReactNode }) {
@@ -71,7 +74,7 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
         {/* Bottom nav — mobile only */}
         <nav className="bottom-nav">
           <div className="flex">
-            {NAV_ITEMS.map(item => {
+            {BOTTOM_NAV_ITEMS.map(item => {
               const active = pathname.startsWith(item.href)
               return (
                 <Link
@@ -81,7 +84,7 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
                   aria-label={item.label}
                   aria-current={active ? 'page' : undefined}
                 >
-                  <Icon name={item.icon} />
+                  <Icon name={item.icon} className="w-6 h-6" />
                   <span className="nav-label">{item.label}</span>
                 </Link>
               )
