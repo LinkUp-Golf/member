@@ -48,14 +48,6 @@ export default function SettingsPage() {
     }
   }, [])
 
-  // Auto-prompt for push permission on first visit (permission not yet asked)
-  useEffect(() => {
-    if (permission === 'default' && !subscribed && !requesting) {
-      requestPermission()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   function togglePref(key: keyof NotifPrefs) {
     setPrefs(prev => ({ ...prev, [key]: !prev[key] }))
   }

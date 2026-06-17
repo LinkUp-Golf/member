@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useProfile } from "@/hooks/useProfile";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { apiClient } from "@/lib/api-client";
 import { formatBookingDate, formatTeeTime, truncate, formatRelativeTime } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
@@ -23,6 +24,15 @@ import type {
 
 export default function HomePage() {
   const { user, profile, loading: authLoading, refetch } = useProfile();
+  const { permission, subscribed, requesting, requestPermission } = usePushNotifications();
+
+  // Auto-prompt for push permission on first app load (before user visits settings)
+  useEffect(() => {
+    if (permission === 'default' && !subscribed && !requesting) {
+      requestPermission();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [nextBooking, setNextBooking] = useState<Booking | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
