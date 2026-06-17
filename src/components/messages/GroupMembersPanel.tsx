@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
+import { RateLimitBanner } from '@/components/ui/RateLimitModal'
 import { apiClient } from '@/lib/api-client'
 import type { GroupParticipant, MemberWithProfile, ParticipantRole, ParticipantStatus } from '@/types'
 
@@ -37,6 +38,7 @@ export function GroupMembersPanel({
   const [allMembers, setAllMembers] = useState<MemberWithProfile[]>([])
   const [memberSearch, setMemberSearch] = useState('')
   const [adding, setAdding] = useState<string | null>(null)
+  const [blocked, setBlocked] = useState<{ title: string; message: string } | null>(null)
 
   // ---- Group name editing (moderators only) ------------------
   const [nameValue, setNameValue] = useState(conversationName ?? '')
@@ -116,6 +118,14 @@ export function GroupMembersPanel({
       { member_id: memberId }
     )
     setAdding(null)
+    if (res.status === 403) {
+      setBlocked({ title: 'Messaging Restricted', message: 'The app anti-spam setting limits users to messaging and invite thresholds. You have exceeded this threshhold. You will be able to message and invite again in 3 hours.' })
+      return
+    }
+    if (res.status === 429) {
+      setBlocked({ title: 'Limit Reached', message: res.error?.message ?? 'Too many invitations. Please try again later.' })
+      return
+    }
     if (!res.error) {
       // Refresh participant list and close search
       const updated = await apiClient.get<GroupParticipant[]>(
@@ -212,6 +222,7 @@ export function GroupMembersPanel({
               ×
             </button>
           </div>
+          {blocked && <RateLimitBanner title={blocked.title} message={blocked.message} onClose={() => setBlocked(null)} />}
         </div>
 
         {/* Group name — moderators only */}

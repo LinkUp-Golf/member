@@ -45,37 +45,28 @@ class ApiClient {
       credentials: 'same-origin',
     })
 
-    // ---- 403 MEMBERSHIP_REVOKED: sign out immediately -------
-    if (res.status === 403) {
-      let errorBody: { error?: { code?: string } } = {}
-      try { errorBody = await res.json() } catch { /* empty */ }
-
-      if (errorBody.error?.code === ErrorCode.MEMBERSHIP_REVOKED) {
-        this.onMembershipRevoked?.()
-        return {
-          data: null,
-          error: {
-            code: ErrorCode.MEMBERSHIP_REVOKED,
-            message: 'Your membership is no longer active.',
-          },
-          status: 403,
-        }
-      }
-    }
-
-    // ---- Parse response --------------------------------------
+    // ---- Parse non-OK responses (including 403) -------------
     if (!res.ok) {
       let errorBody: { error?: { code?: string; message?: string } | string } = {}
       try { errorBody = await res.json() } catch { /* empty */ }
 
       const errObj = typeof errorBody.error === 'object' ? errorBody.error : null
       const errMsg = typeof errorBody.error === 'string' ? errorBody.error : errObj?.message
+      const errCode = errObj?.code ?? 'REQUEST_FAILED'
+
+      // 403 MEMBERSHIP_REVOKED: sign out immediately
+      if (res.status === 403 && errCode === ErrorCode.MEMBERSHIP_REVOKED) {
+        this.onMembershipRevoked?.()
+        return {
+          data: null,
+          error: { code: ErrorCode.MEMBERSHIP_REVOKED, message: 'Your membership is no longer active.' },
+          status: 403,
+        }
+      }
+
       return {
         data: null,
-        error: {
-          code: errObj?.code ?? 'REQUEST_FAILED',
-          message: errMsg ?? `Request failed with status ${res.status}`,
-        },
+        error: { code: errCode, message: errMsg ?? `Request failed with status ${res.status}` },
         status: res.status,
       }
     }

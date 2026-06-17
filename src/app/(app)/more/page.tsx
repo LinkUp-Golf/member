@@ -31,8 +31,9 @@ const MORE_ITEMS: { group: string; items: { href: string; label: string; icon: I
   {
     group: 'Settings',
     items: [
-      { href: '/more/notifications', label: 'Notification Log', icon: { type: 'emoji', char: '🔔' },          desc: 'View your notification history' },
-      { href: '/more/settings',      label: 'Preferences',      icon: { type: 'svg', name: 'more' },           desc: 'Manage push notification settings' },
+      { href: '/more/notifications', label: 'Notification Log', icon: { type: 'emoji', char: '🔔' },  desc: 'View your notification history' },
+      { href: '/more/settings',      label: 'Preferences',      icon: { type: 'svg', name: 'more' },  desc: 'Manage push notification settings' },
+      { href: '/more/install',       label: 'Install App',       icon: { type: 'emoji', char: '📲' }, desc: 'Add LinkUp Golf to your home screen' },
     ],
   },
 ]

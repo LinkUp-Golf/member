@@ -159,6 +159,7 @@ export default function BookPage() {
   // My bookings tab
   const [myBookings, setMyBookings] = useState<Booking[]>([]);
   const [activeTab, setActiveTab] = useState<"book" | "myBookings">("book");
+  const [viewMode, setViewMode] = useState<"day" | "month">("day");
 
   // Who's playing on the selected date
   const [dayPlayers, setDayPlayers] = useState<DayPlayer[]>([]);
@@ -373,7 +374,7 @@ export default function BookPage() {
 
       {activeTab === "book" ? (
         <div className="pb-8 md:max-w-2xl md:mx-auto">
-          {/* Timezone selector */}
+          {/* Timezone selector + view toggle */}
           <div className="px-5 md:px-8 pt-4 pb-1 flex items-center gap-2">
             <span
               className="text-xs flex-shrink-0"
@@ -392,6 +393,30 @@ export default function BookPage() {
               triggerClassName="w-full flex items-center justify-between gap-1.5 text-xs py-1.5 px-2.5 rounded-xl border border-green-900/10 bg-white text-green-900 focus:outline-none focus:ring-2 focus:ring-green-900/20 truncate"
               searchPlaceholder="Search timezone…"
             />
+            <div
+              className="flex p-0.5 rounded-lg flex-shrink-0"
+              style={{ background: "rgba(0,38,105,0.06)" }}
+            >
+              {(["day", "month"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setViewMode(mode)}
+                  className="px-2.5 py-1 text-xs font-semibold rounded-md capitalize transition-all"
+                  style={
+                    viewMode === mode
+                      ? {
+                          background: "white",
+                          color: "var(--color-green-900)",
+                          boxShadow: "0 1px 2px rgba(0,38,105,0.1)",
+                        }
+                      : { color: "rgba(0,38,105,0.45)" }
+                  }
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Month navigation */}
@@ -448,87 +473,105 @@ export default function BookPage() {
             </button>
           </div>
 
-          {/* Date pill strip */}
+          {/* Date picker — day strip or month grid */}
           <div className="px-5 md:px-8 pb-3">
-            {loadingMonth ? (
-              <div className="flex justify-center py-10">
-                <Spinner className="text-green-700" />
-              </div>
-            ) : (
-              <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
-                {monthDays.map((date) => {
-                  const day = date.getDate();
-                  const dateStr = getDateStr(day);
-                  const isPast = dateStr < todayStr;
-                  const isToday = dateStr === todayStr;
-                  const inView = !isPast;
-                  const hasSlots = hasDaySlots(day);
-                  const active = selectedDate === dateStr;
+            {viewMode === "day" ? (
+              loadingMonth ? (
+                <div className="flex justify-center py-10">
+                  <Spinner className="text-green-700" />
+                </div>
+              ) : (
+                <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
+                  {monthDays.map((date) => {
+                    const day = date.getDate();
+                    const dateStr = getDateStr(day);
+                    const isPast = dateStr < todayStr;
+                    const isToday = dateStr === todayStr;
+                    const inView = !isPast;
+                    const hasSlots = hasDaySlots(day);
+                    const active = selectedDate === dateStr;
 
-                  // Today (regardless of slots) stays clickable; everything else
-                  // requires slots to be clickable.
-                  const canClick = isToday || (inView && hasSlots);
+                    const canClick = isToday || (inView && hasSlots);
 
-                  return (
-                    <button
-                      key={dateStr}
-                      ref={
-                        dateStr === selectedDate
-                          ? selectedDateRef
-                          : dateStr === firstInWindowDateStr
-                            ? firstInWindowRef
+                    return (
+                      <button
+                        key={dateStr}
+                        ref={
+                          dateStr === selectedDate
+                            ? selectedDateRef
+                            : dateStr === firstInWindowDateStr
+                              ? firstInWindowRef
+                              : undefined
+                        }
+                        onClick={
+                          canClick
+                            ? () => {
+                                setSelectedDate(dateStr);
+                                setSelectedSlot(null);
+                              }
                             : undefined
-                      }
-                      onClick={
-                        canClick
-                          ? () => {
-                              setSelectedDate(dateStr);
-                              setSelectedSlot(null);
-                            }
-                          : undefined
-                      }
-                      disabled={!canClick}
-                      className={cn(
-                        "flex-shrink-0 flex flex-col items-center px-3 py-3 rounded-2xl border min-w-[56px] transition-all duration-150",
-                        !canClick && !isToday && "cursor-not-allowed",
-                        isPast || !inView
-                          ? "opacity-50"
-                          : !hasSlots && "opacity-60",
-                        active
-                          ? "border-green-900"
-                          : "bg-white border-green-900/08",
-                      )}
-                      style={
-                        active
-                          ? {
-                              background: "var(--color-green-900)",
-                              opacity: hasSlots ? 1 : 0.45,
-                            }
-                          : {}
-                      }
-                    >
-                      <span
-                        className="text-[10px] uppercase tracking-wider font-medium"
-                        style={{
-                          color: active
-                            ? "rgba(133,187,101,0.8)"
-                            : "rgba(0,38,105,0.38)",
-                        }}
+                        }
+                        disabled={!canClick}
+                        className={cn(
+                          "flex-shrink-0 flex flex-col items-center px-3 py-3 rounded-2xl border min-w-[56px] transition-all duration-150",
+                          !canClick && !isToday && "cursor-not-allowed",
+                          isPast || !inView
+                            ? "opacity-50"
+                            : !hasSlots && "opacity-60",
+                          active
+                            ? "border-green-900"
+                            : "bg-white border-green-900/08",
+                        )}
+                        style={
+                          active
+                            ? {
+                                background: "var(--color-green-900)",
+                                opacity: hasSlots ? 1 : 0.45,
+                              }
+                            : {}
+                        }
                       >
-                        {format(date, "EEE")}
-                      </span>
-                      <span
-                        className="font-sans font-black text-2xl mt-0.5"
-                        style={{
-                          color: active ? "white" : "var(--color-green-900)",
-                        }}
-                      >
-                        {format(date, "d")}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+                        <span
+                          className="text-[10px] uppercase tracking-wider font-medium"
+                          style={{
+                            color: active
+                              ? "rgba(133,187,101,0.8)"
+                              : "rgba(0,38,105,0.38)",
+                          }}
+                        >
+                          {format(date, "EEE")}
+                        </span>
+                        <span
+                          className="font-sans font-black text-2xl mt-0.5"
+                          style={{
+                            color: active ? "white" : "var(--color-green-900)",
+                          }}
+                        >
+                          {format(date, "d")}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )
+            ) : (
+              <MonthCalendarGrid
+                year={year}
+                month={month}
+                daysInMonth={daysInMonth}
+                selectedDate={selectedDate}
+                todayStr={todayStr}
+                firstInWindowDateStr={firstInWindowDateStr}
+                hasDaySlots={hasDaySlots}
+                getDateStr={getDateStr}
+                loadingMonth={loadingMonth}
+                onSelectDate={(dateStr) => {
+                  setSelectedDate(dateStr);
+                  setSelectedSlot(null);
+                }}
+                selectedDateRef={selectedDateRef}
+                firstInWindowRef={firstInWindowRef}
+              />
             )}
           </div>
 
@@ -621,6 +664,122 @@ export default function BookPage() {
         />
       )}
     </AppShell>
+  );
+}
+
+// ---- Month calendar grid ------------------------------------
+
+function MonthCalendarGrid({
+  year,
+  month,
+  daysInMonth,
+  selectedDate,
+  todayStr,
+  firstInWindowDateStr,
+  hasDaySlots,
+  getDateStr,
+  loadingMonth,
+  onSelectDate,
+  selectedDateRef,
+  firstInWindowRef,
+}: {
+  year: number;
+  month: number;
+  daysInMonth: number;
+  selectedDate: string;
+  todayStr: string;
+  firstInWindowDateStr: string | null;
+  hasDaySlots: (day: number) => boolean;
+  getDateStr: (day: number) => string;
+  loadingMonth: boolean;
+  onSelectDate: (dateStr: string) => void;
+  selectedDateRef: React.RefObject<HTMLButtonElement>;
+  firstInWindowRef: React.RefObject<HTMLButtonElement>;
+}) {
+  if (loadingMonth) {
+    return (
+      <div className="flex justify-center py-10">
+        <Spinner className="text-green-700" />
+      </div>
+    );
+  }
+
+  const DOW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+  const startDow = new Date(year, month, 1).getDay();
+  const totalCells = Math.ceil((startDow + daysInMonth) / 7) * 7;
+  const cells: (number | null)[] = Array.from({ length: totalCells }, (_, i) => {
+    const d = i - startDow + 1;
+    return d >= 1 && d <= daysInMonth ? d : null;
+  });
+
+  return (
+    <div>
+      {/* Day-of-week header */}
+      <div className="grid grid-cols-7 mb-1">
+        {DOW.map((d) => (
+          <div
+            key={d}
+            className="text-center text-[10px] font-medium py-1.5"
+            style={{ color: "rgba(0,38,105,0.35)" }}
+          >
+            {d}
+          </div>
+        ))}
+      </div>
+      {/* Day cells */}
+      <div className="grid grid-cols-7 gap-y-1">
+        {cells.map((day, i) => {
+          if (day === null) return <div key={`e-${i}`} />;
+          const dateStr = getDateStr(day);
+          const isPast = dateStr < todayStr;
+          const isToday = dateStr === todayStr;
+          const hasSlots = hasDaySlots(day);
+          const canClick = isToday || (!isPast && hasSlots);
+          const active = selectedDate === dateStr;
+
+          return (
+            <button
+              key={dateStr}
+              ref={
+                dateStr === selectedDate
+                  ? selectedDateRef
+                  : dateStr === firstInWindowDateStr
+                    ? firstInWindowRef
+                    : undefined
+              }
+              onClick={canClick ? () => onSelectDate(dateStr) : undefined}
+              disabled={!canClick}
+              className={cn(
+                "relative flex flex-col items-center justify-center aspect-square rounded-xl transition-all duration-150",
+                isPast ? "opacity-40" : !hasSlots && !isToday ? "opacity-50" : "",
+                !canClick ? "cursor-not-allowed" : active ? "" : "hover:bg-green-50/60",
+              )}
+              style={active ? { background: "var(--color-green-900)" } : {}}
+            >
+              <span
+                className={cn(
+                  "font-sans font-black text-sm leading-none",
+                  isToday && !active ? "underline underline-offset-2" : "",
+                )}
+                style={{ color: active ? "white" : "var(--color-green-900)" }}
+              >
+                {day}
+              </span>
+              {hasSlots && (
+                <span
+                  className="mt-1 w-1 h-1 rounded-full"
+                  style={{
+                    background: active
+                      ? "rgba(133,187,101,0.8)"
+                      : "var(--color-green-600, #16a34a)",
+                  }}
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

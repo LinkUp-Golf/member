@@ -24,6 +24,7 @@ export function useMessages(conversationId: string, currentUserId: string | null
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(false)
   const [cursor, setCursor] = useState<string | null>(null)
+  const [blocked, setBlocked] = useState<{ title: string; message: string } | null>(null)
 
   const knownIds = useRef<Set<string>>(new Set())
   const channelRef = useRef<RealtimeChannel | null>(null)
@@ -110,6 +111,11 @@ export function useMessages(conversationId: string, currentUserId: string | null
     )
 
     if (res.error || !res.data) {
+      if (res.status === 403) {
+        setBlocked({ title: 'Messaging Restricted', message: 'The app anti-spam setting limits users to messaging and invite thresholds. You have exceeded this threshhold. You will be able to message and invite again in 3 hours.' })
+      } else if (res.status === 429) {
+        setBlocked({ title: 'Limit Reached', message: res.error?.message ?? 'Too many messages. Please slow down.' })
+      }
       setMessages(prev =>
         prev.map(m => m.tempId === tempId ? { ...m, pending: false, failed: true } : m)
       )
@@ -278,5 +284,7 @@ export function useMessages(conversationId: string, currentUserId: string | null
     retryMessage,
     editMessage,
     deleteMessage,
+    blocked,
+    clearBlocked: () => setBlocked(null),
   }
 }

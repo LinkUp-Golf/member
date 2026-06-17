@@ -11,7 +11,9 @@ import type { ConversationWithDetails, MessageWithSender, ParticipantRole, Parti
 
 // GET /api/conversations — list all conversations for the authenticated user,
 // ordered by most-recent activity, with last_message and unread_count.
-export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
+// ?counts_only=true — returns { unread_messages, pending_invitations } for badge use.
+export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
+  const countsOnly = req.nextUrl.searchParams.get('counts_only') === 'true'
   const admin = createAdminClient()
 
   // Step 1: Fetch all participations + nested conversation + all participants.
@@ -111,6 +113,13 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
     .filter((c): c is ConversationWithDetails => c !== null)
     // Sort by last activity (updated_at) descending — most recently active first
     .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+
+  if (countsOnly) {
+    return NextResponse.json({
+      unread_messages: result.filter(c => c.unread_count > 0).length,
+      pending_invitations: result.filter(c => c.my_status === 'pending').length,
+    })
+  }
 
   return NextResponse.json(result)
 })

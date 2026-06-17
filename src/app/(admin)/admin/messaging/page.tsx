@@ -75,7 +75,7 @@ interface AdminMessage {
 }
 
 const MUTE_DURATIONS = [
-  { label: '1 hour',    hours: 1 },
+  { label: '3 hours',   hours: 3 },
   { label: '24 hours',  hours: 24 },
   { label: '7 days',    hours: 24 * 7 },
   { label: '30 days',   hours: 24 * 30 },
