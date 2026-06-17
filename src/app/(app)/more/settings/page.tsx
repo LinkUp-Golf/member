@@ -48,6 +48,14 @@ export default function SettingsPage() {
     }
   }, [])
 
+  // Auto-prompt for push permission on first visit (permission not yet asked)
+  useEffect(() => {
+    if (permission === 'default' && !subscribed && !requesting) {
+      requestPermission()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function togglePref(key: keyof NotifPrefs) {
     setPrefs(prev => ({ ...prev, [key]: !prev[key] }))
   }
@@ -198,8 +206,8 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void 
       role="switch"
       aria-checked={checked}
     >
-      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-        checked ? 'translate-x-5' : 'translate-x-0.5'
+      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+        checked ? 'translate-x-5' : 'translate-x-0'
       }`} />
     </button>
   )
