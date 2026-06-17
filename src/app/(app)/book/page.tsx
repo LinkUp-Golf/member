@@ -750,7 +750,7 @@ function MonthCalendarGrid({
               onClick={canClick ? () => onSelectDate(dateStr) : undefined}
               disabled={!canClick}
               className={cn(
-                "relative flex flex-col items-center justify-center py-2 rounded-xl transition-all duration-150",
+                "relative flex flex-col items-center justify-center aspect-square rounded-xl transition-all duration-150",
                 isPast ? "opacity-40" : !hasSlots && !isToday ? "opacity-50" : "",
                 !canClick ? "cursor-not-allowed" : active ? "" : "hover:bg-green-50/60",
               )}
