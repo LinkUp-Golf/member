@@ -21,7 +21,7 @@ export default function Header({ title, description, end, className, hideMessage
         <div className="flex items-center gap-1">
           {end}
           {!hideMessagesLink && (
-            <MessagesIcon className="md:hidden" />
+            <MessagesIcon />
           )}
           <NotificationBell variant="light" />
         </div>
