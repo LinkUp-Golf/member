@@ -11,7 +11,7 @@ export default function InstallAppPage() {
 
   return (
     <AppShell title="Install App" description="Add to your home screen">
-      <div className="px-5 py-6 max-w-sm">
+      <div className="px-5 py-6 max-w-md mx-auto w-full">
         {platform === 'unknown' ? (
           <div className="flex justify-center py-16">
             <div className="w-6 h-6 rounded-full border-2 border-green-900/20 border-t-green-900 animate-spin" />
