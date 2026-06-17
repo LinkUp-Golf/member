@@ -8,6 +8,7 @@ import Avatar from '@/components/ui/Avatar'
 import { Spinner } from '@/components/ui/Loading'
 import EmptyState from '@/components/ui/EmptyState'
 import AppShell from '@/components/layout/AppShell'
+import { RateLimitBanner } from '@/components/ui/RateLimitModal'
 import type { MemberWithProfile } from '@/types'
 
 export default function NewConversationPage() {
@@ -23,6 +24,7 @@ export default function NewConversationPage() {
   const [groupName, setGroupName] = useState('')
   const [creating, setCreating] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [blocked, setBlocked] = useState<{ title: string; message: string } | null>(null)
 
   const isGroup = selected.length > 1
 
@@ -51,6 +53,17 @@ export default function NewConversationPage() {
       name: isGroup ? (groupName.trim() || null) : null,
       participant_ids: selected,
     })
+
+    if (response.status === 403) {
+      setBlocked({ title: 'Messaging Restricted', message: 'The app anti-spam setting limits users to messaging and invite thresholds. You have exceeded this threshhold. You will be able to message and invite again in 3 hours.' })
+      setCreating(false)
+      return
+    }
+    if (response.status === 429) {
+      setBlocked({ title: 'Limit Reached', message: response.error?.message ?? 'Too many invitations. Please try again later.' })
+      setCreating(false)
+      return
+    }
 
     if (response.error || !response.data) {
       setCreating(false)
@@ -86,6 +99,8 @@ export default function NewConversationPage() {
       }
     >
       <div className="flex flex-col h-full">
+
+      {blocked && <RateLimitBanner title={blocked.title} message={blocked.message} onClose={() => setBlocked(null)} />}
 
       {/* Selected members */}
       {selected.length > 0 && (

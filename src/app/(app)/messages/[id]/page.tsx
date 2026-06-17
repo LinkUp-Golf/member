@@ -14,6 +14,7 @@ import { useMessages } from '@/hooks/useMessages'
 import { useConversation } from '@/hooks/useConversation'
 import { usePresence } from '@/hooks/usePresence'
 import { useTypingIndicator } from '@/hooks/useTypingIndicator'
+import { RateLimitBanner } from '@/components/ui/RateLimitModal'
 
 export default function ChatPage() {
   const { id } = useParams<{ id: string }>()
@@ -31,6 +32,8 @@ export default function ChatPage() {
     retryMessage,
     editMessage,
     deleteMessage,
+    blocked,
+    clearBlocked,
   } = useMessages(id, user?.id ?? null)
 
   const { isOnline } = usePresence(id, user?.id ?? null)
@@ -190,6 +193,7 @@ export default function ChatPage() {
           className="fixed left-0 right-0 z-30 md:left-[var(--sidebar-width)] lg:left-[var(--sidebar-width-lg)]"
           style={{ bottom: navHeight }}
         >
+          {blocked && <RateLimitBanner title={blocked.title} message={blocked.message} onClose={clearBlocked} />}
           <MessageInput
             placeholder={
               conversation?.type === 'group'
