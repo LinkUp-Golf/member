@@ -25,7 +25,7 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
       <aside className="app-sidebar">
         <div className="sidebar-logo px-6 py-4">
           <div>
-            <div className="font-display text-xl leading-none" style={{ color: 'var(--color-gold)' }}>
+            <div className="font-sans text-base leading-none font-semibold" style={{ color: 'var(--color-gold)' }}>
               LinkUp Golf
             </div>
             <p className="text-[11px] uppercase tracking-widest mt-1" style={{ color: 'rgba(255,255,255,0.28)' }}>
