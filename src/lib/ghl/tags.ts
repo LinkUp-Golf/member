@@ -9,6 +9,7 @@
 export const COURSE_TAG_MAP = {
   'avi member':          'aviara',
   'avi member - active': 'aviara', // id to trigger ghl workflow
+  'nbd client':          'aviara',
 } as const satisfies Record<string, string>
 
 export type CourseTag = keyof typeof COURSE_TAG_MAP

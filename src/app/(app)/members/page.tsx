@@ -75,6 +75,7 @@ export default function MembersPage() {
 
   return (
     <AppShell title="Members" description={`${members.length} active members`}>
+      <div className="max-w-6xl mx-auto w-full">
       {/* Search */}
       <div className="px-5 pt-4">
         <div
@@ -153,6 +154,7 @@ export default function MembersPage() {
           ))}
         </div>
       )}
+      </div>
     </AppShell>
   );
 }
@@ -199,7 +201,7 @@ function MemberRow({
             </span>
           )}
         </div>
-        <p className="text-xs truncate" style={{ color: "rgba(0,38,105,0.5)" }}>
+        <p className="text-xs truncate capitalize" style={{ color: "rgba(0,38,105,0.5)" }}>
           {[m.profile?.role_title, m.profile?.business_name]
             .filter(Boolean)
             .join(" · ")}

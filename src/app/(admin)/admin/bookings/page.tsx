@@ -8,7 +8,7 @@ import {
   ProgressBar, AdminCard, AdminButton,
 } from '@/components/admin/AdminUI'
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns'
-import { formatTeeTime } from '@/lib/utils'
+import { bookingToLocalDate } from '@/lib/utils'
 
 type BookingStatus = 'tentative' | 'availability_confirmed' | 'payment_confirmed' | 'confirmed' | 'pending' | 'cancelled' | 'waitlist'
 
@@ -232,10 +232,10 @@ export default function AdminBookingsPage() {
               <p className="font-medium text-gray-900 capitalize">{b.member?.first_name ?? ''} {b.member?.last_name ?? ''}</p>
               <p className="text-xs text-gray-400">{b.member?.email}</p>
             </AdminTd>
-            <AdminTd>{format(new Date(b.booking_date + 'T12:00:00'), 'EEE, MMM d')}</AdminTd>
-            <AdminTd>{formatTeeTime(b.tee_time)}</AdminTd>
+            <AdminTd>{format(bookingToLocalDate(b.booking_date, b.tee_time), 'EEE, MMM d')}</AdminTd>
+            <AdminTd>{format(bookingToLocalDate(b.booking_date, b.tee_time), 'h:mm a')}</AdminTd>
             <AdminTd>{b.players}</AdminTd>
-            <AdminTd>{b.guest_name ?? <span className="text-gray-300">—</span>}</AdminTd>
+            <AdminTd className="capitalize">{b.guest_name ?? <span className="text-gray-300">—</span>}</AdminTd>
             <AdminTd className="font-medium text-green-700">${Number(b.amount_charged).toFixed(0)}</AdminTd>
             <AdminTd>
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_DISPLAY[b.status]?.color ?? 'bg-gray-100 text-gray-500'}`}>
