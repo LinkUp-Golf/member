@@ -70,8 +70,8 @@ export default function HomePage() {
 
       {/* Hero banner */}
       <div className="hero-banner relative">
-        {/* Messages + notification bell — top right, mobile only */}
-        <div className="absolute top-3 right-4 flex items-center gap-0.5 md:hidden">
+        {/* Messages + notification bell — top right */}
+        <div className="absolute top-3 right-4 flex items-center gap-0.5">
           <MessagesIcon />
           <NotificationBell variant="light" />
         </div>
