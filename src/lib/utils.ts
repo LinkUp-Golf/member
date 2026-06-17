@@ -5,6 +5,7 @@
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import { format, formatDistanceToNow, isToday, isYesterday } from 'date-fns'
+import { AVIARA_TIMEZONE } from '@/lib/constants'
 
 // ---- Class name helper --------------------------------------
 export function cn(...inputs: ClassValue[]) {
@@ -17,6 +18,23 @@ export function getInitials(firstName: string, lastName: string): string {
 }
 
 // ---- Date formatting ----------------------------------------
+
+export function bookingToLocalDate(bookingDate: string, teeTime: string): Date {
+  const ref = new Date(`${bookingDate}T12:00:00Z`)
+  const offsetStr =
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: AVIARA_TIMEZONE,
+      timeZoneName: 'shortOffset',
+    })
+      .formatToParts(ref)
+      .find((p) => p.type === 'timeZoneName')?.value ?? 'GMT-7'
+  const m = offsetStr.match(/GMT([+-])(\d+)(?::(\d+))?/)
+  const tzOffset = m
+    ? `${m[1]}${(m[2] ?? '7').padStart(2, '0')}:${(m[3] ?? '0').padStart(2, '0')}`
+    : '-07:00'
+  return new Date(`${bookingDate}T${teeTime}${tzOffset}`)
+}
+
 export function formatMessageTime(dateString: string): string {
   const date = new Date(dateString)
   if (isToday(date)) return format(date, 'h:mm a')

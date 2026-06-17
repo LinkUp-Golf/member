@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase'
 import { AdminPageHeader, AdminTable, AdminTr, AdminTd, AdminButton } from '@/components/admin/AdminUI'
-import { formatBookingDate, formatTeeTime, formatRelativeTime } from '@/lib/utils'
+import { bookingToLocalDate, formatRelativeTime } from '@/lib/utils'
+import { format } from 'date-fns'
 import type { AdditionalPlayer } from '@/types'
 
 interface BookingRequestRow {
@@ -112,8 +113,8 @@ export default function AdminBookingRequestsPage() {
                 <p className="font-medium text-gray-900 capitalize">
                   {r.booker?.first_name ?? ''} {r.booker?.last_name ?? ''}
                 </p>
-                <p className="text-xs text-gray-400">{r.booker?.profile?.role_title}</p>
-                <p className="text-xs text-gray-400">{r.booker?.profile?.business_name}</p>
+                <p className="text-xs text-gray-400 capitalize">{r.booker?.profile?.role_title}</p>
+                <p className="text-xs text-gray-400 capitalize">{r.booker?.profile?.business_name}</p>
                 {totalRequests > 1 && (
                   <p className="text-xs text-blue-500 mt-0.5">{totalRequests} guests this round</p>
                 )}
@@ -128,7 +129,8 @@ export default function AdminBookingRequestsPage() {
               </AdminTd>
               <AdminTd>
                 <p className="text-xs text-gray-600">
-                  {formatBookingDate(r.booking_date)}<br />{formatTeeTime(r.tee_time)}
+                  {format(bookingToLocalDate(r.booking_date, r.tee_time), 'EEEE, MMMM d')}<br />
+                  {format(bookingToLocalDate(r.booking_date, r.tee_time), 'h:mm a')}
                 </p>
               </AdminTd>
               <AdminTd>

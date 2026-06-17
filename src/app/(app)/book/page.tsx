@@ -10,7 +10,7 @@ import { Spinner } from "@/components/ui/Loading";
 import EmptyState from "@/components/ui/EmptyState";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
-import { formatTeeTime, cn } from "@/lib/utils";
+import { formatTeeTime, cn, bookingToLocalDate } from "@/lib/utils";
 import Select from "@/components/ui/Select";
 import {
   format,
@@ -2732,22 +2732,6 @@ type BookingGroup = {
   players: Booking[];
 };
 
-// Converts a booking's stored Aviara-timezone date+time to the user's local Date.
-function bookingToLocalDate(bookingDate: string, teeTime: string): Date {
-  const ref = new Date(`${bookingDate}T12:00:00Z`);
-  const offsetStr =
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: AVIARA_TIMEZONE,
-      timeZoneName: "shortOffset",
-    })
-      .formatToParts(ref)
-      .find((p) => p.type === "timeZoneName")?.value ?? "GMT-7";
-  const m = offsetStr.match(/GMT([+-])(\d+)(?::(\d+))?/);
-  const tzOffset = m
-    ? `${m[1]}${(m[2] ?? "7").padStart(2, "0")}:${(m[3] ?? "0").padStart(2, "0")}`
-    : "-07:00";
-  return new Date(`${bookingDate}T${teeTime}${tzOffset}`);
-}
 
 function groupBookings(bookings: Booking[]): BookingGroup[] {
   const bySlot = new Map<string, Booking[]>();
