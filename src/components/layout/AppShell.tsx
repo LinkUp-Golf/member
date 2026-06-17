@@ -10,6 +10,8 @@ interface AppShellProps {
   end?: React.ReactNode
   /** Replace the entire header with a custom element */
   header?: React.ReactNode
+  /** Hide the messages shortcut icon in the header (e.g. on the messages page itself) */
+  hideMessagesLink?: boolean
 }
 
 // AppShell wraps a page's header + scrollable content.
@@ -21,13 +23,14 @@ export default function AppShell({
   description,
   end,
   header,
+  hideMessagesLink,
 }: AppShellProps) {
   const showHeader = header !== undefined || title !== undefined
 
   return (
     <>
       {showHeader && (
-        header ?? <Header title={title ?? ''} description={description} end={end} />
+        header ?? <Header title={title ?? ''} description={description} end={end} hideMessagesLink={hideMessagesLink} />
       )}
       {children}
     </>

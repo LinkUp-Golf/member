@@ -65,6 +65,7 @@ export default function MessagesPage() {
     <AppShell
       title="Messages"
       description="Private · Members only"
+      hideMessagesLink
       end={
         <button
           onClick={() => router.push('/messages/new')}
