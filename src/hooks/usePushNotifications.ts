@@ -81,6 +81,16 @@ export function usePushNotifications(): UsePushNotificationsReturn {
     return () => { mountedRef.current = false }
   }, [])
 
+  // ---- Immediately correct permission from the browser -------
+  // Notification.permission is synchronously readable — no service
+  // worker needed. This fixes the SSR hydration issue where useState
+  // initialises to 'unsupported' (server has no window) and the value
+  // is never corrected when no SW is registered (e.g. in development).
+  useEffect(() => {
+    if (!supported) return
+    setPermission(Notification.permission as PushPermission)
+  }, [supported])
+
   // ---- Sync subscription state on mount ----------------------
   // Also re-syncs when the controlling SW changes (PWA update).
   useEffect(() => {
