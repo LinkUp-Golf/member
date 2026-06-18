@@ -17,7 +17,7 @@ const MORE_ITEMS: { group: string; items: { href: string; label: string; icon: I
       { href: '/more/profile',       label: 'My Profile',     icon: { type: 'svg', name: 'members' },          desc: 'Edit your details and golf life' },
       { href: '/more/focus-linkups', label: 'Focus LinkUps',  icon: { type: 'svg', name: 'focus-linkup' },     desc: 'Manage your category subscriptions' },
       { href: '/more/referrals',     label: 'Refer a Member', icon: { type: 'svg', name: 'new-member' },       desc: 'Invite someone to the community' },
-      { href: '/more/guest-access',  label: 'Guest Access',   icon: { type: 'svg', name: 'visiting-member' },  desc: 'Request access to another course' },
+      { href: '/more/guest-access',  label: 'Guest Access',   icon: { type: 'svg', name: 'visiting-member' },  desc: 'Request access to another city' },
     ],
   },
   {
