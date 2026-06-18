@@ -35,11 +35,32 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
     if (!wasDismissed) setDismissed(false)
   }, [])
 
+  const [enabling, setEnabling] = useState(false)
+  const [enableError, setEnableError] = useState('')
+
   const showPrompt = !dismissed && permission === 'default' && !isSubscribed
 
   async function handleEnable() {
-    setDismissed(true)
-    await subscribe()
+    setEnabling(true)
+    setEnableError('')
+    const ok = await subscribe()
+    setEnabling(false)
+
+    if (ok) {
+      // Success — permission is now 'granted', showPrompt becomes false naturally
+      return
+    }
+
+    if (permission === 'denied') {
+      // User blocked notifications in the browser — persist dismiss so banner
+      // doesn't keep reappearing on every load
+      localStorage.setItem(DISMISSED_KEY, '1')
+      setDismissed(true)
+    } else {
+      // Something else failed (SW timeout, server error) — keep banner visible
+      // with an inline error so the user can try again
+      setEnableError('Could not enable. Please try again.')
+    }
   }
 
   function handleDismiss() {
@@ -95,16 +116,17 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
         {showPrompt && (
           <div className="flex items-center gap-3 px-4 py-3 flex-shrink-0" style={{ background: 'var(--color-green-900)' }}>
             <span className="text-lg flex-shrink-0">🔔</span>
-            <p className="flex-1 text-xs text-white/80 leading-snug">
-              Enable notifications to stay updated on bookings, messages, and community activity.
+            <p className="flex-1 text-xs leading-snug" style={{ color: enableError ? '#fca5a5' : 'rgba(255,255,255,0.8)' }}>
+              {enableError || 'Enable notifications to stay updated on bookings, messages, and community activity.'}
             </p>
             <div className="flex items-center gap-2 flex-shrink-0">
               <button
                 onClick={handleEnable}
-                className="text-xs font-semibold px-3 py-1.5 rounded-lg text-green-900"
+                disabled={enabling}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg text-green-900 disabled:opacity-60"
                 style={{ background: 'var(--color-gold)' }}
               >
-                Enable
+                {enabling ? '…' : enableError ? 'Retry' : 'Enable'}
               </button>
               <button
                 onClick={handleDismiss}
