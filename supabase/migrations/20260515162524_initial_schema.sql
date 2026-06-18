@@ -395,11 +395,8 @@ create table push_subscriptions (
 -- ROW LEVEL SECURITY POLICIES
 -- ============================================================
 
--- invite_tokens is intentionally excluded from RLS.
--- It is only ever accessed server-side via the admin (service role) client.
--- Enabling RLS with no policies would block all access, including service role
--- when using the anon key. Leave it unprotected at the RLS layer; rely on the
--- service role key being kept secret.
+-- invite_tokens RLS is enabled in a later migration (20260618000001_invite_tokens_rls.sql).
+-- All access goes through the service role client, which bypasses RLS.
 
 -- Enable RLS on all tables
 alter table courses enable row level security;

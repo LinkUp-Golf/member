@@ -141,7 +141,28 @@ export function usePushNotifications(): UsePushNotificationsReturn {
       }
       const { publicKey } = (await keyRes.json()) as { publicKey: string }
 
-      const reg = await navigator.serviceWorker.ready
+      // Ensure a service worker is registered — subscribe() is self-sufficient
+      // and does not depend on ServiceWorkerRegistration having run first.
+      const existing = await navigator.serviceWorker.getRegistration('/')
+      if (!existing) {
+        try {
+          await navigator.serviceWorker.register('/sw.js', { scope: '/' })
+        } catch (regErr) {
+          console.error('[push] SW registration failed', regErr)
+          return false
+        }
+      }
+
+      // Wait for the SW to activate (up to 15 s). navigator.serviceWorker.ready
+      // never rejects on its own — without the race it hangs forever if no SW
+      // is active, leaving isLoading = true and the spinner stuck permanently.
+      const reg = await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Service worker activation timeout')), 15_000)
+        ),
+      ])
+
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly:      true,
         applicationServerKey: urlBase64ToUint8Array(publicKey),
