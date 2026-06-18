@@ -27,7 +27,16 @@ self.addEventListener('push', function (event) {
   }
 
   event.waitUntil(
-    self.registration.showNotification(data.title ?? 'LinkUp Golf', options)
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (clientList) {
+      // Skip the system banner if the user is actively looking at the app.
+      const appIsVisible = clientList.some(function (client) {
+        return client.visibilityState === 'visible'
+      })
+
+      if (appIsVisible) return
+
+      return self.registration.showNotification(data.title ?? 'LinkUp Golf', options)
+    })
   )
 })
 
