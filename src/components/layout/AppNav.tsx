@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
@@ -18,22 +18,34 @@ const NAV_ITEMS = [
 // Messages moves to the top-bar header on mobile; bottom nav shows 4 items
 const BOTTOM_NAV_ITEMS = NAV_ITEMS.filter(i => i.href !== '/messages')
 
+const DISMISSED_KEY = 'linkup-notif-prompt-dismissed'
+
 // Sidebar (tablet+) and bottom nav (mobile) — both need usePathname for
 // active-state highlighting, so this is the minimal client boundary.
 export default function AppNav({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const { permission, isSubscribed, isLoading, subscribe } = usePushNotifications()
-  const autoPromptedRef = useRef(false)
+  const { permission, isSubscribed, subscribe } = usePushNotifications()
+  const [dismissed, setDismissed] = useState(true) // start hidden, reveal after mount
 
-  // Fire the browser push permission prompt as soon as the app shell mounts,
-  // regardless of which page the user lands on. Uses proper deps (not []) so
-  // it re-runs after SSR hydration corrects permission from 'unsupported' →
-  // 'default'. The ref prevents re-prompting after a dismiss.
+  // Show the in-app prompt banner when permission hasn't been decided yet
+  // and the user hasn't dismissed it before. Must be user-gesture driven
+  // (iOS Safari blocks Notification.requestPermission without a click).
   useEffect(() => {
-    if (autoPromptedRef.current || permission !== 'default' || isSubscribed || isLoading) return
-    autoPromptedRef.current = true
-    subscribe()
-  }, [permission, isSubscribed, isLoading, subscribe])
+    const wasDismissed = localStorage.getItem(DISMISSED_KEY) === '1'
+    if (!wasDismissed) setDismissed(false)
+  }, [])
+
+  const showPrompt = !dismissed && permission === 'default' && !isSubscribed
+
+  async function handleEnable() {
+    setDismissed(true)
+    await subscribe()
+  }
+
+  function handleDismiss() {
+    localStorage.setItem(DISMISSED_KEY, '1')
+    setDismissed(true)
+  }
 
   return (
     <div className="app-shell">
@@ -79,6 +91,32 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
 
       {/* Content column */}
       <div className="app-content-col">
+        {/* Push notification prompt — shown until user enables or dismisses */}
+        {showPrompt && (
+          <div className="flex items-center gap-3 px-4 py-3 flex-shrink-0" style={{ background: 'var(--color-green-900)' }}>
+            <span className="text-lg flex-shrink-0">🔔</span>
+            <p className="flex-1 text-xs text-white/80 leading-snug">
+              Enable notifications to stay updated on bookings, messages, and community activity.
+            </p>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={handleEnable}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg text-green-900"
+                style={{ background: 'var(--color-gold)' }}
+              >
+                Enable
+              </button>
+              <button
+                onClick={handleDismiss}
+                className="text-xs text-white/40 hover:text-white/70 transition-colors px-1"
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
         <main className="screen-content">
           {children}
         </main>
