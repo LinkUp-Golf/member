@@ -1,9 +1,11 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import Icon from '@/components/ui/Icon'
+import { usePushNotifications } from '@/hooks/usePushNotifications'
 
 const NAV_ITEMS = [
   { href: '/home',     label: 'Home',     icon: 'home'     },
@@ -20,6 +22,18 @@ const BOTTOM_NAV_ITEMS = NAV_ITEMS.filter(i => i.href !== '/messages')
 // active-state highlighting, so this is the minimal client boundary.
 export default function AppNav({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const { permission, isSubscribed, isLoading, subscribe } = usePushNotifications()
+  const autoPromptedRef = useRef(false)
+
+  // Fire the browser push permission prompt as soon as the app shell mounts,
+  // regardless of which page the user lands on. Uses proper deps (not []) so
+  // it re-runs after SSR hydration corrects permission from 'unsupported' →
+  // 'default'. The ref prevents re-prompting after a dismiss.
+  useEffect(() => {
+    if (autoPromptedRef.current || permission !== 'default' || isSubscribed || isLoading) return
+    autoPromptedRef.current = true
+    subscribe()
+  }, [permission, isSubscribed, isLoading, subscribe])
 
   return (
     <div className="app-shell">
