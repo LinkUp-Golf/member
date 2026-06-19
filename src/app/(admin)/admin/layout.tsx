@@ -72,7 +72,7 @@ function NavContent({
           priority
         />
         <div>
-          <div className="font-serif text-base font-medium" style={{ color: '#85bb65' }}>
+          <div className="font-sans text-base font-semibold" style={{ color: '#85bb65' }}>
             LinkUp Golf
           </div>
           <div className="text-[10px] uppercase tracking-widest text-white/30 mt-0.5">
