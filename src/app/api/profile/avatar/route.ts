@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic'
 
-import { NextRequest, NextResponse } from 'next/server'
+import { type NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'

@@ -57,10 +57,12 @@ export default function AdminBookingsPage() {
     const monthStart = format(startOfMonth(month), 'yyyy-MM-dd')
     const monthEnd = format(endOfMonth(month), 'yyyy-MM-dd')
 
-    const { data: courses } = await supabase
+    const { data: courses, error: coursesError } = await supabase
       .from('courses')
       .select('id, max_rounds_per_month, reserved_rounds')
       .in('slug', COURSE_SLUGS)
+
+    if (coursesError) console.error('[admin/bookings] courses query failed:', coursesError.message)
 
     const courseIds = (courses ?? []).map(c => c.id)
     setCourseData(courses?.length ? {
@@ -68,13 +70,39 @@ export default function AdminBookingsPage() {
       reserved_rounds: courses.reduce((sum, c) => sum + c.reserved_rounds, 0),
     } : null)
 
-    const { data } = await supabase
+    // Guard: if no course IDs resolved, skip — avoids a vacuous .in() returning nothing
+    if (courseIds.length === 0) {
+      console.warn('[admin/bookings] no courses matched COURSE_SLUGS:', COURSE_SLUGS)
+      setBookings([])
+      setLoading(false)
+      return
+    }
+
+    // Try with dinner_rsvp first; fall back without it if the column doesn't exist yet
+    let { data, error } = await supabase
       .from('bookings')
-      .select('id, booking_date, tee_time, players, guest_name, status, amount_charged, dinner_rsvp, admin_notes, ghl_opportunity_id, member:members(first_name, last_name, email)')
+      .select('id, booking_date, tee_time, players, guest_name, status, amount_charged, dinner_rsvp, admin_notes, ghl_opportunity_id, member:members!bookings_member_id_fkey(first_name, last_name, email)')
       .in('course_id', courseIds)
       .gte('booking_date', monthStart)
       .lte('booking_date', monthEnd)
       .order('booking_date', { ascending: false })
+
+    if (error?.message?.includes('dinner_rsvp')) {
+      // Migration not yet applied — retry without the column
+      console.warn('[admin/bookings] dinner_rsvp column missing, retrying without it')
+      const fallback = await supabase
+        .from('bookings')
+        .select('id, booking_date, tee_time, players, guest_name, status, amount_charged, admin_notes, ghl_opportunity_id, member:members!bookings_member_id_fkey(first_name, last_name, email)')
+        .in('course_id', courseIds)
+        .gte('booking_date', monthStart)
+        .lte('booking_date', monthEnd)
+        .order('booking_date', { ascending: false })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      data = fallback.data as any
+      error = fallback.error
+    }
+
+    if (error) console.error('[admin/bookings] bookings query failed:', error.message)
 
     const rows = (data ?? []) as unknown as BookingRow[]
     setBookings(rows)
