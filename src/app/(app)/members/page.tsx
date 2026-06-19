@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
-import { shortCategory, truncate } from "@/lib/utils";
+import { shortCategory } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
 import AppShell from "@/components/layout/AppShell";
 import { MemberRowSkeleton } from "@/components/ui/Loading";
