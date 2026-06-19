@@ -137,6 +137,7 @@ export interface MemberProfile {
   family_golfers: string | null
   profile_visible: boolean
   show_handicap: boolean
+  text_size: number
   updated_at: string
 }
 

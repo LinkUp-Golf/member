@@ -51,6 +51,7 @@ const profiles: Record<string, MemberProfile> = {
     family_golfers: 'Spouse occasionally',
     profile_visible: true,
     show_handicap: true,
+    text_size: 16,
     updated_at: '2024-01-15T00:00:00Z',
   },
   [MOCK_MEMBER_2_ID]: {
@@ -72,6 +73,7 @@ const profiles: Record<string, MemberProfile> = {
     family_golfers: null,
     profile_visible: true,
     show_handicap: true,
+    text_size: 16,
     updated_at: '2024-02-01T00:00:00Z',
   },
   [MOCK_MEMBER_3_ID]: {
@@ -93,6 +95,7 @@ const profiles: Record<string, MemberProfile> = {
     family_golfers: 'Husband plays regularly',
     profile_visible: true,
     show_handicap: false,
+    text_size: 16,
     updated_at: '2024-02-10T00:00:00Z',
   },
   [MOCK_MEMBER_4_ID]: {
@@ -114,6 +117,7 @@ const profiles: Record<string, MemberProfile> = {
     family_golfers: 'Two sons play competitively',
     profile_visible: true,
     show_handicap: true,
+    text_size: 16,
     updated_at: '2024-03-01T00:00:00Z',
   },
   [MOCK_MEMBER_5_ID]: {
@@ -135,6 +139,7 @@ const profiles: Record<string, MemberProfile> = {
     family_golfers: null,
     profile_visible: true,
     show_handicap: false,
+    text_size: 16,
     updated_at: '2024-03-15T00:00:00Z',
   },
 }

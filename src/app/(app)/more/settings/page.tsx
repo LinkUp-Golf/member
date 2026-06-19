@@ -5,6 +5,10 @@ import { useProfile } from '@/hooks/useProfile'
 import { usePushNotifications } from '@/hooks/usePushNotifications'
 import { Spinner } from '@/components/ui/Loading'
 
+const TEXT_SIZE_MIN = 12
+const TEXT_SIZE_MAX = 26
+const TEXT_SIZE_DEFAULT = 16
+
 interface NotifPrefs {
   new_member:      boolean
   booking:         boolean
@@ -33,12 +37,15 @@ const PREF_LABELS: Record<keyof NotifPrefs, { label: string; desc: string }> = {
 }
 
 export default function SettingsPage() {
-  const { user, profile, signOut } = useProfile()
+  const { user, profile, signOut, refetch } = useProfile()
   const { permission, subscribed, requesting, requestPermission, unsubscribe } = usePushNotifications()
 
   const [prefs, setPrefs] = useState<NotifPrefs>(DEFAULT_PREFS)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+
+  const [textSize, setTextSize] = useState(TEXT_SIZE_DEFAULT)
+  const [savingTextSize, setSavingTextSize] = useState(false)
 
   useEffect(() => {
     // Load saved preferences from localStorage
@@ -47,6 +54,34 @@ export default function SettingsPage() {
       try { setPrefs(JSON.parse(stored)) } catch {}
     }
   }, [])
+
+  useEffect(() => {
+    const saved = profile?.profile?.text_size
+    if (saved) setTextSize(saved)
+  }, [profile?.profile?.text_size])
+
+  function applyTextSize(px: number) {
+    document.documentElement.style.fontSize = `${px}px`
+  }
+
+  function handleSliderInput(px: number) {
+    setTextSize(px)
+    applyTextSize(px)
+  }
+
+  async function handleSliderCommit(px: number) {
+    setSavingTextSize(true)
+    try {
+      await fetch('/api/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text_size: px }),
+      })
+      await refetch()
+    } finally {
+      setSavingTextSize(false)
+    }
+  }
 
   function togglePref(key: keyof NotifPrefs) {
     setPrefs(prev => ({ ...prev, [key]: !prev[key] }))
@@ -147,6 +182,56 @@ export default function SettingsPage() {
             </button>
           </section>
         )}
+
+        {/* Text size */}
+        <section>
+          <p className="section-label mb-3">Text size</p>
+          <div className="card card-pad space-y-4">
+            {/* Current value */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-baseline gap-1">
+                <span className="text-3xl font-black text-green-900 tabular-nums leading-none">{textSize}</span>
+                <span className="text-sm text-green-900/45">px</span>
+              </div>
+              {textSize !== TEXT_SIZE_DEFAULT ? (
+                <button
+                  onClick={() => { handleSliderInput(TEXT_SIZE_DEFAULT); handleSliderCommit(TEXT_SIZE_DEFAULT) }}
+                  disabled={savingTextSize}
+                  className="text-xs text-green-900/45 underline underline-offset-2 disabled:opacity-40"
+                >
+                  Reset to default
+                </button>
+              ) : (
+                <span className="text-xs text-green-900/30">Default</span>
+              )}
+            </div>
+
+            {/* Slider */}
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-green-900/35 leading-none select-none flex-shrink-0">A</span>
+              <input
+                type="range"
+                min={TEXT_SIZE_MIN}
+                max={TEXT_SIZE_MAX}
+                step={1}
+                value={textSize}
+                onChange={e => handleSliderInput(Number(e.target.value))}
+                onMouseUp={e => handleSliderCommit(Number((e.target as HTMLInputElement).value))}
+                onTouchEnd={e => handleSliderCommit(Number((e.target as HTMLInputElement).value))}
+                disabled={savingTextSize}
+                className="text-size-slider flex-1"
+                style={{ '--slider-fill': `${((textSize - TEXT_SIZE_MIN) / (TEXT_SIZE_MAX - TEXT_SIZE_MIN)) * 100}%` } as React.CSSProperties}
+              />
+              <span className="text-xl text-green-900/35 leading-none select-none flex-shrink-0">A</span>
+            </div>
+
+            {/* Min / max labels */}
+            <div className="flex justify-between -mt-1">
+              <span className="text-[11px] text-green-900/25">{TEXT_SIZE_MIN}px</span>
+              <span className="text-[11px] text-green-900/25">{TEXT_SIZE_MAX}px</span>
+            </div>
+          </div>
+        </section>
 
         {/* Account */}
         <section>
