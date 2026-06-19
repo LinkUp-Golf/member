@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
-import { shortCategory, truncate } from "@/lib/utils";
+import { shortCategory } from "@/lib/utils";
 import Avatar from "@/components/ui/Avatar";
 import AppShell from "@/components/layout/AppShell";
 import { MemberRowSkeleton } from "@/components/ui/Loading";
@@ -43,7 +43,6 @@ export default function MembersPage() {
           `${m.first_name} ${m.last_name}`.toLowerCase().includes(q) ||
           m.profile?.business_name?.toLowerCase().includes(q) ||
           m.profile?.role_title?.toLowerCase().includes(q) ||
-          m.profile?.value_offered?.toLowerCase().includes(q) ||
           m.profile?.value_sought?.toLowerCase().includes(q) ||
           m.profile?.industry_category?.toLowerCase().includes(q),
       );
@@ -201,16 +200,11 @@ function MemberRow({
             </span>
           )}
         </div>
-        <p className="text-xs truncate capitalize" style={{ color: "rgba(0,38,105,0.5)" }}>
+        <p className="text-xs truncate" style={{ color: "rgba(0,38,105,0.5)" }}>
           {[m.profile?.role_title, m.profile?.business_name]
             .filter(Boolean)
             .join(" · ")}
         </p>
-        {m.profile?.value_offered && (
-          <span className="tag mt-1.5">
-            Offers: {truncate(m.profile.value_offered, 45)}
-          </span>
-        )}
       </div>
       <svg
         className="w-4 h-4 flex-shrink-0"
