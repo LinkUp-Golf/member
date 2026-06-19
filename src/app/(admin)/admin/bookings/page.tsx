@@ -20,6 +20,7 @@ interface BookingRow {
   guest_name: string | null
   status: BookingStatus
   amount_charged: number
+  dinner_rsvp: 'yes' | 'no' | 'maybe' | null
   admin_notes: string | null
   ghl_opportunity_id: string | null
   member: { first_name: string; last_name: string; email: string } | null
@@ -69,7 +70,7 @@ export default function AdminBookingsPage() {
 
     const { data } = await supabase
       .from('bookings')
-      .select('id, booking_date, tee_time, players, guest_name, status, amount_charged, admin_notes, ghl_opportunity_id, member:members(first_name, last_name, email)')
+      .select('id, booking_date, tee_time, players, guest_name, status, amount_charged, dinner_rsvp, admin_notes, ghl_opportunity_id, member:members(first_name, last_name, email)')
       .in('course_id', courseIds)
       .gte('booking_date', monthStart)
       .lte('booking_date', monthEnd)
@@ -223,7 +224,7 @@ export default function AdminBookingsPage() {
 
       {/* Booking list */}
       <AdminTable
-        headers={['Member', 'Date', 'Tee time', 'Players', 'Guest', 'Amount', 'Status', 'Notes']}
+        headers={['Member', 'Date', 'Tee time', 'Players', 'Guest', 'Amount', 'Status', 'Dinner', 'Notes']}
         empty={loading ? 'Loading…' : filtered.length === 0 ? 'No bookings match the current filters.' : undefined}
       >
         {filtered.map(b => (
@@ -245,6 +246,19 @@ export default function AdminBookingsPage() {
                 <p className="text-[10px] text-gray-400 mt-0.5 font-mono truncate max-w-[120px]" title={b.ghl_opportunity_id}>
                   {b.ghl_opportunity_id.slice(0, 8)}…
                 </p>
+              )}
+            </AdminTd>
+            <AdminTd>
+              {b.dinner_rsvp ? (
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                  b.dinner_rsvp === 'yes'   ? 'bg-green-50 text-green-700' :
+                  b.dinner_rsvp === 'maybe' ? 'bg-yellow-50 text-yellow-700' :
+                                              'bg-gray-100 text-gray-500'
+                }`}>
+                  {b.dinner_rsvp === 'yes' ? 'Yes' : b.dinner_rsvp === 'no' ? 'No' : 'Maybe ⚠'}
+                </span>
+              ) : (
+                <span className="text-gray-300 text-xs">—</span>
               )}
             </AdminTd>
             <AdminTd className="max-w-xs">
