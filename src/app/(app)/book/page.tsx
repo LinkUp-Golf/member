@@ -661,6 +661,9 @@ export default function BookPage() {
           bookings={myBookings}
           onRefresh={loadMyBookings}
           onSwitchToBook={() => setActiveTab("book")}
+          onUpdateBooking={(id, updates) =>
+            setMyBookings(prev => prev.map(b => b.id === id ? { ...b, ...updates } : b))
+          }
         />
       )}
     </AppShell>
@@ -2886,6 +2889,68 @@ function CancelModal({
   );
 }
 
+// ---- Dinner RSVP widget ------------------------------------
+
+function DinnerRsvp({
+  bookingId,
+  current,
+  onSaved,
+}: {
+  bookingId: string;
+  current: 'yes' | 'no' | 'maybe' | null;
+  onSaved: (rsvp: 'yes' | 'no' | 'maybe') => void;
+}) {
+  const [saving, setSaving] = useState<string | null>(null);
+
+  async function pick(rsvp: 'yes' | 'no' | 'maybe') {
+    if (saving) return;
+    setSaving(rsvp);
+    const res = await fetch(`/api/bookings/${bookingId}/dinner-rsvp`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rsvp }),
+    });
+    if (res.ok) onSaved(rsvp);
+    setSaving(null);
+  }
+
+  const opts = [
+    { value: 'yes' as const,   label: 'Yes' },
+    { value: 'no' as const,    label: 'No' },
+    { value: 'maybe' as const, label: '?' },
+  ];
+
+  return (
+    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+      <p className="text-[10px] font-medium" style={{ color: 'rgba(0,38,105,0.38)' }}>
+        Dinner?
+      </p>
+      <div className="flex gap-1">
+        {opts.map(({ value, label }) => {
+          const active = current === value;
+          return (
+            <button
+              key={value}
+              onClick={() => pick(value)}
+              disabled={!!saving}
+              className="w-7 h-7 rounded-full text-[11px] font-semibold transition-all disabled:opacity-50"
+              style={active ? {
+                background: 'var(--color-green-900)',
+                color: 'var(--color-gold)',
+              } : {
+                background: 'rgba(0,38,105,0.06)',
+                color: 'rgba(0,38,105,0.45)',
+              }}
+            >
+              {saving === value ? '…' : label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 type BookingGroup = {
   primary: Booking;
   players: Booking[];
@@ -2895,7 +2960,7 @@ type BookingGroup = {
 function groupBookings(bookings: Booking[]): BookingGroup[] {
   const bySlot = new Map<string, Booking[]>();
   for (const b of bookings) {
-    const key = `${b.booking_date}_${b.tee_time}`;
+    const key = `${b.booking_date}_${b.tee_time}_${b.status === 'cancelled' ? 'cancelled' : 'active'}`;
     const slot = bySlot.get(key) ?? [];
     slot.push(b);
     bySlot.set(key, slot);
@@ -2919,10 +2984,12 @@ function MyBookingsTab({
   bookings,
   onRefresh: _onRefresh,
   onSwitchToBook: _onSwitchToBook,
+  onUpdateBooking,
 }: {
   bookings: Booking[];
   onRefresh: () => void;
   onSwitchToBook: () => void;
+  onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
 }) {
   const { user, profile } = useProfile();
   const [openMenu, setOpenMenu] = useState<{
@@ -2954,6 +3021,11 @@ function MyBookingsTab({
       bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) >= now &&
       g.primary.status !== "cancelled",
   );
+  const cancelledUpcoming = allGroups.filter(
+    (g) =>
+      bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) >= now &&
+      g.primary.status === "cancelled",
+  );
   const past = allGroups.filter(
     (g) => bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) < now,
   );
@@ -2972,7 +3044,7 @@ function MyBookingsTab({
         onDismiss={() => setCancelTarget(null)}
       />
 
-      {upcoming.length === 0 && past.length === 0 && (
+      {upcoming.length === 0 && cancelledUpcoming.length === 0 && past.length === 0 && (
         <EmptyState
           icon="🗓️"
           title="No bookings yet"
@@ -3032,45 +3104,53 @@ function MyBookingsTab({
                 <div key={group.primary.id} className="card overflow-hidden">
                   {/* Booking header */}
                   <div className="px-5 pt-5 pb-4">
-                    <div className="flex items-center gap-2">
-                      <p
-                        className="text-sm font-medium"
-                        style={{ color: "var(--color-green-900)" }}
-                      >
-                        {format(
-                          bookingToLocalDate(
-                            group.primary.booking_date,
-                            group.primary.tee_time,
-                          ),
-                          "EEE, MMM d",
-                        )}
-                      </p>
-                      {!iAmBooker && (
-                        <span
-                          className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0"
-                          style={{
-                            background: "rgba(133,187,101,0.12)",
-                            color: "var(--color-green-700)",
-                          }}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <p
+                          className="text-sm font-medium"
+                          style={{ color: "var(--color-green-900)" }}
                         >
-                          Invited
-                          {group.primary.booker_name
-                            ? ` by ${group.primary.booker_name}`
-                            : ""}
-                        </span>
+                          {format(
+                            bookingToLocalDate(
+                              group.primary.booking_date,
+                              group.primary.tee_time,
+                            ),
+                            "EEE, MMM d",
+                          )}
+                        </p>
+                        {!iAmBooker && (
+                          <span
+                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0"
+                            style={{
+                              background: "rgba(133,187,101,0.12)",
+                              color: "var(--color-green-700)",
+                            }}
+                          >
+                            Invited
+                            {group.primary.booker_name
+                              ? ` by ${group.primary.booker_name}`
+                              : ""}
+                          </span>
+                        )}
+                      </div>
+                      {/* Dinner RSVP — shown for confirmed bookings */}
+                      {["confirmed", "availability_confirmed", "payment_confirmed"].includes(group.primary.status) && (
+                        <DinnerRsvp
+                          bookingId={group.primary.id}
+                          current={group.primary.dinner_rsvp ?? null}
+                          onSaved={(rsvp) => onUpdateBooking(group.primary.id, { dinner_rsvp: rsvp })}
+                        />
                       )}
                     </div>
                     <p
                       className="text-xs mt-0.5"
                       style={{ color: "rgba(0,38,105,0.45)" }}
                     >
-                      {format(
-                        bookingToLocalDate(
-                          group.primary.booking_date,
-                          group.primary.tee_time,
-                        ),
-                        "h:mm a",
-                      )}{" "}
+                      {(() => {
+                        const start = bookingToLocalDate(group.primary.booking_date, group.primary.tee_time);
+                        const end = addMinutes(start, GOLF_ROUND_DURATION_MINUTES);
+                        return `${format(start, "h:mm a")} – ${format(end, "h:mm a")}`;
+                      })()}{" "}
                       · ${totalAmount.toFixed(0)}
                       {iAmBooker &&
                         totalPlayers > 1 &&
@@ -3307,6 +3387,49 @@ function MyBookingsTab({
         </>
       )}
 
+      {cancelledUpcoming.length > 0 && (
+        <>
+          <p className="section-label mb-3">Cancelled</p>
+          <div className="space-y-2 mb-7">
+            {cancelledUpcoming.map((group) => (
+              <div
+                key={group.primary.id}
+                className="card p-4 flex items-center justify-between gap-3"
+                style={{ opacity: 0.65 }}
+              >
+                <div>
+                  <p
+                    className="text-sm line-through"
+                    style={{ color: "var(--color-green-900)" }}
+                  >
+                    {format(
+                      bookingToLocalDate(
+                        group.primary.booking_date,
+                        group.primary.tee_time,
+                      ),
+                      "EEE, MMM d, yyyy",
+                    )}
+                  </p>
+                  <p
+                    className="text-xs mt-0.5"
+                    style={{ color: "rgba(0,38,105,0.45)" }}
+                  >
+                    {(() => {
+                      const start = bookingToLocalDate(group.primary.booking_date, group.primary.tee_time);
+                      const end = addMinutes(start, GOLF_ROUND_DURATION_MINUTES);
+                      return `${format(start, "h:mm a")} – ${format(end, "h:mm a")}`;
+                    })()}
+                    {group.players.length > 0 &&
+                      ` · ${1 + group.players.length} players`}
+                  </p>
+                </div>
+                <BookingStatusBadge status="cancelled" />
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       {past.length > 0 && (
         <>
           <p className="section-label mb-3">Past rounds</p>
@@ -3314,35 +3437,38 @@ function MyBookingsTab({
             {past.slice(0, 10).map((group) => (
               <div
                 key={group.primary.id}
-                className="card p-4"
-                style={{ opacity: 0.55 }}
+                className="card p-4 flex items-center justify-between gap-3"
+                style={{ opacity: group.primary.status === "cancelled" ? 0.5 : 0.55 }}
               >
-                <p
-                  className="text-sm"
-                  style={{ color: "var(--color-green-900)" }}
-                >
-                  {format(
-                    bookingToLocalDate(
-                      group.primary.booking_date,
-                      group.primary.tee_time,
-                    ),
-                    "EEE, MMM d, yyyy",
-                  )}
-                </p>
-                <p
-                  className="text-xs mt-0.5"
-                  style={{ color: "rgba(0,38,105,0.5)" }}
-                >
-                  {format(
-                    bookingToLocalDate(
-                      group.primary.booking_date,
-                      group.primary.tee_time,
-                    ),
-                    "h:mm a",
-                  )}
-                  {group.players.length > 0 &&
-                    ` · ${1 + group.players.length} players`}
-                </p>
+                <div>
+                  <p
+                    className="text-sm"
+                    style={{ color: "var(--color-green-900)" }}
+                  >
+                    {format(
+                      bookingToLocalDate(
+                        group.primary.booking_date,
+                        group.primary.tee_time,
+                      ),
+                      "EEE, MMM d, yyyy",
+                    )}
+                  </p>
+                  <p
+                    className="text-xs mt-0.5"
+                    style={{ color: "rgba(0,38,105,0.5)" }}
+                  >
+                    {(() => {
+                      const start = bookingToLocalDate(group.primary.booking_date, group.primary.tee_time);
+                      const end = addMinutes(start, GOLF_ROUND_DURATION_MINUTES);
+                      return `${format(start, "h:mm a")} – ${format(end, "h:mm a")}`;
+                    })()}
+                    {group.players.length > 0 &&
+                      ` · ${1 + group.players.length} players`}
+                  </p>
+                </div>
+                {group.primary.status === "cancelled" && (
+                  <BookingStatusBadge status="cancelled" />
+                )}
               </div>
             ))}
           </div>

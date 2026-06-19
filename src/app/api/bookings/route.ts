@@ -20,7 +20,6 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     .from('bookings')
     .select('*')
     .or(`member_id.eq.${ctx.userId},player_member_id.eq.${ctx.userId}`)
-    .neq('status', 'cancelled')
     .order('booking_date', { ascending: true })
 
   if (upcoming) {

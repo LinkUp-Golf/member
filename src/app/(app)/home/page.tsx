@@ -140,10 +140,32 @@ export default function HomePage() {
       {/* Content */}
       <div className="px-5 pt-6 space-y-7 pb-6">
 
-        {/* Community Announcements */}
+        {/* Member Offers */}
+        {(loading || promotions.length > 0) && (
+          <section>
+            <div className="flex items-center justify-between mb-3.5">
+              <p className="section-label !mb-0">Member Offers</p>
+              <Link href="/more/promotions" className="text-xs font-medium" style={{ color: 'var(--color-green-600)' }}>
+                View all →
+              </Link>
+            </div>
+            {loading ? (
+              <div className="space-y-2.5">
+                <CardSkeleton lines={2} />
+                <CardSkeleton lines={2} />
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {promotions.map((p) => <PromoCard key={p.id} promo={p} />)}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Who's Playing (Community Announcements) */}
         <section>
           <div className="flex items-center justify-between mb-3.5">
-            <p className="section-label !mb-0">Community</p>
+            <p className="section-label !mb-0">Announcements</p>
             <Link href="/more/announcements" className="text-xs font-medium" style={{ color: 'var(--color-green-600)' }}>
               See all →
             </Link>
@@ -164,11 +186,11 @@ export default function HomePage() {
           )}
         </section>
 
-        {/* Member Spotlight */}
+        {/* New Members */}
         {(loading || newMembers.length > 0) && (
           <section>
             <div className="flex items-center justify-between mb-3.5">
-              <p className="section-label !mb-0">Member Spotlight</p>
+              <p className="section-label !mb-0">New Members</p>
               <Link href="/members" className="text-xs font-medium" style={{ color: 'var(--color-green-600)' }}>
                 All members →
               </Link>
@@ -212,28 +234,6 @@ export default function HomePage() {
                     </svg>
                   </Link>
                 ))}
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* Promotions */}
-        {(loading || promotions.length > 0) && (
-          <section>
-            <div className="flex items-center justify-between mb-3.5">
-              <p className="section-label !mb-0">Member Offers</p>
-              <Link href="/more/promotions" className="text-xs font-medium" style={{ color: 'var(--color-green-600)' }}>
-                View all →
-              </Link>
-            </div>
-            {loading ? (
-              <div className="space-y-2.5">
-                <CardSkeleton lines={2} />
-                <CardSkeleton lines={2} />
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                {promotions.map((p) => <PromoCard key={p.id} promo={p} />)}
               </div>
             )}
           </section>

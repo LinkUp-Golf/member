@@ -20,6 +20,7 @@ interface BookingRow {
   guest_name: string | null
   status: BookingStatus
   amount_charged: number
+  dinner_rsvp: 'yes' | 'no' | 'maybe' | null
   admin_notes: string | null
   ghl_opportunity_id: string | null
   member: { first_name: string; last_name: string; email: string } | null
@@ -56,10 +57,12 @@ export default function AdminBookingsPage() {
     const monthStart = format(startOfMonth(month), 'yyyy-MM-dd')
     const monthEnd = format(endOfMonth(month), 'yyyy-MM-dd')
 
-    const { data: courses } = await supabase
+    const { data: courses, error: coursesError } = await supabase
       .from('courses')
       .select('id, max_rounds_per_month, reserved_rounds')
       .in('slug', COURSE_SLUGS)
+
+    if (coursesError) console.error('[admin/bookings] courses query failed:', coursesError.message)
 
     const courseIds = (courses ?? []).map(c => c.id)
     setCourseData(courses?.length ? {
@@ -67,13 +70,39 @@ export default function AdminBookingsPage() {
       reserved_rounds: courses.reduce((sum, c) => sum + c.reserved_rounds, 0),
     } : null)
 
-    const { data } = await supabase
+    // Guard: if no course IDs resolved, skip — avoids a vacuous .in() returning nothing
+    if (courseIds.length === 0) {
+      console.warn('[admin/bookings] no courses matched COURSE_SLUGS:', COURSE_SLUGS)
+      setBookings([])
+      setLoading(false)
+      return
+    }
+
+    // Try with dinner_rsvp first; fall back without it if the column doesn't exist yet
+    let { data, error } = await supabase
       .from('bookings')
-      .select('id, booking_date, tee_time, players, guest_name, status, amount_charged, admin_notes, ghl_opportunity_id, member:members(first_name, last_name, email)')
+      .select('id, booking_date, tee_time, players, guest_name, status, amount_charged, dinner_rsvp, admin_notes, ghl_opportunity_id, member:members!bookings_member_id_fkey(first_name, last_name, email)')
       .in('course_id', courseIds)
       .gte('booking_date', monthStart)
       .lte('booking_date', monthEnd)
       .order('booking_date', { ascending: false })
+
+    if (error?.message?.includes('dinner_rsvp')) {
+      // Migration not yet applied — retry without the column
+      console.warn('[admin/bookings] dinner_rsvp column missing, retrying without it')
+      const fallback = await supabase
+        .from('bookings')
+        .select('id, booking_date, tee_time, players, guest_name, status, amount_charged, admin_notes, ghl_opportunity_id, member:members!bookings_member_id_fkey(first_name, last_name, email)')
+        .in('course_id', courseIds)
+        .gte('booking_date', monthStart)
+        .lte('booking_date', monthEnd)
+        .order('booking_date', { ascending: false })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      data = fallback.data as any
+      error = fallback.error
+    }
+
+    if (error) console.error('[admin/bookings] bookings query failed:', error.message)
 
     const rows = (data ?? []) as unknown as BookingRow[]
     setBookings(rows)
@@ -223,7 +252,7 @@ export default function AdminBookingsPage() {
 
       {/* Booking list */}
       <AdminTable
-        headers={['Member', 'Date', 'Tee time', 'Players', 'Guest', 'Amount', 'Status', 'Notes']}
+        headers={['Member', 'Date', 'Tee time', 'Players', 'Guest', 'Amount', 'Status', 'Dinner', 'Notes']}
         empty={loading ? 'Loading…' : filtered.length === 0 ? 'No bookings match the current filters.' : undefined}
       >
         {filtered.map(b => (
@@ -245,6 +274,19 @@ export default function AdminBookingsPage() {
                 <p className="text-[10px] text-gray-400 mt-0.5 font-mono truncate max-w-[120px]" title={b.ghl_opportunity_id}>
                   {b.ghl_opportunity_id.slice(0, 8)}…
                 </p>
+              )}
+            </AdminTd>
+            <AdminTd>
+              {b.dinner_rsvp ? (
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                  b.dinner_rsvp === 'yes'   ? 'bg-green-50 text-green-700' :
+                  b.dinner_rsvp === 'maybe' ? 'bg-yellow-50 text-yellow-700' :
+                                              'bg-gray-100 text-gray-500'
+                }`}>
+                  {b.dinner_rsvp === 'yes' ? 'Yes' : b.dinner_rsvp === 'no' ? 'No' : 'Maybe ⚠'}
+                </span>
+              ) : (
+                <span className="text-gray-300 text-xs">—</span>
               )}
             </AdminTd>
             <AdminTd className="max-w-xs">

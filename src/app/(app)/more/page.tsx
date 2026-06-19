@@ -17,7 +17,7 @@ const MORE_ITEMS: { group: string; items: { href: string; label: string; icon: I
       { href: '/more/profile',       label: 'My Profile',     icon: { type: 'svg', name: 'members' },          desc: 'Edit your details and golf life' },
       { href: '/more/focus-linkups', label: 'Focus LinkUps',  icon: { type: 'svg', name: 'focus-linkup' },     desc: 'Manage your category subscriptions' },
       { href: '/more/referrals',     label: 'Refer a Member', icon: { type: 'svg', name: 'new-member' },       desc: 'Invite someone to the community' },
-      { href: '/more/guest-access',  label: 'Guest Access',   icon: { type: 'svg', name: 'visiting-member' },  desc: 'Request access to another course' },
+      { href: '/more/guest-access',  label: 'Guest Access',   icon: { type: 'svg', name: 'visiting-member' },  desc: 'Request access to another city' },
     ],
   },
   {
@@ -32,7 +32,7 @@ const MORE_ITEMS: { group: string; items: { href: string; label: string; icon: I
     group: 'Settings',
     items: [
       { href: '/more/notifications', label: 'Notification Log', icon: { type: 'emoji', char: '🔔' },  desc: 'View your notification history' },
-      { href: '/more/settings',      label: 'Preferences',      icon: { type: 'svg', name: 'more' },  desc: 'Manage push notification settings' },
+      { href: '/more/settings',      label: 'Preferences',      icon: { type: 'svg', name: 'more' },  desc: 'Notifications, text size & display' },
       { href: '/more/install',       label: 'Install App',       icon: { type: 'emoji', char: '📲' }, desc: 'Add LinkUp Golf to your home screen' },
     ],
   },

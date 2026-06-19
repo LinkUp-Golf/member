@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
@@ -16,6 +16,9 @@ export default function MyProfilePage() {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState<Partial<MemberProfile>>({})
   const [focusGroups, setFocusGroups] = useState<string[]>([])
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [avatarError, setAvatarError] = useState('')
+  const avatarInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (profile?.profile) {
@@ -34,6 +37,44 @@ export default function MyProfilePage() {
       }
     })
   }, [])
+
+  async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setAvatarError('')
+
+    // Client-side validation before touching the network
+    const ALLOWED = ['image/jpeg', 'image/png', 'image/webp']
+    if (!ALLOWED.includes(file.type)) {
+      setAvatarError('Please choose a JPEG, PNG, or WebP image.')
+      e.target.value = ''
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setAvatarError('Image must be 5 MB or smaller.')
+      e.target.value = ''
+      return
+    }
+
+    setUploadingAvatar(true)
+    try {
+      const data = new FormData()
+      data.append('file', file)
+      const res = await fetch('/api/profile/avatar', { method: 'POST', body: data })
+      if (res.ok) {
+        await refetch()
+      } else {
+        const body = await res.json().catch(() => ({}))
+        setAvatarError(body.error ?? 'Upload failed. Please try again.')
+      }
+    } catch {
+      setAvatarError('Network error. Check your connection and try again.')
+    } finally {
+      setUploadingAvatar(false)
+      e.target.value = ''
+    }
+  }
 
   function set(field: keyof MemberProfile, value: unknown) {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -71,13 +112,46 @@ export default function MyProfilePage() {
       {/* Header */}
       <div className="bg-green-900 px-5 pt-5 pb-6 text-center">
         <div className="flex justify-center mb-3">
-          <Avatar
-            firstName={m.first_name}
-            lastName={m.last_name}
-            avatarUrl={m.profile?.avatar_url}
-            size="xl"
-          />
+          <button
+            type="button"
+            className="relative group"
+            onClick={() => avatarInputRef.current?.click()}
+            disabled={uploadingAvatar}
+            aria-label="Change profile photo"
+          >
+            <Avatar
+              firstName={m.first_name}
+              lastName={m.last_name}
+              avatarUrl={m.profile?.avatar_url}
+              size="xl"
+            />
+            {/* Spinner overlay while uploading */}
+            {uploadingAvatar && (
+              <div className="absolute inset-0 rounded-full flex items-center justify-center bg-green-950/60">
+                <Spinner className="w-6 h-6 text-gold" />
+              </div>
+            )}
+            {/* Camera badge */}
+            {!uploadingAvatar && (
+              <span className="absolute bottom-0 right-0 w-6 h-6 rounded-full flex items-center justify-center border-2 border-green-900" style={{ background: 'var(--color-gold)' }}>
+                <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-green-950)' }}>
+                  <path d="M14 11.5A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5v-6A1.5 1.5 0 0 1 3.5 4h1.25L6 2h4l1.25 2H12.5A1.5 1.5 0 0 1 14 5.5v6Z" />
+                  <circle cx="8" cy="8.5" r="2" />
+                </svg>
+              </span>
+            )}
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="sr-only"
+              onChange={handleAvatarChange}
+            />
+          </button>
         </div>
+        {avatarError && (
+          <p className="text-xs text-red-300 mb-2">{avatarError}</p>
+        )}
         <h1 className="font-sans font-black text-2xl text-white capitalize">
           {m.first_name} {m.last_name}
         </h1>

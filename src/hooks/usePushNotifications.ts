@@ -91,6 +91,33 @@ export function usePushNotifications(): UsePushNotificationsReturn {
     setPermission(Notification.permission as PushPermission)
   }, [supported])
 
+  // ---- Cross-instance sync via custom window event ------------
+  // When any hook instance (e.g. the settings page) subscribes or
+  // unsubscribes, it broadcasts a window event so every other mounted
+  // instance (e.g. AppNav's prompt banner) updates immediately —
+  // no page refresh needed.
+  useEffect(() => {
+    if (!supported) return
+
+    function onSubscribed() {
+      if (mountedRef.current) {
+        setIsSubscribed(true)
+        setPermission('granted')
+      }
+    }
+
+    function onUnsubscribed() {
+      if (mountedRef.current) setIsSubscribed(false)
+    }
+
+    window.addEventListener('push-subscribed', onSubscribed)
+    window.addEventListener('push-unsubscribed', onUnsubscribed)
+    return () => {
+      window.removeEventListener('push-subscribed', onSubscribed)
+      window.removeEventListener('push-unsubscribed', onUnsubscribed)
+    }
+  }, [supported])
+
   // ---- Sync subscription state on mount ----------------------
   // Also re-syncs when the controlling SW changes (PWA update).
   useEffect(() => {
@@ -181,6 +208,8 @@ export function usePushNotifications(): UsePushNotificationsReturn {
       }
 
       if (mountedRef.current) setIsSubscribed(true)
+      // Notify all other mounted hook instances (e.g. AppNav banner)
+      window.dispatchEvent(new CustomEvent('push-subscribed'))
       return true
     } catch (err) {
       console.error('[push] subscribe error', err)
@@ -210,6 +239,7 @@ export function usePushNotifications(): UsePushNotificationsReturn {
       }
 
       if (mountedRef.current) setIsSubscribed(false)
+      window.dispatchEvent(new CustomEvent('push-unsubscribed'))
     } catch (err) {
       console.error('[push] unsubscribe error', err)
     } finally {
