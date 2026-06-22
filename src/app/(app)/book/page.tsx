@@ -3052,7 +3052,7 @@ function groupBookings(bookings: Booking[]): BookingGroup[] {
   }
   const groups: BookingGroup[] = [];
   for (const slot of bySlot.values()) {
-    const primary = slot.find((b) => b.guest_name === null) ?? slot[0];
+    const primary = slot.find((b) => b.guest_name === null && !b.player_member_id) ?? slot[0];
     if (!primary) continue;
     groups.push({ primary, players: slot.filter((b) => b.id !== primary.id) });
   }

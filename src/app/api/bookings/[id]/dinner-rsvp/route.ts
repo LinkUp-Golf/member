@@ -2,9 +2,8 @@ export const dynamic = 'force-dynamic'
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
-import { createRouteHandlerClient } from '@/lib/supabase-server'
+import { createAdminClient } from '@/lib/supabase-server'
 import { sendPushToAdmins } from '@/lib/push'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -24,10 +23,11 @@ export const PATCH = withAuth(async (
     return NextResponse.json({ error: 'rsvp must be yes, no, or maybe' }, { status: 400 })
   }
 
-  const supabase = createRouteHandlerClient(cookies())
+  // Use admin client so invited-member rows (member_id = booker) aren't blocked by RLS.
+  // Authorization is enforced manually via ownsBooking below.
+  const admin = createAdminClient()
 
-  // Verify the booking belongs to the current user and has an eligible status
-  const { data: booking, error: fetchError } = await supabase
+  const { data: booking, error: fetchError } = await admin
     .from('bookings')
     .select('id, status, booking_date, tee_time, member_id, player_member_id')
     .eq('id', bookingId)
@@ -44,7 +44,7 @@ export const PATCH = withAuth(async (
     return NextResponse.json({ error: 'Dinner RSVP is not available for this booking' }, { status: 400 })
   }
 
-  const { error } = await supabase
+  const { error } = await admin
     .from('bookings')
     .update({ dinner_rsvp: body.rsvp })
     .eq('id', bookingId)
