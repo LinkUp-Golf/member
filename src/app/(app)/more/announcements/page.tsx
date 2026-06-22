@@ -43,6 +43,9 @@ export default function AnnouncementsPage() {
     setLoading(false)
   }
 
+  const pinned = announcements.filter(a => a.is_pinned)
+  const rest   = announcements.filter(a => !a.is_pinned)
+
   return (
     <AppShell
       header={
@@ -74,32 +77,80 @@ export default function AnnouncementsPage() {
             <p className="text-xs text-green-900/25 mt-4">Check back soon — announcements will appear as they&apos;re published.</p>
           </div>
         ) : (
-          <div className="px-5 space-y-2.5">
-            {announcements.map(a => (
-              <Link key={a.id} href={`/more/announcements/${a.id}`} className="card p-4 flex gap-3 items-start active:opacity-75 transition-opacity">
-                <span className="text-2xl flex-shrink-0 mt-0.5">
-                  {TYPE_ICONS[a.type] ?? '📌'}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <span className="text-[10px] uppercase tracking-wider text-green-900/35">
-                      {TYPE_LABELS[a.type] ?? a.type}
-                    </span>
-                    <span className="text-[10px] text-green-900/25">·</span>
-                    <span className="text-[10px] text-green-900/35">
-                      {formatRelativeTime(a.published_at ?? a.created_at)}
-                    </span>
-                  </div>
-                  <p className="text-sm font-black text-green-900 leading-snug line-clamp-2">{a.title}</p>
-                  <p className="text-xs mt-1 text-green-900/55 leading-relaxed line-clamp-2">{a.body}</p>
+          <div className="px-5 space-y-5">
+            {/* Pinned section */}
+            {pinned.length > 0 && (
+              <div>
+                <p className="section-label mb-2.5 flex items-center gap-1.5">
+                  <span>📌</span> Pinned
+                </p>
+                <div className="space-y-2.5">
+                  {pinned.map(a => (
+                    <AnnouncementCard key={a.id} announcement={a} pinned />
+                  ))}
                 </div>
-                <AnnouncementThumbnail announcement={a} />
-              </Link>
-            ))}
+              </div>
+            )}
+
+            {/* Regular feed */}
+            {rest.length > 0 && (
+              <div>
+                {pinned.length > 0 && (
+                  <p className="section-label mb-2.5">Latest</p>
+                )}
+                <div className="space-y-2.5">
+                  {rest.map(a => (
+                    <AnnouncementCard key={a.id} announcement={a} />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
     </AppShell>
+  )
+}
+
+function AnnouncementCard({ announcement: a, pinned = false }: { announcement: Announcement; pinned?: boolean }) {
+  return (
+    <Link
+      href={`/more/announcements/${a.id}`}
+      className="flex gap-3 items-start active:opacity-75 transition-opacity overflow-hidden rounded-2xl"
+      style={pinned ? {
+        background: 'rgba(246,234,193,0.35)',
+        border: '1.5px solid rgba(200,160,60,0.25)',
+      } : {
+        background: 'white',
+        border: '1px solid rgba(0,38,105,0.07)',
+      }}
+    >
+      {pinned && (
+        <div
+          className="w-1 self-stretch flex-shrink-0 rounded-l-2xl"
+          style={{ background: 'var(--color-gold)' }}
+        />
+      )}
+      <div className={`flex gap-3 items-start flex-1 min-w-0 p-4 ${pinned ? 'pl-3' : ''}`}>
+        <span className="text-2xl flex-shrink-0 mt-0.5">
+          {TYPE_ICONS[a.type] ?? '📢'}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+            <span className="text-[10px] uppercase tracking-wider text-green-900/35">
+              {TYPE_LABELS[a.type] ?? a.type}
+            </span>
+            <span className="text-[10px] text-green-900/25">·</span>
+            <span className="text-[10px] text-green-900/35">
+              {formatRelativeTime(a.published_at ?? a.created_at)}
+            </span>
+          </div>
+          <p className="text-sm font-black text-green-900 leading-snug line-clamp-2">{a.title}</p>
+          <p className="text-xs mt-1 text-green-900/55 leading-relaxed line-clamp-2">{a.body}</p>
+        </div>
+        <AnnouncementThumbnail announcement={a} />
+      </div>
+    </Link>
   )
 }
 
@@ -137,4 +188,3 @@ function StackIcon() {
     </svg>
   )
 }
-

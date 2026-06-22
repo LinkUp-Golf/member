@@ -33,6 +33,7 @@ interface AnnouncementRow {
   video_url: string | null;
   media_urls: string[];
   focus_linkup_categories: string[];
+  is_pinned: boolean;
   author: { first_name: string; last_name: string } | null;
 }
 
@@ -61,12 +62,15 @@ const TYPE_ICONS: Record<string, string> = {
   focus_linkup: "🎯",
 };
 
+const MAX_PINNED = 5
+
 export default function AdminAnnouncementsPage() {
   const [announcements, setAnnouncements] = useState<AnnouncementRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [editTarget, setEditTarget] = useState<AnnouncementRow | null>(null);
   const [courseId, setCourseId] = useState("");
+  const [pinError, setPinError] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -84,7 +88,7 @@ export default function AdminAnnouncementsPage() {
     const { data } = await supabase
       .from("announcements")
       .select(
-        "id, type, title, body, status, published_at, created_at, image_url, video_url, media_urls, author:members!announcements_author_id_fkey(first_name, last_name)",
+        "id, type, title, body, status, published_at, created_at, image_url, video_url, media_urls, focus_linkup_categories, is_pinned, author:members!announcements_author_id_fkey(first_name, last_name)",
       )
       .in("course_id", courseIds)
       .order("created_at", { ascending: false })
@@ -133,6 +137,24 @@ export default function AdminAnnouncementsPage() {
     if (res.ok) await loadData();
   }
 
+  async function togglePin(a: AnnouncementRow) {
+    const next = !a.is_pinned;
+    // Optimistic update
+    setAnnouncements(prev => prev.map(r => r.id === a.id ? { ...r, is_pinned: next } : r));
+    const res = await fetch(`/api/admin/announcements/${a.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_pinned: next }),
+    });
+    if (!res.ok) {
+      // Revert
+      setAnnouncements(prev => prev.map(r => r.id === a.id ? { ...r, is_pinned: a.is_pinned } : r));
+      const json = await res.json().catch(() => ({}));
+      setPinError(json.error ?? "Failed to update pin.");
+      setTimeout(() => setPinError(null), 5000);
+    }
+  }
+
   function openCreate() {
     setShowCreate(true);
     setEditTarget(null);
@@ -141,6 +163,9 @@ export default function AdminAnnouncementsPage() {
     setEditTarget(a);
     setShowCreate(false);
   }
+
+  const pinnedCount = announcements.filter(a => a.is_pinned).length;
+  const pinMaxed = pinnedCount >= MAX_PINNED;
 
   return (
     <div className="p-4 sm:p-8">
@@ -155,6 +180,28 @@ export default function AdminAnnouncementsPage() {
           />
         }
       />
+
+      {/* Pin quota indicator */}
+      {!loading && announcements.length > 0 && (
+        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium mb-4 ${
+          pinMaxed
+            ? 'bg-amber-50 text-amber-700 border border-amber-200'
+            : 'bg-gray-50 text-gray-500 border border-gray-100'
+        }`}>
+          <span>📌</span>
+          <span>{pinnedCount} / {MAX_PINNED} pinned</span>
+          {pinMaxed && <span className="font-semibold">— max reached</span>}
+        </div>
+      )}
+
+      {/* Pin error toast */}
+      {pinError && (
+        <div className="flex items-center gap-2 mb-4 px-4 py-2.5 rounded-lg bg-red-50 border border-red-100 text-sm text-red-600">
+          <span>⚠️</span>
+          <span>{pinError}</span>
+          <button onClick={() => setPinError(null)} className="ml-auto text-red-400 hover:text-red-600">✕</button>
+        </div>
+      )}
 
       {showCreate && !editTarget && (
         <div className="mb-6">
@@ -188,16 +235,23 @@ export default function AdminAnnouncementsPage() {
         {announcements.map((a) => (
           <AdminTr key={a.id}>
             <AdminTd>
-              <span className="text-lg">{TYPE_ICONS[a.type] ?? "📌"}</span>
+              <span className="text-lg">{TYPE_ICONS[a.type] ?? "📢"}</span>
             </AdminTd>
             <AdminTd>
               <AnnouncementThumb row={a} />
             </AdminTd>
             <AdminTd>
-              <p className="font-medium text-gray-900 max-w-xs truncate">
-                {a.title}
-              </p>
-              <p className="text-xs text-gray-400 mt-0.5 max-w-xs line-clamp-2">
+              <div className="flex items-center gap-1.5 mb-0.5">
+                {a.is_pinned && (
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200 leading-none">
+                    📌 Pinned
+                  </span>
+                )}
+                <p className="font-medium text-gray-900 max-w-xs truncate">
+                  {a.title}
+                </p>
+              </div>
+              <p className="text-xs text-gray-400 max-w-xs line-clamp-2">
                 {a.body}
               </p>
             </AdminTd>
@@ -232,6 +286,13 @@ export default function AdminAnnouncementsPage() {
             </AdminTd>
             <AdminTd>
               <div className="flex gap-1.5">
+                <AdminButton
+                  label={a.is_pinned ? "Unpin" : "Pin"}
+                  onClick={() => togglePin(a)}
+                  variant="ghost"
+                  size="sm"
+                  disabled={!a.is_pinned && pinMaxed}
+                />
                 <AdminButton
                   label="Edit"
                   onClick={() => openEdit(a)}

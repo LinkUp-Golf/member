@@ -73,8 +73,16 @@ export default function AnnouncementDetailPage() {
           </div>
         ) : (
           <article>
+            {announcement.is_pinned && (
+              <div
+                className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full mb-3"
+                style={{ background: 'rgba(200,160,60,0.12)', color: 'rgba(160,120,20,1)', border: '1px solid rgba(200,160,60,0.25)' }}
+              >
+                📌 Pinned announcement
+              </div>
+            )}
             <div className="flex items-center gap-2 mb-3">
-              <span className="text-2xl">{TYPE_ICONS[announcement.type] ?? '📌'}</span>
+              <span className="text-2xl">{TYPE_ICONS[announcement.type] ?? '📢'}</span>
               <span className="text-xs uppercase tracking-wider text-green-900/35">
                 {TYPE_LABELS[announcement.type] ?? announcement.type}
               </span>

@@ -252,6 +252,7 @@ export interface Announcement {
   video_url: string | null
   media_urls: string[]
   focus_linkup_categories: string[]
+  is_pinned: boolean
   created_at: string
 }
 
