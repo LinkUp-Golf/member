@@ -154,6 +154,7 @@ export default function BookPage() {
     time: string;
     players: number;
     pendingNonMembers: number;
+    bookingId: string | null;
   } | null>(null);
 
   // My bookings tab
@@ -272,6 +273,7 @@ export default function BookPage() {
           typeof data.pendingNonMembers === "number"
             ? data.pendingNonMembers
             : additionalPlayers.filter((p) => p.isNonMember).length,
+        bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
       });
       if (Array.isArray(data.bookings)) {
         setMyBookings((prev) => [...(data.bookings as Booking[]), ...prev]);
@@ -292,6 +294,11 @@ export default function BookPage() {
           setStep("select");
           setSelectedSlot(null);
         }}
+        onUpdateBooking={(bookingId, updates) =>
+          setMyBookings((prev) =>
+            prev.map((b) => (b.id === bookingId ? { ...b, ...updates } : b)),
+          )
+        }
       />
     );
   }
@@ -1836,7 +1843,7 @@ function ConfirmScreen({
       mobile: member.phone ?? "",
       email: member.email,
     });
-    setCollapsed((prev) => [...prev, true]);
+    setCollapsed((prev) => [...prev, false]);
     setPlayerSelections((prev) => [...prev, member]);
     setPlayerKinds((prev) => [...prev, "member"]);
   }, [members, inviteMemberId, maxAdditional, append]);
@@ -1905,9 +1912,6 @@ function ConfirmScreen({
     setPlayerSelections((prev) =>
       prev.map((s, idx) => (idx === i ? member : s)),
     );
-    if (member.phone) {
-      setCollapsed((prev) => prev.map((c, idx) => (idx === i ? true : c)));
-    }
   }
 
   function clearMemberSelection(i: number) {
@@ -2570,10 +2574,29 @@ function MemberAutocomplete({
 function SuccessScreen({
   booking,
   onDone,
+  onUpdateBooking,
 }: {
-  booking: { date: string; time: string; players: number; pendingNonMembers: number };
+  booking: { date: string; time: string; players: number; pendingNonMembers: number; bookingId: string | null };
   onDone: () => void;
+  onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
 }) {
+  const [dinnerRsvp, setDinnerRsvp] = useState<'yes' | 'no' | 'maybe' | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleDone() {
+    if (booking.bookingId && dinnerRsvp) {
+      setSubmitting(true);
+      const res = await fetch(`/api/bookings/${booking.bookingId}/dinner-rsvp`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rsvp: dinnerRsvp }),
+      });
+      if (res.ok) onUpdateBooking(booking.bookingId, { dinner_rsvp: dinnerRsvp });
+      setSubmitting(false);
+    }
+    onDone();
+  }
+
   return (
     <div
       className="flex flex-col items-center justify-center min-h-screen px-8 text-center"
@@ -2606,7 +2629,7 @@ function SuccessScreen({
         </p>
       )}
       {booking.players <= 1 && <div className="mb-8" />}
-      <div className="card p-5 w-full max-w-sm mb-8 text-left space-y-2">
+      <div className="card p-5 w-full max-w-sm mb-4 text-left space-y-2">
         <p
           className="text-xs uppercase tracking-widest mb-3"
           style={{ color: "rgba(0,38,105,0.35)", letterSpacing: "0.14em" }}
@@ -2641,9 +2664,39 @@ function SuccessScreen({
           </p>
         )}
       </div>
-      <button onClick={onDone} className="btn btn-primary">
-        Back to booking
+      {booking.bookingId && (
+        <div className="card p-5 w-full max-w-sm mb-8 text-left">
+          <p
+            className="text-xs uppercase tracking-widest mb-3"
+            style={{ color: "rgba(0,38,105,0.35)", letterSpacing: "0.14em" }}
+          >
+            Staying for dinner?
+          </p>
+          <p className="text-sm mb-4" style={{ color: "rgba(0,38,105,0.6)" }}>
+            Let us know if you&apos;ll be joining for dinner after your round.
+          </p>
+          <DinnerRsvp
+            bookingId={booking.bookingId}
+            current={dinnerRsvp}
+            layout="horizontal"
+            autoSave={false}
+            onSaved={setDinnerRsvp}
+          />
+        </div>
+      )}
+      {!booking.bookingId && <div className="mb-8" />}
+      <button
+        onClick={handleDone}
+        disabled={(!!booking.bookingId && dinnerRsvp === null) || submitting}
+        className="btn btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {submitting ? 'Saving…' : 'Back to booking'}
       </button>
+      {booking.bookingId && dinnerRsvp === null && (
+        <p className="text-xs mt-3" style={{ color: 'rgba(0,38,105,0.4)' }}>
+          Please let us know about dinner first.
+        </p>
+      )}
     </div>
   );
 }
@@ -2895,15 +2948,20 @@ function DinnerRsvp({
   bookingId,
   current,
   onSaved,
+  layout = 'compact',
+  autoSave = true,
 }: {
   bookingId: string;
   current: 'yes' | 'no' | 'maybe' | null;
   onSaved: (rsvp: 'yes' | 'no' | 'maybe') => void;
+  layout?: 'compact' | 'horizontal';
+  autoSave?: boolean;
 }) {
   const [saving, setSaving] = useState<string | null>(null);
 
   async function pick(rsvp: 'yes' | 'no' | 'maybe') {
     if (saving) return;
+    if (!autoSave) { onSaved(rsvp); return; }
     setSaving(rsvp);
     const res = await fetch(`/api/bookings/${bookingId}/dinner-rsvp`, {
       method: 'PATCH',
@@ -2919,6 +2977,33 @@ function DinnerRsvp({
     { value: 'no' as const,    label: 'No' },
     { value: 'maybe' as const, label: '?' },
   ];
+
+  if (layout === 'horizontal') {
+    return (
+      <div className="flex gap-2">
+        {opts.map(({ value, label }) => {
+          const active = current === value;
+          return (
+            <button
+              key={value}
+              onClick={() => pick(value)}
+              disabled={!!saving}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
+              style={active ? {
+                background: 'var(--color-green-900)',
+                color: 'var(--color-gold)',
+              } : {
+                background: 'rgba(0,38,105,0.06)',
+                color: 'rgba(0,38,105,0.5)',
+              }}
+            >
+              {saving === value ? '…' : label}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-end gap-1 flex-shrink-0">
@@ -3133,8 +3218,8 @@ function MyBookingsTab({
                           </span>
                         )}
                       </div>
-                      {/* Dinner RSVP — shown for confirmed bookings */}
-                      {["confirmed", "availability_confirmed", "payment_confirmed"].includes(group.primary.status) && (
+                      {/* Dinner RSVP — shown for all active upcoming bookings */}
+                      {group.primary.status !== "cancelled" && (
                         <DinnerRsvp
                           bookingId={group.primary.id}
                           current={group.primary.dinner_rsvp ?? null}

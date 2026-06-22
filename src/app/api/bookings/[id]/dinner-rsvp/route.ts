@@ -9,7 +9,7 @@ import { sendPushToAdmins } from '@/lib/push'
 import type { AuthContext } from '@/lib/auth/types'
 
 const VALID_RSVP = new Set(['yes', 'no', 'maybe'])
-const DINNER_STATUSES = new Set(['confirmed', 'availability_confirmed', 'payment_confirmed'])
+const DINNER_STATUSES = new Set(['confirmed', 'availability_confirmed', 'payment_confirmed', 'tentative', 'awaiting_approval'])
 
 export const PATCH = withAuth(async (
   req: NextRequest,
@@ -41,7 +41,7 @@ export const PATCH = withAuth(async (
   if (!ownsBooking) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   if (!DINNER_STATUSES.has(booking.status)) {
-    return NextResponse.json({ error: 'Dinner RSVP is only available for confirmed bookings' }, { status: 400 })
+    return NextResponse.json({ error: 'Dinner RSVP is not available for this booking' }, { status: 400 })
   }
 
   const { error } = await supabase
