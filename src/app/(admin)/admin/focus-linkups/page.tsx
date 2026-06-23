@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { FEATURES } from "@/lib/features";
 import { createClient } from "@/lib/supabase";
 import { apiClient } from "@/lib/api-client";
 import { COURSE_SLUGS } from "@/lib/ghl/tags";
@@ -27,9 +29,16 @@ interface CustomGroupRequest {
 }
 
 export default function AdminFocusLinkupsPage() {
+  const router = useRouter();
   const [linkups, setLinkups] = useState<FocusLinkup[]>([]);
   const [customRequests, setCustomRequests] = useState<CustomGroupRequest[]>([]);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!FEATURES.FOCUS_LINKUPS) router.replace('/admin');
+  }, [router]);
+
+  if (!FEATURES.FOCUS_LINKUPS) return null;
   const [showForm, setShowForm] = useState(false);
   const [courseId, setCourseId] = useState("");
 

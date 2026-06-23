@@ -20,6 +20,7 @@ import { formatRelativeTime } from "@/lib/utils";
 import MultiMediaUpload, { type MediaFile } from "@/components/ui/MultiMediaUpload";
 import { INDUSTRY_CATEGORIES } from "@/types";
 import type { AnnouncementType, ModerationStatus } from "@/types";
+import { FEATURES } from "@/lib/features";
 
 interface AnnouncementRow {
   id: string;
@@ -49,7 +50,7 @@ interface AnnouncementPayload {
 
 const TYPE_OPTIONS = [
   { value: "admin_broadcast", label: "Admin broadcast" },
-  { value: "focus_linkup", label: "Focus LinkUp reminder" },
+  ...(FEATURES.FOCUS_LINKUPS ? [{ value: "focus_linkup", label: "Focus LinkUp reminder" }] : []),
   { value: "new_member", label: "New member welcome" },
 ];
 

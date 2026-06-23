@@ -13,6 +13,7 @@
 
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { decrypt } from '@vercel/flags'
 
 const PUBLIC_ROUTES = [
   '/login',
@@ -136,7 +137,42 @@ export async function middleware(request: NextRequest) {
     // The page/API route will enforce its own auth checks.
   }
 
+  // ---- Feature flag cookies ------------------------------------
+  // Decrypt any Vercel toolbar overrides, then stamp plain cookies so
+  // client components can read flag values synchronously.
+  await stampFeatureFlags(request, response)
+
   return response
+}
+
+const FLAG_COOKIE_OPTIONS = {
+  httpOnly: false, // must be readable by client JS
+  sameSite: 'lax' as const,
+  path: '/',
+  maxAge: 60 * 5, // re-evaluate every 5 minutes
+}
+
+async function stampFeatureFlags(request: NextRequest, response: NextResponse) {
+  // Read Vercel toolbar override cookie (encrypted with FLAGS_SECRET)
+  let overrides: Record<string, unknown> = {}
+  const encryptedOverrides = request.cookies.get('vercel-flag-overrides')?.value
+  if (encryptedOverrides && process.env.FLAGS_SECRET) {
+    try {
+      overrides = (await decrypt<Record<string, unknown>>(
+        encryptedOverrides,
+        process.env.FLAGS_SECRET
+      )) ?? {}
+    } catch {
+      // Invalid or expired override cookie — ignore it
+    }
+  }
+
+  // Evaluate each flag: override wins, then env var default
+  const focusLinkups = 'focus-linkups' in overrides
+    ? Boolean(overrides['focus-linkups'])
+    : process.env.NEXT_PUBLIC_FEATURE_FOCUS_LINKUPS !== 'false'
+
+  response.cookies.set('ff_focus_linkups', focusLinkups ? '1' : '0', FLAG_COOKIE_OPTIONS)
 }
 
 export const config = {

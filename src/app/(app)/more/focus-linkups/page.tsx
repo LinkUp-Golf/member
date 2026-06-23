@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useProfile } from '@/hooks/useProfile'
+import { FEATURES } from '@/lib/features'
 import { apiClient } from '@/lib/api-client'
 import { Spinner } from '@/components/ui/Loading'
 import AppShell from '@/components/layout/AppShell'
@@ -22,6 +23,12 @@ interface Sub {
 export default function FocusLinkupsPage() {
   const { user } = useProfile()
   const router = useRouter()
+
+  useEffect(() => {
+    if (!FEATURES.FOCUS_LINKUPS) router.replace('/more')
+  }, [router])
+
+  if (!FEATURES.FOCUS_LINKUPS) return null
   const [subs, setSubs] = useState<Sub[]>([])
   const [upcoming, setUpcoming] = useState<FocusLinkup[]>([])
   const [_loading, setLoading] = useState(true)

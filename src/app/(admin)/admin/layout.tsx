@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase'
 import { COURSE_SLUGS } from '@/lib/ghl/tags'
 import { cn } from '@/lib/utils'
 import { FullScreenLoader } from '@/components/ui/Loading'
+import { FEATURES } from '@/lib/features'
 
 const NAV_GROUPS = [
   {
@@ -33,7 +34,7 @@ const NAV_GROUPS = [
     items: [
       { href: '/admin/bookings',         label: 'Booking Overview',  icon: '▪' },
       { href: '/admin/booking-requests', label: 'Booking Requests',  icon: '▪', badge: true },
-      { href: '/admin/focus-linkups',    label: 'Focus LinkUps',     icon: '▪' },
+      ...(FEATURES.FOCUS_LINKUPS ? [{ href: '/admin/focus-linkups', label: 'Focus LinkUps', icon: '▪' as const }] : []),
     ],
   },
   {

@@ -5,6 +5,7 @@ import { useProfile } from '@/hooks/useProfile'
 import Avatar from '@/components/ui/Avatar'
 import AppShell from '@/components/layout/AppShell'
 import Icon, { type IconName } from '@/components/ui/Icon'
+import { FEATURES } from '@/lib/features'
 
 type SvgIcon = { type: 'svg'; name: IconName }
 type EmojiIcon = { type: 'emoji'; char: string }
@@ -15,7 +16,7 @@ const MORE_ITEMS: { group: string; items: { href: string; label: string; icon: I
     group: 'My account',
     items: [
       { href: '/more/profile',       label: 'My Profile',     icon: { type: 'svg', name: 'members' },          desc: 'Edit your details and golf life' },
-      { href: '/more/focus-linkups', label: 'Focus LinkUps',  icon: { type: 'svg', name: 'focus-linkup' },     desc: 'Manage your category subscriptions' },
+      ...(FEATURES.FOCUS_LINKUPS ? [{ href: '/more/focus-linkups', label: 'Focus LinkUps', icon: { type: 'svg', name: 'focus-linkup' } as ItemIcon, desc: 'Manage your category subscriptions' }] : []),
       { href: '/more/referrals',     label: 'Refer a Member', icon: { type: 'svg', name: 'new-member' },       desc: 'Invite someone to the community' },
       { href: '/more/guest-access',  label: 'Guest Access',   icon: { type: 'svg', name: 'visiting-member' },  desc: 'Request access to another city' },
     ],
