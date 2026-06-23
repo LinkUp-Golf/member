@@ -4,7 +4,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
-import { createRouteHandlerClient } from '@/lib/supabase-server'
+import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { validateString, validateDate } from '@/lib/validation'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -23,9 +23,9 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
   const [eventsRes, rsvpRes] = await Promise.all([
     supabase
       .from('member_events')
-      .select('*')
+      .select('*, organizer:members!organizer_id(first_name, last_name)')
       .eq('course_id', member.home_course_id)
-      .eq('status', 'published')
+      .in('status', ['published', 'pending_review'])
       .gte('event_date', today())
       .order('event_date', { ascending: true }),
 
@@ -35,9 +35,38 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
       .eq('member_id', ctx.userId),
   ])
 
+  const events = eventsRes.data ?? []
+  const eventIds = events.map(e => e.id)
+
+  // Fetch who's attending each event — use admin client to bypass RLS,
+  // which blocks the organizer from seeing other members' RSVPs via the
+  // EXISTS policy when the organizer isn't in course_memberships as active.
+  const attendeesMap: Record<string, { member_id: string; first_name: string; last_name: string; avatar_url: string | null }[]> = {}
+  if (eventIds.length > 0) {
+    const { data: rsvpRows } = await createAdminClient()
+      .from('member_event_rsvps')
+      .select('event_id, member_id, member:members!member_id(first_name, last_name, profile:member_profiles(avatar_url))')
+      .in('event_id', eventIds)
+      .eq('status', 'attending')
+
+    for (const row of rsvpRows ?? []) {
+      const m = row.member as unknown as { first_name: string; last_name: string; profile: { avatar_url: string | null } | null } | null
+      if (!m) continue
+      const bucket = attendeesMap[row.event_id] ?? []
+      bucket.push({
+        member_id: row.member_id,
+        first_name: m.first_name,
+        last_name: m.last_name,
+        avatar_url: m.profile?.avatar_url ?? null,
+      })
+      attendeesMap[row.event_id] = bucket
+    }
+  }
+
   return NextResponse.json({
-    events: eventsRes.data ?? [],
+    events,
     rsvps: rsvpRes.data ?? [],
+    attendees: attendeesMap,
   })
 })
 
@@ -70,6 +99,7 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
       title: body.title as string,
       description: body.description as string,
       event_date: body.event_date as string,
+      event_end_date: body.event_end_date as string | null ?? null,
       event_time: body.event_time as string,
       location: body.location as string,
       external_url: body.external_url as string | null ?? null,
