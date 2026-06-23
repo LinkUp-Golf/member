@@ -21,10 +21,11 @@ const PUBLIC_ROUTES = [
   '/install',
   '/auth/error',
   '/membership-required',
-  '/api/auth/magic-link',   // unauthenticated users request magic links
-  '/api/auth/callback',     // Supabase redirects here after magic link click
-  '/api/auth/signout',      // clears session cookie server-side
-  '/api/webhooks',          // GHL webhooks secured by secret, not session
+  '/api/auth/magic-link',         // unauthenticated users request magic links
+  '/api/auth/callback',           // Supabase redirects here after magic link click
+  '/api/auth/signout',            // clears session cookie server-side
+  '/api/webhooks',                // GHL webhooks secured by secret, not session
+  '/api/.well-known/vercel/flags', // Vercel toolbar flag discovery (public by design)
 ]
 
 const ADMIN_ROUTES = ['/admin']
