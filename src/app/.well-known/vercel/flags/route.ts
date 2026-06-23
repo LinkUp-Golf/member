@@ -1,15 +1,13 @@
 export const dynamic = 'force-dynamic'
 
-// Vercel Toolbar feature-flag discovery endpoint (RFC 8615 well-known URI).
-// The toolbar fetches /.well-known/vercel/flags to discover registered flags.
-// Flag definitions are not sensitive — this endpoint is intentionally public.
-
+import { verifyAccess } from '@vercel/flags'
 import { getProviderData } from '@vercel/flags/next'
-import { focusLinkupsFlag } from '@/flags'
+import { focusLinkupsFlag } from '../../../../flags'
 import type { NextRequest } from 'next/server'
 
-export async function GET(_request: NextRequest) {
-  return Response.json(
-    getProviderData({ focusLinkupsFlag })
-  )
+export async function GET(request: NextRequest) {
+  const access = await verifyAccess(request.headers.get('Authorization'))
+  if (!access) return Response.json(null, { status: 401 })
+
+  return Response.json(getProviderData({ focusLinkupsFlag }))
 }
