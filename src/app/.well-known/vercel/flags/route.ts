@@ -9,5 +9,5 @@ export async function GET(request: NextRequest) {
   const access = await verifyAccess(request.headers.get('Authorization'))
   if (!access) return Response.json(null, { status: 401 })
 
-  return Response.json(getProviderData({ focusLinkupsFlag }))
+  return Response.json({ version: 1, ...getProviderData({ focusLinkupsFlag }) })
 }
