@@ -34,17 +34,18 @@ export default function AdminFocusLinkupsPage() {
   const [customRequests, setCustomRequests] = useState<CustomGroupRequest[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!FEATURES.FOCUS_LINKUPS) router.replace('/admin');
-  }, [router]);
-
-  if (!FEATURES.FOCUS_LINKUPS) return null;
   const [showForm, setShowForm] = useState(false);
   const [courseId, setCourseId] = useState("");
 
   useEffect(() => {
+    if (!FEATURES.FOCUS_LINKUPS) router.replace('/admin');
+  }, [router]);
+
+  useEffect(() => {
     loadData();
   }, []);
+
+  if (!FEATURES.FOCUS_LINKUPS) return null;
 
   async function loadData() {
     const supabase = createClient();

@@ -24,11 +24,6 @@ export default function FocusLinkupsPage() {
   const { user } = useProfile()
   const router = useRouter()
 
-  useEffect(() => {
-    if (!FEATURES.FOCUS_LINKUPS) router.replace('/more')
-  }, [router])
-
-  if (!FEATURES.FOCUS_LINKUPS) return null
   const [subs, setSubs] = useState<Sub[]>([])
   const [upcoming, setUpcoming] = useState<FocusLinkup[]>([])
   const [_loading, setLoading] = useState(true)
@@ -49,7 +44,13 @@ export default function FocusLinkupsPage() {
   const [editError, setEditError] = useState<string | null>(null)
   const editInputRef = useRef<HTMLInputElement>(null)
 
+  useEffect(() => {
+    if (!FEATURES.FOCUS_LINKUPS) router.replace('/more')
+  }, [router])
+
   useEffect(() => { if (user) loadData() }, [user])
+
+  if (!FEATURES.FOCUS_LINKUPS) return null
 
   async function loadData() {
     const res = await apiClient.get<{ linkups: FocusLinkup[]; subscriptions: Sub[] }>('/api/focus-linkups')

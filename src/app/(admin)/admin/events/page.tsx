@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { COURSE_SLUGS } from '@/lib/ghl/tags'
 import {
-  AdminPageHeader, AdminCard, AdminButton, Badge, StatCard,
+  AdminPageHeader, AdminButton, Badge, StatCard,
 } from '@/components/admin/AdminUI'
 import { format } from 'date-fns'
 import { formatRelativeTime } from '@/lib/utils'
