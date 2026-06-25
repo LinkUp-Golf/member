@@ -1,4 +1,4 @@
-import { flag } from '@vercel/flags/next'
+import { flag } from 'flags/next'
 
 // Feature flag definitions.
 // Evaluated server-side; the Vercel toolbar can override values via

@@ -1,13 +1,10 @@
 export const dynamic = 'force-dynamic'
 
-import { verifyAccess } from '@vercel/flags'
-import { getProviderData } from '@vercel/flags/next'
-import { focusLinkupsFlag } from '../../../../flags'
-import type { NextRequest } from 'next/server'
+import { createFlagsDiscoveryEndpoint, getProviderData } from 'flags/next'
+import * as flags from '../../../../flags'
 
-export async function GET(request: NextRequest) {
-  const access = await verifyAccess(request.headers.get('Authorization'))
-  if (!access) return Response.json(null, { status: 401 })
-
-  return Response.json({ version: 1, ...getProviderData({ focusLinkupsFlag }) })
-}
+// createFlagsDiscoveryEndpoint handles auth (verifyAccess) and adds
+// the required x-flags-sdk-version response header automatically.
+export const GET = createFlagsDiscoveryEndpoint(async () => {
+  return getProviderData(flags)
+})

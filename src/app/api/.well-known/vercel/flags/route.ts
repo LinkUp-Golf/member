@@ -5,14 +5,9 @@ export const dynamic = 'force-dynamic'
 // current values / options. Secured by FLAGS_SECRET (set in Vercel env).
 // https://vercel.com/docs/workflow-collaboration/feature-flags
 
-import { getProviderData } from '@vercel/flags/next'
-import { focusLinkupsFlag } from '@/flags'
-import type { NextRequest } from 'next/server'
+import { createFlagsDiscoveryEndpoint, getProviderData } from 'flags/next'
+import * as flags from '../../../../../flags'
 
-// Flag definitions are not sensitive — this endpoint is intentionally public.
-// Override security is handled by the encrypted vercel-flag-overrides cookie (FLAGS_SECRET).
-export async function GET(_request: NextRequest) {
-  return Response.json(
-    getProviderData({ focusLinkupsFlag })
-  )
-}
+export const GET = createFlagsDiscoveryEndpoint(async () => {
+  return getProviderData(flags)
+})

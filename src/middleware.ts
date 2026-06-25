@@ -13,7 +13,7 @@
 
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
-import { decrypt } from '@vercel/flags'
+import { decryptOverrides } from 'flags'
 
 const PUBLIC_ROUTES = [
   '/login',
@@ -160,7 +160,7 @@ async function stampFeatureFlags(request: NextRequest, response: NextResponse) {
   const encryptedOverrides = request.cookies.get('vercel-flag-overrides')?.value
   if (encryptedOverrides && process.env.FLAGS_SECRET) {
     try {
-      overrides = (await decrypt<Record<string, unknown>>(
+      overrides = (await decryptOverrides(
         encryptedOverrides,
         process.env.FLAGS_SECRET
       )) ?? {}
