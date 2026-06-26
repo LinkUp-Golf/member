@@ -1,1 +1,1 @@
-ALTER TABLE courses ADD COLUMN description TEXT;
+ALTER TABLE courses ADD COLUMN IF NOT EXISTS description TEXT;

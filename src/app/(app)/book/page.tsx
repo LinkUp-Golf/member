@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useForm, useFieldArray } from "react-hook-form";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
@@ -2836,6 +2837,7 @@ function BookingCard({
 
   const iAmBooker = group.primary.member_id === userId;
   const activePlayers = group.players.filter((p) => p.status !== "cancelled");
+  // For invited members the group now includes all sibling rows, so total = 1 (primary) + all players
   const totalPlayers = 1 + activePlayers.length;
   // localDt is a UTC-correct timestamp used ONLY for logic (hours-until, cancel modal).
   // For display use bookingDate / bookingTime to avoid browser-timezone shifting.
@@ -2851,10 +2853,14 @@ function BookingCard({
   // pending (tentative/awaiting_approval) bookings cannot be cancelled yet.
   const CANCELLABLE = ["availability_confirmed", "payment_confirmed", "confirmed"];
   const canCancelPrimary = hoursUntil > 0 && CANCELLABLE.includes(group.primary.status);
-  // Always expand for the booker (even solo) so status + pay button are visible.
-  const canExpand = iAmBooker;
+  // All bookings (booker and invited) use the same collapsible card style.
+  const canExpand = true;
 
-  const allRows = canExpand
+  // ---- Build allRows -------------------------------------------------
+  // Booker: "You" = primary row, full actions on all rows
+  // Invited member: "You" = their own player row, can only cancel their own
+  // Status labels are identical for both — same STATUS_LABELS throughout
+  const allRows = iAmBooker
     ? [
         {
           id: group.primary.id,
@@ -2862,6 +2868,7 @@ function BookingCard({
           status: group.primary.status,
           ghlBookingId: group.primary.ghl_booking_id ?? null,
           canCancel: canCancelPrimary,
+          canPay: group.primary.status === "availability_confirmed",
           isYou: true,
         },
         ...activePlayers.map((p) => ({
@@ -2870,10 +2877,45 @@ function BookingCard({
           status: p.status,
           ghlBookingId: p.ghl_booking_id ?? null,
           canCancel: hoursUntil > 0 && CANCELLABLE.includes(p.status),
+          canPay: p.status === "availability_confirmed",
           isYou: false,
         })),
       ]
-    : [];
+    : (() => {
+        const myRow = group.players.find((p) => p.player_member_id === userId);
+        const otherPlayers = activePlayers.filter((p) => p.id !== myRow?.id);
+        return [
+          {
+            id: myRow?.id ?? group.primary.id,
+            name: "You",
+            status: myRow?.status ?? group.primary.status,
+            ghlBookingId: myRow?.ghl_booking_id ?? null,
+            canCancel: myRow
+              ? hoursUntil > 0 && CANCELLABLE.includes(myRow.status)
+              : false,
+            canPay: myRow?.status === "availability_confirmed",
+            isYou: true,
+          },
+          {
+            id: group.primary.id,
+            name: myRow?.booker_name ?? "Booker",
+            status: group.primary.status,
+            ghlBookingId: null,
+            canCancel: false,
+            canPay: false,
+            isYou: false,
+          },
+          ...otherPlayers.map((p) => ({
+            id: p.id,
+            name: p.guest_name ?? "Guest",
+            status: p.status,
+            ghlBookingId: null,
+            canCancel: false,
+            canPay: false,
+            isYou: false,
+          })),
+        ];
+      })();
 
   return (
     <div
@@ -2881,62 +2923,41 @@ function BookingCard({
       style={{ borderColor: "rgba(0,38,105,0.08)" }}
     >
       {/* Main summary */}
-      <div className="px-4 pt-4 pb-3">
-        {/* Course label + overall status */}
-        <div className="flex items-center justify-between gap-2 mb-1">
-          <p
-            className="text-[11px] font-semibold uppercase tracking-wider truncate"
-            style={{ color: "rgba(0,38,105,0.4)" }}
-          >
-            {courseName}
-            {!iAmBooker && group.primary.booker_name && (
-              <span
-                className="normal-case tracking-normal ml-1.5 font-medium"
-                style={{ color: "var(--color-green-700)" }}
-              >
-                · invited by {group.primary.booker_name}
-              </span>
-            )}
-          </p>
-          <BookingStatusBadge status={group.primary.status} />
-        </div>
-
-        {/* Bold date */}
+      <div className="px-4 py-3">
+        {/* Course + invited-by */}
         <p
-          className="font-sans font-black text-xl leading-tight"
-          style={{ color: "var(--color-green-900)" }}
+          className="text-[10px] font-semibold uppercase tracking-wider truncate mb-1"
+          style={{ color: "rgba(0,38,105,0.35)" }}
         >
-          {format(bookingDate, "EEE, MMM d")}
+          {courseName}
+          {!iAmBooker && group.primary.booker_name && (
+            <span className="normal-case tracking-normal ml-1.5 font-medium" style={{ color: "var(--color-green-700)" }}>
+              · invited by {group.primary.booker_name}
+            </span>
+          )}
         </p>
 
-        {/* Time + player toggle */}
-        <div className="flex items-center justify-between gap-2 mt-0.5">
-          <p className="text-xs" style={{ color: "rgba(0,38,105,0.45)" }}>
-            {bookingTime}
+        {/* Date · time · player toggle — all on one line */}
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-semibold" style={{ color: "var(--color-green-900)" }}>
+            {format(bookingDate, "EEE, MMM d")}
+            <span className="font-normal ml-1.5" style={{ color: "rgba(0,38,105,0.45)" }}>
+              · {bookingTime}
+            </span>
           </p>
           {canExpand && (
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
-              className="flex items-center gap-1 text-xs font-semibold"
-              style={{ color: "var(--color-green-900)" }}
+              className="flex items-center gap-1 text-xs font-medium flex-shrink-0"
+              style={{ color: "rgba(0,38,105,0.45)" }}
             >
-              {totalPlayers} {totalPlayers === 1 ? "player" : "players"}
+              {totalPlayers}p
               <svg
-                className={cn(
-                  "w-3 h-3 transition-transform duration-200",
-                  expanded ? "rotate-180" : "",
-                )}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2.5}
+                className={cn("w-3 h-3 transition-transform duration-200", expanded ? "rotate-180" : "")}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M19.5 8.25l-7.5 7.5-7.5-7.5"
-                />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
               </svg>
             </button>
           )}
@@ -2950,79 +2971,46 @@ function BookingCard({
           style={{ borderColor: "rgba(0,38,105,0.06)" }}
         >
           {allRows.map((row, idx) => {
-            const parts = row.name.split(/\s+/).filter(Boolean);
-            const initials = parts
-              .slice(0, 2)
-              .map((s) => s[0])
-              .join("")
-              .toUpperCase();
-            const canPay = row.status === "availability_confirmed";
-
+            const canPay = row.canPay;
             return (
               <div
                 key={row.id}
-                className="flex items-center gap-3 px-4 py-3"
-                style={{
-                  borderTop:
-                    idx === 0 ? "none" : "1px solid rgba(0,38,105,0.04)",
-                }}
+                className="flex items-center gap-2.5 px-4 py-2.5"
+                style={{ borderTop: idx === 0 ? "none" : "1px solid rgba(0,38,105,0.04)" }}
               >
-                {/* Avatar */}
-                <div
-                  className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
-                  style={{
-                    background: "rgba(133,187,101,0.15)",
-                    color: "var(--color-green-700)",
-                  }}
-                >
-                  {initials}
-                </div>
-
                 {/* Name */}
                 <span
-                  className="flex-1 text-sm font-medium truncate capitalize min-w-0"
+                  className="flex-1 text-xs font-medium truncate capitalize min-w-0"
                   style={{ color: "var(--color-green-900)" }}
                 >
                   {row.name}
                 </span>
 
-                {/* Status */}
-                <BookingStatusBadge status={row.status} />
-
-                {/* Pay */}
+                {/* Status badge or Pay CTA */}
+                {!canPay && <BookingStatusBadge status={row.status} />}
                 {canPay && (
                   <a
                     href={BOOKING_PAYMENT_URL}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
-                    style={{
-                      background: "rgba(146,100,10,0.1)",
-                      color: "#92640a",
-                    }}
+                    style={{ background: "rgba(146,100,10,0.1)", color: "#92640a" }}
                   >
                     Pay →
                   </a>
                 )}
 
-                {/* Cancel per-player */}
+                {/* Cancel */}
                 {row.canCancel && (
                   <button
                     type="button"
-                    onClick={() =>
-                      onCancel({
-                        bookingDateTime: localDt.toISOString(),
-                        title: row.isYou
-                          ? "Cancel my booking"
-                          : `Cancel ${row.name}'s booking`,
-                        ghlBookingId: row.ghlBookingId,
-                      })
-                    }
+                    onClick={() => onCancel({
+                      bookingDateTime: localDt.toISOString(),
+                      title: row.isYou ? "Cancel my booking" : `Cancel ${row.name}'s booking`,
+                      ghlBookingId: row.ghlBookingId,
+                    })}
                     className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
-                    style={{
-                      color: "rgba(220,38,38,0.65)",
-                      background: "rgba(220,38,38,0.06)",
-                    }}
+                    style={{ color: "rgba(220,38,38,0.65)", background: "rgba(220,38,38,0.06)" }}
                   >
                     Cancel
                   </button>
@@ -3047,6 +3035,7 @@ function EventSelectionScreen({
   const [events, setEvents] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [showCreateFeed, setShowCreateFeed] = useState(false);
 
   useEffect(() => {
     fetch("/api/courses")
@@ -3079,11 +3068,26 @@ function EventSelectionScreen({
 
   if (events.length === 0) {
     return (
-      <EmptyState
-        icon="⛳"
-        title="No events available"
-        description="No events are currently available for your membership. Check back soon."
-      />
+      <div className="px-5 md:px-8 pt-5">
+        <EmptyState
+          icon="⛳"
+          title="No courses available"
+          description="There are no active courses linked to your membership right now."
+          action={
+            <button
+              type="button"
+              onClick={() => setShowCreateFeed(true)}
+              className="text-sm font-semibold underline underline-offset-2"
+              style={{ color: "var(--color-green-700)" }}
+            >
+              Click here to create a feed
+            </button>
+          }
+        />
+        {showCreateFeed && (
+          <CreateFeedDialog onClose={() => setShowCreateFeed(false)} />
+        )}
+      </div>
     );
   }
 
@@ -3196,6 +3200,106 @@ function EventSelectionScreen({
       </div>
     </div>
   );
+}
+
+// ---- Create Feed Dialog ------------------------------------
+
+function CreateFeedDialog({ onClose }: { onClose: () => void }) {
+  const [feedName, setFeedName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [err, setErr] = useState("");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => { setMounted(true) }, []);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const name = feedName.trim();
+    if (!name) { setErr("Please enter a name for the feed."); return; }
+    setSubmitting(true);
+    setErr("");
+    try {
+      await fetch("/api/focus-linkups/subscriptions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ industry_focus: name, custom_label: name }),
+      });
+      setSubmitted(true);
+    } catch {
+      setErr("Something went wrong. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const dialog = (
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4">
+      {/* Backdrop */}
+      <button
+        type="button"
+        aria-label="Close"
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+      />
+
+      {/* Sheet */}
+      <div className="relative bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl px-6 pt-6 pb-8 shadow-2xl">
+        {/* Drag handle — mobile only */}
+        <div className="flex justify-center mb-5 sm:hidden">
+          <div className="w-10 h-1 rounded-full" style={{ background: "rgba(0,38,105,0.12)" }} />
+        </div>
+
+        {submitted ? (
+          <div className="text-center py-4">
+            <p className="text-3xl mb-3">✅</p>
+            <p className="font-sans font-black text-lg mb-2" style={{ color: "var(--color-green-900)" }}>
+              Feed requested!
+            </p>
+            <p className="text-sm mb-6" style={{ color: "rgba(0,38,105,0.5)" }}>
+              Our team will review your request and get in touch.
+            </p>
+            <button type="button" onClick={onClose} className="btn btn-primary">Done</button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} noValidate>
+            <h2 className="font-sans font-black text-xl mb-1" style={{ color: "var(--color-green-900)" }}>
+              Create New Feed
+            </h2>
+            <p className="text-sm mb-5" style={{ color: "rgba(0,38,105,0.5)" }}>
+              Request a new course or event feed. Our team will review and activate it for your membership.
+            </p>
+
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: "rgba(0,38,105,0.55)" }}>
+              Feed name
+            </label>
+            <input
+              autoFocus
+              className="input w-full text-sm mb-1.5"
+              placeholder="e.g. Weekend Scramble, Corporate Golf Series…"
+              value={feedName}
+              onChange={e => { setFeedName(e.target.value); setErr(""); }}
+              disabled={submitting}
+            />
+            {err && <p className="text-xs text-red-500 mb-3">{err}</p>}
+
+            <div className="flex gap-3 mt-5">
+              <button type="button" onClick={onClose} className="btn btn-outline flex-1 justify-center" disabled={submitting}>
+                Cancel
+              </button>
+              <button type="submit" disabled={submitting || !feedName.trim()} className="btn btn-primary flex-1 justify-center disabled:opacity-50">
+                {submitting ? "Requesting…" : "Request feed"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+
+  // Portal to document.body so fixed positioning is never clipped by a parent stacking context
+  if (!mounted) return null;
+  return createPortal(dialog, document.body);
 }
 
 // ---- Shared -----------------------------------------------

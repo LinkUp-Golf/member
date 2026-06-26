@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { AdminPageHeader, StatCard } from '@/components/admin/AdminUI'
-import { format, startOfMonth, endOfMonth, subMonths, isToday } from 'date-fns'
+import { format, addDays, subDays, isToday } from 'date-fns'
 import { formatTeeTime } from '@/lib/utils'
 import { GOLF_ROUND_DURATION_MINUTES } from '@/lib/constants'
 
@@ -134,23 +134,24 @@ function SlotCard({
       {/* Slot header — always visible, clickable to toggle */}
       <button
         type="button"
-        className="w-full px-5 py-3 text-left flex items-center justify-between gap-3 hover:bg-gray-50 transition-colors"
+        className="w-full px-4 py-3 text-left flex items-center justify-between gap-2 hover:bg-gray-50 transition-colors"
         onClick={() => onToggle(slot.key)}
       >
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           <svg
             className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
             fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
           </svg>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
+            {/* Time + course + attention — first line */}
             <div className="flex items-center gap-2 flex-wrap">
-              <p className="text-sm font-semibold text-gray-800">
+              <p className="text-sm font-semibold text-gray-800 whitespace-nowrap">
                 {formatTeeTime(slot.tee_time)} – {slotEndTime(slot.tee_time)}
               </p>
               {showCourseName && slot.rows[0]?.course?.name && (
-                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-purple-50 text-purple-700">
+                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 whitespace-nowrap">
                   {slot.rows[0].course.name}
                 </span>
               )}
@@ -158,14 +159,14 @@ function SlotCard({
                 <span className="w-1.5 h-1.5 rounded-full bg-orange-400 flex-shrink-0" title="Needs attention" />
               )}
             </div>
-            {/* Status dots */}
-            <div className="flex items-center gap-1.5 mt-1">
+            {/* Status chips — scrollable on mobile */}
+            <div className="flex items-center gap-1 mt-1 overflow-x-auto pb-0.5 hide-scrollbar">
               {Object.entries(statusBreakdown).map(([status, count]) => {
                 const meta = STATUS_META[status as BookingStatus]
                 return (
-                  <span key={status} className={`flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${meta.colour}`}>
+                  <span key={status} className={`flex-shrink-0 flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${meta.colour}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
-                    {count} {meta.label}
+                    {count} <span className="hidden sm:inline">{meta.label}</span>
                   </span>
                 )
               })}
@@ -173,11 +174,10 @@ function SlotCard({
           </div>
         </div>
 
-        <div className="flex items-center gap-4 flex-shrink-0">
-          <div className="text-right">
-            <p className="text-xs font-semibold text-green-700">${totalAmount.toFixed(0)}</p>
-            <p className="text-[10px] text-gray-400">{slot.rows.length} player{slot.rows.length !== 1 ? 's' : ''}</p>
-          </div>
+        {/* Amount + count — always visible */}
+        <div className="flex-shrink-0 text-right">
+          <p className="text-xs font-semibold text-green-700">${totalAmount.toFixed(0)}</p>
+          <p className="text-[10px] text-gray-400">{slot.rows.length}p</p>
         </div>
       </button>
 
@@ -188,69 +188,72 @@ function SlotCard({
             const info = playerInfo(b)
             const sm = STATUS_META[b.status] ?? STATUS_META.tentative
             return (
-              <div key={b.id} className="px-5 py-4 flex items-start gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-medium text-gray-800">{info.name}</p>
-                    {info.badge && (
-                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">
-                        {info.badge}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-400 mt-0.5 truncate">{info.sub}</p>
-
-                  {editingNote === b.id ? (
-                    <div className="mt-2 flex flex-col gap-1.5" onClick={e => e.stopPropagation()} role="presentation">
-                      <textarea
-                        ref={noteRef}
-                        rows={2}
-                        value={noteValues[b.id] ?? ''}
-                        onChange={e => onNoteChange(b.id, e.target.value)}
-                        className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-green-900/20"
-                      />
-                      <div className="flex gap-1.5">
-                        <button onClick={() => onSaveNote(b.id)} disabled={savingNote === b.id}
-                          className="text-xs px-2.5 py-1 rounded-lg bg-green-900 text-white disabled:opacity-50">
-                          {savingNote === b.id ? 'Saving…' : 'Save'}
-                        </button>
-                        <button onClick={() => onEditNote(null)} className="text-xs px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600">
-                          Cancel
-                        </button>
-                      </div>
+              <div key={b.id} className="px-4 py-3">
+                {/* Top: name + status (side by side) */}
+                <div className="flex items-start justify-between gap-2 mb-1.5">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="text-sm font-medium text-gray-800 truncate">{info.name}</p>
+                      {info.badge && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 flex-shrink-0">
+                          {info.badge}
+                        </span>
+                      )}
                     </div>
-                  ) : (
-                    <button onClick={() => onEditNote(b.id)}
-                      className="mt-1.5 text-xs text-left text-gray-400 hover:text-gray-600 transition-colors italic">
-                      {b.admin_notes ?? 'Add note…'}
-                    </button>
-                  )}
+                    <p className="text-xs text-gray-400 mt-0.5 truncate">{info.sub}</p>
+                  </div>
+
+                  {/* Status + dinner — stacked, right-aligned */}
+                  <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                    <select
+                      value={b.status}
+                      disabled={updatingStatus === b.id}
+                      onChange={e => onUpdateStatus(b.id, e.target.value as BookingStatus)}
+                      className={`text-xs font-semibold rounded-lg px-2 py-1 border border-transparent outline-none cursor-pointer disabled:opacity-50 transition-colors max-w-[140px] sm:max-w-none ${sm.colour}`}
+                    >
+                      {ALL_STATUSES.map(s => (
+                        <option key={s} value={s}>{STATUS_META[s].label}</option>
+                      ))}
+                    </select>
+
+                    {b.dinner_rsvp ? (
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${
+                        b.dinner_rsvp === 'yes'   ? 'bg-green-50 text-green-600' :
+                        b.dinner_rsvp === 'maybe' ? 'bg-yellow-50 text-yellow-600' :
+                                                    'bg-gray-100 text-gray-400'
+                      }`}>
+                        🍽 {b.dinner_rsvp === 'yes' ? 'Yes' : b.dinner_rsvp === 'no' ? 'No' : 'Maybe'}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
 
-                <div className="flex flex-col items-end gap-2 flex-shrink-0 pt-0.5">
-                  <select
-                    value={b.status}
-                    disabled={updatingStatus === b.id}
-                    onChange={e => onUpdateStatus(b.id, e.target.value as BookingStatus)}
-                    className={`text-xs font-semibold rounded-lg px-2.5 py-1 border border-transparent outline-none cursor-pointer disabled:opacity-50 transition-colors ${sm.colour}`}
-                  >
-                    {ALL_STATUSES.map(s => (
-                      <option key={s} value={s}>{STATUS_META[s].label}</option>
-                    ))}
-                  </select>
-
-                  {b.dinner_rsvp ? (
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                      b.dinner_rsvp === 'yes'   ? 'bg-green-50 text-green-600' :
-                      b.dinner_rsvp === 'maybe' ? 'bg-yellow-50 text-yellow-600' :
-                                                  'bg-gray-100 text-gray-400'
-                    }`}>
-                      🍽 {b.dinner_rsvp === 'yes' ? 'Yes' : b.dinner_rsvp === 'no' ? 'No' : 'Maybe'}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-gray-300">No dinner RSVP</span>
-                  )}
-                </div>
+                {/* Note — full width below */}
+                {editingNote === b.id ? (
+                  <div className="flex flex-col gap-1.5 mt-1" onClick={e => e.stopPropagation()} role="presentation">
+                    <textarea
+                      ref={noteRef}
+                      rows={2}
+                      value={noteValues[b.id] ?? ''}
+                      onChange={e => onNoteChange(b.id, e.target.value)}
+                      className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-green-900/20"
+                    />
+                    <div className="flex gap-1.5">
+                      <button onClick={() => onSaveNote(b.id)} disabled={savingNote === b.id}
+                        className="text-xs px-2.5 py-1 rounded-lg bg-green-900 text-white disabled:opacity-50">
+                        {savingNote === b.id ? 'Saving…' : 'Save'}
+                      </button>
+                      <button onClick={() => onEditNote(null)} className="text-xs px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => onEditNote(b.id)}
+                    className="text-xs text-left text-gray-400 hover:text-gray-600 transition-colors italic">
+                    {b.admin_notes ?? 'Add note…'}
+                  </button>
+                )}
               </div>
             )
           })}
@@ -268,7 +271,7 @@ export default function AdminBookingsPage() {
 
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [month, setMonth] = useState(new Date())
+  const [view, setView] = useState<'upcoming' | 'past'>('upcoming')
   const [courseList, setCourseList] = useState<{ id: string; name: string }[]>([])
   const [courseFilter, setCourseFilter] = useState<string>(urlCourseId)
 
@@ -286,8 +289,13 @@ export default function AdminBookingsPage() {
   const loadBookings = useCallback(async () => {
     setLoading(true)
     const supabase = createClient()
-    const monthStart = format(startOfMonth(month), 'yyyy-MM-dd')
-    const monthEnd   = format(endOfMonth(month),   'yyyy-MM-dd')
+    const today    = format(new Date(), 'yyyy-MM-dd')
+
+    // Upcoming: today → 365 days ahead (ascending)
+    // Past:     365 days ago → yesterday (descending — most recent first)
+    const isUpcoming  = view === 'upcoming'
+    const rangeStart  = isUpcoming ? today            : format(subDays(new Date(), 365), 'yyyy-MM-dd')
+    const rangeEnd    = isUpcoming ? format(addDays(new Date(), 365), 'yyyy-MM-dd') : format(subDays(new Date(), 1), 'yyyy-MM-dd')
 
     const { data: courses } = await supabase
       .from('courses')
@@ -305,10 +313,10 @@ export default function AdminBookingsPage() {
       .from('bookings')
       .select('id, booking_date, tee_time, players, guest_name, player_member_id, status, amount_charged, dinner_rsvp, admin_notes, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name)')
       .in('course_id', courseFilter === 'all' ? courseIds : [courseFilter])
-      .gte('booking_date', monthStart)
-      .lte('booking_date', monthEnd)
-      .order('booking_date', { ascending: true })
-      .order('tee_time',     { ascending: true })
+      .gte('booking_date', rangeStart)
+      .lte('booking_date', rangeEnd)
+      .order('booking_date', { ascending: isUpcoming })
+      .order('tee_time',     { ascending: isUpcoming })
 
     // Fallback without dinner_rsvp if column doesn't exist yet
     if (error?.message?.includes('dinner_rsvp')) {
@@ -316,10 +324,10 @@ export default function AdminBookingsPage() {
         .from('bookings')
         .select('id, booking_date, tee_time, players, guest_name, player_member_id, status, amount_charged, admin_notes, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name)')
         .in('course_id', courseFilter === 'all' ? courseIds : [courseFilter])
-        .gte('booking_date', monthStart)
-        .lte('booking_date', monthEnd)
-        .order('booking_date', { ascending: true })
-        .order('tee_time',     { ascending: true })
+        .gte('booking_date', rangeStart)
+        .lte('booking_date', rangeEnd)
+        .order('booking_date', { ascending: isUpcoming })
+        .order('tee_time',     { ascending: isUpcoming })
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data = fallback.data as any
       error = fallback.error
@@ -343,7 +351,7 @@ export default function AdminBookingsPage() {
     setNoteValues(initial)
     setExpandedSlots(new Set()) // collapse all on fresh load
     setLoading(false)
-  }, [month, courseFilter])
+  }, [view, courseFilter])
 
   useEffect(() => { loadBookings() }, [loadBookings])
   useEffect(() => { if (editingNote && noteRef.current) noteRef.current.focus() }, [editingNote])
@@ -424,7 +432,7 @@ export default function AdminBookingsPage() {
     })
     const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
-    const a = document.createElement('a'); a.href = url; a.download = `bookings-${format(month, 'yyyy-MM')}.csv`; a.click()
+    const a = document.createElement('a'); a.href = url; a.download = `bookings-${view}-${format(new Date(), 'yyyy-MM-dd')}.csv`; a.click()
     URL.revokeObjectURL(url)
   }
 
@@ -439,60 +447,72 @@ export default function AdminBookingsPage() {
 
   // ---- Render ---------------------------------------------------------
   return (
-    <div className="p-4 sm:p-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
+    <div className="p-4 sm:p-6">
+      {/* Header row: title + view toggle */}
+      <div className="flex items-start justify-between gap-3 mb-5">
         <AdminPageHeader
           title={courseFilter === 'all'
             ? 'All Bookings'
             : (courseList.find(c => c.id === courseFilter)?.name ?? 'Bookings')}
-          description={courseFilter === 'all'
-            ? `${format(month, 'MMMM yyyy')} · ${courseList.length} active course${courseList.length !== 1 ? 's' : ''}`
-            : format(month, 'MMMM yyyy')}
+          description={courseList.length > 0
+            ? `${courseList.length} active course${courseList.length !== 1 ? 's' : ''}`
+            : undefined}
         />
-        <div className="flex items-center gap-2">
-          <button onClick={() => setMonth(m => subMonths(m, 1))} className="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-gray-50">←</button>
-          <span className="text-sm font-medium text-gray-700 w-32 text-center">{format(month, 'MMMM yyyy')}</span>
-          <button onClick={() => setMonth(m => { const n = new Date(m); n.setMonth(m.getMonth() + 1); return n })}
-            disabled={month >= new Date()}
-            className="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40">→</button>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <StatCard label="Active bookings"   value={confirmed} sub="Confirmed or avail. confirmed" colour="green" />
-        <StatCard label="Pending"           value={tentative} sub="Tentative or awaiting approval" colour="blue" />
-        <StatCard label="Revenue"           value={`$${revenue.toLocaleString()}`} sub="Confirmed + payment confirmed" colour="green" />
-        <StatCard label="Needs attention"   value={attention} sub="Awaiting admin approval" colour={attention > 0 ? 'red' : 'gray'} />
-      </div>
-
-      {/* Filter bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-5">
-        <input
-          type="text" placeholder="Search player name or email…" value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="w-full sm:flex-1 sm:max-w-xs px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
-        />
-        <div className="flex gap-1.5 flex-wrap">
-          {STATUS_FILTERS.map(s => (
-            <button key={s} onClick={() => setStatusFilter(s)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${statusFilter === s ? 'bg-green-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-              {s === 'all' ? 'All' : (STATUS_META[s as BookingStatus]?.label ?? s)}
+        {/* Upcoming / Past toggle — compact on mobile */}
+        <div className="flex p-0.5 rounded-xl flex-shrink-0 self-start" style={{ background: 'rgba(0,38,105,0.06)' }}>
+          {(['upcoming', 'past'] as const).map(v => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold rounded-[10px] transition-all"
+              style={view === v
+                ? { background: 'white', color: 'var(--color-green-900)', boxShadow: '0 1px 3px rgba(0,38,105,0.1)' }
+                : { color: 'rgba(0,38,105,0.45)' }}
+            >
+              {v === 'upcoming' ? 'Upcoming' : 'Past'}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2 sm:ml-auto">
+      </div>
+
+      {/* Stats — 2 cols mobile, 4 cols desktop */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 mb-5">
+        <StatCard label="Active"        value={confirmed} sub="Confirmed / avail. confirmed" colour="green" />
+        <StatCard label="Pending"       value={tentative} sub="Tentative / awaiting approval" colour="blue" />
+        <StatCard label="Revenue"       value={`$${revenue.toLocaleString()}`} sub="Confirmed + payment" colour="green" />
+        <StatCard label="Attention"     value={attention} sub="Awaiting admin approval" colour={attention > 0 ? 'red' : 'gray'} />
+      </div>
+
+      {/* Filter bar */}
+      <div className="space-y-2 mb-5">
+        {/* Row 1: search + actions */}
+        <div className="flex items-center gap-2">
+          <input
+            type="text" placeholder="Search player…" value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="flex-1 min-w-0 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
+          />
           {allSlots.length > 0 && (
-            <>
-              <button onClick={expandAll} className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1">Expand all</button>
-              <button onClick={collapseAll} className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1">Collapse</button>
-            </>
+            <div className="hidden sm:flex items-center gap-1">
+              <button onClick={expandAll}  className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-50">Expand all</button>
+              <button onClick={collapseAll} className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-50">Collapse</button>
+            </div>
           )}
           <button onClick={exportCSV} disabled={filtered.length === 0}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors">
-            ↓ CSV
+            className="flex-shrink-0 flex items-center gap-1 px-3 py-2 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors">
+            ↓ <span className="hidden sm:inline">CSV</span>
           </button>
+        </div>
+
+        {/* Row 2: status filters — horizontal scroll on mobile */}
+        <div className="flex gap-1.5 overflow-x-auto pb-1 hide-scrollbar">
+          {STATUS_FILTERS.map(s => (
+            <button key={s} onClick={() => setStatusFilter(s)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${statusFilter === s ? 'bg-green-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              {s === 'all' ? 'All' : (STATUS_META[s as BookingStatus]?.label ?? s)}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -505,7 +525,7 @@ export default function AdminBookingsPage() {
         <div className="text-center py-20">
           <p className="text-3xl mb-3">📅</p>
           <p className="text-sm font-semibold text-gray-600">No bookings match</p>
-          <p className="text-xs text-gray-400 mt-1">Try adjusting the filters or changing the month.</p>
+          <p className="text-xs text-gray-400 mt-1">Try adjusting the filters or switching between Upcoming / Past.</p>
         </div>
       ) : byCourse ? (
         /* All-courses view: grouped by course → date → slot */
@@ -519,9 +539,9 @@ export default function AdminBookingsPage() {
             return (
               <div key={course.id}>
                 {/* Course section header */}
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="h-px flex-1 bg-gray-100" />
-                  <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="h-px flex-1 bg-gray-100 hidden sm:block" />
+                  <div className="flex items-center gap-2 flex-wrap">
                     <h2 className="text-sm font-bold text-gray-700">⛳ {course.name}</h2>
                     <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
                       {cb.filter(b => b.status !== 'cancelled').length} active
@@ -550,7 +570,7 @@ export default function AdminBookingsPage() {
 
       {!loading && filtered.length > 0 && (
         <p className="text-xs text-gray-400 mt-5 text-right">
-          {filtered.length} player{filtered.length !== 1 ? 's' : ''} · {allSlots.length} tee slot{allSlots.length !== 1 ? 's' : ''} · {format(month, 'MMMM yyyy')}
+          {filtered.length} player{filtered.length !== 1 ? 's' : ''} · {allSlots.length} tee slot{allSlots.length !== 1 ? 's' : ''} · {view === 'upcoming' ? 'upcoming' : 'past'}
         </p>
       )}
     </div>
@@ -568,65 +588,38 @@ function DateGroupedSlots({
   showCourseName: boolean
   slotProps: Omit<Parameters<typeof SlotCard>[0], 'slot' | 'showCourseName'>
 }) {
-  const today = format(new Date(), 'yyyy-MM-dd')
-  const past = dateGroups.filter(g => g.date < today)
-  const upcoming = dateGroups.filter(g => g.date >= today)
-
-  function Section({ groups, label }: { groups: DateGroup[]; label?: string }) {
-    if (groups.length === 0) return null
-    return (
-      <div>
-        {label && (
-          <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-3">{label}</p>
-        )}
-        <div className="space-y-4">
-          {groups.map(dg => (
-            <div key={dg.date}>
-              {/* Date header */}
-              <div className="flex items-center gap-2 mb-2">
-                <div
-                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full"
-                  style={dg.isToday
-                    ? { background: 'var(--color-green-900)', color: 'white' }
-                    : { background: 'rgba(0,38,105,0.05)', color: 'rgba(0,38,105,0.6)' }
-                  }
-                >
-                  {dg.isToday && <span className="w-1.5 h-1.5 rounded-full bg-green-400" />}
-                  {dg.label}
-                  {dg.isToday && <span className="ml-0.5 font-bold">— Today</span>}
-                </div>
-                <div className="h-px flex-1 bg-gray-100" />
-                <span className="text-[10px] text-gray-400">
-                  {dg.slots.reduce((s, sl) => s + sl.rows.length, 0)} player{dg.slots.reduce((s, sl) => s + sl.rows.length, 0) !== 1 ? 's' : ''}
-                </span>
-              </div>
-
-              {/* Slots for this date */}
-              <div className="space-y-2 pl-1">
-                {dg.slots.map(slot => (
-                  <SlotCard key={slot.key} slot={slot} showCourseName={showCourseName} {...slotProps} />
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
+  if (dateGroups.length === 0) return null
   return (
-    <div className="space-y-8">
-      <Section groups={upcoming} label={past.length > 0 ? 'Upcoming' : undefined} />
-      {past.length > 0 && (
-        <details>
-          <summary className="cursor-pointer text-xs font-medium text-gray-400 hover:text-gray-600 select-none flex items-center gap-2">
-            <span>Past bookings ({past.reduce((s, g) => s + g.slots.reduce((ss, sl) => ss + sl.rows.length, 0), 0)} players)</span>
-          </summary>
-          <div className="mt-4">
-            <Section groups={past} />
+    <div className="space-y-4">
+      {dateGroups.map(dg => (
+        <div key={dg.date}>
+          {/* Date header */}
+          <div className="flex items-center gap-2 mb-2">
+            <div
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full"
+              style={dg.isToday
+                ? { background: 'var(--color-green-900)', color: 'white' }
+                : { background: 'rgba(0,38,105,0.05)', color: 'rgba(0,38,105,0.6)' }
+              }
+            >
+              {dg.isToday && <span className="w-1.5 h-1.5 rounded-full bg-green-400" />}
+              {dg.label}
+              {dg.isToday && <span className="ml-0.5 font-bold">— Today</span>}
+            </div>
+            <div className="h-px flex-1 bg-gray-100" />
+            <span className="text-[10px] text-gray-400">
+              {dg.slots.reduce((s, sl) => s + sl.rows.length, 0)} player{dg.slots.reduce((s, sl) => s + sl.rows.length, 0) !== 1 ? 's' : ''}
+            </span>
           </div>
-        </details>
-      )}
+
+          {/* Slots for this date */}
+          <div className="space-y-2 pl-1">
+            {dg.slots.map(slot => (
+              <SlotCard key={slot.key} slot={slot} showCourseName={showCourseName} {...slotProps} />
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
