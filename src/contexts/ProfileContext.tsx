@@ -40,7 +40,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         const supabase = createClient()
         const { data, error: dbError } = await supabase
           .from('members')
-          .select('*, profile:member_profiles(*), home_course:courses(*)')
+          .select('*, profile:member_profiles(*), home_course:courses!members_home_course_id_fkey(*)')
           .eq('id', user.id)
           .single()
 
