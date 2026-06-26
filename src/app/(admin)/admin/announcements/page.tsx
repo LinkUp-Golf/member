@@ -288,9 +288,9 @@ export default function AdminAnnouncementsPage() {
             <AdminTd>
               <div className="flex gap-1.5">
                 <AdminButton
-                  label={a.is_pinned ? "Unpin" : "Pin"}
+                  label={a.is_pinned ? "📌 Unpin" : "Pin"}
                   onClick={() => togglePin(a)}
-                  variant="ghost"
+                  variant={a.is_pinned ? "warning" : "ghost"}
                   size="sm"
                   disabled={!a.is_pinned && pinMaxed}
                 />

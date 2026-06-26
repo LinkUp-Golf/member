@@ -25,6 +25,7 @@ export default function MemberEventsPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [profileMemberId, setProfileMemberId] = useState<string | null>(null)
+  const [submitBanner, setSubmitBanner] = useState(false)
 
   useEffect(() => {
     if (user) loadEvents()
@@ -97,6 +98,16 @@ export default function MemberEventsPage() {
 
       {tab === 'browse' ? (
         <div className="px-5 py-4 pb-8">
+          {submitBanner && (
+            <div className="mb-4 rounded-2xl px-4 py-3 flex items-center gap-3" style={{ background: 'rgba(133,187,101,0.1)', border: '1px solid rgba(133,187,101,0.25)' }}>
+              <span className="text-lg">✅</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold" style={{ color: 'var(--color-green-900)' }}>Event submitted</p>
+                <p className="text-xs mt-0.5" style={{ color: 'rgba(0,38,105,0.5)' }}>Pending review — once approved it will appear on the community calendar.</p>
+              </div>
+              <button type="button" onClick={() => setSubmitBanner(false)} className="text-xs" style={{ color: 'rgba(0,38,105,0.3)' }}>✕</button>
+            </div>
+          )}
           {loading ? (
             <div className="space-y-3">{[1,2,3].map(i => <CardSkeleton key={i} lines={3} />)}</div>
           ) : events.length === 0 ? (
@@ -135,7 +146,12 @@ export default function MemberEventsPage() {
         </div>
       ) : (
         <SubmitEventForm
-          onSubmitted={() => { setTab('browse'); loadEvents() }}
+          onSubmitted={(newEvent) => {
+            setEvents(prev => [newEvent, ...prev])
+            setTab('browse')
+            setSubmitBanner(true)
+            setTimeout(() => setSubmitBanner(false), 5000)
+          }}
         />
       )}
     </AppShell>
@@ -440,10 +456,9 @@ interface EventFormValues {
 function SubmitEventForm({
   onSubmitted,
 }: {
-  onSubmitted: () => void
+  onSubmitted: (newEvent: MemberEvent) => void
 }) {
   const todayStr = new Date().toISOString().split('T')[0]!
-  const [submitted, setSubmitted] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
 
   const {
@@ -463,7 +478,7 @@ function SubmitEventForm({
 
   async function onValid(values: EventFormValues) {
     setServerError(null)
-    const res = await apiClient.post<{ error?: string }>('/api/events', {
+    const res = await apiClient.post<MemberEvent>('/api/events', {
       title:        values.title.trim(),
       description:  values.description.trim(),
       event_date:   values.event_date,
@@ -477,22 +492,7 @@ function SubmitEventForm({
       setServerError(typeof res.error === 'string' ? res.error : 'Something went wrong. Please try again.')
       return
     }
-    setSubmitted(true)
-  }
-
-  if (submitted) {
-    return (
-      <div className="px-5 py-16 text-center">
-        <p className="text-4xl mb-4">✅</p>
-        <p className="font-sans font-black text-xl text-green-900 mb-2">Event submitted</p>
-        <p className="text-sm text-green-900/55 mb-6 leading-relaxed">
-          Your event is pending review. Once approved, it will appear on the community calendar.
-        </p>
-        <button onClick={onSubmitted} className="btn btn-primary">
-          Back to events
-        </button>
-      </div>
-    )
+    if (res.data) onSubmitted(res.data)
   }
 
   return (

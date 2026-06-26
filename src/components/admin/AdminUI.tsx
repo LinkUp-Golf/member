@@ -183,7 +183,7 @@ export function AdminButton({
 }: {
   label: string
   onClick?: () => void
-  variant?: 'primary' | 'danger' | 'ghost' | 'gold'
+  variant?: 'primary' | 'danger' | 'ghost' | 'gold' | 'warning'
   size?: 'sm' | 'md'
   disabled?: boolean
   type?: 'button' | 'submit'
@@ -193,6 +193,7 @@ export function AdminButton({
     danger:  'bg-red-50 text-red-600 hover:bg-red-100',
     ghost:   'bg-gray-100 text-gray-600 hover:bg-gray-200',
     gold:    'text-green-900 font-semibold hover:opacity-90',
+    warning: 'bg-amber-50 text-amber-700 hover:bg-amber-100',
   }
   const sizes = {
     sm: 'px-3 py-1.5 text-xs rounded-lg',
