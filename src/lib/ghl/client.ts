@@ -305,6 +305,74 @@ export async function getContactBookings(contactId: string): Promise<GHLCalendar
   }
 }
 
+// ---- Calendar management (raw fetch) ------------------------
+
+export async function createGHLCalendar(params: {
+  name: string
+  slug: string
+  eventTitle: string
+  eventColor: string
+  meetingIntervalMins: number
+  meetingDurationMins: number
+  minSchedulingNoticeMins: number
+  dateRangeDays: number
+  preBufferMins: number
+  postBufferMins: number
+  seatsPerClass?: number | null
+}): Promise<string> {
+  const data = await ghlFetch<{ calendar?: { id: string }; id?: string }>('/calendars/', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: params.name,
+      calendarType: 'class_booking',
+      groupId: GHL_CALENDAR_PROVIDER_ID,
+      slug: params.slug,
+      eventTitle: params.eventTitle,
+      eventColor: params.eventColor,
+      locationId: GHL_LOCATION_ID,
+      isActive: true,
+      slotInterval: params.meetingIntervalMins,
+      slotDuration: params.meetingDurationMins,
+      preBuffer: params.preBufferMins,
+      slotBuffer: params.postBufferMins,
+      ...(params.seatsPerClass != null ? { appoinmentPerSlot: params.seatsPerClass } : {}),
+      allowBookingAfter: params.minSchedulingNoticeMins,
+      allowBookingFor: params.dateRangeDays,
+    }),
+  })
+  const id = (data.calendar?.id ?? (data as { id?: string }).id) ?? ''
+  if (!id) throw new GHLError('createGHLCalendar returned no id', ErrorCode.GHL_UNAVAILABLE)
+  return id
+}
+
+export async function createCalendarGroup(params: {
+  name: string
+  slug: string
+  description?: string | null
+}): Promise<string> {
+  const data = await ghlFetch<{ group?: { id: string } }>('/calendars/groups', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: params.name,
+      slug: params.slug,
+      locationId: GHL_LOCATION_ID,
+      ...(params.description ? { description: params.description } : {}),
+    }),
+  })
+  const id = data.group?.id ?? ''
+  if (!id) throw new GHLError('createCalendarGroup returned no id', ErrorCode.GHL_UNAVAILABLE)
+  return id
+}
+
+export async function deleteGHLCalendar(calendarId: string): Promise<boolean> {
+  try {
+    await ghlFetch(`/calendars/${calendarId}`, { method: 'DELETE' })
+    return true
+  } catch {
+    return false
+  }
+}
+
 // ---- Payments (raw fetch — SDK payment API differs) ---------
 
 export async function chargeForBooking(params: {
@@ -401,6 +469,65 @@ export async function updateOpportunityStage(
   } catch (err) {
     logger.warn('updateOpportunityStage failed', { action: 'ghl_opportunity_update', errorMessage: String(err) })
     return false
+  }
+}
+
+// ---- Tags list (for admin UI multi-select) ------------------
+
+export async function listLocationTags(): Promise<{ id: string; name: string }[]> {
+  try {
+    const data = await ghlFetch<{ tags?: { id: string; name: string }[] }>(
+      `/locations/${GHL_LOCATION_ID}/tags`
+    )
+    return data.tags ?? []
+  } catch {
+    return []
+  }
+}
+
+// ---- Calendar list (for admin UI calendar selector) ---------
+
+export interface GHLCalendarSummary {
+  id: string
+  name: string
+  calendarType: string
+  slug: string | null
+  groupId: string | null
+  // Booking settings returned by GHL on the calendar object
+  slotInterval: number | null
+  slotDuration: number | null
+  preBuffer: number | null
+  slotBuffer: number | null
+  appoinmentPerSlot: number | null
+  allowBookingAfter: number | null
+  allowBookingFor: number | null
+}
+
+export async function listCalendars(): Promise<GHLCalendarSummary[]> {
+  try {
+    // Fetch all calendars for this location then also try the groups endpoint
+    // to ensure we get every calendar including those in groups.
+    const [calsData, groupsData] = await Promise.allSettled([
+      ghlFetch<{ calendars?: GHLCalendarSummary[] }>(`/calendars/?locationId=${GHL_LOCATION_ID}`),
+      ghlFetch<{ groups?: { id: string; calendars?: GHLCalendarSummary[] }[] }>(
+        `/calendars/groups?locationId=${GHL_LOCATION_ID}`
+      ),
+    ])
+
+    const cals: GHLCalendarSummary[] = calsData.status === 'fulfilled' ? (calsData.value.calendars ?? []) : []
+
+    // Merge in any calendars found in groups that aren't in the main list
+    if (groupsData.status === 'fulfilled') {
+      for (const group of groupsData.value.groups ?? []) {
+        for (const cal of group.calendars ?? []) {
+          if (!cals.find(c => c.id === cal.id)) cals.push({ ...cal, groupId: group.id })
+        }
+      }
+    }
+
+    return cals
+  } catch {
+    return []
   }
 }
 

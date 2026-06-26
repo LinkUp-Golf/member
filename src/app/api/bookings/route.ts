@@ -18,7 +18,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
   let query = supabase
     .from('bookings')
-    .select('*')
+    .select('*, course:courses!bookings_course_id_fkey(name, city, state)')
     .or(`member_id.eq.${ctx.userId},player_member_id.eq.${ctx.userId}`)
     .order('booking_date', { ascending: true })
 

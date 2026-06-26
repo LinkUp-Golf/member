@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase'
 import { AdminPageHeader, AdminTable, AdminTr, AdminTd, AdminButton } from '@/components/admin/AdminUI'
-import { bookingToLocalDate, formatRelativeTime } from '@/lib/utils'
+import { formatTeeTime, formatRelativeTime } from '@/lib/utils'
 import { format } from 'date-fns'
 import type { AdditionalPlayer } from '@/types'
 
@@ -129,8 +129,8 @@ export default function AdminBookingRequestsPage() {
               </AdminTd>
               <AdminTd>
                 <p className="text-xs text-gray-600">
-                  {format(bookingToLocalDate(r.booking_date, r.tee_time), 'EEEE, MMMM d')}<br />
-                  {format(bookingToLocalDate(r.booking_date, r.tee_time), 'h:mm a')}
+                  {format(new Date(`${r.booking_date}T12:00:00`), 'EEEE, MMMM d')}<br />
+                  {formatTeeTime(r.tee_time)}
                 </p>
               </AdminTd>
               <AdminTd>

@@ -1,13 +1,11 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { createPortal } from "react-dom";
 import { useForm, useFieldArray } from "react-hook-form";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
 import AppShell from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/Loading";
-import MemberProfileSheet from "@/components/ui/MemberProfileSheet";
 import EmptyState from "@/components/ui/EmptyState";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
@@ -28,14 +26,15 @@ import type {
   GHLBookingSlot,
   AdditionalPlayer,
   MemberWithProfile,
+  Course,
 } from "@/types";
 import {
   BOOKING_PRICE_USD,
   POLICY_TIERS,
   GOLF_ROUND_DURATION_MINUTES,
   AVIARA_TIMEZONE,
-  BOOKING_PAYMENT_URL,
   GHL_CANCEL_BOOKING_URL,
+  BOOKING_PAYMENT_URL,
 } from "@/lib/constants";
 import { validateEmail } from "@/lib/validation";
 
@@ -146,6 +145,9 @@ export default function BookPage() {
   );
   const [selectedSlot, setSelectedSlot] = useState<GHLBookingSlot | null>(null);
 
+  // Selected course (null = no course chosen yet)
+  const [selectedEvent, setSelectedEvent] = useState<Course | null>(null);
+
   // Booking flow
   const [step, setStep] = useState<Step>("select");
   const [submitting, setSubmitting] = useState(false);
@@ -156,6 +158,7 @@ export default function BookPage() {
     players: number;
     pendingNonMembers: number;
     bookingId: string | null;
+    eventName: string;
   } | null>(null);
 
   // My bookings tab
@@ -181,8 +184,9 @@ export default function BookPage() {
       return todayInThisMonth ? format(new Date(), "yyyy-MM-dd") : "";
     });
     try {
+      const eventParam = selectedEvent ? `&courseId=${selectedEvent.id}` : "";
       const res = await fetch(
-        `/api/bookings/create?month=${monthStr}&timezone=${encodeURIComponent(timezone)}`,
+        `/api/bookings/create?month=${monthStr}&timezone=${encodeURIComponent(timezone)}${eventParam}`,
       );
       const data = await res.json();
       setMonthSlots(data.slots ?? {});
@@ -190,7 +194,7 @@ export default function BookPage() {
       setMonthSlots({});
     }
     setLoadingMonth(false);
-  }, [currentMonth, timezone]);
+  }, [currentMonth, timezone, selectedEvent]);
 
   useEffect(() => {
     fetchMonthSlots();
@@ -261,6 +265,7 @@ export default function BookPage() {
         startTime: selectedSlot.startTime,
         players: 1 + additionalPlayers.length,
         additionalPlayers,
+        ...(selectedEvent ? { courseId: selectedEvent.id } : {}),
       }),
     });
 
@@ -275,6 +280,7 @@ export default function BookPage() {
             ? data.pendingNonMembers
             : additionalPlayers.filter((p) => p.isNonMember).length,
         bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
+        eventName: selectedEvent?.name ?? "Park Hyatt Aviara",
       });
       if (Array.isArray(data.bookings)) {
         setMyBookings((prev) => [...(data.bookings as Booking[]), ...prev]);
@@ -294,6 +300,7 @@ export default function BookPage() {
         onDone={() => {
           setStep("select");
           setSelectedSlot(null);
+          setSelectedEvent(null);
         }}
         onUpdateBooking={(bookingId, updates) =>
           setMyBookings((prev) =>
@@ -316,6 +323,7 @@ export default function BookPage() {
         onBack={() => setStep("select")}
         inviteMemberId={inviteMemberId}
         bookerEmail={user?.email ?? ""}
+        eventName={selectedEvent?.name ?? null}
       />
     );
   }
@@ -354,7 +362,7 @@ export default function BookPage() {
     : [];
 
   return (
-    <AppShell title="Book" description="Park Hyatt Aviara">
+    <AppShell title="Book" description={selectedEvent ? selectedEvent.name : "Select an event"}>
       {/* Tabs */}
       <div
         className="flex border-b bg-white"
@@ -381,7 +389,38 @@ export default function BookPage() {
       </div>
 
       {activeTab === "book" ? (
+        !selectedEvent ? (
+          <EventSelectionScreen onSelect={(ev) => {
+            setSelectedEvent(ev);
+            setSelectedSlot(null);
+            setMonthSlots({});
+          }} />
+        ) : (
         <div className="pb-8 md:max-w-2xl md:mx-auto">
+          {/* Selected event banner */}
+          <div
+            className="px-5 md:px-8 pt-3 pb-2 flex items-center justify-between"
+            style={{ borderBottom: '1px solid rgba(0,38,105,0.06)' }}
+          >
+            <div>
+              <p className="text-xs font-semibold" style={{ color: "var(--color-green-900)" }}>
+                {selectedEvent.name}
+              </p>
+              {(selectedEvent.city || selectedEvent.state) && (
+                <p className="text-[10px] mt-0.5" style={{ color: "rgba(0,38,105,0.4)" }}>
+                  {[selectedEvent.city, selectedEvent.state].filter(Boolean).join(", ")}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => { setSelectedEvent(null); setMonthSlots({}); setSelectedSlot(null); }}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium"
+              style={{ background: "rgba(0,38,105,0.06)", color: "rgba(0,38,105,0.55)" }}
+            >
+              Change
+            </button>
+          </div>
           {/* Timezone selector + view toggle */}
           <div className="px-5 md:px-8 pt-4 pb-1 flex items-center gap-2">
             <span
@@ -664,6 +703,7 @@ export default function BookPage() {
             Availability is confirmed by the team — payment link sent by email.
           </p>
         </div>
+        )
       ) : (
         <MyBookingsTab
           bookings={myBookings}
@@ -846,8 +886,8 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
   const initials =
     `${player.first_name[0] ?? ""}${player.last_name[0] ?? ""}`.toUpperCase();
   const avatarUrl = prof?.avatar_url ?? player.avatar_url;
-  const localDate = bookingToLocalDate(player.booking_date, player.tee_time);
-  const localTeeTime = `${String(localDate.getHours()).padStart(2, '0')}:${String(localDate.getMinutes()).padStart(2, '0')}:00`;
+  // tee_time is stored in course-local timezone; display it directly.
+  const localTeeTime = player.tee_time;
 
   return (
     <>
@@ -1374,6 +1414,7 @@ function ConfirmScreen({
   onBack,
   inviteMemberId,
   bookerEmail,
+  eventName,
 }: {
   slot: GHLBookingSlot;
   date: string;
@@ -1384,6 +1425,7 @@ function ConfirmScreen({
   onBack: () => void;
   inviteMemberId?: string | null;
   bookerEmail: string;
+  eventName?: string | null;
 }) {
   const maxAdditional = Math.max(0, (slot.spotsOpen ?? 1) - 1);
   const [collapsed, setCollapsed] = useState<boolean[]>([]);
@@ -1587,7 +1629,7 @@ function ConfirmScreen({
               className="text-xs uppercase tracking-widest mb-3"
               style={{ color: "rgba(0,38,105,0.35)", letterSpacing: "0.12em" }}
             >
-              Park Hyatt Aviara
+              {eventName ?? "Park Hyatt Aviara"}
             </p>
             <p
               className="font-sans font-black"
@@ -2189,7 +2231,7 @@ function SuccessScreen({
   onDone,
   onUpdateBooking,
 }: {
-  booking: { date: string; time: string; players: number; pendingNonMembers: number; bookingId: string | null };
+  booking: { date: string; time: string; players: number; pendingNonMembers: number; bookingId: string | null; eventName: string };
   onDone: () => void;
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
 }) {
@@ -2234,7 +2276,7 @@ function SuccessScreen({
         {booking.date} at {booking.time}
       </p>
       <p className="text-sm mb-1" style={{ color: "rgba(0,38,105,0.5)" }}>
-        Park Hyatt Aviara
+        {booking.eventName}
       </p>
       {booking.players > 1 && (
         <p className="text-sm mb-8" style={{ color: "rgba(0,38,105,0.45)" }}>
@@ -2682,58 +2724,30 @@ function MyBookingsTab({
   bookings,
   onRefresh: _onRefresh,
   onSwitchToBook: _onSwitchToBook,
-  onUpdateBooking,
+  onUpdateBooking: _onUpdateBooking,
 }: {
   bookings: Booking[];
   onRefresh: () => void;
   onSwitchToBook: () => void;
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
 }) {
-  const { user, profile } = useProfile();
-  const [openMenu, setOpenMenu] = useState<{
-    id: string;
-    top: number;
-    right: number;
-  } | null>(null);
-  const [profileMemberId, setProfileMemberId] = useState<string | null>(null);
-
-  useEffect(() => {
-    function handleOutside(e: MouseEvent) {
-      if (
-        openMenu &&
-        !(e.target as Element).closest(`[data-menu-id="${openMenu.id}"]`) &&
-        !(e.target as Element).closest(`[data-menu-portal="${openMenu.id}"]`)
-      ) {
-        setOpenMenu(null);
-      }
-    }
-    document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
-  }, [openMenu]);
+  const { user } = useProfile();
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
 
   const now = new Date();
   const allGroups = groupBookings(bookings);
   const upcoming = allGroups.filter(
-    (g) =>
-      bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) >= now &&
-      g.primary.status !== "cancelled",
+    (g) => bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) >= now && g.primary.status !== "cancelled"
   );
-  const cancelledUpcoming = allGroups.filter(
-    (g) =>
-      bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) >= now &&
-      g.primary.status === "cancelled",
-  );
-  const past = allGroups.filter(
-    (g) => bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) < now,
+  const cancelledAndPast = allGroups.filter(
+    (g) => bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) < now || g.primary.status === "cancelled"
+  ).sort((a, b) =>
+    bookingToLocalDate(b.primary.booking_date, b.primary.tee_time).getTime() -
+    bookingToLocalDate(a.primary.booking_date, a.primary.tee_time).getTime()
   );
 
   return (
     <div className="px-5 md:px-8 py-5 pb-8 md:max-w-2xl md:mx-auto">
-      <MemberProfileSheet
-        memberId={profileMemberId}
-        onClose={() => setProfileMemberId(null)}
-      />
       <CancelModal
         open={!!cancelTarget}
         bookingDateTime={cancelTarget?.bookingDateTime ?? ""}
@@ -2742,7 +2756,7 @@ function MyBookingsTab({
         onDismiss={() => setCancelTarget(null)}
       />
 
-      {upcoming.length === 0 && cancelledUpcoming.length === 0 && past.length === 0 && (
+      {upcoming.length === 0 && cancelledAndPast.length === 0 && (
         <EmptyState
           icon="🗓️"
           title="No bookings yet"
@@ -2753,425 +2767,433 @@ function MyBookingsTab({
       {upcoming.length > 0 && (
         <>
           <p className="section-label mb-3">Upcoming</p>
-          <div className="space-y-2.5 mb-7">
-            {upcoming.map((group) => {
-              const activePlayers = group.players.filter(
-                (p) => p.status !== "cancelled",
-              );
-              const totalAmount =
-                group.primary.amount_charged +
-                activePlayers.reduce((sum, p) => sum + p.amount_charged, 0);
-              const totalPlayers = 1 + activePlayers.length;
+          <div className="space-y-2 mb-6">
+            {upcoming.map((group) => (
+              <BookingCard
+                key={group.primary.id}
+                group={group}
+                userId={user?.id}
+                onCancel={setCancelTarget}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
-              const iAmBooker = group.primary.member_id === user?.id;
-              const allPlayers = iAmBooker
-                ? [
-                    {
-                      id: group.primary.id,
-                      name: "You",
-                      booking: group.primary,
-                      isInvited: false,
-                    },
-                    ...activePlayers.map((p) => ({
-                      id: p.id,
-                      name:
-                        p.guest_name ??
-                        (p.member_id === user?.id ? "You" : "Guest"),
-                      booking: p,
-                      isInvited: true,
-                    })),
-                  ]
-                : [
-                    // Invited view — show only the user's own guest row, labelled "You"
-                    {
-                      id: group.primary.id,
-                      name: "You",
-                      booking: group.primary,
-                      isInvited: false,
-                    },
-                  ];
-
-              const playerCanAct = (b: typeof group.primary) =>
-                differenceInHours(
-                  bookingToLocalDate(b.booking_date, b.tee_time),
-                  new Date(),
-                ) > 0 &&
-                !["awaiting_approval", "tentative", "cancelled", "confirmed"].includes(b.status);
+      {cancelledAndPast.length > 0 && (
+        <>
+          <p className="section-label mb-3">Past &amp; Cancelled</p>
+          <div className="space-y-1.5">
+            {cancelledAndPast.map((group) => {
+              const displayDate = new Date(`${group.primary.booking_date}T12:00:00`);
+              const displayTime = formatTeeTime(group.primary.tee_time);
+              const courseName = group.primary.course?.name ?? "Aviara";
+              const isCancelled = group.primary.status === "cancelled";
 
               return (
-                <div key={group.primary.id} className="card overflow-hidden">
-                  {/* Booking header */}
-                  <div className="px-5 pt-5 pb-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <p
-                          className="text-sm font-medium"
-                          style={{ color: "var(--color-green-900)" }}
-                        >
-                          {format(
-                            bookingToLocalDate(
-                              group.primary.booking_date,
-                              group.primary.tee_time,
-                            ),
-                            "EEE, MMM d",
-                          )}
-                        </p>
-                        {!iAmBooker && (
-                          <span
-                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0"
-                            style={{
-                              background: "rgba(133,187,101,0.12)",
-                              color: "var(--color-green-700)",
-                            }}
-                          >
-                            Invited
-                            {group.primary.booker_name
-                              ? ` by ${group.primary.booker_name}`
-                              : ""}
-                          </span>
-                        )}
-                      </div>
-                      {/* Dinner RSVP — shown for all active upcoming bookings */}
-                      {group.primary.status !== "cancelled" && (
-                        <DinnerRsvp
-                          bookingId={group.primary.id}
-                          current={group.primary.dinner_rsvp ?? null}
-                          onSaved={(rsvp) => onUpdateBooking(group.primary.id, { dinner_rsvp: rsvp })}
-                        />
-                      )}
-                    </div>
+                <div
+                  key={group.primary.id}
+                  className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl"
+                  style={{
+                    background: "rgba(0,38,105,0.025)",
+                    opacity: isCancelled ? 0.6 : 0.75,
+                  }}
+                >
+                  <div className="min-w-0">
                     <p
-                      className="text-xs mt-0.5"
-                      style={{ color: "rgba(0,38,105,0.45)" }}
+                      className={`text-sm font-medium truncate ${isCancelled ? "line-through" : ""}`}
+                      style={{ color: "var(--color-green-900)" }}
                     >
-                      {(() => {
-                        const start = bookingToLocalDate(group.primary.booking_date, group.primary.tee_time);
-                        const end = addMinutes(start, GOLF_ROUND_DURATION_MINUTES);
-                        return `${format(start, "h:mm a")} – ${format(end, "h:mm a")}`;
-                      })()}{" "}
-                      · ${totalAmount.toFixed(0)}
-                      {iAmBooker &&
-                        totalPlayers > 1 &&
-                        ` · ${totalPlayers} players`}
+                      {courseName}
+                    </p>
+                    <p className="text-xs mt-0.5" style={{ color: "rgba(0,38,105,0.45)" }}>
+                      {format(displayDate, "EEE, MMM d, yyyy")} · {displayTime}
                     </p>
                   </div>
-
-                  {/* Per-player rows */}
-                  <div
-                    className="border-t"
-                    style={{ borderColor: "rgba(0,38,105,0.07)" }}
-                  >
-                    {allPlayers.map((player, idx) => {
-                      const dt = bookingToLocalDate(
-                        player.booking.booking_date,
-                        player.booking.tee_time,
-                      ).toISOString();
-                      const canAct = playerCanAct(player.booking);
-                      return (
-                        <div
-                          key={player.id}
-                          className="flex items-center gap-3 px-5 py-3"
-                          style={{
-                            borderTop:
-                              idx === 0
-                                ? "none"
-                                : "1px solid rgba(0,38,105,0.05)",
-                          }}
-                        >
-                          {/* Avatar — opens member profile sheet */}
-                          {(() => {
-                            const memberId =
-                              player.name === "You"
-                                ? (user?.id ?? null)
-                                : (player.booking.player_member_id ?? null);
-                            const raw =
-                              player.name === "You"
-                                ? `${profile?.first_name ?? ""} ${profile?.last_name ?? ""}`.trim()
-                                : player.name;
-                            const parts = raw.split(/\s+/).filter(Boolean);
-                            const initials =
-                              parts.length >= 2
-                                ? `${parts[0]?.[0] ?? ""}${parts[parts.length - 1]?.[0] ?? ""}`.toUpperCase()
-                                : (parts[0]?.[0] ?? "?").toUpperCase();
-                            const avatarUrl =
-                              player.name === "You"
-                                ? (profile?.profile?.avatar_url ?? null)
-                                : null;
-                            return (
-                              <button
-                                onClick={() =>
-                                  memberId && setProfileMemberId(memberId)
-                                }
-                                className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 overflow-hidden"
-                                style={{
-                                  background: "rgba(0,38,105,0.08)",
-                                  color: "var(--color-green-900)",
-                                  cursor: memberId ? "pointer" : "default",
-                                }}
-                              >
-                                {avatarUrl ? (
-                                  <Image
-                                    src={avatarUrl}
-                                    alt=""
-                                    width={28}
-                                    height={28}
-                                    className="w-full h-full object-cover"
-                                  />
-                                ) : (
-                                  initials
-                                )}
-                              </button>
-                            );
-                          })()}
-
-                          <div className="flex-1 flex items-center gap-1.5 min-w-0">
-                            <span
-                              className="text-sm font-medium truncate capitalize"
-                              style={{ color: "var(--color-green-900)" }}
-                            >
-                              {player.name}
-                            </span>
-                            {/* "Invited" pill — shown on guest rows */}
-                            {player.isInvited && (
-                              <span
-                                className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0"
-                                style={{
-                                  background: "rgba(234,179,8,0.1)",
-                                  color: "#92640a",
-                                }}
-                              >
-                                Invited
-                              </span>
-                            )}
-                            {/* "Invited X" — shown on booker's own row when they have guests */}
-                            {!player.isInvited &&
-                              iAmBooker &&
-                              activePlayers.length > 0 && (
-                                <span
-                                  className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5"
-                                  style={{
-                                    background: "rgba(0,38,105,0.06)",
-                                    color: "rgba(0,38,105,0.55)",
-                                  }}
-                                >
-                                  <svg
-                                    width="10"
-                                    height="10"
-                                    viewBox="0 0 16 16"
-                                    fill="currentColor"
-                                  >
-                                    <path d="M5.5 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM1 14s-.5 0-.5-.5C.5 11 2.5 9 5.5 9s5 2 5 4.5c0 .5-.5.5-.5.5H1ZM12 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM14.5 13.5h-2c0-1.1-.4-2.1-1-2.9.4-.1.7-.1 1-.1 2 0 3.5 1.6 3.5 3.5 0 .27-.23.5-.5.5Z" />
-                                  </svg>
-                                  +{activePlayers.length}
-                                </span>
-                              )}
-                          </div>
-
-                          {player.booking.status ===
-                          "availability_confirmed" ? (
-                            <a
-                              href={BOOKING_PAYMENT_URL}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-xs font-semibold flex items-center gap-0.5 flex-shrink-0"
-                              style={{ color: "#92640a" }}
-                            >
-                              Pay now
-                              <svg
-                                width="11"
-                                height="11"
-                                viewBox="0 0 12 12"
-                                fill="none"
-                              >
-                                <path
-                                  d="M2.5 6h7m-3-3 3 3-3 3"
-                                  stroke="currentColor"
-                                  strokeWidth="1.5"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                            </a>
-                          ) : (
-                            <BookingStatusBadge
-                              status={player.booking.status}
-                            />
-                          )}
-
-                          {/* 3-dot menu per player */}
-                          {canAct && (
-                            <div
-                              className="flex-shrink-0"
-                              data-menu-id={player.id}
-                            >
-                              <button
-                                onClick={(e) => {
-                                  const rect =
-                                    e.currentTarget.getBoundingClientRect();
-                                  setOpenMenu((prev) =>
-                                    prev?.id === player.id
-                                      ? null
-                                      : {
-                                          id: player.id,
-                                          top: rect.bottom + 4,
-                                          right: window.innerWidth - rect.right,
-                                        },
-                                  );
-                                }}
-                                className="w-6 h-6 flex items-center justify-center rounded-md transition-colors"
-                                style={{
-                                  color: "rgba(0,38,105,0.3)",
-                                  background:
-                                    openMenu?.id === player.id
-                                      ? "rgba(0,38,105,0.06)"
-                                      : "transparent",
-                                }}
-                              >
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 16 16"
-                                  fill="currentColor"
-                                >
-                                  <circle cx="8" cy="3" r="1.2" />
-                                  <circle cx="8" cy="8" r="1.2" />
-                                  <circle cx="8" cy="13" r="1.2" />
-                                </svg>
-                              </button>
-                              {openMenu?.id === player.id &&
-                                createPortal(
-                                  <div
-                                    data-menu-portal={player.id}
-                                    className="rounded-xl shadow-lg border overflow-hidden z-50"
-                                    style={{
-                                      position: "fixed",
-                                      top: openMenu.top,
-                                      right: openMenu.right,
-                                      minWidth: 155,
-                                      background: "white",
-                                      borderColor: "rgba(0,38,105,0.08)",
-                                    }}
-                                  >
-                                    <button
-                                      onClick={() => {
-                                        setOpenMenu(null);
-                                        setCancelTarget({
-                                          bookingDateTime: dt,
-                                          title: "Cancel booking",
-                                          ghlBookingId:
-                                            player.booking.ghl_booking_id ??
-                                            group.primary.ghl_booking_id ??
-                                            null,
-                                        });
-                                      }}
-                                      className="w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-red-50"
-                                      style={{ color: "rgba(220,38,38,0.8)" }}
-                                    >
-                                      Cancel booking
-                                    </button>
-                                  </div>,
-                                  document.body,
-                                )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {isCancelled && <BookingStatusBadge status="cancelled" />}
                 </div>
               );
             })}
           </div>
         </>
       )}
+    </div>
+  );
+}
 
-      {cancelledUpcoming.length > 0 && (
-        <>
-          <p className="section-label mb-3">Cancelled</p>
-          <div className="space-y-2 mb-7">
-            {cancelledUpcoming.map((group) => (
-              <div
-                key={group.primary.id}
-                className="card p-4 flex items-center justify-between gap-3"
-                style={{ opacity: 0.65 }}
-              >
-                <div>
-                  <p
-                    className="text-sm line-through"
-                    style={{ color: "var(--color-green-900)" }}
-                  >
-                    {format(
-                      bookingToLocalDate(
-                        group.primary.booking_date,
-                        group.primary.tee_time,
-                      ),
-                      "EEE, MMM d, yyyy",
-                    )}
-                  </p>
-                  <p
-                    className="text-xs mt-0.5"
-                    style={{ color: "rgba(0,38,105,0.45)" }}
-                  >
-                    {(() => {
-                      const start = bookingToLocalDate(group.primary.booking_date, group.primary.tee_time);
-                      const end = addMinutes(start, GOLF_ROUND_DURATION_MINUTES);
-                      return `${format(start, "h:mm a")} – ${format(end, "h:mm a")}`;
-                    })()}
-                    {group.players.length > 0 &&
-                      ` · ${1 + group.players.length} players`}
-                  </p>
-                </div>
-                <BookingStatusBadge status="cancelled" />
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+// ---- Booking card with player toggle ------------------------
 
-      {past.length > 0 && (
-        <>
-          <p className="section-label mb-3">Past rounds</p>
-          <div className="space-y-2">
-            {past.slice(0, 10).map((group) => (
-              <div
-                key={group.primary.id}
-                className="card p-4 flex items-center justify-between gap-3"
-                style={{ opacity: group.primary.status === "cancelled" ? 0.5 : 0.55 }}
+function BookingCard({
+  group,
+  userId,
+  onCancel,
+}: {
+  group: BookingGroup;
+  userId: string | undefined;
+  onCancel: (target: CancelTarget) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const iAmBooker = group.primary.member_id === userId;
+  const activePlayers = group.players.filter((p) => p.status !== "cancelled");
+  const totalPlayers = 1 + activePlayers.length;
+  // localDt is a UTC-correct timestamp used ONLY for logic (hours-until, cancel modal).
+  // For display use bookingDate / bookingTime to avoid browser-timezone shifting.
+  const localDt = bookingToLocalDate(
+    group.primary.booking_date,
+    group.primary.tee_time,
+  );
+  const bookingDate = new Date(`${group.primary.booking_date}T12:00:00`);
+  const bookingTime = formatTeeTime(group.primary.tee_time);
+  const courseName = group.primary.course?.name ?? "Aviara";
+  const hoursUntil = differenceInHours(localDt, new Date());
+  // Cancel is only actionable once a booking has been confirmed/payment-ready —
+  // pending (tentative/awaiting_approval) bookings cannot be cancelled yet.
+  const CANCELLABLE = ["availability_confirmed", "payment_confirmed", "confirmed"];
+  const canCancelPrimary = hoursUntil > 0 && CANCELLABLE.includes(group.primary.status);
+  // Always expand for the booker (even solo) so status + pay button are visible.
+  const canExpand = iAmBooker;
+
+  const allRows = canExpand
+    ? [
+        {
+          id: group.primary.id,
+          name: "You",
+          status: group.primary.status,
+          ghlBookingId: group.primary.ghl_booking_id ?? null,
+          canCancel: canCancelPrimary,
+          isYou: true,
+        },
+        ...activePlayers.map((p) => ({
+          id: p.id,
+          name: p.guest_name ?? "Guest",
+          status: p.status,
+          ghlBookingId: p.ghl_booking_id ?? null,
+          canCancel: hoursUntil > 0 && CANCELLABLE.includes(p.status),
+          isYou: false,
+        })),
+      ]
+    : [];
+
+  return (
+    <div
+      className="rounded-2xl border bg-white overflow-hidden"
+      style={{ borderColor: "rgba(0,38,105,0.08)" }}
+    >
+      {/* Main summary */}
+      <div className="px-4 pt-4 pb-3">
+        {/* Course label + overall status */}
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <p
+            className="text-[11px] font-semibold uppercase tracking-wider truncate"
+            style={{ color: "rgba(0,38,105,0.4)" }}
+          >
+            {courseName}
+            {!iAmBooker && group.primary.booker_name && (
+              <span
+                className="normal-case tracking-normal ml-1.5 font-medium"
+                style={{ color: "var(--color-green-700)" }}
               >
-                <div>
-                  <p
-                    className="text-sm"
-                    style={{ color: "var(--color-green-900)" }}
-                  >
-                    {format(
-                      bookingToLocalDate(
-                        group.primary.booking_date,
-                        group.primary.tee_time,
-                      ),
-                      "EEE, MMM d, yyyy",
-                    )}
-                  </p>
-                  <p
-                    className="text-xs mt-0.5"
-                    style={{ color: "rgba(0,38,105,0.5)" }}
-                  >
-                    {(() => {
-                      const start = bookingToLocalDate(group.primary.booking_date, group.primary.tee_time);
-                      const end = addMinutes(start, GOLF_ROUND_DURATION_MINUTES);
-                      return `${format(start, "h:mm a")} – ${format(end, "h:mm a")}`;
-                    })()}
-                    {group.players.length > 0 &&
-                      ` · ${1 + group.players.length} players`}
-                  </p>
+                · invited by {group.primary.booker_name}
+              </span>
+            )}
+          </p>
+          <BookingStatusBadge status={group.primary.status} />
+        </div>
+
+        {/* Bold date */}
+        <p
+          className="font-sans font-black text-xl leading-tight"
+          style={{ color: "var(--color-green-900)" }}
+        >
+          {format(bookingDate, "EEE, MMM d")}
+        </p>
+
+        {/* Time + player toggle */}
+        <div className="flex items-center justify-between gap-2 mt-0.5">
+          <p className="text-xs" style={{ color: "rgba(0,38,105,0.45)" }}>
+            {bookingTime}
+          </p>
+          {canExpand && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="flex items-center gap-1 text-xs font-semibold"
+              style={{ color: "var(--color-green-900)" }}
+            >
+              {totalPlayers} {totalPlayers === 1 ? "player" : "players"}
+              <svg
+                className={cn(
+                  "w-3 h-3 transition-transform duration-200",
+                  expanded ? "rotate-180" : "",
+                )}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2.5}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M19.5 8.25l-7.5 7.5-7.5-7.5"
+                />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Expandable players panel */}
+      {canExpand && expanded && (
+        <div
+          className="border-t"
+          style={{ borderColor: "rgba(0,38,105,0.06)" }}
+        >
+          {allRows.map((row, idx) => {
+            const parts = row.name.split(/\s+/).filter(Boolean);
+            const initials = parts
+              .slice(0, 2)
+              .map((s) => s[0])
+              .join("")
+              .toUpperCase();
+            const canPay = row.status === "availability_confirmed";
+
+            return (
+              <div
+                key={row.id}
+                className="flex items-center gap-3 px-4 py-3"
+                style={{
+                  borderTop:
+                    idx === 0 ? "none" : "1px solid rgba(0,38,105,0.04)",
+                }}
+              >
+                {/* Avatar */}
+                <div
+                  className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
+                  style={{
+                    background: "rgba(133,187,101,0.15)",
+                    color: "var(--color-green-700)",
+                  }}
+                >
+                  {initials}
                 </div>
-                {group.primary.status === "cancelled" && (
-                  <BookingStatusBadge status="cancelled" />
+
+                {/* Name */}
+                <span
+                  className="flex-1 text-sm font-medium truncate capitalize min-w-0"
+                  style={{ color: "var(--color-green-900)" }}
+                >
+                  {row.name}
+                </span>
+
+                {/* Status */}
+                <BookingStatusBadge status={row.status} />
+
+                {/* Pay */}
+                {canPay && (
+                  <a
+                    href={BOOKING_PAYMENT_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
+                    style={{
+                      background: "rgba(146,100,10,0.1)",
+                      color: "#92640a",
+                    }}
+                  >
+                    Pay →
+                  </a>
+                )}
+
+                {/* Cancel per-player */}
+                {row.canCancel && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onCancel({
+                        bookingDateTime: localDt.toISOString(),
+                        title: row.isYou
+                          ? "Cancel my booking"
+                          : `Cancel ${row.name}'s booking`,
+                        ghlBookingId: row.ghlBookingId,
+                      })
+                    }
+                    className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
+                    style={{
+                      color: "rgba(220,38,38,0.65)",
+                      background: "rgba(220,38,38,0.06)",
+                    }}
+                  >
+                    Cancel
+                  </button>
                 )}
               </div>
-            ))}
-          </div>
-        </>
+            );
+          })}
+        </div>
       )}
+
+    </div>
+  );
+}
+
+// ---- Event selection screen ---------------------------------
+
+function EventSelectionScreen({
+  onSelect,
+}: {
+  onSelect: (course: Course) => void;
+}) {
+  const [events, setEvents] = useState<Course[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/courses")
+      .then((r) => r.json())
+      .then((d) => {
+        setEvents(Array.isArray(d.courses) ? d.courses : []);
+      })
+      .catch(() => setError("Failed to load courses."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 gap-4">
+        <Spinner className="text-green-700 w-6 h-6" />
+        <p className="text-sm" style={{ color: "rgba(0,38,105,0.4)" }}>
+          Loading events…
+        </p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="px-5 py-10 text-center">
+        <p className="text-sm text-red-500">{error}</p>
+      </div>
+    );
+  }
+
+  if (events.length === 0) {
+    return (
+      <EmptyState
+        icon="⛳"
+        title="No events available"
+        description="No events are currently available for your membership. Check back soon."
+      />
+    );
+  }
+
+  return (
+    <div className="pb-8 md:max-w-2xl md:mx-auto">
+      <div className="px-5 md:px-8 pt-5 pb-2">
+        <p className="section-label mb-1">Select an event to book</p>
+        <p className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>
+          Choose an event below to see available times.
+        </p>
+      </div>
+
+      <div className="px-5 md:px-8 pt-3 space-y-3">
+        {events.map((course) => (
+          <button
+            key={course.id}
+            type="button"
+            onClick={() => onSelect(course)}
+            className="w-full text-left rounded-2xl border bg-white transition-all hover:border-green-900/30 hover:shadow-sm active:opacity-80"
+            style={{ borderColor: "rgba(0,38,105,0.09)" }}
+          >
+            <div className="flex items-stretch">
+              {/* Course initial accent */}
+              <div
+                className="flex flex-col items-center justify-center px-3 py-4 rounded-l-2xl flex-shrink-0 w-16 text-center"
+                style={{ background: "var(--color-green-900)" }}
+              >
+                <p
+                  className="text-2xl font-black text-white leading-none"
+                  style={{ color: "rgba(133,187,101,0.9)" }}
+                >
+                  ⛳
+                </p>
+                {course.state && (
+                  <p
+                    className="text-[10px] font-semibold uppercase tracking-wider mt-1.5 text-white"
+                    style={{ color: "rgba(255,255,255,0.6)" }}
+                  >
+                    {course.state}
+                  </p>
+                )}
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 min-w-0 px-4 py-4">
+                <div className="flex items-start justify-between gap-2">
+                  <p
+                    className="font-sans font-black text-base leading-tight"
+                    style={{ color: "var(--color-green-900)" }}
+                  >
+                    {course.name}
+                  </p>
+                  <svg
+                    className="w-4 h-4 flex-shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    style={{ color: "rgba(0,38,105,0.25)" }}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                  </svg>
+                </div>
+
+                {(course.city || course.state) && (
+                  <p
+                    className="text-xs mt-1"
+                    style={{ color: "rgba(0,38,105,0.45)" }}
+                  >
+                    📍 {[course.city, course.state].filter(Boolean).join(", ")}
+                  </p>
+                )}
+
+                <div
+                  className="flex items-center justify-between mt-2 pt-2 border-t"
+                  style={{ borderColor: "rgba(0,38,105,0.06)" }}
+                >
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {course.cost_per_player != null && (
+                      <span className="text-xs font-semibold" style={{ color: "var(--color-gold-dark, #92640a)" }}>
+                        ${course.cost_per_player}/player
+                      </span>
+                    )}
+                    {!course.ghl_calendar_id && (
+                      <span className="text-xs" style={{ color: "rgba(0,38,105,0.35)" }}>
+                        Calendar setup pending
+                      </span>
+                    )}
+                  </div>
+                  {course.booking_url && (
+                    <a
+                      href={course.booking_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full flex-shrink-0 transition-opacity hover:opacity-75"
+                      style={{ color: "var(--color-gold-dark, #92640a)", background: "rgba(146,100,10,0.08)" }}
+                    >
+                      Event info
+                      <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                      </svg>
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

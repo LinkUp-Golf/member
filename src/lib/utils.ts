@@ -19,6 +19,10 @@ export function getInitials(firstName: string, lastName: string): string {
 
 // ---- Date formatting ----------------------------------------
 
+// Returns a JS Date (UTC) for past/future comparisons and hour-difference logic.
+// DO NOT use this for display — the result renders in the browser's local timezone,
+// which will shift the date/time. For display, use booking_date + formatTeeTime(tee_time)
+// directly, since they are already stored in the course's local timezone.
 export function bookingToLocalDate(bookingDate: string, teeTime: string): Date {
   const ref = new Date(`${bookingDate}T12:00:00Z`)
   const offsetStr =
