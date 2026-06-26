@@ -52,7 +52,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
       let query = admin
         .from('members')
-        .select('*, profile:member_profiles(*), home_course:courses(*)')
+        .select('*, profile:member_profiles(*), home_course:courses!members_home_course_id_fkey(*)')
         .eq('home_course_id', courseId)
         .eq('membership_status', 'active')
         .order(orderBy, { ascending: orderBy === 'first_name' })

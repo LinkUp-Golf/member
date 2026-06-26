@@ -13,6 +13,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase-server'
 import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
 import { format, addDays } from 'date-fns'
+import { focusLinkupsFlag } from '@/flags'
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get('authorization')
@@ -48,7 +49,11 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // ---- 2. Focus LinkUp notifications --------------------------
+  // ---- 2. Focus LinkUp notifications (skipped when feature is disabled) ------
+  if (!await focusLinkupsFlag()) {
+    console.log('Daily cron results:', results)
+    return NextResponse.json({ message: 'Daily cron complete', results })
+  }
 
   // Find Focus LinkUps happening in exactly 14 days
   const in14Days = format(addDays(new Date(), 14), 'yyyy-MM-dd')

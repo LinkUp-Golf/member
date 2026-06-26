@@ -1,12 +1,8 @@
 {
   "crons": [
     {
-      "path": "/api/cron/daily",
-      "schedule": "0 8 * * *"
-    },
-    {
-      "path": "/api/cron/play-suggestions",
-      "schedule": "0 9 * * 1"
+      "path": "/api/cron/booking-reminders",
+      "schedule": "* * * * *"
     }
   ]
 }

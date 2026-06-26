@@ -252,6 +252,7 @@ export interface Announcement {
   video_url: string | null
   media_urls: string[]
   focus_linkup_categories: string[]
+  is_pinned: boolean
   created_at: string
 }
 
@@ -262,6 +263,7 @@ export interface MemberEvent {
   title: string
   description: string
   event_date: string
+  event_end_date: string | null
   event_time: string
   location: string
   external_url: string | null
@@ -269,6 +271,7 @@ export interface MemberEvent {
   status: ModerationStatus
   reviewed_by: string | null
   created_at: string
+  organizer?: { first_name: string; last_name: string } | null
 }
 
 export interface MemberEventRSVP {

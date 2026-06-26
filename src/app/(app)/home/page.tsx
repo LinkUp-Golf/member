@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
 import { formatBookingDate, formatTeeTime, truncate, formatRelativeTime } from "@/lib/utils";
@@ -51,7 +52,7 @@ export default function HomePage() {
     const [bookingRes, announcementRes, promoRes, memberRes] =
       await Promise.all([
         apiClient.get<Booking[]>("/api/bookings?upcoming=true&limit=1"),
-        apiClient.get<Announcement[]>("/api/announcements?limit=3"),
+        apiClient.get<Announcement[]>("/api/announcements?limit=20"),
         apiClient.get<Promotion[]>("/api/promotions?limit=2"),
         apiClient.get<MemberWithProfile[]>(
           "/api/members?limit=2&exclude_self=true&order=created_at"
@@ -175,13 +176,16 @@ export default function HomePage() {
               <CardSkeleton lines={2} />
               <CardSkeleton lines={2} />
             </div>
-          ) : announcements.length > 0 ? (
-            <div className="space-y-2.5">
-              {announcements.map((a) => (
-                <AnnouncementCard key={a.id} announcement={a} />
-              ))}
-            </div>
-          ) : (
+          ) : announcements.length > 0 ? (() => {
+              const pinned  = announcements.filter(a => a.is_pinned)
+              const regular = announcements.filter(a => !a.is_pinned).slice(0, 3)
+              return (
+                <div className="space-y-2.5">
+                  {pinned.length > 0 && <PinnedCarousel announcements={pinned} />}
+                  {regular.map(a => <AnnouncementCard key={a.id} announcement={a} />)}
+                </div>
+              )
+            })() : (
             <EmptyState compact icon="📢" title="No announcements yet" description="Course news and community highlights will appear here." />
           )}
         </section>
@@ -294,11 +298,150 @@ const ANNOUNCEMENT_TYPES: Record<string, { icon: IconName; color: string; iconCo
   focus_linkup:    { icon: 'focus-linkup',      color: 'rgba(0,38,105,0.07)',    iconColor: 'rgba(0,38,105,0.5)' },
 }
 
+function PinnedCarousel({ announcements }: { announcements: Announcement[] }) {
+  const router = useRouter()
+  const [current, setCurrent] = useState(0)
+  const [timerKey, setTimerKey] = useState(0)
+  const touchStartX = useRef<number | null>(null)
+  const didSwipe = useRef(false)
+  const multi = announcements.length > 1
+
+  // Auto-advance every 7 s; resets whenever the user manually navigates
+  useEffect(() => {
+    if (!multi) return
+    const id = setInterval(() => {
+      setCurrent(c => (c + 1) % announcements.length)
+    }, 7000)
+    return () => clearInterval(id)
+  }, [multi, announcements.length, timerKey])
+
+  function navigate(idx: number) {
+    setCurrent(idx)
+    setTimerKey(k => k + 1) // restart the 7-s timer
+  }
+
+  function onTouchStart(e: React.TouchEvent) {
+    touchStartX.current = e.touches[0]?.clientX ?? null
+    didSwipe.current = false
+  }
+
+  function onTouchEnd(e: React.TouchEvent) {
+    if (touchStartX.current === null) return
+    const delta = touchStartX.current - (e.changedTouches[0]?.clientX ?? touchStartX.current)
+    if (Math.abs(delta) > 48) {
+      didSwipe.current = true
+      if (delta > 0) navigate(Math.min(current + 1, announcements.length - 1))
+      else navigate(Math.max(current - 1, 0))
+    }
+    touchStartX.current = null
+  }
+
+  if (announcements.length === 0) return null
+
+  return (
+    <div className="relative" style={{ paddingBottom: multi ? 6 : 0 }}>
+      {/* Single backdrop layer — only when multiple pinned */}
+      {multi && (
+        <div className="absolute inset-x-2 bottom-0 h-full rounded-2xl"
+          style={{ background: 'rgba(200,160,40,0.12)', border: '1px solid rgba(200,160,40,0.20)', transform: 'translateY(4px) scaleX(0.96)' }} />
+      )}
+
+      {/* Main card */}
+      <div
+        role="button"
+        tabIndex={0}
+        className="card overflow-hidden relative cursor-pointer"
+        style={{ zIndex: 2 }}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        onClick={() => {
+          if (!didSwipe.current) {
+            const ann = announcements[current]
+            if (ann) router.push(`/more/announcements/${ann.id}`)
+          }
+        }}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            const ann = announcements[current]
+            if (ann) router.push(`/more/announcements/${ann.id}`)
+          }
+          if (e.key === 'ArrowRight') navigate(Math.min(current + 1, announcements.length - 1))
+          if (e.key === 'ArrowLeft') navigate(Math.max(current - 1, 0))
+        }}
+      >
+        {/* Gold accent bar */}
+        <div className="h-1" style={{ background: 'var(--color-gold)' }} />
+
+        {/* Slide track */}
+        <div
+          className="flex"
+          style={{ transform: `translateX(-${current * 100}%)`, transition: 'transform 400ms cubic-bezier(0.4,0,0.2,1)' }}
+        >
+          {announcements.map((ann) => {
+            const m = ANNOUNCEMENT_TYPES[ann.type] ?? { icon: 'announcement' as IconName, color: 'rgba(0,38,105,0.07)', iconColor: 'rgba(0,38,105,0.5)' }
+            return (
+              <div key={ann.id} className="flex-shrink-0 w-full p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-gold)' }}>
+                    📌 Pinned
+                  </span>
+                  {multi && (
+                    <span className="text-[10px]" style={{ color: 'rgba(0,38,105,0.3)' }}>
+                      {current + 1} / {announcements.length}
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-3 items-start">
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: m.color, color: m.iconColor }}>
+                    <Icon name={m.icon} className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold leading-snug line-clamp-2" style={{ color: 'var(--color-green-900)' }}>
+                      {ann.title}
+                    </p>
+                    <p className="text-xs mt-1 leading-relaxed line-clamp-2" style={{ color: 'rgba(0,38,105,0.52)' }}>
+                      {ann.body}
+                    </p>
+                    <p className="text-[10px] mt-1.5" style={{ color: 'rgba(0,38,105,0.3)' }}>
+                      {formatRelativeTime(ann.published_at ?? ann.created_at)}
+                    </p>
+                  </div>
+                  <AnnouncementThumbnail announcement={ann} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Dot indicators */}
+        {multi && (
+          <div className="flex justify-center gap-1.5 pb-3 px-4">
+            {announcements.map((_, i) => (
+              <button
+                key={i}
+                onClick={e => { e.stopPropagation(); navigate(i) }}
+                className="rounded-full"
+                style={{
+                  width: i === current ? 16 : 6,
+                  height: 6,
+                  background: i === current ? 'var(--color-gold)' : 'rgba(0,38,105,0.15)',
+                  transition: 'width 250ms ease, background 250ms ease',
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function AnnouncementCard({ announcement }: { announcement: Announcement }) {
   const meta = ANNOUNCEMENT_TYPES[announcement.type] ?? { icon: 'announcement' as IconName, color: 'rgba(0,38,105,0.07)', iconColor: 'rgba(0,38,105,0.5)' }
 
   return (
-    <Link href={`/more/announcements/${announcement.id}`} className="card p-4 flex gap-3 items-start">
+    <Link href={`/more/announcements/${announcement.id}`} className="card p-4 flex gap-3 items-start overflow-hidden">
       <div
         className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
         style={{ background: meta.color, color: meta.iconColor }}
@@ -306,16 +449,10 @@ function AnnouncementCard({ announcement }: { announcement: Announcement }) {
         <Icon name={meta.icon} className="w-5 h-5" />
       </div>
       <div className="flex-1 min-w-0">
-        <p
-          className="text-sm font-medium leading-snug line-clamp-2"
-          style={{ color: 'var(--color-green-900)' }}
-        >
+        <p className="text-sm font-medium leading-snug line-clamp-2" style={{ color: 'var(--color-green-900)' }}>
           {announcement.title}
         </p>
-        <p
-          className="text-xs mt-1 leading-relaxed line-clamp-2"
-          style={{ color: 'rgba(0,38,105,0.52)' }}
-        >
+        <p className="text-xs mt-1 leading-relaxed line-clamp-2" style={{ color: 'rgba(0,38,105,0.52)' }}>
           {announcement.body}
         </p>
         <p className="text-[10px] mt-1.5" style={{ color: 'rgba(0,38,105,0.3)' }}>
@@ -324,7 +461,7 @@ function AnnouncementCard({ announcement }: { announcement: Announcement }) {
       </div>
       <AnnouncementThumbnail announcement={announcement} />
     </Link>
-  );
+  )
 }
 
 function PromoCard({ promo }: { promo: Promotion }) {

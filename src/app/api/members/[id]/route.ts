@@ -42,7 +42,7 @@ export const GET = withAuth(async (
         const admin = createAdminClient()
         const { data, error } = await admin
           .from('members')
-          .select('*, profile:member_profiles(*), home_course:courses(*)')
+          .select('*, profile:member_profiles(*), home_course:courses!members_home_course_id_fkey(*)')
           .eq('id', memberId)
           .single()
         if (error || !data) throw new Error('Member not found')

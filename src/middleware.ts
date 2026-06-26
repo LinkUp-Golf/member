@@ -13,6 +13,7 @@
 
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { decryptOverrides } from 'flags'
 
 const PUBLIC_ROUTES = [
   '/login',
@@ -20,10 +21,12 @@ const PUBLIC_ROUTES = [
   '/install',
   '/auth/error',
   '/membership-required',
-  '/api/auth/magic-link',   // unauthenticated users request magic links
-  '/api/auth/callback',     // Supabase redirects here after magic link click
-  '/api/auth/signout',      // clears session cookie server-side
-  '/api/webhooks',          // GHL webhooks secured by secret, not session
+  '/api/auth/magic-link',         // unauthenticated users request magic links
+  '/api/auth/callback',           // Supabase redirects here after magic link click
+  '/api/auth/signout',            // clears session cookie server-side
+  '/api/webhooks',                // GHL webhooks secured by secret, not session
+  '/api/.well-known/vercel/flags', // Vercel toolbar flag discovery (public by design)
+  '/.well-known/vercel/flags',    // RFC 8615 path the toolbar actually fetches
 ]
 
 const ADMIN_ROUTES = ['/admin']
@@ -136,7 +139,42 @@ export async function middleware(request: NextRequest) {
     // The page/API route will enforce its own auth checks.
   }
 
+  // ---- Feature flag cookies ------------------------------------
+  // Decrypt any Vercel toolbar overrides, then stamp plain cookies so
+  // client components can read flag values synchronously.
+  await stampFeatureFlags(request, response)
+
   return response
+}
+
+const FLAG_COOKIE_OPTIONS = {
+  httpOnly: false, // must be readable by client JS
+  sameSite: 'lax' as const,
+  path: '/',
+  maxAge: 60 * 5, // re-evaluate every 5 minutes
+}
+
+async function stampFeatureFlags(request: NextRequest, response: NextResponse) {
+  // Read Vercel toolbar override cookie (encrypted with FLAGS_SECRET)
+  let overrides: Record<string, unknown> = {}
+  const encryptedOverrides = request.cookies.get('vercel-flag-overrides')?.value
+  if (encryptedOverrides && process.env.FLAGS_SECRET) {
+    try {
+      overrides = (await decryptOverrides(
+        encryptedOverrides,
+        process.env.FLAGS_SECRET
+      )) ?? {}
+    } catch {
+      // Invalid or expired override cookie — ignore it
+    }
+  }
+
+  // Evaluate each flag: override wins, then env var default
+  const focusLinkups = 'focus-linkups' in overrides
+    ? Boolean(overrides['focus-linkups'])
+    : process.env.NEXT_PUBLIC_FEATURE_FOCUS_LINKUPS !== 'false'
+
+  response.cookies.set('ff_focus_linkups', focusLinkups ? '1' : '0', FLAG_COOKIE_OPTIONS)
 }
 
 export const config = {

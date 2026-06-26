@@ -7,6 +7,7 @@ import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
 import AppShell from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/Loading";
+import MemberProfileSheet from "@/components/ui/MemberProfileSheet";
 import EmptyState from "@/components/ui/EmptyState";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
@@ -154,6 +155,7 @@ export default function BookPage() {
     time: string;
     players: number;
     pendingNonMembers: number;
+    bookingId: string | null;
   } | null>(null);
 
   // My bookings tab
@@ -272,6 +274,7 @@ export default function BookPage() {
           typeof data.pendingNonMembers === "number"
             ? data.pendingNonMembers
             : additionalPlayers.filter((p) => p.isNonMember).length,
+        bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
       });
       if (Array.isArray(data.bookings)) {
         setMyBookings((prev) => [...(data.bookings as Booking[]), ...prev]);
@@ -292,6 +295,11 @@ export default function BookPage() {
           setStep("select");
           setSelectedSlot(null);
         }}
+        onUpdateBooking={(bookingId, updates) =>
+          setMyBookings((prev) =>
+            prev.map((b) => (b.id === bookingId ? { ...b, ...updates } : b)),
+          )
+        }
       />
     );
   }
@@ -788,26 +796,7 @@ function MonthCalendarGrid({
 
 // ---- Day player bubble + popover ----------------------------
 
-interface MemberDetail {
-  id: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  profile: {
-    display_name: string;
-    avatar_url: string | null;
-    business_name: string | null;
-    role_title: string | null;
-    handicap_index: number | null;
-    show_handicap: boolean;
-    industry_category: string | null;
-    value_offered: string | null;
-    preferred_play_times: string | null;
-    play_frequency: string | null;
-    open_to_golf_travel: boolean;
-    non_golf_hobbies: string | null;
-  } | null;
-}
+import type { MemberDetail } from "@/components/ui/MemberProfileSheet"
 
 function DayPlayerBubble({ player }: { player: DayPlayer }) {
   const [detail, setDetail] = useState<MemberDetail | null>(null);
@@ -1249,375 +1238,6 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
   );
 }
 
-// ---- Reusable member profile sheet --------------------------
-
-function MemberProfileSheet({
-  memberId,
-  onClose,
-}: {
-  memberId: string | null;
-  onClose: () => void;
-}) {
-  const [detail, setDetail] = useState<MemberDetail | null>(null);
-  const [hasPlayedWith, setHasPlayedWith] = useState(false);
-  const [focusGroups, setFocusGroups] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    if (memberId) {
-      setDetail(null);
-      setHasPlayedWith(false);
-      setFocusGroups([]);
-      setMounted(true);
-      setLoading(true);
-      fetch(`/api/members/${memberId}`)
-        .then((r) => r.json())
-        .then((d) => {
-          setDetail(d.member ?? null);
-          setHasPlayedWith(!!d.hasPlayedWith);
-          setFocusGroups(
-            Array.isArray(d.focusLinkupGroups) ? d.focusLinkupGroups : [],
-          );
-        })
-        .catch(() => {})
-        .finally(() => setLoading(false));
-      return;
-    }
-    setVisible(false);
-    const t = setTimeout(() => {
-      setMounted(false);
-      setDetail(null);
-    }, 320);
-    return () => clearTimeout(t);
-  }, [memberId]);
-
-  useEffect(() => {
-    if (!mounted) return;
-    const ids: number[] = [];
-    ids[0] = requestAnimationFrame(() => {
-      ids[1] = requestAnimationFrame(() => setVisible(true));
-    });
-    return () => ids.forEach((id) => cancelAnimationFrame(id));
-  }, [mounted]);
-
-  if (!mounted) return null;
-
-  const prof = detail?.profile;
-  const displayName =
-    prof?.display_name ||
-    (detail ? `${detail.first_name} ${detail.last_name}`.trim() : "");
-  const initials = detail
-    ? `${detail.first_name[0] ?? ""}${detail.last_name[0] ?? ""}`.toUpperCase()
-    : "?";
-  const avatarUrl = prof?.avatar_url ?? null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center md:p-6">
-      <button
-        type="button"
-        aria-label="Close"
-        className="absolute inset-0 w-full h-full"
-        style={{
-          background: "rgba(0,0,0,0.45)",
-          opacity: visible ? 1 : 0,
-          transition: "opacity 200ms ease-out",
-        }}
-        onClick={onClose}
-      />
-      <div
-        className="relative bg-white rounded-t-3xl md:rounded-3xl pt-5 pb-8 w-full md:max-w-md"
-        style={{
-          boxShadow: "0 -4px 32px rgba(0,0,0,0.12)",
-          transform: visible ? "translateY(0)" : "translateY(100%)",
-          transition: visible
-            ? "transform 340ms cubic-bezier(0.32,0.72,0,1)"
-            : "transform 240ms cubic-bezier(0.4,0,1,1)",
-          willChange: "transform",
-          maxHeight: "85vh",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div className="flex justify-center mb-4 flex-shrink-0">
-          <div
-            className="w-10 h-1 rounded-full"
-            style={{ background: "rgba(0,38,105,0.12)" }}
-          />
-        </div>
-
-        {loading ? (
-          <div className="flex flex-col items-center py-10 gap-3 px-5">
-            <div
-              className="w-16 h-16 rounded-2xl animate-pulse"
-              style={{ background: "rgba(0,38,105,0.08)" }}
-            />
-            <div
-              className="w-36 h-3.5 rounded-full animate-pulse"
-              style={{ background: "rgba(0,38,105,0.08)" }}
-            />
-            <div
-              className="w-24 h-2.5 rounded-full animate-pulse"
-              style={{ background: "rgba(0,38,105,0.06)" }}
-            />
-            <div
-              className="w-full h-16 rounded-2xl animate-pulse mt-2"
-              style={{ background: "rgba(0,38,105,0.05)" }}
-            />
-          </div>
-        ) : (
-          <div className="overflow-y-auto flex-1 px-5 space-y-4">
-            {/* Header */}
-            <div className="flex items-start gap-4">
-              {avatarUrl ? (
-                <Image
-                  src={avatarUrl}
-                  alt=""
-                  width={60}
-                  height={60}
-                  className="rounded-2xl object-cover flex-shrink-0"
-                  style={{ width: 60, height: 60 }}
-                />
-              ) : (
-                <div
-                  className="rounded-2xl flex items-center justify-center text-xl font-bold flex-shrink-0"
-                  style={{
-                    width: 60,
-                    height: 60,
-                    background: "rgba(133,187,101,0.15)",
-                    color: "var(--color-green-700)",
-                  }}
-                >
-                  {initials}
-                </div>
-              )}
-              <div className="flex-1 min-w-0 pt-0.5">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p
-                    className="font-sans font-black text-lg leading-tight"
-                    style={{ color: "var(--color-green-900)" }}
-                  >
-                    {displayName}
-                  </p>
-                  {hasPlayedWith && (
-                    <span
-                      className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
-                      style={{
-                        background: "rgba(133,187,101,0.15)",
-                        color: "var(--color-green-700)",
-                      }}
-                    >
-                      Played before
-                    </span>
-                  )}
-                </div>
-                {prof?.role_title && (
-                  <p
-                    className="text-sm mt-0.5"
-                    style={{ color: "rgba(0,38,105,0.55)" }}
-                  >
-                    {prof.role_title}
-                  </p>
-                )}
-                {prof?.business_name && (
-                  <p
-                    className="text-xs mt-0.5 truncate"
-                    style={{ color: "rgba(0,38,105,0.4)" }}
-                  >
-                    {prof.business_name}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Stats strip */}
-            {(prof?.show_handicap && prof?.handicap_index != null) ||
-            prof?.open_to_golf_travel ? (
-              <div
-                className="flex rounded-2xl overflow-hidden"
-                style={{ background: "rgba(0,38,105,0.04)" }}
-              >
-                {prof?.show_handicap && prof?.handicap_index != null && (
-                  <div className="flex-1 py-3 text-center">
-                    <p
-                      className="text-[9px] uppercase tracking-wider mb-0.5"
-                      style={{ color: "rgba(0,38,105,0.38)" }}
-                    >
-                      HCP
-                    </p>
-                    <p
-                      className="font-sans font-black text-sm"
-                      style={{ color: "var(--color-green-900)" }}
-                    >
-                      {prof.handicap_index}
-                    </p>
-                  </div>
-                )}
-                {prof?.open_to_golf_travel && (
-                  <>
-                    {prof?.show_handicap && prof?.handicap_index != null && (
-                      <div
-                        className="w-px my-2.5"
-                        style={{ background: "rgba(0,38,105,0.08)" }}
-                      />
-                    )}
-                    <div className="flex-1 py-3 text-center">
-                      <p
-                        className="text-[9px] uppercase tracking-wider mb-0.5"
-                        style={{ color: "rgba(0,38,105,0.38)" }}
-                      >
-                        Golf travel
-                      </p>
-                      <p
-                        className="text-sm"
-                        style={{ color: "var(--color-green-700)" }}
-                      >
-                        ✓ Open
-                      </p>
-                    </div>
-                  </>
-                )}
-              </div>
-            ) : null}
-
-            {prof?.value_offered && (
-              <div
-                className="rounded-2xl px-4 py-3.5"
-                style={{
-                  background: "rgba(0,38,105,0.03)",
-                  border: "1px solid rgba(0,38,105,0.06)",
-                }}
-              >
-                <p
-                  className="text-[10px] uppercase tracking-wider mb-1.5"
-                  style={{ color: "rgba(0,38,105,0.38)" }}
-                >
-                  What they bring
-                </p>
-                <p
-                  className="text-sm leading-relaxed"
-                  style={{ color: "rgba(0,38,105,0.7)" }}
-                >
-                  {prof.value_offered}
-                </p>
-              </div>
-            )}
-
-            {(prof?.play_frequency || prof?.preferred_play_times) && (
-              <div
-                className="rounded-2xl px-4 py-3.5"
-                style={{
-                  background: "rgba(0,38,105,0.03)",
-                  border: "1px solid rgba(0,38,105,0.06)",
-                }}
-              >
-                <p
-                  className="text-[10px] uppercase tracking-wider mb-2"
-                  style={{ color: "rgba(0,38,105,0.38)" }}
-                >
-                  Play habits
-                </p>
-                <div className="space-y-1.5">
-                  {prof?.play_frequency && (
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="text-xs"
-                        style={{ color: "rgba(0,38,105,0.4)" }}
-                      >
-                        Frequency
-                      </span>
-                      <span
-                        className="text-xs font-medium"
-                        style={{ color: "var(--color-green-900)" }}
-                      >
-                        {prof.play_frequency}
-                      </span>
-                    </div>
-                  )}
-                  {prof?.preferred_play_times && (
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="text-xs"
-                        style={{ color: "rgba(0,38,105,0.4)" }}
-                      >
-                        Prefers
-                      </span>
-                      <span
-                        className="text-xs font-medium"
-                        style={{ color: "var(--color-green-900)" }}
-                      >
-                        {prof.preferred_play_times}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {focusGroups.length > 0 && (
-              <div>
-                <p
-                  className="text-[10px] uppercase tracking-wider mb-2"
-                  style={{ color: "rgba(0,38,105,0.38)" }}
-                >
-                  Focus groups
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {focusGroups.map((g) => (
-                    <span
-                      key={g}
-                      className="text-xs font-medium px-2.5 py-1 rounded-full"
-                      style={{
-                        background: "rgba(0,38,105,0.06)",
-                        color: "var(--color-green-900)",
-                      }}
-                    >
-                      {g}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {prof?.non_golf_hobbies && (
-              <div
-                className="rounded-2xl px-4 py-3.5"
-                style={{
-                  background: "rgba(0,38,105,0.03)",
-                  border: "1px solid rgba(0,38,105,0.06)",
-                }}
-              >
-                <p
-                  className="text-[10px] uppercase tracking-wider mb-1.5"
-                  style={{ color: "rgba(0,38,105,0.38)" }}
-                >
-                  Beyond the course
-                </p>
-                <p
-                  className="text-sm leading-relaxed"
-                  style={{ color: "rgba(0,38,105,0.7)" }}
-                >
-                  {prof.non_golf_hobbies}
-                </p>
-              </div>
-            )}
-
-            {memberId && (
-              <a
-                href={`/members/${memberId}`}
-                className="btn btn-primary btn-full text-center block"
-              >
-                View profile
-              </a>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ---- Slot row -----------------------------------------------
 
 function SlotRow({
@@ -1836,7 +1456,7 @@ function ConfirmScreen({
       mobile: member.phone ?? "",
       email: member.email,
     });
-    setCollapsed((prev) => [...prev, true]);
+    setCollapsed((prev) => [...prev, false]);
     setPlayerSelections((prev) => [...prev, member]);
     setPlayerKinds((prev) => [...prev, "member"]);
   }, [members, inviteMemberId, maxAdditional, append]);
@@ -1905,9 +1525,6 @@ function ConfirmScreen({
     setPlayerSelections((prev) =>
       prev.map((s, idx) => (idx === i ? member : s)),
     );
-    if (member.phone) {
-      setCollapsed((prev) => prev.map((c, idx) => (idx === i ? true : c)));
-    }
   }
 
   function clearMemberSelection(i: number) {
@@ -2570,10 +2187,29 @@ function MemberAutocomplete({
 function SuccessScreen({
   booking,
   onDone,
+  onUpdateBooking,
 }: {
-  booking: { date: string; time: string; players: number; pendingNonMembers: number };
+  booking: { date: string; time: string; players: number; pendingNonMembers: number; bookingId: string | null };
   onDone: () => void;
+  onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
 }) {
+  const [dinnerRsvp, setDinnerRsvp] = useState<'yes' | 'no' | 'maybe' | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleDone() {
+    if (booking.bookingId && dinnerRsvp) {
+      setSubmitting(true);
+      const res = await fetch(`/api/bookings/${booking.bookingId}/dinner-rsvp`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rsvp: dinnerRsvp }),
+      });
+      if (res.ok) onUpdateBooking(booking.bookingId, { dinner_rsvp: dinnerRsvp });
+      setSubmitting(false);
+    }
+    onDone();
+  }
+
   return (
     <div
       className="flex flex-col items-center justify-center min-h-screen px-8 text-center"
@@ -2606,7 +2242,7 @@ function SuccessScreen({
         </p>
       )}
       {booking.players <= 1 && <div className="mb-8" />}
-      <div className="card p-5 w-full max-w-sm mb-8 text-left space-y-2">
+      <div className="card p-5 w-full max-w-sm mb-4 text-left space-y-2">
         <p
           className="text-xs uppercase tracking-widest mb-3"
           style={{ color: "rgba(0,38,105,0.35)", letterSpacing: "0.14em" }}
@@ -2641,9 +2277,39 @@ function SuccessScreen({
           </p>
         )}
       </div>
-      <button onClick={onDone} className="btn btn-primary">
-        Back to booking
+      {booking.bookingId && (
+        <div className="card p-5 w-full max-w-sm mb-8 text-left">
+          <p
+            className="text-xs uppercase tracking-widest mb-3"
+            style={{ color: "rgba(0,38,105,0.35)", letterSpacing: "0.14em" }}
+          >
+            Staying for dinner?
+          </p>
+          <p className="text-sm mb-4" style={{ color: "rgba(0,38,105,0.6)" }}>
+            Let us know if you&apos;ll be joining for dinner after your round.
+          </p>
+          <DinnerRsvp
+            bookingId={booking.bookingId}
+            current={dinnerRsvp}
+            layout="horizontal"
+            autoSave={false}
+            onSaved={setDinnerRsvp}
+          />
+        </div>
+      )}
+      {!booking.bookingId && <div className="mb-8" />}
+      <button
+        onClick={handleDone}
+        disabled={(!!booking.bookingId && dinnerRsvp === null) || submitting}
+        className="btn btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {submitting ? 'Saving…' : 'Back to booking'}
       </button>
+      {booking.bookingId && dinnerRsvp === null && (
+        <p className="text-xs mt-3" style={{ color: 'rgba(0,38,105,0.4)' }}>
+          Please let us know about dinner first.
+        </p>
+      )}
     </div>
   );
 }
@@ -2895,15 +2561,20 @@ function DinnerRsvp({
   bookingId,
   current,
   onSaved,
+  layout = 'compact',
+  autoSave = true,
 }: {
   bookingId: string;
   current: 'yes' | 'no' | 'maybe' | null;
   onSaved: (rsvp: 'yes' | 'no' | 'maybe') => void;
+  layout?: 'compact' | 'horizontal';
+  autoSave?: boolean;
 }) {
   const [saving, setSaving] = useState<string | null>(null);
 
   async function pick(rsvp: 'yes' | 'no' | 'maybe') {
     if (saving) return;
+    if (!autoSave) { onSaved(rsvp); return; }
     setSaving(rsvp);
     const res = await fetch(`/api/bookings/${bookingId}/dinner-rsvp`, {
       method: 'PATCH',
@@ -2919,6 +2590,33 @@ function DinnerRsvp({
     { value: 'no' as const,    label: 'No' },
     { value: 'maybe' as const, label: '?' },
   ];
+
+  if (layout === 'horizontal') {
+    return (
+      <div className="flex gap-2">
+        {opts.map(({ value, label }) => {
+          const active = current === value;
+          return (
+            <button
+              key={value}
+              onClick={() => pick(value)}
+              disabled={!!saving}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
+              style={active ? {
+                background: 'var(--color-green-900)',
+                color: 'var(--color-gold)',
+              } : {
+                background: 'rgba(0,38,105,0.06)',
+                color: 'rgba(0,38,105,0.5)',
+              }}
+            >
+              {saving === value ? '…' : label}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-end gap-1 flex-shrink-0">
@@ -2967,7 +2665,7 @@ function groupBookings(bookings: Booking[]): BookingGroup[] {
   }
   const groups: BookingGroup[] = [];
   for (const slot of bySlot.values()) {
-    const primary = slot.find((b) => b.guest_name === null) ?? slot[0];
+    const primary = slot.find((b) => b.guest_name === null && !b.player_member_id) ?? slot[0];
     if (!primary) continue;
     groups.push({ primary, players: slot.filter((b) => b.id !== primary.id) });
   }
@@ -3133,8 +2831,8 @@ function MyBookingsTab({
                           </span>
                         )}
                       </div>
-                      {/* Dinner RSVP — shown for confirmed bookings */}
-                      {["confirmed", "availability_confirmed", "payment_confirmed"].includes(group.primary.status) && (
+                      {/* Dinner RSVP — shown for all active upcoming bookings */}
+                      {group.primary.status !== "cancelled" && (
                         <DinnerRsvp
                           bookingId={group.primary.id}
                           current={group.primary.dinner_rsvp ?? null}

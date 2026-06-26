@@ -39,6 +39,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
           .select('*')
           .eq('course_id', courseId)
           .eq('status', 'published')
+          .order('is_pinned', { ascending: false })
           .order('published_at', { ascending: false })
           .limit(limit)
 

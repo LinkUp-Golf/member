@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase'
 import { COURSE_SLUGS } from '@/lib/ghl/tags'
 import { cn } from '@/lib/utils'
 import { FullScreenLoader } from '@/components/ui/Loading'
+import { FEATURES } from '@/lib/features'
 
 const NAV_GROUPS = [
   {
@@ -20,10 +21,11 @@ const NAV_GROUPS = [
   {
     label: 'Community',
     items: [
-      { href: '/admin/members',          label: 'Members',           icon: '▪' },
-      { href: '/admin/moderation',       label: 'Moderation Queue',  icon: '▪', badge: true },
-      { href: '/admin/guest-access',     label: 'Guest Access',      icon: '▪', badge: true },
-      { href: '/admin/referrals',        label: 'Referral Pipeline', icon: '▪' },
+      { href: '/admin/members',          label: 'Members',            icon: '▪' },
+      { href: '/admin/events',           label: 'Member Events',      icon: '▪', badge: true },
+      { href: '/admin/moderation',       label: 'Moderation Queue',   icon: '▪', badge: true },
+      { href: '/admin/guest-access',     label: 'Guest Access',       icon: '▪', badge: true },
+      { href: '/admin/referrals',        label: 'Referral Pipeline',  icon: '▪' },
       { href: '/admin/messaging',        label: 'Messaging Controls', icon: '▪' },
     ],
   },
@@ -32,7 +34,7 @@ const NAV_GROUPS = [
     items: [
       { href: '/admin/bookings',         label: 'Booking Overview',  icon: '▪' },
       { href: '/admin/booking-requests', label: 'Booking Requests',  icon: '▪', badge: true },
-      { href: '/admin/focus-linkups',    label: 'Focus LinkUps',     icon: '▪' },
+      ...(FEATURES.FOCUS_LINKUPS ? [{ href: '/admin/focus-linkups', label: 'Focus LinkUps', icon: '▪' as const }] : []),
     ],
   },
   {
@@ -49,6 +51,7 @@ function NavContent({
   pendingCount,
   guestCount,
   bookingReqCount,
+  eventsCount,
   user,
   onNavigate,
 }: {
@@ -56,6 +59,7 @@ function NavContent({
   pendingCount: number
   guestCount: number
   bookingReqCount: number
+  eventsCount: number
   user: { email: string }
   onNavigate?: () => void
 }) {
@@ -99,6 +103,8 @@ function NavContent({
                   ? guestCount
                   : item.href.includes('booking-requests')
                   ? bookingReqCount
+                  : item.href.includes('/admin/events')
+                  ? eventsCount
                   : 0
                 : 0
 
@@ -152,6 +158,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [pendingCount, setPendingCount] = useState(0)
   const [guestCount, setGuestCount] = useState(0)
   const [bookingReqCount, setBookingReqCount] = useState(0)
+  const [eventsCount, setEventsCount] = useState(0)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerMounted, setDrawerMounted] = useState(false)
   const [drawerVisible, setDrawerVisible] = useState(false)
@@ -174,17 +181,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       .in('slug', COURSE_SLUGS)
     if (!courses?.length) return
     const courseIds = courses.map(c => c.id)
-    const [modRes, guestRes, bookingReqRes] = await Promise.all([
+    const [modRes, guestRes, bookingReqRes, eventsRes] = await Promise.all([
       supabase.from('announcements').select('id', { count: 'exact', head: true })
         .in('course_id', courseIds).eq('status', 'pending_review'),
       supabase.from('guest_access_requests').select('id', { count: 'exact', head: true })
         .in('target_course_id', courseIds).eq('status', 'pending'),
       supabase.from('bookings').select('id', { count: 'exact', head: true })
         .in('course_id', courseIds).eq('status', 'awaiting_approval'),
+      supabase.from('member_events').select('id', { count: 'exact', head: true })
+        .in('course_id', courseIds).eq('status', 'pending_review'),
     ])
     setPendingCount(modRes.count ?? 0)
     setGuestCount(guestRes.count ?? 0)
     setBookingReqCount(bookingReqRes.count ?? 0)
+    setEventsCount(eventsRes.count ?? 0)
   }, [])
 
   useEffect(() => {
@@ -223,6 +233,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           pendingCount={pendingCount}
           guestCount={guestCount}
           bookingReqCount={bookingReqCount}
+          eventsCount={eventsCount}
           user={{ email: user.email ?? '' }}
         />
       </aside>
@@ -268,6 +279,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               pendingCount={pendingCount}
               guestCount={guestCount}
               bookingReqCount={bookingReqCount}
+              eventsCount={eventsCount}
               user={{ email: user.email ?? '' }}
               onNavigate={() => setDrawerOpen(false)}
             />

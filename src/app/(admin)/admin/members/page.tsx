@@ -88,7 +88,7 @@ export default function AdminMembersPage() {
     const supabase = createClient();
     const { data } = await supabase
       .from("members")
-      .select("*, profile:member_profiles(*), home_course:courses(*)")
+      .select("*, profile:member_profiles(*), home_course:courses!members_home_course_id_fkey(*)")
       .order("created_at", { ascending: false });
     setMembers((data ?? []) as MemberWithProfile[]);
     setFiltered((data ?? []) as MemberWithProfile[]);

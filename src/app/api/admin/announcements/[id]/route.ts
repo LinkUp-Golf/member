@@ -23,6 +23,7 @@ export const PATCH = withAuth(
       video_url?: string | null
       media_urls?: string[]
       focus_linkup_categories?: string[]
+      is_pinned?: boolean
     }
 
     // Detect moderation approval: status transitioning to 'published'
@@ -49,6 +50,29 @@ export const PATCH = withAuth(
     if ('video_url' in body) update.video_url = body.video_url
     if ('media_urls' in body) update.media_urls = body.media_urls ?? []
     if ('focus_linkup_categories' in body) update.focus_linkup_categories = body.focus_linkup_categories ?? []
+    if ('is_pinned' in body) update.is_pinned = !!body.is_pinned
+
+    // Enforce max-5 pinned per course
+    if (update.is_pinned === true) {
+      const { data: ann } = await admin
+        .from('announcements')
+        .select('course_id, is_pinned')
+        .eq('id', id)
+        .single()
+      if (ann && !ann.is_pinned && ann.course_id) {
+        const { count } = await admin
+          .from('announcements')
+          .select('id', { count: 'exact', head: true })
+          .eq('course_id', ann.course_id)
+          .eq('is_pinned', true)
+        if ((count ?? 0) >= 5) {
+          return NextResponse.json(
+            { error: 'Maximum of 5 announcements can be pinned at a time.' },
+            { status: 400 }
+          )
+        }
+      }
+    }
 
     const { data, error } = await admin
       .from('announcements')

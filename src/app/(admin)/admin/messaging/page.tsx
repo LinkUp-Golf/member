@@ -567,17 +567,9 @@ function ControlsTab() {
       {/* Rate limit info */}
       <AdminCard>
         <h2 className="text-sm font-semibold text-gray-700 mb-3">Active Rate Limits</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {[
-            { label: 'Messages / min',  value: '30 per member' },
-            { label: 'Burst / 15 s',    value: '10 per conversation' },
-            { label: 'Invites / hour',  value: '10 per member' },
-          ].map(({ label, value }) => (
-            <div key={label} className="bg-gray-50 rounded-lg px-4 py-3">
-              <p className="text-[11px] uppercase tracking-wide text-gray-400 mb-0.5">{label}</p>
-              <p className="text-sm font-semibold text-gray-800">{value}</p>
-            </div>
-          ))}
+        <div className="bg-gray-50 rounded-lg px-4 py-3 inline-block">
+          <p className="text-[11px] uppercase tracking-wide text-gray-400 mb-0.5">Invites / hour</p>
+          <p className="text-sm font-semibold text-gray-800">10 per member</p>
         </div>
         <p className="text-xs text-gray-400 mt-3">
           Limits reset automatically. Members hitting them receive a 429 with a Retry-After header.
