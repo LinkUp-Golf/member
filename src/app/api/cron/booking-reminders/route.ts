@@ -2,17 +2,22 @@ export const dynamic = 'force-dynamic'
 
 // ============================================================
 // GET /api/cron/booking-reminders
-// Runs every minute (vercel.json: "* * * * *").
-// Change to a wider schedule (e.g. "*/5 * * * *") in production
-// once confirmed working.
+// Runs every 15 minutes (vercel.json: "*/15 * * * *").
 //
-// For each upcoming non-cancelled booking:
-//   • Sends a push notification + notification_log entry at:
-//     - 7 days before tee time
-//     - 3 days before tee time
-//     - 6 hours before tee time
+// For each upcoming non-cancelled booking, reminders fire at:
+//   • teeTime - 7 days   (7-day reminder)
+//   • teeTime - 3 days   (3-day reminder)
+//   • teeTime - 6 hours  (6-hour reminder)
 //
-// Test locally (CRON_SECRET from .env.local):
+// The cron runs every 15 minutes; any booking whose reminder
+// target falls within ±8 minutes of now will be triggered.
+// This means each member's reminder arrives within ~8 minutes
+// of their booking's actual 7-day / 3-day / 6-hour mark.
+//
+// The reminder_*_sent flags prevent duplicate sends even if
+// the cron overlaps a boundary.
+//
+// Test locally:
 //   curl -H "Authorization: Bearer <CRON_SECRET>" \
 //        http://localhost:3000/api/cron/booking-reminders
 // ============================================================
@@ -22,25 +27,42 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase-server'
 import { sendPushToMember } from '@/lib/push'
 import { bookingToLocalDate } from '@/lib/utils'
-import { format, addDays, addHours } from 'date-fns'
+import { format, subDays, subHours, addDays } from 'date-fns'
 import { logger } from '@/lib/logger'
 
-// How far either side of the target time we'll still fire a reminder.
-// 5 minutes handles the 1-min cron cadence with generous headroom.
-const WINDOW_MS = 5 * 60 * 1000
+// Half the cron cadence + small buffer. Cron runs every 15 min → ±8 min window.
+// Any booking whose reminder target is within 8 min of now will fire.
+const WINDOW_MS = 8 * 60 * 1000
 
 type ReminderType = '7d' | '3d' | '6h'
 
 interface Reminder {
-  type: ReminderType
-  flag: 'reminder_7d_sent' | 'reminder_3d_sent' | 'reminder_6h_sent'
-  targetFn: (now: Date) => Date
+  type:     ReminderType
+  flag:     'reminder_7d_sent' | 'reminder_3d_sent' | 'reminder_6h_sent'
+  // Returns the exact UTC moment this reminder should fire for a given tee time
+  targetFn: (teeTime: Date) => Date
+  label:    string
 }
 
 const REMINDERS: Reminder[] = [
-  { type: '7d', flag: 'reminder_7d_sent', targetFn: (now) => addDays(now,  7) },
-  { type: '3d', flag: 'reminder_3d_sent', targetFn: (now) => addDays(now,  3) },
-  { type: '6h', flag: 'reminder_6h_sent', targetFn: (now) => addHours(now, 6) },
+  {
+    type:     '7d',
+    flag:     'reminder_7d_sent',
+    targetFn: (tee) => subDays(tee, 7),
+    label:    'in 7 days',
+  },
+  {
+    type:     '3d',
+    flag:     'reminder_3d_sent',
+    targetFn: (tee) => subDays(tee, 3),
+    label:    'in 3 days',
+  },
+  {
+    type:     '6h',
+    flag:     'reminder_6h_sent',
+    targetFn: (tee) => subHours(tee, 6),
+    label:    'in 6 hours',
+  },
 ]
 
 export async function GET(request: NextRequest) {
@@ -49,13 +71,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
   }
 
-  const now = new Date()
+  const now   = new Date()
   const admin = createAdminClient()
 
-  // Fetch upcoming bookings for the next 8 days that still have pending reminders.
-  // Guest-name rows (non-member guests) have no account — skip them via guest_name IS NULL.
-  const windowStart = format(now, 'yyyy-MM-dd')
-  const windowEnd   = format(addDays(now, 8), 'yyyy-MM-dd')
+  // Fetch upcoming bookings in the relevant window.
+  // We need bookings up to 7 days + 8 min ahead (furthest reminder target)
+  // and from 6 hours - 8 min ago (nearest target for the 6h reminder).
+  const fetchFrom = format(subHours(now, 1),    'yyyy-MM-dd')
+  const fetchTo   = format(addDays(now, 8),     'yyyy-MM-dd')
 
   const { data: bookings, error: bookingsError } = await admin
     .from('bookings')
@@ -73,8 +96,8 @@ export async function GET(request: NextRequest) {
       reminder_6h_sent
     `)
     .not('status', 'in', '("cancelled","waitlist")')
-    .gte('booking_date', windowStart)
-    .lte('booking_date', windowEnd)
+    .gte('booking_date', fetchFrom)
+    .lte('booking_date', fetchTo)
     .is('guest_name', null)
 
   if (bookingsError) {
@@ -85,13 +108,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: bookingsError.message }, { status: 500 })
   }
 
-  // Fetch all distinct courses referenced so we can build the notification text.
+  // Fetch course names
   const courseIds = [...new Set((bookings ?? []).map(b => b.course_id))]
-  const courseMap = new Map<string, { name: string; city: string; state: string }>()
+  const courseMap = new Map<string, { name: string; city: string }>()
   if (courseIds.length > 0) {
     const { data: courses } = await admin
       .from('courses')
-      .select('id, name, city, state')
+      .select('id, name, city')
       .in('id', courseIds)
     courses?.forEach(c => courseMap.set(c.id, c))
   }
@@ -99,7 +122,6 @@ export async function GET(request: NextRequest) {
   const results = { checked: bookings?.length ?? 0, sent: 0, errors: 0 }
 
   for (const booking of bookings ?? []) {
-    // Determine the member who owns this booking row
     const recipientId: string | null = booking.player_member_id ?? booking.member_id ?? null
     if (!recipientId) continue
 
@@ -108,21 +130,20 @@ export async function GET(request: NextRequest) {
     const dateStr = format(teeDate, 'EEEE, MMMM d')
     const timeStr = format(teeDate, 'h:mm a')
     const venue   = course?.name ?? 'the course'
-    const address = course ? `${course.city}, ${course.state}` : ''
 
     for (const reminder of REMINDERS) {
       // Skip if already sent
       if (booking[reminder.flag]) continue
 
-      const target = reminder.targetFn(now)
-      const diff   = Math.abs(teeDate.getTime() - target.getTime())
+      // Compute the exact moment this reminder should fire
+      const reminderAt = reminder.targetFn(teeDate)
+      const diff = Math.abs(now.getTime() - reminderAt.getTime())
       if (diff > WINDOW_MS) continue
 
-      const title = `Upcoming tee time 🏌️`
-      const body  = `You're playing golf at ${venue} on ${dateStr} at ${timeStr}${address ? `. Address: ${address}` : ''}`
+      const title = `Tee time ${reminder.label} 🏌️`
+      const body  = `You're playing at ${venue} on ${dateStr} at ${timeStr}`
 
       try {
-        // Push notification
         await sendPushToMember(recipientId, {
           title,
           body,
@@ -130,7 +151,6 @@ export async function GET(request: NextRequest) {
           tag: `booking-reminder-${booking.id}-${reminder.type}`,
         })
 
-        // In-app notification log
         await admin.from('notification_log').insert({
           member_id: recipientId,
           type:      'booking_reminder',
@@ -140,19 +160,16 @@ export async function GET(request: NextRequest) {
           url:       '/book',
         })
 
-        // Mark reminder as sent
         await admin
           .from('bookings')
           .update({ [reminder.flag]: true })
           .eq('id', booking.id)
 
         results.sent++
-
-        // eslint-disable-next-line no-console
-        console.log(`[cron/booking-reminders] sent ${reminder.type} reminder → member ${recipientId} for booking ${booking.id}`)
+        console.log(`[cron/booking-reminders] sent ${reminder.type} → member ${recipientId} booking ${booking.id}`)
       } catch (err) {
         results.errors++
-        logger.error('booking-reminders: failed to send reminder', {
+        logger.error('booking-reminders: failed to send', {
           action: 'cron.booking_reminders',
           metadata: { booking_id: booking.id, reminder: reminder.type, recipient: recipientId },
           errorMessage: err instanceof Error ? err.message : String(err),
@@ -161,7 +178,6 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // eslint-disable-next-line no-console
   console.log(`[cron/booking-reminders] done — checked: ${results.checked}, sent: ${results.sent}, errors: ${results.errors}`)
   logger.info('booking-reminders cron complete', {
     action: 'cron.booking_reminders',
