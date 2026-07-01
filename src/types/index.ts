@@ -41,6 +41,7 @@ export type NotificationType =
   | 'play_suggestion'
   | 'guest_access'
   | 'referral'
+  | 'member_event'
   | 'test'
   | 'general'
 export type RSVPStatus = 'attending' | 'maybe' | 'declined'
@@ -309,6 +310,7 @@ export interface MemberEvent {
   max_attendees: number | null
   status: ModerationStatus
   reviewed_by: string | null
+  rejection_reason: string | null
   created_at: string
   organizer?: { first_name: string; last_name: string } | null
 }

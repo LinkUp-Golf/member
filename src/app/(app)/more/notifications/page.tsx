@@ -21,6 +21,7 @@ const TYPE_ICONS: Record<NotificationType, string> = {
   play_suggestion: '🏌️',
   guest_access:    '🔑',
   referral:        '🤝',
+  member_event:    '📅',
   test:            '🔔',
   general:         '📣',
 }
@@ -37,6 +38,7 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   play_suggestion: 'Play suggestion',
   guest_access:    'Guest access',
   referral:        'Referral',
+  member_event:    'Member event',
   test:            'Test',
   general:         'Notification',
 }

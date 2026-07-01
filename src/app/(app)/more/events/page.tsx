@@ -189,6 +189,7 @@ function EventCard({
   onSelectAttendee: (memberId: string) => void
 }) {
   const isPending   = e.status === 'pending_review'
+  const isRejected  = e.status === 'rejected'
   const isOrganizer = !!userId && e.organizer_id === userId
   const startDate  = new Date(e.event_date + 'T12:00:00')
   const endDate    = e.event_end_date ? new Date(e.event_end_date + 'T12:00:00') : null
@@ -204,17 +205,22 @@ function EventCard({
     : format(startDate, 'EEE, MMM d')
 
   return (
-    <div className="card overflow-hidden" style={isPending ? { opacity: 0.8 } : undefined}>
+    <div className="card overflow-hidden" style={(isPending || isRejected) ? { opacity: 0.8 } : undefined}>
       {/* Date header */}
       <div
         className="px-4 py-2.5 flex items-center justify-between"
-        style={{ background: isPending ? 'rgba(0,38,105,0.45)' : 'var(--color-green-900)' }}
+        style={{ background: isPending ? 'rgba(0,38,105,0.45)' : isRejected ? 'rgba(220,38,38,0.75)' : 'var(--color-green-900)' }}
       >
         <p className="text-sm font-medium text-white">{dateLabel}</p>
         <div className="flex items-center gap-2">
           {isPending && (
             <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-white/15 text-white/80">
               Pending
+            </span>
+          )}
+          {isRejected && (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-white/15 text-white/80">
+              Rejected
             </span>
           )}
           <p className="text-xs text-white/50">{e.event_time.slice(0, 5)}</p>
@@ -259,6 +265,12 @@ function EventCard({
           </a>
         )}
 
+        {isRejected && e.rejection_reason && (
+          <p className="text-[11px] text-red-600 bg-red-50 rounded-lg px-2.5 py-1.5 mt-2 whitespace-pre-wrap">
+            Not approved: {e.rejection_reason}
+          </p>
+        )}
+
         {/* Organizer + attendee avatars */}
         <div className="flex items-center justify-between mt-2">
           {e.organizer ? (
@@ -277,6 +289,10 @@ function EventCard({
         ) : isPending ? (
           <p className="text-[11px] text-green-900/35 mt-2 italic">
             Awaiting admin approval
+          </p>
+        ) : isRejected ? (
+          <p className="text-[11px] text-green-900/35 mt-2 italic">
+            {isOrganizer ? 'Edit and resubmit for review.' : 'This event was not approved.'}
           </p>
         ) : isOrganizer ? (
           <p className="text-[11px] text-green-900/35 mt-3 italic">
@@ -363,8 +379,8 @@ function EventEditForm({
         onChange={e => setEndDate(e.target.value)} placeholder="End date (optional)" />
       <input className={inputCls} placeholder="Location" value={location} onChange={e => setLocation(e.target.value)} />
       <input type="url" className={inputCls} placeholder="Link (optional)" value={url} onChange={e => setUrl(e.target.value)} />
-      {e.status === 'published' && (
-        <p className="text-[10px] text-amber-600 italic">Editing a published event sends it back for admin review.</p>
+      {(e.status === 'published' || e.status === 'rejected') && (
+        <p className="text-[10px] text-amber-600 italic">Saving sends this event back for admin review.</p>
       )}
       <div className="flex gap-2 pt-1">
         <button
