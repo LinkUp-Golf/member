@@ -20,7 +20,9 @@ interface MediaUploadProps {
    *  and show a local blob preview. The parent is responsible for uploading on submit. */
   onFileStaged?: (file: File | null) => void
   mediaType: 'image' | 'video'
-  folder: 'announcements' | 'promotions'
+  folder: 'announcements' | 'promotions' | 'course-logos'
+  /** Shows a red dashed border/label when the field is required and empty. */
+  hasError?: boolean
 }
 
 export default function MediaUpload({
@@ -30,6 +32,7 @@ export default function MediaUpload({
   onFileStaged,
   mediaType,
   folder,
+  hasError,
 }: MediaUploadProps) {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -112,10 +115,10 @@ export default function MediaUpload({
 
   return (
     <div>
-      <label className="text-xs text-gray-400 mb-1.5 block">{label}</label>
+      <label className={`text-xs mb-1.5 block ${hasError ? 'text-red-500' : 'text-gray-400'}`}>{label}</label>
 
       {value ? (
-        <div className="relative rounded-xl overflow-hidden border border-gray-200">
+        <div className={`relative rounded-xl overflow-hidden border ${hasError ? 'border-red-300' : 'border-gray-200'}`}>
           {mediaType === 'image' ? (
             <Image
               src={value}
@@ -148,8 +151,10 @@ export default function MediaUpload({
           type="button"
           onClick={() => inputRef.current?.click()}
           disabled={uploading}
-          className="w-full border-2 border-dashed border-gray-200 rounded-xl py-6 flex flex-col items-center gap-2 transition-colors disabled:opacity-50 hover:border-green-400 hover:text-green-700"
-          style={{ color: 'rgba(0,0,0,0.35)' }}
+          className={`w-full border-2 border-dashed rounded-xl py-6 flex flex-col items-center gap-2 transition-colors disabled:opacity-50 ${
+            hasError ? 'border-red-300 hover:border-red-400' : 'border-gray-200 hover:border-green-400 hover:text-green-700'
+          }`}
+          style={{ color: hasError ? 'rgba(220,38,38,0.6)' : 'rgba(0,0,0,0.35)' }}
         >
           {uploading ? (
             <>

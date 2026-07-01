@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useForm, Controller } from 'react-hook-form'
+import Image from 'next/image'
 import {
   AdminPageHeader, AdminButton, Badge, StatCard,
 } from '@/components/admin/AdminUI'
 import Select from '@/components/ui/Select'
+import MediaUpload from '@/components/ui/MediaUpload'
 import { formatRelativeTime } from '@/lib/utils'
 import type { Course, CourseApprovalStatus } from '@/types'
 
@@ -219,13 +221,15 @@ export default function AdminCoursesPage() {
                     className="flex flex-col items-center justify-center px-3 py-4 flex-shrink-0 w-16 text-center"
                     style={{ background: course.approval_status === 'pending' ? '#1e3a5f' : course.approval_status === 'active' ? 'var(--color-green-900, #14532d)' : '#6b7280' }}
                   >
-                    <p className="text-xl">⛳</p>
-                    {course.state && <p className="text-[10px] font-bold text-white/60 mt-1 uppercase">{course.state}</p>}
+                    {course.state && <p className="text-xs font-bold text-white/70 uppercase">{course.state}</p>}
                   </div>
 
                   <div className="flex-1 min-w-0 p-4">
                     <div className="flex items-start justify-between gap-3 mb-2 flex-wrap">
                       <div className="flex items-center gap-2 flex-wrap">
+                        <div className="relative w-8 h-8 rounded-lg overflow-hidden border border-gray-200 flex-shrink-0">
+                          <Image src={course.logo_url} alt="" fill unoptimized className="object-cover" />
+                        </div>
                         <h3 className="font-semibold text-gray-900">{course.name}</h3>
                         <Badge label={sm.label} colour={sm.colour} />
                         {course.ghl_calendar_id && (
@@ -433,6 +437,7 @@ function formatDays(days: number | null): string {
 type CourseFormValues = {
   name: string
   slug: string        // hidden — auto-generated from name
+  logo_url: string
   city: string        // stores full one-line location
   timezone: string
   ghl_calendar_id: string
@@ -461,6 +466,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
     defaultValues: {
       name: editingCourse?.name ?? '',
       slug: editingCourse?.slug ?? '',
+      logo_url: editingCourse?.logo_url ?? '',
       city: editingCourse?.city ?? '',
       timezone: editingCourse?.timezone ?? 'America/Los_Angeles',
       ghl_calendar_id: editingCourse?.ghl_calendar_id ?? '',
@@ -542,6 +548,25 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
           <section>
             <h3 className="text-sm font-semibold text-gray-700 mb-4 pb-2 border-b border-gray-100">Course Info</h3>
             <div className="space-y-4">
+
+              <Controller
+                name="logo_url"
+                control={control}
+                rules={{ validate: v => !!v || 'A venue logo is required' }}
+                render={({ field: f }) => (
+                  <div>
+                    <MediaUpload
+                      label="Venue Logo *"
+                      value={f.value || null}
+                      onChange={url => f.onChange(url ?? '')}
+                      mediaType="image"
+                      folder="course-logos"
+                      hasError={!!errors.logo_url}
+                    />
+                    {errors.logo_url && <p className={errMsg}>{errors.logo_url.message}</p>}
+                  </div>
+                )}
+              />
 
               <div>
                 <label className={labelCls}>Course Name *</label>

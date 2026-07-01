@@ -88,6 +88,12 @@ export const PATCH = withAuth(
       }
     }
 
+    // logo_url is required — reject attempts to clear it, but allow omitting
+    // the key entirely (no change) or replacing it with a new upload.
+    if ('logo_url' in body && !body.logo_url?.trim()) {
+      return NextResponse.json({ error: 'A venue logo is required' }, { status: 400 })
+    }
+
     // Calendar uniqueness on edit: reject if the new calendar is already used by a different course
     if ('ghl_calendar_id' in body && body.ghl_calendar_id) {
       const { data: calConflict } = await admin
@@ -105,7 +111,7 @@ export const PATCH = withAuth(
     }
 
     const allowed: Array<keyof Course> = [
-      'name', 'slug', 'city', 'state', 'country', 'access_tag', 'timezone', 'active',
+      'name', 'slug', 'logo_url', 'city', 'state', 'country', 'access_tag', 'timezone', 'active',
       'description', 'ghl_calendar_id', 'ghl_calendar_user_id', 'cost_per_player',
       'booking_rules', 'booking_url', 'required_tags', 'meeting_interval_mins',
       'meeting_duration_mins', 'min_scheduling_notice_mins', 'date_range_days',

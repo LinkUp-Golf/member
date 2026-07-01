@@ -18,6 +18,7 @@ export const mockCourse: Course = {
   id: MOCK_COURSE_ID,
   name: 'Park Hyatt Aviara Golf Club',
   slug: 'aviara',
+  logo_url: '/course-logo-fallback.svg',
   city: 'Carlsbad',
   state: 'CA',
   country: 'US',

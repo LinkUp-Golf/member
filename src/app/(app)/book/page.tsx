@@ -172,7 +172,9 @@ export default function BookPage() {
     }
     setLoadingDayPlayers(true);
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    fetch(`/api/bookings/day?date=${selectedDate}&timezone=${encodeURIComponent(tz)}`)
+    fetch(
+      `/api/bookings/day?date=${selectedDate}&timezone=${encodeURIComponent(tz)}`,
+    )
       .then((r) => r.json())
       .then((d) => setDayPlayers(Array.isArray(d.players) ? d.players : []))
       .catch(() => setDayPlayers([]))
@@ -325,7 +327,10 @@ export default function BookPage() {
     : [];
 
   return (
-    <AppShell title="Book" description={selectedEvent ? selectedEvent.name : "Select an event"}>
+    <AppShell
+      title="Book"
+      description={selectedEvent ? selectedEvent.name : "Select an event"}
+    >
       {/* Tabs */}
       <div
         className="flex border-b bg-white"
@@ -353,302 +358,321 @@ export default function BookPage() {
 
       {activeTab === "book" ? (
         !selectedEvent ? (
-          <EventSelectionScreen onSelect={(ev) => {
-            setSelectedEvent(ev);
-            setSelectedSlot(null);
-            setMonthSlots({});
-          }} />
+          <EventSelectionScreen
+            onSelect={(ev) => {
+              setSelectedEvent(ev);
+              setSelectedSlot(null);
+              setMonthSlots({});
+            }}
+          />
         ) : (
-        <div className="pb-8 md:max-w-2xl md:mx-auto">
-          {/* Selected event banner */}
-          <div
-            className="px-5 md:px-8 pt-3 pb-2 flex items-center justify-between"
-            style={{ borderBottom: '1px solid rgba(0,38,105,0.06)' }}
-          >
-            <div>
-              <p className="text-xs font-semibold" style={{ color: "var(--color-green-900)" }}>
-                {selectedEvent.name}
-              </p>
-              {(selectedEvent.city || selectedEvent.state) && (
-                <p className="text-[10px] mt-0.5" style={{ color: "rgba(0,38,105,0.4)" }}>
-                  {[selectedEvent.city, selectedEvent.state].filter(Boolean).join(", ")}
-                </p>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => { setSelectedEvent(null); setMonthSlots({}); setSelectedSlot(null); }}
-              className="text-xs px-3 py-1.5 rounded-lg font-medium"
-              style={{ background: "rgba(0,38,105,0.06)", color: "rgba(0,38,105,0.55)" }}
-            >
-              Change
-            </button>
-          </div>
-          {/* View toggle */}
-          <div className="px-5 md:px-8 pt-4 pb-1 flex items-center justify-end gap-2">
+          <div className="pb-8 md:max-w-2xl md:mx-auto">
+            {/* Selected event banner */}
             <div
-              className="flex p-0.5 rounded-lg flex-shrink-0"
-              style={{ background: "rgba(0,38,105,0.06)" }}
+              className="px-5 md:px-8 pt-3 pb-2 flex items-center justify-between"
+              style={{ borderBottom: "1px solid rgba(0,38,105,0.06)" }}
             >
-              {(["day", "month"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setViewMode(mode)}
-                  className="px-2.5 py-1 text-xs font-semibold rounded-md capitalize transition-all"
-                  style={
-                    viewMode === mode
-                      ? {
-                          background: "white",
-                          color: "var(--color-green-900)",
-                          boxShadow: "0 1px 2px rgba(0,38,105,0.1)",
-                        }
-                      : { color: "rgba(0,38,105,0.45)" }
-                  }
+              <div>
+                <p
+                  className="text-xs font-semibold"
+                  style={{ color: "var(--color-green-900)" }}
                 >
-                  {mode}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Month navigation */}
-          <div className="px-5 md:px-8 pt-3 pb-2 flex items-center justify-between">
-            <button
-              onClick={() => setCurrentMonth((m) => addMonths(m, -1))}
-              disabled={!canGoPrev}
-              className="w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-20"
-              style={{ background: "rgba(0,38,105,0.05)" }}
-            >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2.5}
-                style={{ color: "var(--color-green-900)" }}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15.75 19.5L8.25 12l7.5-7.5"
-                />
-              </svg>
-            </button>
-
-            <p
-              className="font-sans font-black text-lg"
-              style={{ color: "var(--color-green-900)" }}
-            >
-              {format(currentMonth, "MMMM yyyy")}
-            </p>
-
-            <button
-              onClick={() => setCurrentMonth((m) => addMonths(m, 1))}
-              disabled={!canGoNext}
-              className="w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-20"
-              style={{ background: "rgba(0,38,105,0.05)" }}
-            >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2.5}
-                style={{ color: "var(--color-green-900)" }}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M8.25 4.5l7.5 7.5-7.5 7.5"
-                />
-              </svg>
-            </button>
-          </div>
-
-          {/* Date picker — day strip or month grid */}
-          <div className="px-5 md:px-8 pb-3">
-            {viewMode === "day" ? (
-              loadingMonth ? (
-                <div className="flex justify-center py-10">
-                  <Spinner className="text-green-700" />
-                </div>
-              ) : (
-                <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
-                  {monthDays.map((date) => {
-                    const day = date.getDate();
-                    const dateStr = getDateStr(day);
-                    const isPast = dateStr < todayStr;
-                    const isToday = dateStr === todayStr;
-                    const inView = !isPast;
-                    const hasSlots = hasDaySlots(day);
-                    const active = selectedDate === dateStr;
-
-                    const canClick = isToday || (inView && hasSlots);
-
-                    return (
-                      <button
-                        key={dateStr}
-                        ref={
-                          dateStr === selectedDate
-                            ? selectedDateRef
-                            : dateStr === firstInWindowDateStr
-                              ? firstInWindowRef
-                              : undefined
-                        }
-                        onClick={
-                          canClick
-                            ? () => {
-                                setSelectedDate(dateStr);
-                                setSelectedSlot(null);
-                              }
-                            : undefined
-                        }
-                        disabled={!canClick}
-                        className={cn(
-                          "flex-shrink-0 flex flex-col items-center px-3 py-3 rounded-2xl border min-w-[56px] transition-all duration-150",
-                          !canClick && !isToday && "cursor-not-allowed",
-                          isPast || !inView
-                            ? "opacity-50"
-                            : !hasSlots && "opacity-60",
-                          active
-                            ? "border-green-900"
-                            : "bg-white border-green-900/08",
-                        )}
-                        style={
-                          active
-                            ? {
-                                background: "var(--color-green-900)",
-                                opacity: hasSlots ? 1 : 0.45,
-                              }
-                            : {}
-                        }
-                      >
-                        <span
-                          className="text-[10px] uppercase tracking-wider font-medium"
-                          style={{
-                            color: active
-                              ? "rgba(133,187,101,0.8)"
-                              : "rgba(0,38,105,0.38)",
-                          }}
-                        >
-                          {format(date, "EEE")}
-                        </span>
-                        <span
-                          className="font-sans font-black text-2xl mt-0.5"
-                          style={{
-                            color: active ? "white" : "var(--color-green-900)",
-                          }}
-                        >
-                          {format(date, "d")}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )
-            ) : (
-              <MonthCalendarGrid
-                year={year}
-                month={month}
-                daysInMonth={daysInMonth}
-                selectedDate={selectedDate}
-                todayStr={todayStr}
-                firstInWindowDateStr={firstInWindowDateStr}
-                hasDaySlots={hasDaySlots}
-                getDateStr={getDateStr}
-                loadingMonth={loadingMonth}
-                onSelectDate={(dateStr) => {
-                  setSelectedDate(dateStr);
+                  {selectedEvent.name}
+                </p>
+                {(selectedEvent.city || selectedEvent.state) && (
+                  <p
+                    className="text-[10px] mt-0.5"
+                    style={{ color: "rgba(0,38,105,0.4)" }}
+                  >
+                    {[selectedEvent.city, selectedEvent.state]
+                      .filter(Boolean)
+                      .join(", ")}
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedEvent(null);
+                  setMonthSlots({});
                   setSelectedSlot(null);
                 }}
-                selectedDateRef={selectedDateRef}
-                firstInWindowRef={firstInWindowRef}
-              />
-            )}
-          </div>
+                className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                style={{
+                  background: "rgba(0,38,105,0.06)",
+                  color: "rgba(0,38,105,0.55)",
+                }}
+              >
+                Change
+              </button>
+            </div>
+            {/* Month navigation + view toggle */}
+            <div className="px-5 md:px-8 pt-4 pb-2 flex items-center justify-between">
+              <div className="flex-1 flex items-center justify-between mr-3">
+                <button
+                  onClick={() => setCurrentMonth((m) => addMonths(m, -1))}
+                  disabled={!canGoPrev}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-20"
+                  style={{ background: "rgba(0,38,105,0.05)" }}
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
+                    style={{ color: "var(--color-green-900)" }}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M15.75 19.5L8.25 12l7.5-7.5"
+                    />
+                  </svg>
+                </button>
 
-          {/* Who's playing on selected date */}
-          {selectedDate &&
-            !loadingMonth &&
-            (dayPlayers.length > 0 || loadingDayPlayers) && (
-              <div className="px-5 md:px-8 pb-1">
-                <p className="section-label mb-2">
-                  {loadingDayPlayers
-                    ? "Who's playing…"
-                    : `Who's playing · ${dayPlayers.length}`}
+                <p
+                  className="font-sans font-black text-lg"
+                  style={{ color: "var(--color-green-900)" }}
+                >
+                  {format(currentMonth, "MMMM yyyy")}
                 </p>
-                {loadingDayPlayers ? (
-                  <div className="flex gap-2">
-                    {[1, 2, 3, 4, 5, 6].map((i) => (
-                      <div
-                        key={i}
-                        className="flex flex-col items-center gap-1.5 animate-pulse flex-1 min-w-0"
-                      >
-                        <div
-                          className="w-10 h-10 rounded-full mx-auto"
-                          style={{ background: "rgba(0,38,105,0.08)" }}
-                        />
-                        <div
-                          className="w-8 h-2 rounded-full mx-auto"
-                          style={{ background: "rgba(0,38,105,0.08)" }}
-                        />
-                        <div
-                          className="w-6 h-1.5 rounded-full mx-auto"
-                          style={{ background: "rgba(0,38,105,0.05)" }}
-                        />
-                      </div>
-                    ))}
+
+                <button
+                  onClick={() => setCurrentMonth((m) => addMonths(m, 1))}
+                  disabled={!canGoNext}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-20"
+                  style={{ background: "rgba(0,38,105,0.05)" }}
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
+                    style={{ color: "var(--color-green-900)" }}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M8.25 4.5l7.5 7.5-7.5 7.5"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <div
+                className="flex rounded-lg flex-shrink-0"
+                style={{ background: "rgba(0,38,105,0.06)" }}
+              >
+                {(["day", "month"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setViewMode(mode)}
+                    className="h-9 px-2.5 py-1 text-xs font-semibold rounded-md capitalize transition-all"
+                    style={
+                      viewMode === mode
+                        ? {
+                            background: "white",
+                            color: "var(--color-green-900)",
+                            boxShadow: "0 1px 2px rgba(0,38,105,0.1)",
+                          }
+                        : { color: "rgba(0,38,105,0.45)" }
+                    }
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Date picker — day strip or month grid */}
+            <div className="px-5 md:px-8 pb-3">
+              {viewMode === "day" ? (
+                loadingMonth ? (
+                  <div className="flex justify-center py-10">
+                    <Spinner className="text-green-700" />
                   </div>
                 ) : (
-                  <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-1">
-                    {dayPlayers.map((p) => (
-                      <DayPlayerBubble key={p.member_id} player={p} />
+                  <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
+                    {monthDays.map((date) => {
+                      const day = date.getDate();
+                      const dateStr = getDateStr(day);
+                      const isPast = dateStr < todayStr;
+                      const isToday = dateStr === todayStr;
+                      const inView = !isPast;
+                      const hasSlots = hasDaySlots(day);
+                      const active = selectedDate === dateStr;
+
+                      const canClick = isToday || (inView && hasSlots);
+
+                      return (
+                        <button
+                          key={dateStr}
+                          ref={
+                            dateStr === selectedDate
+                              ? selectedDateRef
+                              : dateStr === firstInWindowDateStr
+                                ? firstInWindowRef
+                                : undefined
+                          }
+                          onClick={
+                            canClick
+                              ? () => {
+                                  setSelectedDate(dateStr);
+                                  setSelectedSlot(null);
+                                }
+                              : undefined
+                          }
+                          disabled={!canClick}
+                          className={cn(
+                            "flex-shrink-0 flex flex-col items-center px-3 py-3 rounded-2xl border min-w-[56px] transition-all duration-150",
+                            !canClick && !isToday && "cursor-not-allowed",
+                            isPast || !inView
+                              ? "opacity-50"
+                              : !hasSlots && "opacity-60",
+                            active
+                              ? "border-green-900"
+                              : "bg-white border-green-900/08",
+                          )}
+                          style={
+                            active
+                              ? {
+                                  background: "var(--color-green-900)",
+                                  opacity: hasSlots ? 1 : 0.45,
+                                }
+                              : {}
+                          }
+                        >
+                          <span
+                            className="text-[10px] uppercase tracking-wider font-medium"
+                            style={{
+                              color: active
+                                ? "rgba(133,187,101,0.8)"
+                                : "rgba(0,38,105,0.38)",
+                            }}
+                          >
+                            {format(date, "EEE")}
+                          </span>
+                          <span
+                            className="font-sans font-black text-2xl mt-0.5"
+                            style={{
+                              color: active
+                                ? "white"
+                                : "var(--color-green-900)",
+                            }}
+                          >
+                            {format(date, "d")}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )
+              ) : (
+                <MonthCalendarGrid
+                  year={year}
+                  month={month}
+                  daysInMonth={daysInMonth}
+                  selectedDate={selectedDate}
+                  todayStr={todayStr}
+                  firstInWindowDateStr={firstInWindowDateStr}
+                  hasDaySlots={hasDaySlots}
+                  getDateStr={getDateStr}
+                  loadingMonth={loadingMonth}
+                  onSelectDate={(dateStr) => {
+                    setSelectedDate(dateStr);
+                    setSelectedSlot(null);
+                  }}
+                  selectedDateRef={selectedDateRef}
+                  firstInWindowRef={firstInWindowRef}
+                />
+              )}
+            </div>
+
+            {/* Who's playing on selected date */}
+            {selectedDate &&
+              !loadingMonth &&
+              (dayPlayers.length > 0 || loadingDayPlayers) && (
+                <div className="px-5 md:px-8 pb-1">
+                  <p className="section-label mb-2">
+                    {loadingDayPlayers
+                      ? "Who's playing…"
+                      : `Who's playing · ${dayPlayers.length}`}
+                  </p>
+                  {loadingDayPlayers ? (
+                    <div className="flex gap-2">
+                      {[1, 2, 3, 4, 5, 6].map((i) => (
+                        <div
+                          key={i}
+                          className="flex flex-col items-center gap-1.5 animate-pulse flex-1 min-w-0"
+                        >
+                          <div
+                            className="w-10 h-10 rounded-full mx-auto"
+                            style={{ background: "rgba(0,38,105,0.08)" }}
+                          />
+                          <div
+                            className="w-8 h-2 rounded-full mx-auto"
+                            style={{ background: "rgba(0,38,105,0.08)" }}
+                          />
+                          <div
+                            className="w-6 h-1.5 rounded-full mx-auto"
+                            style={{ background: "rgba(0,38,105,0.05)" }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-1">
+                      {dayPlayers.map((p) => (
+                        <DayPlayerBubble key={p.member_id} player={p} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+            {/* Tee time slots for selected date */}
+            {selectedDate && !loadingMonth && (
+              <div className="px-5 md:px-8 pt-5">
+                <p className="section-label mb-3">
+                  Tee times —{" "}
+                  {format(new Date(selectedDate + "T12:00:00"), "EEE, MMM d")}
+                </p>
+
+                {selectedDateSlots.length === 0 ? (
+                  <EmptyState
+                    icon="⛳"
+                    title="No tee times"
+                    description="No open slots for this date."
+                  />
+                ) : (
+                  <div className="space-y-2">
+                    {selectedDateSlots.map((slot) => (
+                      <SlotRow
+                        key={slot.startTime}
+                        slot={slot}
+                        selected={selectedSlot?.startTime === slot.startTime}
+                        onSelect={() => setSelectedSlot(slot)}
+                        onContinue={() => setStep("confirm")}
+                      />
                     ))}
                   </div>
                 )}
               </div>
             )}
 
-          {/* Tee time slots for selected date */}
-          {selectedDate && !loadingMonth && (
-            <div className="px-5 md:px-8 pt-5">
-              <p className="section-label mb-3">
-                Tee times —{" "}
-                {format(new Date(selectedDate + "T12:00:00"), "EEE, MMM d")}
-              </p>
-
-              {selectedDateSlots.length === 0 ? (
-                <EmptyState
-                  icon="⛳"
-                  title="No tee times"
-                  description="No open slots for this date."
-                />
-              ) : (
-                <div className="space-y-2">
-                  {selectedDateSlots.map((slot) => (
-                    <SlotRow
-                      key={slot.startTime}
-                      slot={slot}
-                      selected={selectedSlot?.startTime === slot.startTime}
-                      onSelect={() => setSelectedSlot(slot)}
-                      onContinue={() => setStep("confirm")}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          <p
-            className="text-xs text-center mt-6 px-5 md:px-8 leading-relaxed"
-            style={{ color: "rgba(0,38,105,0.25)" }}
-          >
-            Select a date and tee time to submit a booking request.
-            <br />
-            Availability is confirmed by the team — payment link sent by email.
-          </p>
-        </div>
+            <p
+              className="text-xs text-center mt-6 px-5 md:px-8 leading-relaxed"
+              style={{ color: "rgba(0,38,105,0.25)" }}
+            >
+              Select a date and tee time to submit a booking request.
+              <br />
+              Availability is confirmed by the team — payment link sent by
+              email.
+            </p>
+          </div>
         )
       ) : (
         <MyBookingsTab
@@ -656,7 +680,9 @@ export default function BookPage() {
           onRefresh={loadMyBookings}
           onSwitchToBook={() => setActiveTab("book")}
           onUpdateBooking={(id, updates) =>
-            setMyBookings(prev => prev.map(b => b.id === id ? { ...b, ...updates } : b))
+            setMyBookings((prev) =>
+              prev.map((b) => (b.id === id ? { ...b, ...updates } : b)),
+            )
           }
         />
       )}
@@ -704,10 +730,13 @@ function MonthCalendarGrid({
   const DOW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
   const startDow = new Date(year, month, 1).getDay();
   const totalCells = Math.ceil((startDow + daysInMonth) / 7) * 7;
-  const cells: (number | null)[] = Array.from({ length: totalCells }, (_, i) => {
-    const d = i - startDow + 1;
-    return d >= 1 && d <= daysInMonth ? d : null;
-  });
+  const cells: (number | null)[] = Array.from(
+    { length: totalCells },
+    (_, i) => {
+      const d = i - startDow + 1;
+      return d >= 1 && d <= daysInMonth ? d : null;
+    },
+  );
 
   return (
     <div>
@@ -748,8 +777,16 @@ function MonthCalendarGrid({
               disabled={!canClick}
               className={cn(
                 "relative flex flex-col items-center justify-center aspect-square rounded-xl transition-all duration-150",
-                isPast ? "opacity-40" : !hasSlots && !isToday ? "opacity-50" : "",
-                !canClick ? "cursor-not-allowed" : active ? "" : "hover:bg-green-50/60",
+                isPast
+                  ? "opacity-40"
+                  : !hasSlots && !isToday
+                    ? "opacity-50"
+                    : "",
+                !canClick
+                  ? "cursor-not-allowed"
+                  : active
+                    ? ""
+                    : "hover:bg-green-50/60",
               )}
               style={active ? { background: "var(--color-green-900)" } : {}}
             >
@@ -782,7 +819,7 @@ function MonthCalendarGrid({
 
 // ---- Day player bubble + popover ----------------------------
 
-import type { MemberDetail } from "@/components/ui/MemberProfileSheet"
+import type { MemberDetail } from "@/components/ui/MemberProfileSheet";
 
 function DayPlayerBubble({ player }: { player: DayPlayer }) {
   const [detail, setDetail] = useState<MemberDetail | null>(null);
@@ -827,7 +864,7 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
 
   const prof = detail?.profile;
   const displayName = player.is_self
-    ? 'You'
+    ? "You"
     : prof?.display_name || `${player.first_name} ${player.last_name}`.trim();
   const initials =
     `${player.first_name[0] ?? ""}${player.last_name[0] ?? ""}`.toUpperCase();
@@ -841,7 +878,7 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
         type="button"
         onClick={player.is_self ? undefined : openPopover}
         className="flex flex-col items-center gap-1 flex-shrink-0 w-14 transition-opacity active:opacity-60"
-        style={{ cursor: player.is_self ? 'default' : undefined }}
+        style={{ cursor: player.is_self ? "default" : undefined }}
       >
         {avatarUrl ? (
           <Image
@@ -1411,7 +1448,8 @@ function ConfirmScreen({
   const normalisedBookerEmail = bookerEmail.trim().toLowerCase();
 
   function validateGuestEmail(value: string | undefined): true | string {
-    if (!value || !validateEmail(value).valid) return "Enter a valid email address";
+    if (!value || !validateEmail(value).valid)
+      return "Enter a valid email address";
     if (
       normalisedBookerEmail &&
       value.trim().toLowerCase() === normalisedBookerEmail
@@ -1487,7 +1525,10 @@ function ConfirmScreen({
   function rowValid(i: number): boolean {
     if (playerKinds[i] === "non_member") {
       const p = watchedPlayers?.[i];
-      return validateGuestEmail(p?.email) === true && validateGuestPhone(p?.mobile) === true;
+      return (
+        validateGuestEmail(p?.email) === true &&
+        validateGuestPhone(p?.mobile) === true
+      );
     }
     return !!playerSelections[i];
   }
@@ -1878,7 +1919,10 @@ function ConfirmScreen({
                                   className={inputBase}
                                   style={
                                     rowErrors?.mobile
-                                      ? { ...inputStyle, borderColor: "#dc2626" }
+                                      ? {
+                                          ...inputStyle,
+                                          borderColor: "#dc2626",
+                                        }
                                       : inputStyle
                                   }
                                 />
@@ -1902,7 +1946,10 @@ function ConfirmScreen({
                                   className={inputBase}
                                   style={
                                     rowErrors?.email
-                                      ? { ...inputStyle, borderColor: "#dc2626" }
+                                      ? {
+                                          ...inputStyle,
+                                          borderColor: "#dc2626",
+                                        }
                                       : inputStyle
                                   }
                                 />
@@ -1912,9 +1959,13 @@ function ConfirmScreen({
                                   </p>
                                 )}
                               </div>
-                              {(rowErrors?.firstName || rowErrors?.lastName) && (
+                              {(rowErrors?.firstName ||
+                                rowErrors?.lastName) && (
                                 <p className="text-xs text-red-600">
-                                  {(rowErrors.firstName || rowErrors.lastName)?.message}
+                                  {
+                                    (rowErrors.firstName || rowErrors.lastName)
+                                      ?.message
+                                  }
                                 </p>
                               )}
                             </>
@@ -2177,22 +2228,35 @@ function SuccessScreen({
   onDone,
   onUpdateBooking,
 }: {
-  booking: { date: string; time: string; players: number; pendingNonMembers: number; bookingId: string | null; eventName: string };
+  booking: {
+    date: string;
+    time: string;
+    players: number;
+    pendingNonMembers: number;
+    bookingId: string | null;
+    eventName: string;
+  };
   onDone: () => void;
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
 }) {
-  const [dinnerRsvp, setDinnerRsvp] = useState<'yes' | 'no' | 'maybe' | null>(null);
+  const [dinnerRsvp, setDinnerRsvp] = useState<"yes" | "no" | "maybe" | null>(
+    null,
+  );
   const [submitting, setSubmitting] = useState(false);
 
   async function handleDone() {
     if (booking.bookingId && dinnerRsvp) {
       setSubmitting(true);
-      const res = await fetch(`/api/bookings/${booking.bookingId}/dinner-rsvp`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rsvp: dinnerRsvp }),
-      });
-      if (res.ok) onUpdateBooking(booking.bookingId, { dinner_rsvp: dinnerRsvp });
+      const res = await fetch(
+        `/api/bookings/${booking.bookingId}/dinner-rsvp`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rsvp: dinnerRsvp }),
+        },
+      );
+      if (res.ok)
+        onUpdateBooking(booking.bookingId, { dinner_rsvp: dinnerRsvp });
       setSubmitting(false);
     }
     onDone();
@@ -2260,8 +2324,8 @@ function SuccessScreen({
           >
             {booking.pendingNonMembers} non-member guest
             {booking.pendingNonMembers !== 1 ? "s" : ""} need
-            {booking.pendingNonMembers !== 1 ? "" : "s"} admin approval. We&apos;ll
-            let you know once they&apos;re confirmed.
+            {booking.pendingNonMembers !== 1 ? "" : "s"} admin approval.
+            We&apos;ll let you know once they&apos;re confirmed.
           </p>
         )}
       </div>
@@ -2274,7 +2338,8 @@ function SuccessScreen({
             Staying for dinner?
           </p>
           <p className="text-sm mb-4" style={{ color: "rgba(0,38,105,0.6)" }}>
-            Should we reserve a seat for you at group table for post-golf drinks/dinner?
+            Should we reserve a seat for you at group table for post-golf
+            drinks/dinner?
           </p>
           <DinnerRsvp
             bookingId={booking.bookingId}
@@ -2291,10 +2356,10 @@ function SuccessScreen({
         disabled={(!!booking.bookingId && dinnerRsvp === null) || submitting}
         className="btn btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        {submitting ? 'Saving…' : 'Back to booking'}
+        {submitting ? "Saving…" : "Back to booking"}
       </button>
       {booking.bookingId && dinnerRsvp === null && (
-        <p className="text-xs mt-3" style={{ color: 'rgba(0,38,105,0.4)' }}>
+        <p className="text-xs mt-3" style={{ color: "rgba(0,38,105,0.4)" }}>
           Please let us know about dinner first.
         </p>
       )}
@@ -2530,8 +2595,8 @@ function CancelModal({
         {/* CTA */}
         <button
           onClick={() => {
-            window.open(cancelUrl, '_blank', 'noopener,noreferrer')
-            onDismiss()
+            window.open(cancelUrl, "_blank", "noopener,noreferrer");
+            onDismiss();
           }}
           className="w-full py-3.5 rounded-2xl text-sm font-semibold text-center"
           style={{ background: "rgba(220,38,38,0.9)", color: "white" }}
@@ -2549,24 +2614,27 @@ function DinnerRsvp({
   bookingId,
   current,
   onSaved,
-  layout = 'compact',
+  layout = "compact",
   autoSave = true,
 }: {
   bookingId: string;
-  current: 'yes' | 'no' | 'maybe' | null;
-  onSaved: (rsvp: 'yes' | 'no' | 'maybe') => void;
-  layout?: 'compact' | 'horizontal';
+  current: "yes" | "no" | "maybe" | null;
+  onSaved: (rsvp: "yes" | "no" | "maybe") => void;
+  layout?: "compact" | "horizontal";
   autoSave?: boolean;
 }) {
   const [saving, setSaving] = useState<string | null>(null);
 
-  async function pick(rsvp: 'yes' | 'no' | 'maybe') {
+  async function pick(rsvp: "yes" | "no" | "maybe") {
     if (saving) return;
-    if (!autoSave) { onSaved(rsvp); return; }
+    if (!autoSave) {
+      onSaved(rsvp);
+      return;
+    }
     setSaving(rsvp);
     const res = await fetch(`/api/bookings/${bookingId}/dinner-rsvp`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rsvp }),
     });
     if (res.ok) onSaved(rsvp);
@@ -2574,12 +2642,12 @@ function DinnerRsvp({
   }
 
   const opts = [
-    { value: 'yes' as const,   label: 'Yes' },
-    { value: 'no' as const,    label: 'No' },
-    { value: 'maybe' as const, label: 'Maybe' },
+    { value: "yes" as const, label: "Yes" },
+    { value: "no" as const, label: "No" },
+    { value: "maybe" as const, label: "Maybe" },
   ];
 
-  if (layout === 'horizontal') {
+  if (layout === "horizontal") {
     return (
       <div className="flex gap-2">
         {opts.map(({ value, label }) => {
@@ -2590,15 +2658,19 @@ function DinnerRsvp({
               onClick={() => pick(value)}
               disabled={!!saving}
               className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
-              style={active ? {
-                background: 'var(--color-green-900)',
-                color: 'var(--color-gold)',
-              } : {
-                background: 'rgba(0,38,105,0.06)',
-                color: 'rgba(0,38,105,0.5)',
-              }}
+              style={
+                active
+                  ? {
+                      background: "var(--color-green-900)",
+                      color: "var(--color-gold)",
+                    }
+                  : {
+                      background: "rgba(0,38,105,0.06)",
+                      color: "rgba(0,38,105,0.5)",
+                    }
+              }
             >
-              {saving === value ? '…' : label}
+              {saving === value ? "…" : label}
             </button>
           );
         })}
@@ -2608,7 +2680,10 @@ function DinnerRsvp({
 
   return (
     <div className="flex flex-col items-end gap-1 flex-shrink-0">
-      <p className="text-[10px] font-medium" style={{ color: 'rgba(0,38,105,0.38)' }}>
+      <p
+        className="text-[10px] font-medium"
+        style={{ color: "rgba(0,38,105,0.38)" }}
+      >
         Dinner?
       </p>
       <div className="flex gap-1">
@@ -2620,15 +2695,19 @@ function DinnerRsvp({
               onClick={() => pick(value)}
               disabled={!!saving}
               className="h-7 px-2.5 rounded-full text-[11px] font-semibold transition-all disabled:opacity-50"
-              style={active ? {
-                background: 'var(--color-green-900)',
-                color: 'var(--color-gold)',
-              } : {
-                background: 'rgba(0,38,105,0.06)',
-                color: 'rgba(0,38,105,0.45)',
-              }}
+              style={
+                active
+                  ? {
+                      background: "var(--color-green-900)",
+                      color: "var(--color-gold)",
+                    }
+                  : {
+                      background: "rgba(0,38,105,0.06)",
+                      color: "rgba(0,38,105,0.45)",
+                    }
+              }
             >
-              {saving === value ? '…' : label}
+              {saving === value ? "…" : label}
             </button>
           );
         })}
@@ -2642,18 +2721,18 @@ type BookingGroup = {
   players: Booking[];
 };
 
-
 function groupBookings(bookings: Booking[]): BookingGroup[] {
   const bySlot = new Map<string, Booking[]>();
   for (const b of bookings) {
-    const key = `${b.booking_date}_${b.tee_time}_${b.status === 'cancelled' ? 'cancelled' : 'active'}`;
+    const key = `${b.booking_date}_${b.tee_time}_${b.status === "cancelled" ? "cancelled" : "active"}`;
     const slot = bySlot.get(key) ?? [];
     slot.push(b);
     bySlot.set(key, slot);
   }
   const groups: BookingGroup[] = [];
   for (const slot of bySlot.values()) {
-    const primary = slot.find((b) => b.guest_name === null && !b.player_member_id) ?? slot[0];
+    const primary =
+      slot.find((b) => b.guest_name === null && !b.player_member_id) ?? slot[0];
     if (!primary) continue;
     groups.push({ primary, players: slot.filter((b) => b.id !== primary.id) });
   }
@@ -2683,14 +2762,27 @@ function MyBookingsTab({
   const now = new Date();
   const allGroups = groupBookings(bookings);
   const upcoming = allGroups.filter(
-    (g) => bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) >= now && g.primary.status !== "cancelled"
+    (g) =>
+      bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) >= now &&
+      g.primary.status !== "cancelled",
   );
-  const cancelledAndPast = allGroups.filter(
-    (g) => bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) < now || g.primary.status === "cancelled"
-  ).sort((a, b) =>
-    bookingToLocalDate(b.primary.booking_date, b.primary.tee_time).getTime() -
-    bookingToLocalDate(a.primary.booking_date, a.primary.tee_time).getTime()
-  );
+  const cancelledAndPast = allGroups
+    .filter(
+      (g) =>
+        bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) < now ||
+        g.primary.status === "cancelled",
+    )
+    .sort(
+      (a, b) =>
+        bookingToLocalDate(
+          b.primary.booking_date,
+          b.primary.tee_time,
+        ).getTime() -
+        bookingToLocalDate(
+          a.primary.booking_date,
+          a.primary.tee_time,
+        ).getTime(),
+    );
 
   return (
     <div className="px-5 md:px-8 py-5 pb-8 md:max-w-2xl md:mx-auto">
@@ -2731,7 +2823,9 @@ function MyBookingsTab({
           <p className="section-label mb-3">Past &amp; Cancelled</p>
           <div className="space-y-1.5">
             {cancelledAndPast.map((group) => {
-              const displayDate = new Date(`${group.primary.booking_date}T12:00:00`);
+              const displayDate = new Date(
+                `${group.primary.booking_date}T12:00:00`,
+              );
               const displayTime = formatTeeTime(group.primary.tee_time);
               const courseName = group.primary.course?.name ?? "Aviara";
               const isCancelled = group.primary.status === "cancelled";
@@ -2752,7 +2846,10 @@ function MyBookingsTab({
                     >
                       {courseName}
                     </p>
-                    <p className="text-xs mt-0.5" style={{ color: "rgba(0,38,105,0.45)" }}>
+                    <p
+                      className="text-xs mt-0.5"
+                      style={{ color: "rgba(0,38,105,0.45)" }}
+                    >
                       {format(displayDate, "EEE, MMM d, yyyy")} · {displayTime}
                     </p>
                   </div>
@@ -2796,8 +2893,13 @@ function BookingCard({
   const hoursUntil = differenceInHours(localDt, new Date());
   // Cancel is only actionable once a booking has been confirmed/payment-ready —
   // pending (tentative/awaiting_approval) bookings cannot be cancelled yet.
-  const CANCELLABLE = ["availability_confirmed", "payment_confirmed", "confirmed"];
-  const canCancelPrimary = hoursUntil > 0 && CANCELLABLE.includes(group.primary.status);
+  const CANCELLABLE = [
+    "availability_confirmed",
+    "payment_confirmed",
+    "confirmed",
+  ];
+  const canCancelPrimary =
+    hoursUntil > 0 && CANCELLABLE.includes(group.primary.status);
   // All bookings (booker and invited) use the same collapsible card style.
   const canExpand = true;
 
@@ -2876,7 +2978,10 @@ function BookingCard({
         >
           {courseName}
           {!iAmBooker && group.primary.booker_name && (
-            <span className="normal-case tracking-normal ml-1.5 font-medium" style={{ color: "var(--color-green-700)" }}>
+            <span
+              className="normal-case tracking-normal ml-1.5 font-medium"
+              style={{ color: "var(--color-green-700)" }}
+            >
               · invited by {group.primary.booker_name}
             </span>
           )}
@@ -2884,9 +2989,15 @@ function BookingCard({
 
         {/* Date · time · player toggle — all on one line */}
         <div className="flex items-center justify-between gap-2">
-          <p className="text-sm font-semibold" style={{ color: "var(--color-green-900)" }}>
+          <p
+            className="text-sm font-semibold"
+            style={{ color: "var(--color-green-900)" }}
+          >
             {format(bookingDate, "EEE, MMM d")}
-            <span className="font-normal ml-1.5" style={{ color: "rgba(0,38,105,0.45)" }}>
+            <span
+              className="font-normal ml-1.5"
+              style={{ color: "rgba(0,38,105,0.45)" }}
+            >
               · {bookingTime}
             </span>
           </p>
@@ -2899,10 +3010,20 @@ function BookingCard({
             >
               {totalPlayers}p
               <svg
-                className={cn("w-3 h-3 transition-transform duration-200", expanded ? "rotate-180" : "")}
-                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+                className={cn(
+                  "w-3 h-3 transition-transform duration-200",
+                  expanded ? "rotate-180" : "",
+                )}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2.5}
               >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M19.5 8.25l-7.5 7.5-7.5-7.5"
+                />
               </svg>
             </button>
           )}
@@ -2921,7 +3042,10 @@ function BookingCard({
               <div
                 key={row.id}
                 className="flex items-center gap-2.5 px-4 py-2.5"
-                style={{ borderTop: idx === 0 ? "none" : "1px solid rgba(0,38,105,0.04)" }}
+                style={{
+                  borderTop:
+                    idx === 0 ? "none" : "1px solid rgba(0,38,105,0.04)",
+                }}
               >
                 {/* Name */}
                 <span
@@ -2939,7 +3063,10 @@ function BookingCard({
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
-                    style={{ background: "rgba(146,100,10,0.1)", color: "#92640a" }}
+                    style={{
+                      background: "rgba(146,100,10,0.1)",
+                      color: "#92640a",
+                    }}
                   >
                     Pay →
                   </a>
@@ -2949,13 +3076,20 @@ function BookingCard({
                 {row.canCancel && (
                   <button
                     type="button"
-                    onClick={() => onCancel({
-                      bookingDateTime: localDt.toISOString(),
-                      title: row.isYou ? "Cancel my booking" : `Cancel ${row.name}'s booking`,
-                      ghlBookingId: row.ghlBookingId,
-                    })}
+                    onClick={() =>
+                      onCancel({
+                        bookingDateTime: localDt.toISOString(),
+                        title: row.isYou
+                          ? "Cancel my booking"
+                          : `Cancel ${row.name}'s booking`,
+                        ghlBookingId: row.ghlBookingId,
+                      })
+                    }
                     className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
-                    style={{ color: "rgba(220,38,38,0.65)", background: "rgba(220,38,38,0.06)" }}
+                    style={{
+                      color: "rgba(220,38,38,0.65)",
+                      background: "rgba(220,38,38,0.06)",
+                    }}
                   >
                     Cancel
                   </button>
@@ -2965,7 +3099,6 @@ function BookingCard({
           })}
         </div>
       )}
-
     </div>
   );
 }
@@ -3051,33 +3184,29 @@ function EventSelectionScreen({
             key={course.id}
             type="button"
             onClick={() => onSelect(course)}
-            className="w-full text-left rounded-2xl border bg-white transition-all hover:border-green-900/30 hover:shadow-sm active:opacity-80"
+            className="w-full text-left rounded-2xl border bg-white p-4 shadow-sm transition-all hover:border-green-900/30 hover:shadow-md active:opacity-80"
             style={{ borderColor: "rgba(0,38,105,0.09)" }}
           >
-            <div className="flex items-stretch">
-              {/* Course initial accent */}
+            <div className="flex items-center gap-3">
+              {/* Venue logo */}
               <div
-                className="flex flex-col items-center justify-center px-3 py-4 rounded-l-2xl flex-shrink-0 w-16 text-center"
-                style={{ background: "var(--color-green-900)" }}
+                className="relative w-14 h-14 rounded-2xl overflow-hidden flex-shrink-0 border"
+                style={{
+                  borderColor: "rgba(0,38,105,0.08)",
+                  background: "rgba(0,38,105,0.03)",
+                }}
               >
-                <p
-                  className="text-2xl font-black text-white leading-none"
-                  style={{ color: "rgba(133,187,101,0.9)" }}
-                >
-                  ⛳
-                </p>
-                {course.state && (
-                  <p
-                    className="text-[10px] font-semibold uppercase tracking-wider mt-1.5 text-white"
-                    style={{ color: "rgba(255,255,255,0.6)" }}
-                  >
-                    {course.state}
-                  </p>
-                )}
+                <Image
+                  src={course.logo_url}
+                  alt=""
+                  fill
+                  unoptimized
+                  className="object-cover"
+                />
               </div>
 
               {/* Content */}
-              <div className="flex-1 min-w-0 px-4 py-4">
+              <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-2">
                   <p
                     className="font-sans font-black text-base leading-tight"
@@ -3085,16 +3214,25 @@ function EventSelectionScreen({
                   >
                     {course.name}
                   </p>
-                  <svg
-                    className="w-4 h-4 flex-shrink-0"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    style={{ color: "rgba(0,38,105,0.25)" }}
+                  <span
+                    className="flex items-center justify-center w-6 h-6 rounded-full flex-shrink-0"
+                    style={{ background: "rgba(0,38,105,0.05)" }}
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                  </svg>
+                    <svg
+                      className="w-3.5 h-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      style={{ color: "rgba(0,38,105,0.35)" }}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M8.25 4.5l7.5 7.5-7.5 7.5"
+                      />
+                    </svg>
+                  </span>
                 </div>
 
                 {(course.city || course.state) && (
@@ -3105,40 +3243,63 @@ function EventSelectionScreen({
                     📍 {[course.city, course.state].filter(Boolean).join(", ")}
                   </p>
                 )}
-
-                <div
-                  className="flex items-center justify-between mt-2 pt-2 border-t"
-                  style={{ borderColor: "rgba(0,38,105,0.06)" }}
-                >
-                  <div className="flex items-center gap-3 flex-wrap">
-                    {course.cost_per_player != null && (
-                      <span className="text-xs font-semibold" style={{ color: "var(--color-gold-dark, #92640a)" }}>
-                        ${course.cost_per_player}/player
-                      </span>
-                    )}
-                    {!course.ghl_calendar_id && (
-                      <span className="text-xs" style={{ color: "rgba(0,38,105,0.35)" }}>
-                        Calendar setup pending
-                      </span>
-                    )}
-                  </div>
-                  {course.booking_url && (
-                    <a
-                      href={course.booking_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full flex-shrink-0 transition-opacity hover:opacity-75"
-                      style={{ color: "var(--color-gold-dark, #92640a)", background: "rgba(146,100,10,0.08)" }}
-                    >
-                      Event info
-                      <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                      </svg>
-                    </a>
-                  )}
-                </div>
               </div>
+            </div>
+
+            {/* Footer */}
+            <div
+              className="flex items-center justify-between mt-3 pt-3 border-t"
+              style={{ borderColor: "rgba(0,38,105,0.06)" }}
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                {course.cost_per_player != null && (
+                  <span
+                    className="text-xs font-bold px-2.5 py-1 rounded-full"
+                    style={{
+                      color: "var(--color-gold-dark, #92640a)",
+                      background: "rgba(146,100,10,0.1)",
+                    }}
+                  >
+                    ${course.cost_per_player}/player
+                  </span>
+                )}
+                {!course.ghl_calendar_id && (
+                  <span
+                    className="text-xs"
+                    style={{ color: "rgba(0,38,105,0.35)" }}
+                  >
+                    Calendar setup pending
+                  </span>
+                )}
+              </div>
+              {course.booking_url && (
+                <a
+                  href={course.booking_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full flex-shrink-0 transition-opacity hover:opacity-75"
+                  style={{
+                    color: "var(--color-gold-dark, #92640a)",
+                    background: "rgba(146,100,10,0.08)",
+                  }}
+                >
+                  Event info
+                  <svg
+                    className="w-3 h-3 flex-shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+                    />
+                  </svg>
+                </a>
+              )}
             </div>
           </button>
         ))}
@@ -3156,12 +3317,17 @@ function CreateFeedDialog({ onClose }: { onClose: () => void }) {
   const [err, setErr] = useState("");
   const [mounted, setMounted] = useState(false);
 
-  useEffect(() => { setMounted(true) }, []);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const name = feedName.trim();
-    if (!name) { setErr("Please enter a name for the feed."); return; }
+    if (!name) {
+      setErr("Please enter a name for the feed.");
+      return;
+    }
     setSubmitting(true);
     setErr("");
     try {
@@ -3192,30 +3358,45 @@ function CreateFeedDialog({ onClose }: { onClose: () => void }) {
       <div className="relative bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl px-6 pt-6 pb-8 shadow-2xl">
         {/* Drag handle — mobile only */}
         <div className="flex justify-center mb-5 sm:hidden">
-          <div className="w-10 h-1 rounded-full" style={{ background: "rgba(0,38,105,0.12)" }} />
+          <div
+            className="w-10 h-1 rounded-full"
+            style={{ background: "rgba(0,38,105,0.12)" }}
+          />
         </div>
 
         {submitted ? (
           <div className="text-center py-4">
             <p className="text-3xl mb-3">✅</p>
-            <p className="font-sans font-black text-lg mb-2" style={{ color: "var(--color-green-900)" }}>
+            <p
+              className="font-sans font-black text-lg mb-2"
+              style={{ color: "var(--color-green-900)" }}
+            >
               Feed requested!
             </p>
             <p className="text-sm mb-6" style={{ color: "rgba(0,38,105,0.5)" }}>
               Our team will review your request and get in touch.
             </p>
-            <button type="button" onClick={onClose} className="btn btn-primary">Done</button>
+            <button type="button" onClick={onClose} className="btn btn-primary">
+              Done
+            </button>
           </div>
         ) : (
           <form onSubmit={handleSubmit} noValidate>
-            <h2 className="font-sans font-black text-xl mb-1" style={{ color: "var(--color-green-900)" }}>
+            <h2
+              className="font-sans font-black text-xl mb-1"
+              style={{ color: "var(--color-green-900)" }}
+            >
               Create New Feed
             </h2>
             <p className="text-sm mb-5" style={{ color: "rgba(0,38,105,0.5)" }}>
-              Request a new course or event feed. Our team will review and activate it for your membership.
+              Request a new course or event feed. Our team will review and
+              activate it for your membership.
             </p>
 
-            <label className="block text-xs font-semibold mb-1.5" style={{ color: "rgba(0,38,105,0.55)" }}>
+            <label
+              className="block text-xs font-semibold mb-1.5"
+              style={{ color: "rgba(0,38,105,0.55)" }}
+            >
               Feed name
             </label>
             <input
@@ -3223,16 +3404,28 @@ function CreateFeedDialog({ onClose }: { onClose: () => void }) {
               className="input w-full text-sm mb-1.5"
               placeholder="e.g. Weekend Scramble, Corporate Golf Series…"
               value={feedName}
-              onChange={e => { setFeedName(e.target.value); setErr(""); }}
+              onChange={(e) => {
+                setFeedName(e.target.value);
+                setErr("");
+              }}
               disabled={submitting}
             />
             {err && <p className="text-xs text-red-500 mb-3">{err}</p>}
 
             <div className="flex gap-3 mt-5">
-              <button type="button" onClick={onClose} className="btn btn-outline flex-1 justify-center" disabled={submitting}>
+              <button
+                type="button"
+                onClick={onClose}
+                className="btn btn-outline flex-1 justify-center"
+                disabled={submitting}
+              >
                 Cancel
               </button>
-              <button type="submit" disabled={submitting || !feedName.trim()} className="btn btn-primary flex-1 justify-center disabled:opacity-50">
+              <button
+                type="submit"
+                disabled={submitting || !feedName.trim()}
+                className="btn btn-primary flex-1 justify-center disabled:opacity-50"
+              >
                 {submitting ? "Requesting…" : "Request feed"}
               </button>
             </div>

@@ -88,6 +88,7 @@ export interface Course {
   id: string
   name: string
   slug: string
+  logo_url: string
   city: string
   state: string
   country: string

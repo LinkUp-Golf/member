@@ -41,6 +41,7 @@ export const POST = withAuth(
     const body = await req.json() as Partial<Course> & { createCalendar?: boolean }
 
     if (!body.name?.trim()) return NextResponse.json({ error: 'Course name required' }, { status: 400 })
+    if (!body.logo_url?.trim()) return NextResponse.json({ error: 'A venue logo is required' }, { status: 400 })
 
     const slug = body.slug?.trim() || toSlug(body.name)
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
@@ -83,6 +84,7 @@ export const POST = withAuth(
       .insert({
         name: body.name.trim(),
         slug,
+        logo_url: body.logo_url.trim(),
         city: body.city ?? '',
         state: body.state ?? '',
         country: body.country ?? 'US',
