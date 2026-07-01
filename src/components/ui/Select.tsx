@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 
 export interface SelectOption {
@@ -37,9 +38,11 @@ function Select({
   const [query, setQuery] = useState("");
   const [highlighted, setHighlighted] = useState(0);
   const [openUp, setOpenUp] = useState(false);
+  const [coords, setCoords] = useState<{ top: number; bottom: number; left: number; width: number } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const shouldScrollRef = useRef(false);
@@ -64,16 +67,25 @@ function Select({
     setQuery("");
   }, []);
 
+  // Positioned via a portal (see render below) so the dropdown can escape
+  // any ancestor with overflow-hidden (e.g. the .card container) — coords
+  // are viewport-relative, matching getBoundingClientRect + position: fixed.
+  const updatePosition = useCallback(() => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setOpenUp(window.innerHeight - rect.bottom < 280);
+    setCoords({ top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width });
+  }, []);
+
   const openDropdown = useCallback(() => {
     if (disabled) return;
-    const rect = triggerRef.current?.getBoundingClientRect();
-    if (rect) setOpenUp(window.innerHeight - rect.bottom < 280);
+    updatePosition();
     setOpen(true);
     setQuery("");
     shouldScrollRef.current = true;
     setHighlighted(options.findIndex((o) => o.value === value) || 0);
     setTimeout(() => searchRef.current?.focus(), 30);
-  }, [disabled, options, value]);
+  }, [disabled, options, value, updatePosition]);
 
   const selectOption = useCallback(
     (opt: SelectOption) => {
@@ -118,11 +130,16 @@ function Select({
     [closeDropdown, filtered, highlighted, selectOption]
   );
 
-  // Close on outside click / tap
+  // Close on outside click / tap — the dropdown is portaled outside
+  // containerRef, so clicks inside it (search input, options) must also
+  // count as "inside" or every interaction would immediately close it.
   useEffect(() => {
     if (!open) return;
     function handle(e: MouseEvent | TouchEvent) {
-      if (!containerRef.current?.contains(e.target as Node)) closeDropdown();
+      const target = e.target as Node;
+      if (containerRef.current?.contains(target)) return;
+      if (dropdownRef.current?.contains(target)) return;
+      closeDropdown();
     }
     document.addEventListener("mousedown", handle);
     document.addEventListener("touchstart", handle);
@@ -131,6 +148,18 @@ function Select({
       document.removeEventListener("touchstart", handle);
     };
   }, [open, closeDropdown]);
+
+  // Keep the dropdown anchored to the trigger while open. The capture-phase
+  // scroll listener catches scrolling in any ancestor container, not just window.
+  useEffect(() => {
+    if (!open) return;
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open, updatePosition]);
 
   // Scroll highlighted option into view — only for keyboard nav and on open, not mouse hover
   useEffect(() => {
@@ -174,61 +203,70 @@ function Select({
         <ChevronIcon open={open} />
       </button>
 
-      {/* Dropdown */}
-      {open && (
-        // eslint-disable-next-line jsx-a11y/interactive-supports-focus
-        <div
-          role="listbox"
-          onKeyDown={handleListKeyDown}
-          className={cn(
-            "absolute z-50 w-full rounded-xl border border-green-900/10 bg-white shadow-xl overflow-hidden",
-            openUp ? "bottom-full mb-1" : "top-full mt-1"
-          )}
-        >
-          {/* Search input — font-size 16px prevents iOS zoom */}
-          <div className="p-2 border-b border-green-900/08">
-            <input
-              ref={searchRef}
-              type="search"
-              className="w-full px-3 py-2 rounded-lg bg-green-50 text-green-900 placeholder:text-green-900/35 outline-none"
-              style={{ fontSize: 16 }}
-              placeholder={searchPlaceholder}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={handleListKeyDown}
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
-            />
-          </div>
-
-          {/* Options list */}
-          <ul
-            ref={listRef}
-            className="max-h-56 overflow-y-auto py-1 overscroll-contain"
+      {/* Dropdown — portaled to document.body so it can't be clipped by an
+          ancestor's overflow-hidden (e.g. .card); positioned via fixed coords
+          measured from the trigger. */}
+      {open && coords && typeof document !== "undefined" &&
+        createPortal(
+          // eslint-disable-next-line jsx-a11y/interactive-supports-focus
+          <div
+            ref={dropdownRef}
+            role="listbox"
+            onKeyDown={handleListKeyDown}
+            className="fixed z-50 rounded-xl border border-green-900/10 bg-white shadow-xl overflow-hidden"
+            style={{
+              left: coords.left,
+              width: coords.width,
+              ...(openUp
+                ? { bottom: window.innerHeight - coords.top + 4 }
+                : { top: coords.bottom + 4 }),
+            }}
           >
-            {filtered.length === 0 ? (
-              <li className="px-3 py-3 text-sm text-green-900/40 italic text-center">
-                No results
-              </li>
-            ) : (
-              filtered.map((opt, i) => (
-                // eslint-disable-next-line jsx-a11y/click-events-have-key-events
-                <OptionItem
-                  key={opt.value}
-                  opt={opt}
-                  isHighlighted={i === highlighted}
-                  isSelected={opt.value === value}
-                  index={i}
-                  onSelect={selectOption}
-                  onHover={setHighlighted}
-                  shouldScrollRef={shouldScrollRef}
-                />
-              ))
-            )}
-          </ul>
-        </div>
-      )}
+            {/* Search input — font-size 16px prevents iOS zoom */}
+            <div className="p-2 border-b border-green-900/08">
+              <input
+                ref={searchRef}
+                type="search"
+                className="w-full px-3 py-2 rounded-lg bg-green-50 text-green-900 placeholder:text-green-900/35 outline-none"
+                style={{ fontSize: 16 }}
+                placeholder={searchPlaceholder}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={handleListKeyDown}
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            </div>
+
+            {/* Options list */}
+            <ul
+              ref={listRef}
+              className="max-h-56 overflow-y-auto py-1 overscroll-contain"
+            >
+              {filtered.length === 0 ? (
+                <li className="px-3 py-3 text-sm text-green-900/40 italic text-center">
+                  No results
+                </li>
+              ) : (
+                filtered.map((opt, i) => (
+                  // eslint-disable-next-line jsx-a11y/click-events-have-key-events
+                  <OptionItem
+                    key={opt.value}
+                    opt={opt}
+                    isHighlighted={i === highlighted}
+                    isSelected={opt.value === value}
+                    index={i}
+                    onSelect={selectOption}
+                    onHover={setHighlighted}
+                    shouldScrollRef={shouldScrollRef}
+                  />
+                ))
+              )}
+            </ul>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
