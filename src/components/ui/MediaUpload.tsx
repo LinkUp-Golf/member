@@ -130,7 +130,7 @@ export default function MediaUpload({
               src={value}
               controls
               playsInline
-              className="w-full max-h-52 bg-black"
+              className="w-full max-h-52 bg-white"
             />
           )}
           <button

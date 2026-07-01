@@ -76,9 +76,9 @@ function PromoCard({ promo, onTap }: { promo: Promotion; onTap?: () => void }) {
         const ext = url.split('?')[0]?.split('.').pop()?.toLowerCase() ?? ''
         const isVideo = ['mp4', 'webm', 'mov', 'quicktime'].includes(ext)
         return isVideo
-          ? <video src={url} muted playsInline className="w-full max-h-56 object-contain bg-black rounded-t-2xl" />
+          ? <video src={url} muted playsInline className="w-full max-h-56 object-contain bg-white rounded-t-2xl" />
           : (
-              <div className="relative w-full h-56 bg-black rounded-t-2xl overflow-hidden">
+              <div className="relative w-full h-56 bg-white rounded-t-2xl overflow-hidden">
                 <Image src={url} alt="" fill className="object-contain" />
               </div>
             )
