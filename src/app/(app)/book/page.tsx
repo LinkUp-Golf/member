@@ -11,7 +11,6 @@ import EmptyState from "@/components/ui/EmptyState";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { formatTeeTime, cn, bookingToLocalDate } from "@/lib/utils";
-import Select from "@/components/ui/Select";
 import {
   format,
   parse,
@@ -38,6 +37,7 @@ import {
   BOOKING_PAYMENT_URL,
 } from "@/lib/constants";
 import { validateEmail } from "@/lib/validation";
+import { getBrowserTimezone } from "@/lib/timezone";
 
 type PlayerKind = "member" | "non_member";
 
@@ -62,47 +62,6 @@ interface DayPlayer {
 
 const BOOKING_MIN_DAYS = 0;
 
-const FALLBACK_TIMEZONES = [
-  "America/Los_Angeles",
-  "America/Denver",
-  "America/Chicago",
-  "America/New_York",
-  "America/Anchorage",
-  "Pacific/Honolulu",
-  "Asia/Manila",
-  "Asia/Singapore",
-  "Asia/Tokyo",
-  "Asia/Shanghai",
-  "Asia/Kolkata",
-  "Asia/Dubai",
-  "Europe/London",
-  "Europe/Paris",
-  "Europe/Berlin",
-  "Australia/Sydney",
-  "Pacific/Auckland",
-  "UTC",
-];
-
-function getBrowserTimezone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone;
-  } catch {
-    return "UTC";
-  }
-}
-
-function getAllTimezones(): string[] {
-  try {
-    const all = (
-      Intl as unknown as { supportedValuesOf?: (k: string) => string[] }
-    ).supportedValuesOf?.("timeZone");
-    if (all && all.length > 0) return all;
-  } catch {
-    /* ignore */
-  }
-  return FALLBACK_TIMEZONES;
-}
-
 function formatSlotTime(isoString: string): string {
   return formatTeeTime(isoString.split("T")[1]?.slice(0, 8) ?? "");
 }
@@ -119,15 +78,18 @@ function slotEndTime(startIso: string): string {
 }
 
 export default function BookPage() {
-  const { user } = useProfile();
+  const { user, profile } = useProfile();
   const searchParams = useSearchParams();
   const inviteMemberId = searchParams?.get("invite") ?? null;
 
   const today = useMemo(() => new Date(), []);
 
-  // Timezone — default to user's browser timezone
+  // Timezone — default to the member's saved preference (set via Settings),
+  // falling back to the browser-detected zone until a preference exists.
   const [timezone, setTimezone] = useState<string>(getBrowserTimezone);
-  const timezones = useMemo(getAllTimezones, []);
+  useEffect(() => {
+    if (profile?.profile?.timezone) setTimezone(profile.profile.timezone);
+  }, [profile?.profile?.timezone]);
 
   // Month navigation — start at the month containing the first bookable date
   const [currentMonth, setCurrentMonth] = useState<Date>(() =>
@@ -422,25 +384,8 @@ export default function BookPage() {
               Change
             </button>
           </div>
-          {/* Timezone selector + view toggle */}
-          <div className="px-5 md:px-8 pt-4 pb-1 flex items-center gap-2">
-            <span
-              className="text-xs flex-shrink-0"
-              style={{ color: "rgba(0,38,105,0.4)" }}
-            >
-              Timezone
-            </span>
-            <Select
-              options={timezones.map((tz) => ({
-                value: tz,
-                label: tz.replace(/_/g, " "),
-              }))}
-              value={timezone}
-              onChange={setTimezone}
-              className="flex-1 min-w-0"
-              triggerClassName="w-full flex items-center justify-between gap-1.5 text-xs py-1.5 px-2.5 rounded-xl border border-green-900/10 bg-white text-green-900 focus:outline-none focus:ring-2 focus:ring-green-900/20 truncate"
-              searchPlaceholder="Search timezone…"
-            />
+          {/* View toggle */}
+          <div className="px-5 md:px-8 pt-4 pb-1 flex items-center justify-end gap-2">
             <div
               className="flex p-0.5 rounded-lg flex-shrink-0"
               style={{ background: "rgba(0,38,105,0.06)" }}

@@ -4,6 +4,8 @@
 // No external dependency — keeps bundle lean.
 // ============================================================
 
+import { isValidTimezone } from '@/lib/timezone'
+
 export interface ValidationResult {
   valid: boolean
   errors: string[]
@@ -78,6 +80,31 @@ export function validateUUID(value: unknown, field: string): ValidationResult {
     return { valid: false, errors: [`${field} is not a valid ID`] }
   }
   return { valid: true, errors: [] }
+}
+
+// ---- Timezone (IANA identifier) ------------------------------
+export function validateTimezone(value: unknown, field: string): ValidationResult {
+  if (!value) return { valid: false, errors: [`${field} is required`] }
+  if (typeof value !== 'string' || !isValidTimezone(value)) {
+    return { valid: false, errors: [`${field} is not a valid timezone`] }
+  }
+  return { valid: true, errors: [] }
+}
+
+// ---- Coordinates ----------------------------------------------
+export function validateCoordinates(latitude: unknown, longitude: unknown): ValidationResult {
+  const errors: string[] = []
+  const lat = Number(latitude)
+  const lng = Number(longitude)
+
+  if (typeof latitude !== 'number' || isNaN(lat) || lat < -90 || lat > 90) {
+    errors.push('latitude must be between -90 and 90')
+  }
+  if (typeof longitude !== 'number' || isNaN(lng) || lng < -180 || lng > 180) {
+    errors.push('longitude must be between -180 and 180')
+  }
+
+  return { valid: errors.length === 0, errors }
 }
 
 // ---- Booking payload ----------------------------------------
