@@ -2274,7 +2274,7 @@ function SuccessScreen({
             Staying for dinner?
           </p>
           <p className="text-sm mb-4" style={{ color: "rgba(0,38,105,0.6)" }}>
-            Let us know if you&apos;ll be joining for dinner after your round.
+            Should we reserve a seat for you at group table for post-golf drinks/dinner?
           </p>
           <DinnerRsvp
             bookingId={booking.bookingId}
@@ -2576,7 +2576,7 @@ function DinnerRsvp({
   const opts = [
     { value: 'yes' as const,   label: 'Yes' },
     { value: 'no' as const,    label: 'No' },
-    { value: 'maybe' as const, label: '?' },
+    { value: 'maybe' as const, label: 'Maybe' },
   ];
 
   if (layout === 'horizontal') {
@@ -2619,7 +2619,7 @@ function DinnerRsvp({
               key={value}
               onClick={() => pick(value)}
               disabled={!!saving}
-              className="w-7 h-7 rounded-full text-[11px] font-semibold transition-all disabled:opacity-50"
+              className="h-7 px-2.5 rounded-full text-[11px] font-semibold transition-all disabled:opacity-50"
               style={active ? {
                 background: 'var(--color-green-900)',
                 color: 'var(--color-gold)',

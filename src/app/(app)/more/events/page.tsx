@@ -91,7 +91,7 @@ export default function MemberEventsPage() {
               tab === t ? 'border-green-900 text-green-900' : 'border-transparent text-green-900/40'
             }`}
           >
-            {t === 'browse' ? 'Community Events' : 'Submit an event'}
+            {t === 'browse' ? 'Community Events' : 'Create an event'}
           </button>
         ))}
       </div>
@@ -118,7 +118,7 @@ export default function MemberEventsPage() {
                 Be the first to post a community event.
               </p>
               <button onClick={() => setTab('submit')} className="btn btn-primary">
-                Submit an event
+                Create an event
               </button>
 
             </div>
