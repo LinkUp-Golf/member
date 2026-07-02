@@ -43,7 +43,9 @@ async function ghlFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     const body = await res.text().catch(() => '')
     const code = res.status === 404 ? ErrorCode.GHL_CONTACT_NOT_FOUND : ErrorCode.GHL_UNAVAILABLE
     logger.error(`GHL ${res.status} ${path}: ${body.slice(0, 200)}`, { action: 'ghl_fetch_error', statusCode: res.status })
-    throw new GHLError(`GHL API error ${res.status}`, code, { path, statusCode: res.status })
+    let parsedBody: unknown
+    try { parsedBody = JSON.parse(body) } catch { /* not JSON */ }
+    throw new GHLError(`GHL API error ${res.status}`, code, { path, statusCode: res.status, body: parsedBody })
   }
 
   return res.json() as Promise<T>
@@ -78,7 +80,7 @@ export async function createContact(params: {
   lastName: string
   email: string
   phone?: string | null
-}): Promise<string | null> {
+}): Promise<string> {
   try {
     const data = await ghlFetch<{ contact: { id: string } }>('/contacts', {
       method: 'POST',
@@ -90,10 +92,19 @@ export async function createContact(params: {
         ...(params.phone ? { phone: params.phone } : {}),
       }),
     })
-    return data.contact?.id ?? null
+    const id = data.contact?.id
+    if (!id) throw new GHLError('GHL did not return a contact id', ErrorCode.GHL_UNAVAILABLE)
+    return id
   } catch (err) {
+    // Don't silently reuse whatever contact GHL matched on failure (e.g. a
+    // "duplicated contacts" rejection by phone/email) — that contact could
+    // belong to a different person entirely (like the booker), so misattaching
+    // the guest's appointment to it would be worse than failing loudly here.
+    const ghlMessage = err instanceof GHLError
+      ? (err.context?.body as { message?: string } | undefined)?.message
+      : undefined
     logger.warn('createContact failed', { action: 'ghl_contact_create', errorMessage: String(err) })
-    return null
+    throw new GHLError(ghlMessage ?? 'Failed to create GHL contact', ErrorCode.GHL_UNAVAILABLE)
   }
 }
 

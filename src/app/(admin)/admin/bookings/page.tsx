@@ -8,6 +8,7 @@ import Select from '@/components/ui/Select'
 import { format, addDays, subDays, isToday } from 'date-fns'
 import { formatTeeTime } from '@/lib/utils'
 import { GOLF_ROUND_DURATION_MINUTES } from '@/lib/constants'
+import type { AdditionalPlayer } from '@/types'
 
 type BookingStatus = 'tentative' | 'availability_confirmed' | 'payment_confirmed' | 'confirmed' | 'pending' | 'cancelled' | 'waitlist' | 'awaiting_approval'
 
@@ -18,6 +19,7 @@ interface BookingRow {
   players: number
   guest_name: string | null
   player_member_id: string | null
+  additional_players?: AdditionalPlayer[] | null
   status: BookingStatus
   amount_charged: number
   dinner_rsvp: 'yes' | 'no' | 'maybe' | null
@@ -56,7 +58,21 @@ interface CourseListItem {
   description: string | null
   city: string
   state: string
+  access_tag: string
   required_tags: string[]
+}
+
+interface AccessRequestRow {
+  id: string
+  member: { first_name: string; last_name: string; email: string } | null
+}
+
+interface AccessMemberRow {
+  id: string
+  first_name: string
+  last_name: string
+  email: string
+  ghl_tags: string[]
 }
 
 type TeeSlot = { key: string; booking_date: string; tee_time: string; rows: BookingRow[] }
@@ -93,7 +109,11 @@ function groupByDate(slots: TeeSlot[]): DateGroup[] {
 }
 
 function playerInfo(b: BookingRow): { name: string; sub: string; badge?: string } {
-  if (b.guest_name) return { name: b.guest_name, sub: 'Non-member guest', badge: 'Guest' }
+  if (b.guest_name) {
+    const guest = b.additional_players?.[0]
+    const contact = [guest?.email, guest?.mobile].filter(Boolean).join(' · ')
+    return { name: b.guest_name, sub: contact || 'Non-member guest', badge: 'Guest' }
+  }
   if (b.player) return { name: `${b.player.first_name ?? ''} ${b.player.last_name ?? ''}`.trim(), sub: b.player.email ?? '', badge: 'Invited' }
   return { name: `${b.member?.first_name ?? ''} ${b.member?.last_name ?? ''}`.trim(), sub: b.member?.email ?? '' }
 }
@@ -120,6 +140,8 @@ function SlotCard({
   onSaveNote,
   savingNote,
   noteRef,
+  processingBookingRequestId,
+  onDecideRequest,
 }: {
   slot: TeeSlot
   showCourseName: boolean
@@ -134,6 +156,8 @@ function SlotCard({
   onSaveNote: (id: string) => void
   savingNote: string | null
   noteRef: React.RefObject<HTMLTextAreaElement>
+  processingBookingRequestId: string | null
+  onDecideRequest: (id: string, action: 'setup' | 'reject') => void
 }) {
   const isExpanded = expandedSlots.has(slot.key)
   const totalAmount = slot.rows.reduce((sum, b) => sum + Number(b.amount_charged), 0)
@@ -221,16 +245,35 @@ function SlotCard({
 
                   {/* Status + dinner — stacked, right-aligned */}
                   <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                    <select
-                      value={b.status}
-                      disabled={updatingStatus === b.id}
-                      onChange={e => onUpdateStatus(b.id, e.target.value as BookingStatus)}
-                      className={`text-xs font-semibold rounded-lg px-2 py-1 border border-transparent outline-none cursor-pointer disabled:opacity-50 transition-colors max-w-[140px] sm:max-w-none ${sm.colour}`}
-                    >
-                      {ALL_STATUSES.map(s => (
-                        <option key={s} value={s}>{STATUS_META[s].label}</option>
-                      ))}
-                    </select>
+                    {b.status === 'awaiting_approval' ? (
+                      <div className="flex gap-1.5">
+                        <button
+                          onClick={() => onDecideRequest(b.id, 'setup')}
+                          disabled={processingBookingRequestId === b.id}
+                          className="text-xs font-medium px-2.5 py-1 rounded-lg bg-green-900 text-white disabled:opacity-50 whitespace-nowrap"
+                        >
+                          {processingBookingRequestId === b.id ? '…' : 'Setup'}
+                        </button>
+                        <button
+                          onClick={() => onDecideRequest(b.id, 'reject')}
+                          disabled={processingBookingRequestId === b.id}
+                          className="text-xs font-medium px-2.5 py-1 rounded-lg bg-red-50 text-red-600 disabled:opacity-50 whitespace-nowrap"
+                        >
+                          ✕ Reject
+                        </button>
+                      </div>
+                    ) : (
+                      <select
+                        value={b.status}
+                        disabled={updatingStatus === b.id}
+                        onChange={e => onUpdateStatus(b.id, e.target.value as BookingStatus)}
+                        className={`text-xs font-semibold rounded-lg px-2 py-1 border border-transparent outline-none cursor-pointer disabled:opacity-50 transition-colors max-w-[140px] sm:max-w-none ${sm.colour}`}
+                      >
+                        {ALL_STATUSES.map(s => (
+                          <option key={s} value={s}>{STATUS_META[s].label}</option>
+                        ))}
+                      </select>
+                    )}
 
                     {b.dinner_rsvp ? (
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${
@@ -306,6 +349,19 @@ export default function AdminBookingsPage() {
   const [expandedSlots, setExpandedSlots] = useState<Set<string>>(new Set())
   const noteRef = useRef<HTMLTextAreaElement>(null)
 
+  const [accessRequests, setAccessRequests] = useState<AccessRequestRow[]>([])
+  const [loadingAccessRequests, setLoadingAccessRequests] = useState(false)
+  const [processingRequestId, setProcessingRequestId] = useState<string | null>(null)
+
+  const [activeTab, setActiveTab] = useState<'bookings' | 'access'>('bookings')
+  const [allMembers, setAllMembers] = useState<AccessMemberRow[]>([])
+  const [loadingMembers, setLoadingMembers] = useState(false)
+  const [processingMemberId, setProcessingMemberId] = useState<string | null>(null)
+  const [addMemberSearch, setAddMemberSearch] = useState('')
+
+  const [processingBookingRequestId, setProcessingBookingRequestId] = useState<string | null>(null)
+  const [requestToast, setRequestToast] = useState<{ msg: string; ok: boolean } | null>(null)
+
   // Sync URL → filter when navigating from the nav sidebar (clicking a specific
   // course under "Booking Courses"). Once a course is pinned this way, the
   // cross-course narrowing filters (location/tags/event name) no longer apply
@@ -340,7 +396,7 @@ export default function AdminBookingsPage() {
 
     const { data: courses } = await supabase
       .from('courses')
-      .select('id, name, description, city, state, required_tags')
+      .select('id, name, description, city, state, access_tag, required_tags')
       .eq('active', true)
       .eq('approval_status', 'active')
       .order('name')
@@ -364,7 +420,7 @@ export default function AdminBookingsPage() {
 
     if (matchingCourseIds.length === 0) { setBookings([]); setLoading(false); return }
 
-    const SELECT = 'id, booking_date, tee_time, players, guest_name, player_member_id, status, amount_charged, dinner_rsvp, admin_notes, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name)'
+    const SELECT = 'id, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name)'
     const SELECT_NO_DINNER = SELECT.replace('dinner_rsvp, ', '')
 
     function buildQuery(select: string) {
@@ -416,6 +472,117 @@ export default function AdminBookingsPage() {
 
   useEffect(() => { loadBookings() }, [loadBookings])
   useEffect(() => { if (editingNote && noteRef.current) noteRef.current.focus() }, [editingNote])
+
+  const loadAccessRequests = useCallback(async () => {
+    if (courseFilter === 'all') { setAccessRequests([]); return }
+    setLoadingAccessRequests(true)
+    const res = await fetch(`/api/admin/event-access-requests?courseId=${courseFilter}`)
+    const json = await res.json()
+    setAccessRequests(((json.requests ?? []) as (AccessRequestRow & { status: string })[]).filter(r => r.status === 'pending'))
+    setLoadingAccessRequests(false)
+  }, [courseFilter])
+
+  useEffect(() => { loadAccessRequests() }, [loadAccessRequests])
+
+  async function decideAccessRequest(id: string, action: 'approve' | 'deny') {
+    setProcessingRequestId(id)
+    await fetch(`/api/admin/event-access-requests/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    })
+    await loadAccessRequests()
+    setProcessingRequestId(null)
+  }
+
+  async function decideBookingRequest(id: string, action: 'setup' | 'reject') {
+    setProcessingBookingRequestId(id)
+    const res = await fetch(`/api/admin/booking-requests/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    })
+    if (res.ok) {
+      setRequestToast({ msg: action === 'setup' ? 'Guest set up, booked, and synced.' : 'Guest request rejected.', ok: true })
+    } else {
+      const json = await res.json().catch(() => ({}))
+      setRequestToast({ msg: json.error ?? 'Action failed. Please try again.', ok: false })
+    }
+    setTimeout(() => setRequestToast(null), 3500)
+    await loadBookings()
+    setProcessingBookingRequestId(null)
+  }
+
+  const loadMembers = useCallback(async () => {
+    setLoadingMembers(true)
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('members')
+      .select('id, first_name, last_name, email, ghl_tags')
+      .order('first_name')
+    setAllMembers((data ?? []) as AccessMemberRow[])
+    setLoadingMembers(false)
+  }, [])
+
+  useEffect(() => { loadMembers() }, [loadMembers])
+
+  // Reset to the Bookings tab when leaving a specific course — the Access
+  // tab only makes sense scoped to one event.
+  useEffect(() => {
+    if (courseFilter === 'all') setActiveTab('bookings')
+  }, [courseFilter])
+
+  const currentCourse = courseList.find(c => c.id === courseFilter) ?? null
+
+  const courseAccessTags = useMemo(
+    () => currentCourse
+      ? [...new Set([currentCourse.access_tag, ...(currentCourse.required_tags ?? [])].filter(Boolean))]
+      : [],
+    [currentCourse]
+  )
+
+  const membersWithAccess = useMemo(
+    () => allMembers.filter(m => (m.ghl_tags ?? []).some(t => courseAccessTags.includes(t))),
+    [allMembers, courseAccessTags]
+  )
+  const membersWithAccessIds = useMemo(
+    () => new Set(membersWithAccess.map(m => m.id)),
+    [membersWithAccess]
+  )
+
+  const addMemberMatches = useMemo(() => {
+    if (!addMemberSearch.trim()) return []
+    const q = addMemberSearch.toLowerCase()
+    return allMembers
+      .filter(m => !membersWithAccessIds.has(m.id))
+      .filter(m => `${m.first_name} ${m.last_name}`.toLowerCase().includes(q) || m.email.toLowerCase().includes(q))
+      .slice(0, 8)
+  }, [addMemberSearch, allMembers, membersWithAccessIds])
+
+  async function grantAccess(memberId: string) {
+    if (!currentCourse?.access_tag) return
+    setProcessingMemberId(memberId)
+    await fetch('/api/admin/members/bulk-tags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memberIds: [memberId], tag: currentCourse.access_tag, action: 'add' }),
+    })
+    await loadMembers()
+    setAddMemberSearch('')
+    setProcessingMemberId(null)
+  }
+
+  async function revokeAccess(memberId: string) {
+    if (!currentCourse?.access_tag) return
+    setProcessingMemberId(memberId)
+    await fetch('/api/admin/members/bulk-tags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memberIds: [memberId], tag: currentCourse.access_tag, action: 'remove' }),
+    })
+    await loadMembers()
+    setProcessingMemberId(null)
+  }
 
   // Status/dinner-RSVP/venue/location/tags are already applied server-side in
   // loadBookings — only free-text search (out of scope for server-side filtering,
@@ -532,11 +699,20 @@ export default function AdminBookingsPage() {
     onEditNote: setEditingNote,
     onNoteChange: (id: string, val: string) => setNoteValues(prev => ({ ...prev, [id]: val })),
     onSaveNote: saveNote, savingNote, noteRef,
+    processingBookingRequestId, onDecideRequest: decideBookingRequest,
   }
 
   // ---- Render ---------------------------------------------------------
   return (
     <div className="p-4 sm:p-6">
+      {requestToast && (
+        <div className={`fixed top-6 right-6 z-50 px-4 py-3 rounded-xl shadow-lg text-sm font-medium max-w-sm ${
+          requestToast.ok ? 'bg-green-900 text-white' : 'bg-red-600 text-white'
+        }`}>
+          {requestToast.msg}
+        </div>
+      )}
+
       {/* Header row: title + view toggle */}
       <div className="flex items-start justify-between gap-3 mb-5">
         <AdminPageHeader
@@ -565,6 +741,147 @@ export default function AdminBookingsPage() {
         </div>
       </div>
 
+      {/* Tabs — only meaningful once a specific event/course is pinned via the sidebar */}
+      {courseFilter !== 'all' && (
+        <div className="flex gap-1 mb-5 border-b border-gray-100">
+          {(['bookings', 'access'] as const).map(tab => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-2.5 text-sm font-medium capitalize transition-colors border-b-2 -mb-px ${
+                activeTab === tab
+                  ? 'border-green-900 text-green-900'
+                  : 'border-transparent text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              {tab === 'bookings' ? 'Bookings' : 'Access'}
+              {tab === 'access' && accessRequests.length > 0 && (
+                <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600">
+                  {accessRequests.length}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {courseFilter !== 'all' && activeTab === 'access' ? (
+        <div className="space-y-8">
+          {/* Access requests */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <h2 className="text-sm font-bold text-gray-700">Access Requests</h2>
+              {accessRequests.length > 0 && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-orange-50 text-orange-600">
+                  {accessRequests.length} pending
+                </span>
+              )}
+            </div>
+            {loadingAccessRequests ? (
+              <div className="h-12 bg-gray-100 rounded-xl animate-pulse" />
+            ) : accessRequests.length === 0 ? (
+              <p className="text-xs text-gray-400 italic px-1">No pending access requests for this event.</p>
+            ) : (
+              <div className="space-y-2">
+                {accessRequests.map(r => (
+                  <div key={r.id} className="bg-white border border-gray-100 rounded-xl shadow-sm px-4 py-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate capitalize">
+                        {r.member?.first_name} {r.member?.last_name}
+                      </p>
+                      <p className="text-xs text-gray-400 truncate">{r.member?.email}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <button
+                        onClick={() => decideAccessRequest(r.id, 'approve')}
+                        disabled={processingRequestId === r.id}
+                        className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-green-900 text-white disabled:opacity-50"
+                      >
+                        ✓ Approve
+                      </button>
+                      <button
+                        onClick={() => decideAccessRequest(r.id, 'deny')}
+                        disabled={processingRequestId === r.id}
+                        className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600 disabled:opacity-50"
+                      >
+                        ✕ Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Add an existing member directly */}
+          <div>
+            <h2 className="text-sm font-bold text-gray-700 mb-2">Add Member</h2>
+            <div className="relative max-w-sm">
+              <input
+                type="search"
+                placeholder="Search members by name or email…"
+                value={addMemberSearch}
+                onChange={e => setAddMemberSearch(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
+              />
+              {addMemberMatches.length > 0 && (
+                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-100 rounded-xl shadow-lg overflow-hidden">
+                  {addMemberMatches.map(m => (
+                    <div key={m.id} className="flex items-center justify-between gap-3 px-3 py-2 hover:bg-gray-50">
+                      <div className="min-w-0">
+                        <p className="text-sm text-gray-800 truncate capitalize">{m.first_name} {m.last_name}</p>
+                        <p className="text-xs text-gray-400 truncate">{m.email}</p>
+                      </div>
+                      <button
+                        onClick={() => grantAccess(m.id)}
+                        disabled={processingMemberId === m.id}
+                        className="flex-shrink-0 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-green-900 text-white disabled:opacity-50"
+                      >
+                        + Add
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Members currently with access */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <h2 className="text-sm font-bold text-gray-700">Members With Access</h2>
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
+                {membersWithAccess.length}
+              </span>
+            </div>
+            {loadingMembers ? (
+              <div className="h-12 bg-gray-100 rounded-xl animate-pulse" />
+            ) : membersWithAccess.length === 0 ? (
+              <p className="text-xs text-gray-400 italic px-1">No members have access to this event yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {membersWithAccess.map(m => (
+                  <div key={m.id} className="bg-white border border-gray-100 rounded-xl shadow-sm px-4 py-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate capitalize">{m.first_name} {m.last_name}</p>
+                      <p className="text-xs text-gray-400 truncate">{m.email}</p>
+                    </div>
+                    <button
+                      onClick={() => revokeAccess(m.id)}
+                      disabled={processingMemberId === m.id}
+                      className="flex-shrink-0 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600 disabled:opacity-50"
+                    >
+                      Remove access
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Stats — 2 cols mobile, 4 cols desktop */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 mb-5">
         <StatCard label="Active"        value={confirmed} sub="Confirmed / avail. confirmed" colour="green" />
@@ -719,6 +1036,8 @@ export default function AdminBookingsPage() {
         <p className="text-xs text-gray-400 mt-5 text-right">
           {filtered.length} player{filtered.length !== 1 ? 's' : ''} · {allSlots.length} tee slot{allSlots.length !== 1 ? 's' : ''} · {view === 'upcoming' ? 'upcoming' : 'past'}
         </p>
+      )}
+        </>
       )}
     </div>
   )

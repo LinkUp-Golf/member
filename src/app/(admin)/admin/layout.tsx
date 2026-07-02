@@ -23,7 +23,6 @@ const NAV_GROUPS = [
     items: [
       { href: '/admin/members',          label: 'Members',            icon: '▪' },
       { href: '/admin/events',           label: 'Member Events',      icon: '▪', badge: true },
-      { href: '/admin/moderation',       label: 'Moderation Queue',   icon: '▪', badge: true },
       { href: '/admin/guest-access',     label: 'Guest Access',       icon: '▪', badge: true },
       { href: '/admin/referrals',        label: 'Referral Pipeline',  icon: '▪' },
       { href: '/admin/messaging',        label: 'Messaging Controls', icon: '▪' },
@@ -33,7 +32,6 @@ const NAV_GROUPS = [
     label: 'Golf',
     items: [
       { href: '/admin/golf-events',      label: 'Courses',           icon: '▪', badge: true },
-      { href: '/admin/booking-requests', label: 'Booking Requests',  icon: '▪', badge: true },
       ...(FEATURES.FOCUS_LINKUPS ? [{ href: '/admin/focus-linkups', label: 'Focus LinkUps', icon: '▪' as const }] : []),
     ],
   },
@@ -48,9 +46,7 @@ const NAV_GROUPS = [
 
 function NavContent({
   pathname,
-  pendingCount,
   guestCount,
-  bookingReqCount,
   eventsCount,
   golfEventsCount,
   activeCourses,
@@ -58,9 +54,7 @@ function NavContent({
   onNavigate,
 }: {
   pathname: string
-  pendingCount: number
   guestCount: number
-  bookingReqCount: number
   eventsCount: number
   golfEventsCount: number
   activeCourses: { id: string; name: string }[]
@@ -106,12 +100,8 @@ function NavContent({
                 pathname === item.href ||
                 (item.href !== '/admin' && pathname.startsWith(item.href))
               const count = item.badge
-                ? item.href.includes('moderation')
-                  ? pendingCount
-                  : item.href.includes('guest')
+                ? item.href.includes('guest')
                   ? guestCount
-                  : item.href.includes('booking-requests')
-                  ? bookingReqCount
                   : item.href.includes('/admin/events')
                   ? eventsCount
                   : item.href.includes('golf-events')
@@ -229,9 +219,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const { user, profile, loading, isAdmin } = useProfile()
   const router = useRouter()
   const pathname = usePathname()
-  const [pendingCount, setPendingCount] = useState(0)
   const [guestCount, setGuestCount] = useState(0)
-  const [bookingReqCount, setBookingReqCount] = useState(0)
   const [eventsCount, setEventsCount] = useState(0)
   const [golfEventsCount, setGolfEventsCount] = useState(0)
   const [activeCourses, setActiveCourses] = useState<{ id: string; name: string }[]>([])
@@ -251,27 +239,22 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const fetchCounts = useCallback(async () => {
     const supabase = createClient()
+
     const { data: courses } = await supabase
       .from('courses')
       .select('id')
       .in('slug', COURSE_SLUGS)
     if (!courses?.length) return
     const courseIds = courses.map(c => c.id)
-    const [modRes, guestRes, bookingReqRes, eventsRes, golfEventsRes] = await Promise.all([
-      supabase.from('announcements').select('id', { count: 'exact', head: true })
-        .in('course_id', courseIds).eq('status', 'pending_review'),
+    const [guestRes, eventsRes, golfEventsRes] = await Promise.all([
       supabase.from('guest_access_requests').select('id', { count: 'exact', head: true })
         .in('target_course_id', courseIds).eq('status', 'pending'),
-      supabase.from('bookings').select('id', { count: 'exact', head: true })
-        .in('course_id', courseIds).eq('status', 'awaiting_approval'),
       supabase.from('member_events').select('id', { count: 'exact', head: true })
         .in('course_id', courseIds).eq('status', 'pending_review'),
       supabase.from('courses').select('id', { count: 'exact', head: true })
         .eq('approval_status', 'pending'),
     ])
-    setPendingCount(modRes.count ?? 0)
     setGuestCount(guestRes.count ?? 0)
-    setBookingReqCount(bookingReqRes.count ?? 0)
     setEventsCount(eventsRes.count ?? 0)
     setGolfEventsCount(golfEventsRes.count ?? 0)
 
@@ -318,10 +301,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <aside className="hidden md:flex md:w-56 lg:w-60 bg-green-950 flex-col flex-shrink-0 h-screen overflow-hidden">
         <NavContent
           pathname={pathname}
-          pendingCount={pendingCount}
           guestCount={guestCount}
-          bookingReqCount={bookingReqCount}
-          eventsCount={eventsCount}
+                    eventsCount={eventsCount}
           golfEventsCount={golfEventsCount}
           activeCourses={activeCourses}
           user={{ email: user.email ?? '' }}
@@ -366,10 +347,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </button>
             <NavContent
               pathname={pathname}
-              pendingCount={pendingCount}
               guestCount={guestCount}
-              bookingReqCount={bookingReqCount}
-              eventsCount={eventsCount}
+                            eventsCount={eventsCount}
               golfEventsCount={golfEventsCount}
           activeCourses={activeCourses}
               user={{ email: user.email ?? '' }}

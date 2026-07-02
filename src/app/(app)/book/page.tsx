@@ -3110,15 +3110,18 @@ function BookingCard({
 
 // ---- Event selection screen ---------------------------------
 
+type BookableCourse = Course & { has_access: boolean; access_requested: boolean };
+
 function EventSelectionScreen({
   onSelect,
 }: {
   onSelect: (course: Course) => void;
 }) {
-  const [events, setEvents] = useState<Course[]>([]);
+  const [events, setEvents] = useState<BookableCourse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showCreateFeed, setShowCreateFeed] = useState(false);
+  const [requestingId, setRequestingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/courses")
@@ -3129,6 +3132,24 @@ function EventSelectionScreen({
       .catch(() => setError("Failed to load courses."))
       .finally(() => setLoading(false));
   }, []);
+
+  async function requestAccess(courseId: string) {
+    setRequestingId(courseId);
+    try {
+      const res = await fetch("/api/event-access-requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ course_id: courseId }),
+      });
+      if (res.ok) {
+        setEvents((prev) =>
+          prev.map((c) => (c.id === courseId ? { ...c, access_requested: true } : c)),
+        );
+      }
+    } finally {
+      setRequestingId(null);
+    }
+  }
 
   if (loading) {
     return (
@@ -3185,103 +3206,150 @@ function EventSelectionScreen({
 
       <div className="px-5 md:px-8 pt-3">
         <div className="card">
-          {events.map((course, i) => (
-            <button
-              key={course.id}
-              type="button"
-              onClick={() => onSelect(course)}
-              className="w-full text-left flex items-start gap-3 px-4 py-4 transition-colors hover:bg-green-50/40 active:opacity-70"
-              style={{
-                borderBottom: i < events.length - 1 ? "1px solid rgba(0,38,105,0.06)" : "none",
-              }}
-            >
-              {/* Venue logo — fixed square, pinned to the top so it never
-                  stretches/shrinks based on how tall the text stack next to
-                  it gets (e.g. whether the website icon row is present). */}
-              <div
-                className="relative w-24 h-24 aspect-square self-start rounded-xl overflow-hidden flex-shrink-0"
-                style={{ background: "rgba(0,38,105,0.03)" }}
+          {events.map((course, i) => {
+            const borderStyle = {
+              borderBottom: i < events.length - 1 ? "1px solid rgba(0,38,105,0.06)" : "none",
+            };
+
+            return course.has_access ? (
+              <button
+                key={course.id}
+                type="button"
+                onClick={() => onSelect(course)}
+                className="w-full text-left flex items-start gap-3 px-4 py-4 transition-colors hover:bg-green-50/40 active:opacity-70"
+                style={borderStyle}
               >
-                <Image
-                  src={course.logo_url}
-                  alt=""
-                  fill
-                  unoptimized
-                  className="object-contain"
+                <CourseRowInner
+                  course={course}
+                  isRequesting={requestingId === course.id}
+                  onRequestAccess={requestAccess}
+                />
+              </button>
+            ) : (
+              <div
+                key={course.id}
+                className="w-full text-left flex items-start gap-3 px-4 py-4"
+                style={borderStyle}
+              >
+                <CourseRowInner
+                  course={course}
+                  isRequesting={requestingId === course.id}
+                  onRequestAccess={requestAccess}
                 />
               </div>
-
-              {/* Row stack: name / location - address / price / website icon */}
-              <div className="flex-1 min-w-0 flex flex-col gap-1">
-                <p
-                  className="font-sans font-black text-base leading-tight truncate"
-                  style={{ color: "var(--color-green-900)" }}
-                >
-                  {course.name}
-                </p>
-
-                {(course.city || course.state || course.address) && (
-                  <p
-                    className="text-xs truncate"
-                    style={{ color: "rgba(0,38,105,0.45)" }}
-                  >
-                    📍 {[course.city, course.state].filter(Boolean).join(", ")}
-                    {course.address ? ` - ${course.address}` : ""}
-                  </p>
-                )}
-
-                <div className="flex items-center gap-2 flex-wrap">
-                  {course.cost_per_player != null && (
-                    <span
-                      className="text-xs font-bold"
-                      style={{ color: "var(--color-gold-dark, #92640a)" }}
-                    >
-                      ${course.cost_per_player}/player
-                    </span>
-                  )}
-                  {!course.ghl_calendar_id && (
-                    <span
-                      className="text-xs"
-                      style={{ color: "rgba(0,38,105,0.35)" }}
-                    >
-                      Calendar setup pending
-                    </span>
-                  )}
-                </div>
-
-                {course.booking_url && (
-                  <div className="flex justify-end -mb-1">
-                    <a
-                      href={course.booking_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      aria-label="Visit website"
-                      className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
-                      style={{ color: "rgba(0,38,105,0.35)" }}
-                    >
-                      <svg
-                        className="w-3.5 h-3.5 flex-shrink-0"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
-                        />
-                      </svg>
-                    </a>
-                  </div>
-                )}
-              </div>
-            </button>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
+  );
+}
+
+function CourseRowInner({
+  course,
+  isRequesting,
+  onRequestAccess,
+}: {
+  course: BookableCourse;
+  isRequesting: boolean;
+  onRequestAccess: (courseId: string) => void;
+}) {
+  return (
+    <>
+      {/* Venue logo — fixed square, pinned to the top so it never
+          stretches/shrinks based on how tall the text stack next to
+          it gets (e.g. whether the website icon row is present). */}
+      <div
+        className="relative w-24 h-24 aspect-square self-start rounded-xl overflow-hidden flex-shrink-0"
+        style={{ background: "rgba(0,38,105,0.03)" }}
+      >
+        <Image
+          src={course.logo_url}
+          alt=""
+          fill
+          unoptimized
+          className="object-contain"
+        />
+      </div>
+
+      {/* Row stack: name / location - address / price / access CTA / website icon */}
+      <div className="flex-1 min-w-0 flex flex-col gap-1">
+        <p
+          className="font-sans font-black text-base leading-tight truncate"
+          style={{ color: "var(--color-green-900)" }}
+        >
+          {course.name}
+        </p>
+
+        {(course.city || course.state || course.address) && (
+          <p
+            className="text-xs truncate"
+            style={{ color: "rgba(0,38,105,0.45)" }}
+          >
+            📍 {[course.city, course.state].filter(Boolean).join(", ")}
+            {course.address ? ` - ${course.address}` : ""}
+          </p>
+        )}
+
+        {course.cost_per_player != null && (
+          <span
+            className="text-xs font-bold"
+            style={{ color: "var(--color-gold-dark, #92640a)" }}
+          >
+            ${course.cost_per_player}/player
+          </span>
+        )}
+
+        {!course.has_access && (
+          <div className="flex justify-end -mb-1">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!course.access_requested) onRequestAccess(course.id);
+              }}
+              disabled={course.access_requested || isRequesting}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg flex-shrink-0 disabled:opacity-60"
+              style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+            >
+              {course.access_requested
+                ? "Access requested"
+                : isRequesting
+                  ? "Requesting…"
+                  : "Request access"}
+            </button>
+          </div>
+        )}
+
+        {course.booking_url && (
+          <div className="flex justify-end -mb-1">
+            <a
+              href={course.booking_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              aria-label="Visit website"
+              className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
+              style={{ color: "rgba(0,38,105,0.35)" }}
+            >
+              <svg
+                className="w-3.5 h-3.5 flex-shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+                />
+              </svg>
+            </a>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 

@@ -110,13 +110,12 @@ export const PATCH = withAuth(
     let contactId = ''
     try {
       const existing = await getContactByEmail(guest.email)
-      contactId = existing?.id ?? (await createContact({
+      contactId = existing?.id ?? await createContact({
         firstName: guest.firstName ?? '',
         lastName: guest.lastName ?? '',
         email: guest.email,
         phone: guest.mobile || null,
-      })) ?? ''
-      if (!contactId) throw new Error('Could not resolve a GHL contact for the guest')
+      })
 
       // Tag the contact with the app's access/membership tags so the app
       // recognises them (and GHL membership workflows fire) before booking.
@@ -135,13 +134,14 @@ export const PATCH = withAuth(
         contact: { id: contactId, email: guest.email, phone: guest.mobile || null },
       })
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
       logger.error('Non-member setup — GHL booking failed', {
         action: 'non_member_booking.ghl_failed',
         userId: ctx.userId,
-        metadata: { booking_id: id, error: String(err) },
+        metadata: { booking_id: id, error: message },
       })
       return NextResponse.json(
-        { error: 'Failed to create the appointment in GHL. Please try again.', detail: String(err) },
+        { error: `Failed to set up the guest in GHL: ${message}`, detail: message },
         { status: 502 }
       )
     }
