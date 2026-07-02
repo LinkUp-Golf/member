@@ -3178,131 +3178,103 @@ function EventSelectionScreen({
         </p>
       </div>
 
-      <div className="px-5 md:px-8 pt-3 space-y-3">
-        {events.map((course) => (
-          <button
-            key={course.id}
-            type="button"
-            onClick={() => onSelect(course)}
-            className="w-full text-left rounded-2xl border bg-white p-4 shadow-sm transition-all hover:border-green-900/30 hover:shadow-md active:opacity-80"
-            style={{ borderColor: "rgba(0,38,105,0.09)" }}
-          >
-            <div className="flex items-center gap-3">
-              {/* Venue logo */}
+      <div className="px-5 md:px-8 pt-3">
+        <div className="card">
+          {events.map((course, i) => (
+            <button
+              key={course.id}
+              type="button"
+              onClick={() => onSelect(course)}
+              className="w-full text-left flex items-start gap-3 px-4 py-4 transition-colors hover:bg-green-50/40 active:opacity-70"
+              style={{
+                borderBottom: i < events.length - 1 ? "1px solid rgba(0,38,105,0.06)" : "none",
+              }}
+            >
+              {/* Venue logo — fixed square, pinned to the top so it never
+                  stretches/shrinks based on how tall the text stack next to
+                  it gets (e.g. whether the website icon row is present). */}
               <div
-                className="relative w-14 h-14 rounded-2xl overflow-hidden flex-shrink-0 border"
-                style={{
-                  borderColor: "rgba(0,38,105,0.08)",
-                  background: "rgba(0,38,105,0.03)",
-                }}
+                className="relative w-24 h-24 aspect-square self-start rounded-xl overflow-hidden flex-shrink-0"
+                style={{ background: "rgba(0,38,105,0.03)" }}
               >
                 <Image
                   src={course.logo_url}
                   alt=""
                   fill
                   unoptimized
-                  className="object-cover"
+                  className="object-contain"
                 />
               </div>
 
-              {/* Content */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-2">
-                  <p
-                    className="font-sans font-black text-base leading-tight"
-                    style={{ color: "var(--color-green-900)" }}
-                  >
-                    {course.name}
-                  </p>
-                  <span
-                    className="flex items-center justify-center w-6 h-6 rounded-full flex-shrink-0"
-                    style={{ background: "rgba(0,38,105,0.05)" }}
-                  >
-                    <svg
-                      className="w-3.5 h-3.5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      style={{ color: "rgba(0,38,105,0.35)" }}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M8.25 4.5l7.5 7.5-7.5 7.5"
-                      />
-                    </svg>
-                  </span>
-                </div>
+              {/* Row stack: name / location - address / price / website icon */}
+              <div className="flex-1 min-w-0 flex flex-col gap-1">
+                <p
+                  className="font-sans font-black text-base leading-tight truncate"
+                  style={{ color: "var(--color-green-900)" }}
+                >
+                  {course.name}
+                </p>
 
-                {(course.city || course.state) && (
+                {(course.city || course.state || course.address) && (
                   <p
-                    className="text-xs mt-1"
+                    className="text-xs truncate"
                     style={{ color: "rgba(0,38,105,0.45)" }}
                   >
                     📍 {[course.city, course.state].filter(Boolean).join(", ")}
+                    {course.address ? ` - ${course.address}` : ""}
                   </p>
                 )}
-              </div>
-            </div>
 
-            {/* Footer */}
-            <div
-              className="flex items-center justify-between mt-3 pt-3 border-t"
-              style={{ borderColor: "rgba(0,38,105,0.06)" }}
-            >
-              <div className="flex items-center gap-2 flex-wrap">
-                {course.cost_per_player != null && (
-                  <span
-                    className="text-xs font-bold px-2.5 py-1 rounded-full"
-                    style={{
-                      color: "var(--color-gold-dark, #92640a)",
-                      background: "rgba(146,100,10,0.1)",
-                    }}
-                  >
-                    ${course.cost_per_player}/player
-                  </span>
-                )}
-                {!course.ghl_calendar_id && (
-                  <span
-                    className="text-xs"
-                    style={{ color: "rgba(0,38,105,0.35)" }}
-                  >
-                    Calendar setup pending
-                  </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {course.cost_per_player != null && (
+                    <span
+                      className="text-xs font-bold"
+                      style={{ color: "var(--color-gold-dark, #92640a)" }}
+                    >
+                      ${course.cost_per_player}/player
+                    </span>
+                  )}
+                  {!course.ghl_calendar_id && (
+                    <span
+                      className="text-xs"
+                      style={{ color: "rgba(0,38,105,0.35)" }}
+                    >
+                      Calendar setup pending
+                    </span>
+                  )}
+                </div>
+
+                {course.booking_url && (
+                  <div className="flex justify-end -mb-1">
+                    <a
+                      href={course.booking_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label="Visit website"
+                      className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
+                      style={{ color: "rgba(0,38,105,0.35)" }}
+                    >
+                      <svg
+                        className="w-3.5 h-3.5 flex-shrink-0"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+                        />
+                      </svg>
+                    </a>
+                  </div>
                 )}
               </div>
-              {course.booking_url && (
-                <a
-                  href={course.booking_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full flex-shrink-0 transition-opacity hover:opacity-75"
-                  style={{
-                    color: "var(--color-gold-dark, #92640a)",
-                    background: "rgba(146,100,10,0.08)",
-                  }}
-                >
-                  Event info
-                  <svg
-                    className="w-3 h-3 flex-shrink-0"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
-                    />
-                  </svg>
-                </a>
-              )}
-            </div>
-          </button>
-        ))}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

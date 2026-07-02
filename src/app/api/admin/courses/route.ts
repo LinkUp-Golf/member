@@ -49,7 +49,11 @@ export const POST = withAuth(
     }
 
     if (body.booking_url?.trim() && !isValidUrl(body.booking_url.trim())) {
-      return NextResponse.json({ error: 'Booking URL must be a valid URL (e.g. https://example.com)' }, { status: 400 })
+      return NextResponse.json({ error: 'Website must be a valid URL (e.g. https://example.com)' }, { status: 400 })
+    }
+
+    if (body.map_link?.trim() && !isValidUrl(body.map_link.trim())) {
+      return NextResponse.json({ error: 'Map link must be a valid URL (e.g. https://maps.google.com/...)' }, { status: 400 })
     }
 
     const admin = createAdminClient()
@@ -60,7 +64,7 @@ export const POST = withAuth(
       return NextResponse.json({ error: `The slug "${slug}" is already taken. Choose a different one.` }, { status: 409 })
     }
 
-    const ghlCalendarId: string | null = body.ghl_calendar_id ?? null
+    const ghlCalendarId: string | null = body.ghl_calendar_id?.trim() || null
 
     // Calendar uniqueness: reject if the selected calendar is already assigned to another course
     if (ghlCalendarId) {
@@ -88,6 +92,9 @@ export const POST = withAuth(
         city: body.city ?? '',
         state: body.state ?? '',
         country: body.country ?? 'US',
+        address: body.address?.trim() || null,
+        phone: body.phone?.trim() || null,
+        map_link: body.map_link?.trim() || null,
         access_tag: requiredTags[0] ?? '',
         timezone: body.timezone ?? AVIARA_TIMEZONE,
         active: true,

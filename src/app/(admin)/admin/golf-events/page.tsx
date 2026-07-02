@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useForm, Controller } from 'react-hook-form'
 import Image from 'next/image'
 import {
@@ -8,7 +9,6 @@ import {
 } from '@/components/admin/AdminUI'
 import Select from '@/components/ui/Select'
 import MediaUpload from '@/components/ui/MediaUpload'
-import { formatRelativeTime } from '@/lib/utils'
 import type { Course, CourseApprovalStatus } from '@/types'
 
 type FilterTab = 'pending' | 'active' | 'rejected' | 'archived'
@@ -39,6 +39,110 @@ interface CourseRow extends Course {
 
 function toSlug(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
+function DotsVertical() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+      <circle cx="12" cy="5" r="1.75" />
+      <circle cx="12" cy="12" r="1.75" />
+      <circle cx="12" cy="19" r="1.75" />
+    </svg>
+  )
+}
+
+function CourseMenuItem({ label, danger, disabled, onClick }: { label: string; danger?: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors disabled:opacity-50"
+      style={{ color: danger ? '#dc2626' : '#1a2e1a' }}
+    >
+      {label}
+    </button>
+  )
+}
+
+// Portaled to document.body (not rendered inline) so the dropdown can
+// escape the .card list's overflow-hidden clip; position is measured
+// from the trigger button via getBoundingClientRect, same approach as
+// the shared Select component.
+function CourseActionsMenu({ children }: { children: (close: () => void) => React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const [coords, setCoords] = useState<{ top?: number; bottom?: number; left: number } | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  const MENU_WIDTH = 160
+
+  const updatePosition = useCallback(() => {
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const openUp = window.innerHeight - rect.bottom < 220
+    const left = Math.min(Math.max(8, rect.right - MENU_WIDTH), window.innerWidth - MENU_WIDTH - 8)
+    setCoords(
+      openUp
+        ? { bottom: window.innerHeight - rect.top + 4, left }
+        : { top: rect.bottom + 4, left }
+    )
+  }, [])
+
+  const close = useCallback(() => setOpen(false), [])
+
+  const toggle = useCallback(() => {
+    if (!open) updatePosition()
+    setOpen(o => !o)
+  }, [open, updatePosition])
+
+  useEffect(() => {
+    if (!open) return
+    function handle(e: MouseEvent) {
+      const target = e.target as Node
+      if (triggerRef.current?.contains(target)) return
+      if (dropdownRef.current?.contains(target)) return
+      close()
+    }
+    document.addEventListener('mousedown', handle)
+    return () => document.removeEventListener('mousedown', handle)
+  }, [open, close])
+
+  useEffect(() => {
+    if (!open) return
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
+    return () => {
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
+    }
+  }, [open, updatePosition])
+
+  return (
+    <div className="relative flex-shrink-0 sm:hidden">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={toggle}
+        aria-label="Course actions"
+        className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+      >
+        <DotsVertical />
+      </button>
+
+      {open && coords && typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={dropdownRef}
+            className="fixed z-50 rounded-xl shadow-lg border border-gray-100 overflow-hidden bg-white"
+            style={{ top: coords.top, bottom: coords.bottom, left: coords.left, width: MENU_WIDTH }}
+          >
+            {children(close)}
+          </div>,
+          document.body
+        )}
+    </div>
+  )
 }
 
 export default function AdminCoursesPage() {
@@ -208,74 +312,80 @@ export default function AdminCoursesPage() {
           )}
         </div>
       ) : (
-        <div className="space-y-4">
-          {filtered.map(course => {
+        <div className="card">
+          {filtered.map((course, i) => {
             const sm = STATUS_META[course.approval_status]
             const isProcessing = processing === course.id
             const isRejecting = rejectingId === course.id
 
             return (
-              <div key={course.id} className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm p-4">
-                <div className="flex items-start justify-between gap-3 mb-2 flex-wrap">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <div className="relative w-10 h-10 rounded-xl overflow-hidden border border-gray-200 flex-shrink-0">
-                      <Image src={course.logo_url} alt="" fill unoptimized className="object-cover" />
+              <div
+                key={course.id}
+                className="flex items-start gap-3 px-4 py-4"
+                style={{ borderBottom: i < filtered.length - 1 ? '1px solid rgba(0,38,105,0.06)' : 'none' }}
+              >
+                {/* Venue logo — fixed square, pinned to the top like the
+                    member booking card, so it never stretches with content. */}
+                <div
+                  className="relative w-24 h-24 aspect-square self-start rounded-xl overflow-hidden flex-shrink-0"
+                  style={{ background: 'rgba(0,38,105,0.03)' }}
+                >
+                  <Image src={course.logo_url} alt="" fill unoptimized className="object-contain" />
+                </div>
+
+                <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <h3 className="font-semibold text-gray-900 truncate min-w-0">{course.name}</h3>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        {course.approval_status !== 'active' && (
+                          <Badge label={sm.label} colour={sm.colour} />
+                        )}
+                        {course.ghl_calendar_id && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium">Calendar ✓</span>
+                        )}
+                        {course.ghl_group_id && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 font-medium">Group ✓</span>
+                        )}
+                      </div>
                     </div>
-                    <h3 className="font-semibold text-gray-900">{course.name}</h3>
-                    <Badge label={sm.label} colour={sm.colour} />
-                    {course.ghl_calendar_id && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium">Calendar ✓</span>
-                    )}
-                    {course.ghl_group_id && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 font-medium">Group ✓</span>
-                    )}
-                  </div>
-                  <span className="text-[11px] text-gray-400 flex-shrink-0">{formatRelativeTime(course.created_at)}</span>
-                </div>
 
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3">
-                  {(course.city || course.state) && (
-                    <p className="text-xs text-gray-500">📍 {[course.city, course.state].filter(Boolean).join(', ')}</p>
+                    {/* Mobile-only 3-dot actions menu — portaled so it can't
+                        be clipped by the .card container's overflow-hidden */}
+                    <CourseActionsMenu>
+                      {(closeMenu) => (
+                        <>
+                          {course.approval_status === 'pending' && !isRejecting && (
+                            <>
+                              <CourseMenuItem label={isProcessing ? 'Approving…' : 'Approve'} disabled={isProcessing} onClick={() => { approveCourse(course); closeMenu() }} />
+                              <CourseMenuItem label="Reject" danger disabled={isProcessing} onClick={() => { setRejectingId(course.id); setRejectReason(''); closeMenu() }} />
+                            </>
+                          )}
+                          {course.approval_status === 'active' && (
+                            <CourseMenuItem label={isProcessing ? '…' : 'Archive'} disabled={isProcessing} onClick={() => { toggleActive(course, true); closeMenu() }} />
+                          )}
+                          {course.approval_status === 'archived' && (
+                            <CourseMenuItem label={isProcessing ? '…' : 'Reactivate'} disabled={isProcessing} onClick={() => { toggleActive(course, false); closeMenu() }} />
+                          )}
+                          <CourseMenuItem label="Edit" disabled={isProcessing} onClick={() => { setEditingCourse(course); setShowCreate(true); closeMenu() }} />
+                          <CourseMenuItem label="Delete" danger disabled={isProcessing} onClick={() => { setDeletingId(course.id); closeMenu() }} />
+                        </>
+                      )}
+                    </CourseActionsMenu>
+                  </div>
+
+                  {(course.city || course.state || course.address) && (
+                    <p className="text-xs text-gray-500">
+                      📍 {[course.city, course.state].filter(Boolean).join(', ')}
+                      {course.address ? ` - ${course.address}` : ''}
+                    </p>
                   )}
+
                   {course.cost_per_player != null && (
-                    <p className="text-xs text-gray-500"><span className="font-medium text-gray-700">${course.cost_per_player}</span>/player</p>
+                    <p className="text-xs font-bold text-gray-700">${course.cost_per_player}/player</p>
                   )}
-                </div>
 
-                {course.approval_status === 'active' && !course.ghl_calendar_id && (
-                  <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-1.5 mb-3">
-                    ⚠️ No GHL calendar configured — members cannot book this course yet.
-                  </p>
-                )}
-
-                {course.requester && (
-                  <p className="text-xs text-gray-400 mb-3">
-                    Requested by <span className="font-medium text-gray-600">{course.requester.first_name} {course.requester.last_name}</span>
-                  </p>
-                )}
-
-                {course.rejection_reason && (
-                  <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-3">Reason: {course.rejection_reason}</p>
-                )}
-
-                {isRejecting && (
-                  <div className="flex gap-2 mb-3">
-                    <input
-                      type="text"
-                      placeholder="Rejection reason (required)"
-                      value={rejectReason}
-                      onChange={e => setRejectReason(e.target.value)}
-                      className="flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 outline-none focus:border-red-300"
-                    />
-                    <button onClick={() => rejectCourse(course)} disabled={isProcessing || !rejectReason.trim()} className="px-3 py-2 rounded-lg bg-red-600 text-white text-xs font-medium disabled:opacity-50">
-                      {isProcessing ? '…' : 'Confirm'}
-                    </button>
-                    <button onClick={() => { setRejectingId(null); setRejectReason('') }} className="px-3 py-2 rounded-lg border border-gray-200 text-xs text-gray-600">Cancel</button>
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between gap-3 pt-3 border-t border-gray-50 flex-wrap">
-                  {/* GHL tags — left */}
+                  {/* GHL access tags */}
                   <div className="flex flex-wrap gap-1">
                     {(course.required_tags ?? []).length > 0
                       ? (course.required_tags ?? []).map(t => (
@@ -287,8 +397,40 @@ export default function AdminCoursesPage() {
                     }
                   </div>
 
-                  {/* Actions — right */}
-                  <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
+                  {course.approval_status === 'active' && !course.ghl_calendar_id && (
+                    <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-1.5">
+                      ⚠️ No GHL calendar configured — members cannot book this course yet.
+                    </p>
+                  )}
+
+                  {course.requester && (
+                    <p className="text-xs text-gray-400">
+                      Requested by <span className="font-medium text-gray-600">{course.requester.first_name} {course.requester.last_name}</span>
+                    </p>
+                  )}
+
+                  {course.rejection_reason && (
+                    <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">Reason: {course.rejection_reason}</p>
+                  )}
+
+                  {isRejecting && (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Rejection reason (required)"
+                        value={rejectReason}
+                        onChange={e => setRejectReason(e.target.value)}
+                        className="flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 outline-none focus:border-red-300"
+                      />
+                      <button onClick={() => rejectCourse(course)} disabled={isProcessing || !rejectReason.trim()} className="px-3 py-2 rounded-lg bg-red-600 text-white text-xs font-medium disabled:opacity-50">
+                        {isProcessing ? '…' : 'Confirm'}
+                      </button>
+                      <button onClick={() => { setRejectingId(null); setRejectReason('') }} className="px-3 py-2 rounded-lg border border-gray-200 text-xs text-gray-600">Cancel</button>
+                    </div>
+                  )}
+
+                  {/* Actions — desktop only; mobile uses the 3-dot menu above */}
+                  <div className="hidden sm:flex items-center justify-end gap-1.5 flex-wrap pt-1">
                     {course.approval_status === 'pending' && !isRejecting && (
                       <>
                         <AdminButton label={isProcessing ? 'Approving…' : 'Approve'} onClick={() => approveCourse(course)} variant="primary" size="sm" disabled={isProcessing} />
@@ -428,6 +570,9 @@ type CourseFormValues = {
   slug: string        // hidden — auto-generated from name
   logo_url: string
   city: string        // stores full one-line location
+  address: string
+  phone: string
+  map_link: string
   timezone: string
   ghl_calendar_id: string
   cost_per_player: number | ''
@@ -457,6 +602,9 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
       slug: editingCourse?.slug ?? '',
       logo_url: editingCourse?.logo_url ?? '',
       city: editingCourse?.city ?? '',
+      address: editingCourse?.address ?? '',
+      phone: editingCourse?.phone ?? '',
+      map_link: editingCourse?.map_link ?? '',
       timezone: editingCourse?.timezone ?? 'America/Los_Angeles',
       ghl_calendar_id: editingCourse?.ghl_calendar_id ?? '',
       cost_per_player: editingCourse?.cost_per_player ?? '',
@@ -581,6 +729,41 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
               </div>
 
               <div>
+                <label htmlFor="course-address" className={labelCls}>Address</label>
+                <input
+                  id="course-address"
+                  className={field(false)}
+                  placeholder="Street address"
+                  {...register('address')}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="course-phone" className={labelCls}>Phone</label>
+                <input
+                  id="course-phone"
+                  type="tel"
+                  className={field(false)}
+                  placeholder="(760) 555-0100"
+                  {...register('phone')}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="course-map-link" className={labelCls}>Map Link</label>
+                <input
+                  id="course-map-link"
+                  type="url"
+                  className={field(!!errors.map_link)}
+                  placeholder="https://maps.google.com/…"
+                  {...register('map_link', {
+                    validate: v => !v || /^https?:\/\/.+/.test(v) || 'Must be a valid URL (https://…)',
+                  })}
+                />
+                {errors.map_link && <p className={errMsg}>{errors.map_link.message}</p>}
+              </div>
+
+              <div>
                 <label className={labelCls}>Timezone</label>
                 <Controller
                   name="timezone"
@@ -690,7 +873,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
               </div>
 
               <div>
-                <label className={labelCls}>Event / Booking URL</label>
+                <label className={labelCls}>Website</label>
                 <input
                   type="url"
                   className={field(!!errors.booking_url)}
@@ -701,7 +884,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
                 />
                 {errors.booking_url
                   ? <p className={errMsg}>{errors.booking_url.message}</p>
-                  : <p className={infoText}>Optional link shown to members (opens in new tab).</p>
+                  : <p className={infoText}>Optional website link shown to members (opens in new tab).</p>
                 }
               </div>
             </div>
@@ -743,17 +926,29 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
               <Controller
                 name="ghl_calendar_id"
                 control={control}
-                rules={{ required: 'GHL calendar is required' }}
                 render={({ field: f }) => (
                   <>
-                    <Select
-                      options={ghlCalendars.map(c => ({ value: c.id, label: `${c.name} (${c.calendarType})` }))}
-                      value={f.value}
-                      onChange={f.onChange}
-                      placeholder="Select a GHL calendar…"
-                      searchPlaceholder="Search calendars…"
-                      triggerClassName={triggerCls(!!errors.ghl_calendar_id)}
-                    />
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0">
+                        <Select
+                          options={ghlCalendars.map(c => ({ value: c.id, label: `${c.name} (${c.calendarType})` }))}
+                          value={f.value}
+                          onChange={f.onChange}
+                          placeholder="Select a GHL calendar…"
+                          searchPlaceholder="Search calendars…"
+                          triggerClassName={triggerCls(!!errors.ghl_calendar_id)}
+                        />
+                      </div>
+                      {f.value && (
+                        <button
+                          type="button"
+                          onClick={() => f.onChange('')}
+                          className="flex-shrink-0 text-xs text-gray-400 hover:text-red-500 px-2 py-2"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
                     {errors.ghl_calendar_id && <p className={errMsg}>{errors.ghl_calendar_id.message}</p>}
                   </>
                 )}

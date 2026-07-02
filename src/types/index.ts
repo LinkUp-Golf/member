@@ -92,6 +92,9 @@ export interface Course {
   city: string
   state: string
   country: string
+  address: string | null
+  phone: string | null
+  map_link: string | null
   access_tag: string
   max_members: number
   max_rounds_per_month: number
@@ -119,7 +122,7 @@ export interface Course {
   // Optional description shown in the admin and used as the GHL group description
   description: string | null
 
-  // Custom event/booking URL (any valid URL, optional)
+  // Website shown to members (any valid URL, optional) — labelled "Website" in the admin UI
   booking_url: string | null
 
   // GHL Calendar Group for this course (auto-created on course creation)

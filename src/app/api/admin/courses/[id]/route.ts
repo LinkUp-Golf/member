@@ -84,7 +84,13 @@ export const PATCH = withAuth(
 
     if ('booking_url' in body && body.booking_url?.trim()) {
       if (!isValidUrl(body.booking_url.trim())) {
-        return NextResponse.json({ error: 'Booking URL must be a valid URL (e.g. https://example.com)' }, { status: 400 })
+        return NextResponse.json({ error: 'Website must be a valid URL (e.g. https://example.com)' }, { status: 400 })
+      }
+    }
+
+    if ('map_link' in body && body.map_link?.trim()) {
+      if (!isValidUrl(body.map_link.trim())) {
+        return NextResponse.json({ error: 'Map link must be a valid URL (e.g. https://maps.google.com/...)' }, { status: 400 })
       }
     }
 
@@ -111,7 +117,8 @@ export const PATCH = withAuth(
     }
 
     const allowed: Array<keyof Course> = [
-      'name', 'slug', 'logo_url', 'city', 'state', 'country', 'access_tag', 'timezone', 'active',
+      'name', 'slug', 'logo_url', 'city', 'state', 'country', 'address', 'phone', 'map_link',
+      'access_tag', 'timezone', 'active',
       'description', 'ghl_calendar_id', 'ghl_calendar_user_id', 'cost_per_player',
       'booking_rules', 'booking_url', 'required_tags', 'meeting_interval_mins',
       'meeting_duration_mins', 'min_scheduling_notice_mins', 'date_range_days',
@@ -126,9 +133,9 @@ export const PATCH = withAuth(
       const tags = updates.required_tags as string[]
       updates.access_tag = tags[0] ?? ''
     }
-    // Normalise booking_url: empty string → null
-    if ('booking_url' in updates) {
-      updates.booking_url = (updates.booking_url as string)?.trim() || null
+    // Normalise optional text/URL fields: empty string → null
+    for (const key of ['booking_url', 'address', 'phone', 'map_link', 'ghl_calendar_id'] as const) {
+      if (key in updates) updates[key] = (updates[key] as string)?.trim() || null
     }
     if (!Object.keys(updates).length) return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
 
