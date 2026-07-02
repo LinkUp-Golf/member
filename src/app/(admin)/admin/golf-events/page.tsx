@@ -403,6 +403,12 @@ export default function AdminCoursesPage() {
                     </p>
                   )}
 
+                  {course.approval_status === 'active' && !course.payment_url && (
+                    <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-1.5">
+                      ⚠️ No payment link configured — members cannot pay for confirmed bookings yet.
+                    </p>
+                  )}
+
                   {course.requester && (
                     <p className="text-xs text-gray-400">
                       Requested by <span className="font-medium text-gray-600">{course.requester.first_name} {course.requester.last_name}</span>
@@ -578,6 +584,7 @@ type CourseFormValues = {
   cost_per_player: number | ''
   booking_rules: string
   booking_url: string
+  payment_url: string
   required_tags: string[]
 }
 
@@ -610,6 +617,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
       cost_per_player: editingCourse?.cost_per_player ?? '',
       booking_rules: editingCourse?.booking_rules ?? '',
       booking_url: editingCourse?.booking_url ?? '',
+      payment_url: editingCourse?.payment_url ?? '',
       required_tags: editingCourse?.required_tags ?? [],
     },
   })
@@ -885,6 +893,24 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
                 {errors.booking_url
                   ? <p className={errMsg}>{errors.booking_url.message}</p>
                   : <p className={infoText}>Optional website link shown to members (opens in new tab).</p>
+                }
+              </div>
+
+              <div>
+                <label htmlFor="payment_url" className={labelCls}>Payment Link *</label>
+                <input
+                  id="payment_url"
+                  type="url"
+                  className={field(!!errors.payment_url)}
+                  placeholder="https://linkupgolf-services.com/event-checkout-page"
+                  {...register('payment_url', {
+                    required: 'Payment link is required',
+                    validate: v => /^https?:\/\/.+/.test(v) || 'Must be a valid URL (https://…)',
+                  })}
+                />
+                {errors.payment_url
+                  ? <p className={errMsg}>{errors.payment_url.message}</p>
+                  : <p className={infoText}>Members are sent here to pay for confirmed bookings.</p>
                 }
               </div>
             </div>

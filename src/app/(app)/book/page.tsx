@@ -34,7 +34,6 @@ import {
   GOLF_ROUND_DURATION_MINUTES,
   AVIARA_TIMEZONE,
   GHL_CANCEL_BOOKING_URL,
-  BOOKING_PAYMENT_URL,
 } from "@/lib/constants";
 import { validateEmail } from "@/lib/validation";
 import { getBrowserTimezone } from "@/lib/timezone";
@@ -3058,18 +3057,24 @@ function BookingCard({
                 {/* Status badge or Pay CTA */}
                 {!canPay && <BookingStatusBadge status={row.status} />}
                 {canPay && (
-                  <a
-                    href={BOOKING_PAYMENT_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
-                    style={{
-                      background: "rgba(146,100,10,0.1)",
-                      color: "#92640a",
-                    }}
-                  >
-                    Pay →
-                  </a>
+                  group.primary.course?.payment_url ? (
+                    <a
+                      href={group.primary.course.payment_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
+                      style={{
+                        background: "rgba(146,100,10,0.1)",
+                        color: "#92640a",
+                      }}
+                    >
+                      Pay →
+                    </a>
+                  ) : (
+                    <span className="text-[11px] text-gray-400 flex-shrink-0">
+                      Payment link pending
+                    </span>
+                  )
                 )}
 
                 {/* Cancel */}

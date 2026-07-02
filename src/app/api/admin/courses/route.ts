@@ -42,6 +42,10 @@ export const POST = withAuth(
 
     if (!body.name?.trim()) return NextResponse.json({ error: 'Course name required' }, { status: 400 })
     if (!body.logo_url?.trim()) return NextResponse.json({ error: 'A venue logo is required' }, { status: 400 })
+    if (!body.payment_url?.trim()) return NextResponse.json({ error: 'A payment link is required' }, { status: 400 })
+    if (!isValidUrl(body.payment_url.trim())) {
+      return NextResponse.json({ error: 'Payment link must be a valid URL (e.g. https://example.com)' }, { status: 400 })
+    }
 
     const slug = body.slug?.trim() || toSlug(body.name)
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
@@ -103,6 +107,7 @@ export const POST = withAuth(
         cost_per_player: body.cost_per_player ?? null,
         booking_rules: body.booking_rules ?? null,
         booking_url: body.booking_url?.trim() || null,
+        payment_url: body.payment_url.trim(),
         required_tags: requiredTags,
         approval_status: 'active',
         reviewed_by: ctx.userId,

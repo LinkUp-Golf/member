@@ -32,7 +32,6 @@ export const AVIARA_TIMEZONE = 'America/Los_Angeles'
 
 export const BOOKING_PRICE_USD           = 160   // per player, USD
 export const GOLF_ROUND_DURATION_MINUTES = 300   // 5 hours
-export const BOOKING_PAYMENT_URL         = 'https://linkupgolf-services.com/aviara-event-booking-checkout-page'
 
 // ---- Cancellation policy tiers ------------------------------
 

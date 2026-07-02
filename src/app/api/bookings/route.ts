@@ -18,7 +18,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
   let query = supabase
     .from('bookings')
-    .select('*, course:courses!bookings_course_id_fkey(name, city, state)')
+    .select('*, course:courses!bookings_course_id_fkey(name, city, state, payment_url)')
     .or(`member_id.eq.${ctx.userId},player_member_id.eq.${ctx.userId}`)
     .order('booking_date', { ascending: true })
 
@@ -63,7 +63,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     await Promise.all(invitedRows.map(async inv => {
       const { data: siblings } = await admin
         .from('bookings')
-        .select('*, course:courses!bookings_course_id_fkey(name, city, state)')
+        .select('*, course:courses!bookings_course_id_fkey(name, city, state, payment_url)')
         .eq('member_id', inv.member_id)   // same booker
         .eq('booking_date', inv.booking_date)
         .eq('tee_time', inv.tee_time)

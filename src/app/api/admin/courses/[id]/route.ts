@@ -100,6 +100,17 @@ export const PATCH = withAuth(
       return NextResponse.json({ error: 'A venue logo is required' }, { status: 400 })
     }
 
+    // payment_url is required — reject attempts to clear it, but allow omitting
+    // the key entirely (no change) or replacing it with a new link.
+    if ('payment_url' in body) {
+      if (!body.payment_url?.trim()) {
+        return NextResponse.json({ error: 'A payment link is required' }, { status: 400 })
+      }
+      if (!isValidUrl(body.payment_url.trim())) {
+        return NextResponse.json({ error: 'Payment link must be a valid URL (e.g. https://example.com)' }, { status: 400 })
+      }
+    }
+
     // Calendar uniqueness on edit: reject if the new calendar is already used by a different course
     if ('ghl_calendar_id' in body && body.ghl_calendar_id) {
       const { data: calConflict } = await admin
@@ -120,7 +131,7 @@ export const PATCH = withAuth(
       'name', 'slug', 'logo_url', 'city', 'state', 'country', 'address', 'phone', 'map_link',
       'access_tag', 'timezone', 'active',
       'description', 'ghl_calendar_id', 'ghl_calendar_user_id', 'cost_per_player',
-      'booking_rules', 'booking_url', 'required_tags', 'meeting_interval_mins',
+      'booking_rules', 'booking_url', 'payment_url', 'required_tags', 'meeting_interval_mins',
       'meeting_duration_mins', 'min_scheduling_notice_mins', 'date_range_days',
       'pre_buffer_mins', 'post_buffer_mins', 'seats_per_class',
     ]

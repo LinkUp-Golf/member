@@ -125,6 +125,9 @@ export interface Course {
   // Website shown to members (any valid URL, optional) — labelled "Website" in the admin UI
   booking_url: string | null
 
+  // Payment link members are sent to for confirmed bookings — required per course
+  payment_url: string | null
+
   // GHL Calendar Group for this course (auto-created on course creation)
   ghl_group_id: string | null
 
@@ -226,7 +229,7 @@ export interface Booking {
   admin_notes?: string | null
   created_at: string
   booker_name?: string | null
-  course?: { name: string; city: string; state: string } | null
+  course?: { name: string; city: string; state: string; payment_url: string | null } | null
 }
 
 export interface PlayHistory {
