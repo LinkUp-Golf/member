@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { AdminPageHeader, StatCard } from '@/components/admin/AdminUI'
+import Select from '@/components/ui/Select'
 import { format, addDays, subDays, isToday } from 'date-fns'
 import { formatTeeTime } from '@/lib/utils'
 import { GOLF_ROUND_DURATION_MINUTES } from '@/lib/constants'
@@ -42,6 +43,21 @@ const STATUS_META: Record<BookingStatus, { label: string; colour: string; dot: s
 const ALL_STATUSES = Object.keys(STATUS_META) as BookingStatus[]
 const STATUS_FILTERS = ['all', 'tentative', 'awaiting_approval', 'availability_confirmed', 'payment_confirmed', 'confirmed', 'cancelled'] as const
 type StatusFilter = typeof STATUS_FILTERS[number]
+
+const DINNER_FILTERS = ['all', 'yes', 'no', 'maybe', 'none'] as const
+type DinnerFilter = typeof DINNER_FILTERS[number]
+const DINNER_FILTER_LABELS: Record<DinnerFilter, string> = {
+  all: 'All', yes: '🍽 Yes', no: '🍽 No', maybe: '🍽 Maybe', none: 'No response',
+}
+
+interface CourseListItem {
+  id: string
+  name: string
+  description: string | null
+  city: string
+  state: string
+  required_tags: string[]
+}
 
 type TeeSlot = { key: string; booking_date: string; tee_time: string; rows: BookingRow[] }
 type DateGroup = { date: string; label: string; isToday: boolean; slots: TeeSlot[] }
@@ -272,19 +288,42 @@ export default function AdminBookingsPage() {
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<'upcoming' | 'past'>('upcoming')
-  const [courseList, setCourseList] = useState<{ id: string; name: string }[]>([])
+  const [courseList, setCourseList] = useState<CourseListItem[]>([])
   const [courseFilter, setCourseFilter] = useState<string>(urlCourseId)
-
-  // Sync URL → filter when navigating from the nav
-  useEffect(() => { setCourseFilter(urlCourseId) }, [urlCourseId])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [dinnerFilter, setDinnerFilter] = useState<DinnerFilter>('all')
+  const [locationFilter, setLocationFilter] = useState<string>('all')
+  const [tagFilter, setTagFilter] = useState<string>('all')
+  const [eventNameFilter, setEventNameFilter] = useState('')
+  const [debouncedEventName, setDebouncedEventName] = useState('')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null)
   const [editingNote, setEditingNote] = useState<string | null>(null)
   const [noteValues, setNoteValues] = useState<Record<string, string>>({})
   const [savingNote, setSavingNote] = useState<string | null>(null)
   const [expandedSlots, setExpandedSlots] = useState<Set<string>>(new Set())
   const noteRef = useRef<HTMLTextAreaElement>(null)
+
+  // Sync URL → filter when navigating from the nav sidebar (clicking a specific
+  // course under "Booking Courses"). Once a course is pinned this way, the
+  // cross-course narrowing filters (location/tags/event name) no longer apply
+  // — they're for slicing "All Bookings" without picking one exact course —
+  // so clear them to avoid a hidden, still-active filter.
+  useEffect(() => {
+    setCourseFilter(urlCourseId)
+    if (urlCourseId !== 'all') {
+      setLocationFilter('all')
+      setTagFilter('all')
+      setEventNameFilter('')
+    }
+  }, [urlCourseId])
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedEventName(eventNameFilter), 350)
+    return () => clearTimeout(t)
+  }, [eventNameFilter])
 
   const loadBookings = useCallback(async () => {
     setLoading(true)
@@ -293,41 +332,63 @@ export default function AdminBookingsPage() {
 
     // Upcoming: today → 365 days ahead (ascending)
     // Past:     365 days ago → yesterday (descending — most recent first)
+    // A custom From/To range overrides the view-based window when both are set.
     const isUpcoming  = view === 'upcoming'
-    const rangeStart  = isUpcoming ? today            : format(subDays(new Date(), 365), 'yyyy-MM-dd')
-    const rangeEnd    = isUpcoming ? format(addDays(new Date(), 365), 'yyyy-MM-dd') : format(subDays(new Date(), 1), 'yyyy-MM-dd')
+    const hasCustomRange = !!customFrom && !!customTo
+    const rangeStart  = hasCustomRange ? customFrom : isUpcoming ? today : format(subDays(new Date(), 365), 'yyyy-MM-dd')
+    const rangeEnd    = hasCustomRange ? customTo   : isUpcoming ? format(addDays(new Date(), 365), 'yyyy-MM-dd') : format(subDays(new Date(), 1), 'yyyy-MM-dd')
 
     const { data: courses } = await supabase
       .from('courses')
-      .select('id, name')
+      .select('id, name, description, city, state, required_tags')
       .eq('active', true)
       .eq('approval_status', 'active')
       .order('name')
 
-    const courseIds = (courses ?? []).map(c => c.id)
-    setCourseList(courses ?? [])
+    const allCourses = courses ?? []
+    setCourseList(allCourses)
 
-    if (courseIds.length === 0) { setBookings([]); setLoading(false); return }
+    // A specific course (picked via the sidebar "Booking Courses" list) pins
+    // course_id directly. Location/Tags/Event-name are cross-course narrowing
+    // tools for the "All Bookings" case — they're hidden and reset to defaults
+    // once a specific course is selected (see the urlCourseId effect above),
+    // so guarding on isAllCourses here is defensive, not load-bearing.
+    const isAllCourses = courseFilter === 'all'
+    const eventNameQuery = isAllCourses ? debouncedEventName.trim().toLowerCase() : ''
+    const matchingCourseIds = allCourses
+      .filter(c => isAllCourses || c.id === courseFilter)
+      .filter(c => !isAllCourses || locationFilter === 'all' || `${c.city}, ${c.state}` === locationFilter)
+      .filter(c => !isAllCourses || tagFilter === 'all' || (c.required_tags ?? []).includes(tagFilter))
+      .filter(c => !eventNameQuery || c.name.toLowerCase().includes(eventNameQuery) || (c.description ?? '').toLowerCase().includes(eventNameQuery))
+      .map(c => c.id)
 
-    let { data, error } = await supabase
-      .from('bookings')
-      .select('id, booking_date, tee_time, players, guest_name, player_member_id, status, amount_charged, dinner_rsvp, admin_notes, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name)')
-      .in('course_id', courseFilter === 'all' ? courseIds : [courseFilter])
-      .gte('booking_date', rangeStart)
-      .lte('booking_date', rangeEnd)
-      .order('booking_date', { ascending: isUpcoming })
-      .order('tee_time',     { ascending: isUpcoming })
+    if (matchingCourseIds.length === 0) { setBookings([]); setLoading(false); return }
 
-    // Fallback without dinner_rsvp if column doesn't exist yet
-    if (error?.message?.includes('dinner_rsvp')) {
-      const fallback = await supabase
+    const SELECT = 'id, booking_date, tee_time, players, guest_name, player_member_id, status, amount_charged, dinner_rsvp, admin_notes, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name)'
+    const SELECT_NO_DINNER = SELECT.replace('dinner_rsvp, ', '')
+
+    function buildQuery(select: string) {
+      let q = supabase
         .from('bookings')
-        .select('id, booking_date, tee_time, players, guest_name, player_member_id, status, amount_charged, admin_notes, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name)')
-        .in('course_id', courseFilter === 'all' ? courseIds : [courseFilter])
+        .select(select)
+        .in('course_id', matchingCourseIds)
         .gte('booking_date', rangeStart)
         .lte('booking_date', rangeEnd)
+      if (statusFilter !== 'all') q = q.eq('status', statusFilter)
+      if (dinnerFilter !== 'all') {
+        q = dinnerFilter === 'none' ? q.is('dinner_rsvp', null) : q.eq('dinner_rsvp', dinnerFilter)
+      }
+      return q
         .order('booking_date', { ascending: isUpcoming })
         .order('tee_time',     { ascending: isUpcoming })
+    }
+
+    let { data, error } = await buildQuery(SELECT)
+
+    // Fallback without dinner_rsvp if column doesn't exist yet — the dinner
+    // filter itself can't be enforced in that (legacy) case.
+    if (error?.message?.includes('dinner_rsvp')) {
+      const fallback = await buildQuery(SELECT_NO_DINNER)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data = fallback.data as any
       error = fallback.error
@@ -351,18 +412,46 @@ export default function AdminBookingsPage() {
     setNoteValues(initial)
     setExpandedSlots(new Set()) // collapse all on fresh load
     setLoading(false)
-  }, [view, courseFilter])
+  }, [view, courseFilter, locationFilter, tagFilter, debouncedEventName, statusFilter, dinnerFilter, customFrom, customTo])
 
   useEffect(() => { loadBookings() }, [loadBookings])
   useEffect(() => { if (editingNote && noteRef.current) noteRef.current.focus() }, [editingNote])
 
+  // Status/dinner-RSVP/venue/location/tags are already applied server-side in
+  // loadBookings — only free-text search (out of scope for server-side filtering,
+  // see plan) is re-checked here.
   const filtered = useMemo(() => bookings.filter(b => {
     const info = playerInfo(b)
     const q = search.toLowerCase()
-    const matchesSearch = !search || info.name.toLowerCase().includes(q) || info.sub.toLowerCase().includes(q)
-    const matchesStatus = statusFilter === 'all' || b.status === (statusFilter as BookingStatus)
-    return matchesSearch && matchesStatus
-  }), [bookings, search, statusFilter])
+    return !search || info.name.toLowerCase().includes(q) || info.sub.toLowerCase().includes(q)
+  }), [bookings, search])
+
+  const locationOptions = useMemo(() => {
+    const set = new Set(courseList.filter(c => c.city || c.state).map(c => `${c.city}, ${c.state}`))
+    return [...set].sort()
+  }, [courseList])
+
+  const tagOptions = useMemo(() => {
+    const set = new Set(courseList.flatMap(c => c.required_tags ?? []))
+    return [...set].sort()
+  }, [courseList])
+
+  // Course selection itself is driven by the sidebar's "Booking Courses" list
+  // (and highlighted there), so it's intentionally excluded here — this only
+  // covers filters this page's own controls can set and clear.
+  const hasActiveFilters = statusFilter !== 'all' || dinnerFilter !== 'all'
+    || locationFilter !== 'all' || tagFilter !== 'all' || !!eventNameFilter || !!search || !!customFrom || !!customTo
+
+  function clearFilters() {
+    setSearch('')
+    setStatusFilter('all')
+    setDinnerFilter('all')
+    setLocationFilter('all')
+    setTagFilter('all')
+    setEventNameFilter('')
+    setCustomFrom('')
+    setCustomTo('')
+  }
 
   // Per-course slot grouping for the "All Courses" view
   const byCourse = useMemo(() => {
@@ -505,14 +594,72 @@ export default function AdminBookingsPage() {
           </button>
         </div>
 
-        {/* Row 2: status filters — horizontal scroll on mobile */}
-        <div className="flex gap-1.5 overflow-x-auto pb-1 hide-scrollbar">
-          {STATUS_FILTERS.map(s => (
-            <button key={s} onClick={() => setStatusFilter(s)}
-              className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${statusFilter === s ? 'bg-green-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-              {s === 'all' ? 'All' : (STATUS_META[s as BookingStatus]?.label ?? s)}
+        {/* Row 2: filter controls — compact dropdowns, wraps responsively.
+            Course selection itself lives in the sidebar's "Booking Courses"
+            list; location/tags/event name only make sense while browsing
+            "All Bookings" (they narrow across courses), so they're hidden
+            once a specific course is pinned via the sidebar. */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <Select
+            value={statusFilter}
+            onChange={v => setStatusFilter(v as StatusFilter)}
+            options={STATUS_FILTERS.map(s => ({ value: s, label: s === 'all' ? 'All statuses' : STATUS_META[s as BookingStatus].label }))}
+            placeholder="All statuses"
+            className="w-full sm:w-40"
+            triggerClassName="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg flex items-center justify-between gap-2 bg-white"
+          />
+          <Select
+            value={dinnerFilter}
+            onChange={v => setDinnerFilter(v as DinnerFilter)}
+            options={DINNER_FILTERS.map(d => ({ value: d, label: DINNER_FILTER_LABELS[d] }))}
+            placeholder="All dinner RSVPs"
+            className="w-full sm:w-40"
+            triggerClassName="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg flex items-center justify-between gap-2 bg-white"
+          />
+          <input
+            type="date" value={customFrom} aria-label="From date"
+            onChange={e => setCustomFrom(e.target.value)}
+            className="px-2.5 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
+          />
+          <input
+            type="date" value={customTo} aria-label="To date"
+            onChange={e => setCustomTo(e.target.value)}
+            className="px-2.5 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
+          />
+
+          {courseFilter === 'all' && (
+            <>
+              <Select
+                value={locationFilter}
+                onChange={setLocationFilter}
+                options={[{ value: 'all', label: 'All locations' }, ...locationOptions.map(l => ({ value: l, label: l }))]}
+                placeholder="All locations"
+                searchPlaceholder="Search locations…"
+                className="w-full sm:w-44"
+                triggerClassName="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg flex items-center justify-between gap-2 bg-white"
+              />
+              <Select
+                value={tagFilter}
+                onChange={setTagFilter}
+                options={[{ value: 'all', label: 'All tags' }, ...tagOptions.map(t => ({ value: t, label: t }))]}
+                placeholder="All tags"
+                searchPlaceholder="Search tags…"
+                className="w-full sm:w-36"
+                triggerClassName="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg flex items-center justify-between gap-2 bg-white"
+              />
+              <input
+                type="text" placeholder="Event name…" value={eventNameFilter}
+                onChange={e => setEventNameFilter(e.target.value)}
+                className="w-full sm:w-44 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
+              />
+            </>
+          )}
+
+          {hasActiveFilters && (
+            <button onClick={clearFilters} className="text-xs font-medium text-gray-400 hover:text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-50">
+              Clear filters
             </button>
-          ))}
+          )}
         </div>
       </div>
 
