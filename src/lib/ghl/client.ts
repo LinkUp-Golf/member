@@ -10,7 +10,7 @@ import { HighLevel } from '@gohighlevel/api-client'
 import type { GHLContact, GHLCalendarEvent, GHLBookingSlot } from '@/types'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
 import { logger } from '@/lib/logger'
-import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GOLF_ROUND_DURATION_MINUTES } from '@/lib/constants'
+import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GOLF_ROUND_DURATION_MINUTES, GHL_BOOKING_REMINDER_WEBHOOK_PATH } from '@/lib/constants'
 
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID ?? ''
 
@@ -160,6 +160,32 @@ export async function triggerWorkflow(params: {
     return true
   } catch (err) {
     logger.warn('triggerWorkflow failed', { action: 'ghl_workflow_trigger', errorMessage: String(err) })
+    return false
+  }
+}
+
+// Fires the GHL inbound webhook used for booking reminders (7d/3d/6h before
+// a tee time) — a plain POST to a workflow-trigger URL, not the REST API,
+// so it doesn't go through ghlFetch/GHL_BASE_URL.
+export async function triggerBookingReminderWebhook(payload: {
+  type: '7 days' | '3 days' | '6 hours'
+  email: string
+  firstName: string
+  content: string
+}): Promise<boolean> {
+  try {
+    const res = await fetch(`${GHL_BASE_URL}${GHL_BOOKING_REMINDER_WEBHOOK_PATH}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      logger.warn('triggerBookingReminderWebhook failed', { action: 'ghl_reminder_webhook', metadata: { statusCode: res.status } })
+      return false
+    }
+    return true
+  } catch (err) {
+    logger.warn('triggerBookingReminderWebhook failed', { action: 'ghl_reminder_webhook', errorMessage: String(err) })
     return false
   }
 }

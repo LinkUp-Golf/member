@@ -23,6 +23,12 @@ export const GHL_OPPORTUNITY_FIELDS = {
 export const GHL_CANCEL_BOOKING_URL = 'https://api.leadconnectorhq.com/widget/cancel-booking'
 export const GHL_CALENDAR_PROVIDER_ID = 'bdd10QRepJvC6EYoy32m'
 
+// Inbound webhook (GHL workflow trigger) fired alongside each booking
+// reminder push notification — see /api/cron/booking-reminders. Path only;
+// combine with GHL_BASE_URL like every other GHL request (see ghlFetch).
+export const GHL_BOOKING_REMINDER_WEBHOOK_PATH =
+  '/hooks/J3tfnLdEv4WmE3XorQYW/webhook-trigger/274c8b8d-551e-4225-9702-6539308d84fb'
+
 // ---- Aviara course ------------------------------------------
 
 export const AVIARA_ADDRESS  = 'Aviara Golf Club, 7447 Batiquitos Drive, Carlsbad, CA 92011'
