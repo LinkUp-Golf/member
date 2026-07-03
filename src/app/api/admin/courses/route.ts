@@ -4,14 +4,11 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { createGHLCalendar } from '@/lib/ghl/client'
 import { validateTimezone } from '@/lib/validation'
 import { AVIARA_TIMEZONE } from '@/lib/constants'
 import type { AuthContext } from '@/lib/auth/types'
 import type { Course } from '@/types'
 
-const CALENDAR_COLORS = ['#16a34a', '#0ea5e9', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899']
-function randomColor() { return CALENDAR_COLORS[Math.floor(Math.random() * CALENDAR_COLORS.length)] ?? '#16a34a' }
 function toSlug(name: string) { return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') }
 
 function isValidUrl(url: string): boolean {

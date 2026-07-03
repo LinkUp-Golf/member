@@ -3767,12 +3767,14 @@ function CreateFeedDialog({ onClose }: { onClose: () => void }) {
             </p>
 
             <label
+              htmlFor="new-feed-name"
               className="block text-xs font-semibold mb-1.5"
               style={{ color: "rgba(0,38,105,0.55)" }}
             >
               Feed name
             </label>
             <input
+              id="new-feed-name"
               autoFocus
               className="input w-full text-sm mb-1.5"
               placeholder="e.g. Weekend Scramble, Corporate Golf Series…"

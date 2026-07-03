@@ -646,7 +646,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
     if (editingCourse?.id) calParams.set('excludeCourseId', editingCourse.id)
     const calUrl = `/api/admin/ghl/calendars${calParams.toString() ? `?${calParams}` : ''}`
     fetch(calUrl).then(r => r.json()).then(d => setGhlCalendars(d.calendars ?? [])).catch(() => setGhlCalendars([])).finally(() => setCalsLoading(false))
-  }, [editingCourse?.ghl_group_id])
+  }, [editingCourse?.ghl_group_id, editingCourse?.id])
 
   const selectedCalendar = ghlCalendars.find(c => c.id === watchedCalendarId) ?? null
 
@@ -719,8 +719,9 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
               />
 
               <div>
-                <label className={labelCls}>Course Name *</label>
+                <label htmlFor="course-name" className={labelCls}>Course Name *</label>
                 <input
+                  id="course-name"
                   className={field(!!errors.name)}
                   placeholder="Country Club of Rancho Bernardo"
                   {...register('name', { required: 'Course name is required' })}
@@ -732,8 +733,9 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
               <input type="hidden" {...register('slug')} />
 
               <div>
-                <label className={labelCls}>Location *</label>
+                <label htmlFor="course-city" className={labelCls}>Location *</label>
                 <input
+                  id="course-city"
                   className={field(!!errors.city)}
                   placeholder="7447 Batiquitos Dr, Carlsbad, CA 92011"
                   {...register('city', { required: 'Location is required' })}
@@ -777,12 +779,13 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
               </div>
 
               <div>
-                <label className={labelCls}>Timezone</label>
+                <label htmlFor="course-timezone" className={labelCls}>Timezone</label>
                 <Controller
                   name="timezone"
                   control={control}
                   render={({ field: f }) => (
                     <Select
+                      id="course-timezone"
                       options={TIMEZONES.map(tz => ({ value: tz, label: tz }))}
                       value={f.value}
                       onChange={f.onChange}
@@ -808,7 +811,9 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
                 rules={{ validate: v => v.length > 0 || 'At least one GHL access tag is required' }}
                 render={({ field: f }) => (
                   <div>
-                    <label className={labelCls}>GHL Access Tags *</label>
+                    {/* Not a native <label> — this heads a checkbox group, not
+                        a single control, so it can't be associated via htmlFor. */}
+                    <p className={labelCls}>GHL Access Tags *</p>
                     <p className={`${infoText} mb-2`}>Members with at least one of these tags can access and book this course.</p>
 
                     {f.value.length > 0 && (
@@ -865,8 +870,9 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
               />
 
               <div>
-                <label className={labelCls}>Cost per player (USD) *</label>
+                <label htmlFor="course-cost-per-player" className={labelCls}>Cost per player (USD) *</label>
                 <input
+                  id="course-cost-per-player"
                   type="number"
                   min="0"
                   step="0.01"
@@ -881,13 +887,14 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
               </div>
 
               <div>
-                <label className={labelCls}>Booking Rules</label>
-                <textarea className={`${field(false)} min-h-[80px] resize-y`} placeholder="Cancellation policy, dress code…" {...register('booking_rules')} />
+                <label htmlFor="course-booking-rules" className={labelCls}>Booking Rules</label>
+                <textarea id="course-booking-rules" className={`${field(false)} min-h-[80px] resize-y`} placeholder="Cancellation policy, dress code…" {...register('booking_rules')} />
               </div>
 
               <div>
-                <label className={labelCls}>Website</label>
+                <label htmlFor="course-booking-url" className={labelCls}>Website</label>
                 <input
+                  id="course-booking-url"
                   type="url"
                   className={field(!!errors.booking_url)}
                   placeholder="https://your-booking-site.com/event"
