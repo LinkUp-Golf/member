@@ -106,10 +106,14 @@
 
 ## 8. Scheduled Jobs (Cron)
 
-- **Cron schedules are declared in `vercel.json`** (`/api/cron/daily` 08:00 UTC
-  daily; `/api/cron/play-suggestions` 09:00 UTC Mondays).
+- **Cron schedules are declared in `vercel.json`** — currently only
+  `/api/cron/booking-reminders` (every 15 minutes; fires 7d/3d/6h push + SMS
+  reminders before each booking's tee time).
 - **Every cron handler verifies `Authorization: Bearer ${CRON_SECRET}`** before
   doing work, returning 401 otherwise.
+- `/api/cron/daily` and `/api/cron/play-suggestions` existed previously but
+  were removed after being silently dropped from `vercel.json` (so they'd
+  stopped running) without the route files being cleaned up to match.
 
 ## 9. Configuration & Secrets
 

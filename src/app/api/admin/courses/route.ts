@@ -121,9 +121,16 @@ export const POST = withAuth(
       .single()
 
     if (error) {
-      // Concurrent create raced past the pre-check above and hit the slug's
-      // unique constraint — surface the same clean 409 instead of a raw 500.
+      // Concurrent create raced past the pre-checks above and hit a unique
+      // constraint (slug or ghl_calendar_id) — surface the same clean 409
+      // instead of a raw 500.
       if (error.code === '23505') {
+        if (error.message.includes('courses_ghl_calendar_id_unique')) {
+          return NextResponse.json(
+            { error: 'This GHL calendar is already assigned to another course. Each course must use a unique calendar.' },
+            { status: 409 }
+          )
+        }
         return NextResponse.json({ error: `The slug "${slug}" is already taken. Choose a different one.` }, { status: 409 })
       }
       return NextResponse.json({ error: error.message }, { status: 500 })

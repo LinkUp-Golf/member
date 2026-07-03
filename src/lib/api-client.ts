@@ -38,12 +38,21 @@ class ApiClient {
     method: ApiMethod = 'GET',
     body?: unknown
   ): Promise<ApiResponse<T>> {
-    const res = await fetch(path, {
-      method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-      credentials: 'same-origin',
-    })
+    let res: Response
+    try {
+      res = await fetch(path, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+        credentials: 'same-origin',
+      })
+    } catch {
+      return {
+        data: null,
+        error: { code: 'NETWORK_ERROR', message: 'Network error. Check your connection and try again.' },
+        status: 0,
+      }
+    }
 
     // ---- Parse non-OK responses (including 403) -------------
     if (!res.ok) {

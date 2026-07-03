@@ -16,12 +16,12 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { createBooking, getContactByEmail, createContact, addTagToContact } from '@/lib/ghl/client'
 import { ALL_ACCESS_TAGS } from '@/lib/ghl/tags'
-import { resolveAviaraAppointmentIso } from '@/lib/ghl/booking-time'
+import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { syncMember } from '@/lib/sync'
 import { sendPushToMember, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
 import { format } from 'date-fns'
-import { AVIARA_TIMEZONE, AVIARA_ADDRESS } from '@/lib/constants'
+import { AVIARA_TIMEZONE, AVIARA_ADDRESS, GOLF_ROUND_DURATION_MINUTES } from '@/lib/constants'
 import type { AuthContext } from '@/lib/auth/types'
 import type { AdditionalPlayer, GHLContact } from '@/types'
 
@@ -44,7 +44,7 @@ export const PATCH = withAuth(
 
     const { data: booking, error: fetchError } = await admin
       .from('bookings')
-      .select('id, member_id, booking_date, tee_time, guest_name, additional_players, status')
+      .select('id, member_id, course_id, booking_date, tee_time, guest_name, additional_players, status')
       .eq('id', id)
       .single()
 
@@ -104,6 +104,32 @@ export const PATCH = withAuth(
       return NextResponse.json({ error: 'Guest is missing an email address' }, { status: 400 })
     }
 
+    // Resolve the booking's own course calendar/timezone/address — falling
+    // back to the Aviara env-var constants only when the course has no GHL
+    // calendar configured, for backward compatibility with pre-multi-course
+    // bookings. Using the Aviara constants unconditionally here would send
+    // every non-Aviara guest's appointment to the wrong calendar, at the
+    // wrong address, computed in the wrong timezone.
+    let eventCalendarId = AVIARA_CALENDAR_ID
+    let eventTimezone = AVIARA_TIMEZONE
+    let eventAddress = AVIARA_ADDRESS
+    let eventDurationMinutes = GOLF_ROUND_DURATION_MINUTES
+    let courseName = 'Aviara'
+    if (booking.course_id) {
+      const { data: course } = await admin
+        .from('courses')
+        .select('name, ghl_calendar_id, timezone, address, meeting_duration_mins')
+        .eq('id', booking.course_id)
+        .single()
+      if (course?.ghl_calendar_id) {
+        eventCalendarId = course.ghl_calendar_id
+        eventTimezone = course.timezone || AVIARA_TIMEZONE
+        eventAddress = course.address || AVIARA_ADDRESS
+        eventDurationMinutes = course.meeting_duration_mins || GOLF_ROUND_DURATION_MINUTES
+        courseName = course.name
+      }
+    }
+
     // Create the GHL contact + appointment first. If GHL fails, leave the booking
     // 'awaiting_approval' so the admin can retry instead of losing the guest.
     let ghlBookingId: string
@@ -123,14 +149,14 @@ export const PATCH = withAuth(
         await addTagToContact(contactId, tag)
       }
 
-      const { startIso, endIso } = resolveAviaraAppointmentIso(booking.booking_date, booking.tee_time)
+      const { startIso, endIso } = resolveAppointmentIso(booking.booking_date, booking.tee_time, eventTimezone, eventDurationMinutes)
       ghlBookingId = await createBooking({
-        calendarId: AVIARA_CALENDAR_ID,
-        title: 'LinkUp @ Aviara',
+        calendarId: eventCalendarId,
+        title: `LinkUp @ ${courseName}`,
         startTime: startIso,
         endTime: endIso,
-        timezone: AVIARA_TIMEZONE,
-        address: AVIARA_ADDRESS,
+        timezone: eventTimezone,
+        address: eventAddress,
         contact: { id: contactId, email: guest.email, phone: guest.mobile || null },
       })
     } catch (err) {
@@ -188,10 +214,25 @@ export const PATCH = withAuth(
           },
         })
         if (createErr || !created.user) {
-          throw new Error(createErr?.message ?? 'Auth user creation failed')
+          // members.email is unique — a concurrent Setup approval for another
+          // booking naming this same new guest's email can race past the
+          // existingMember lookup above and create the account first. Re-check
+          // for that member instead of failing the sync outright.
+          const { data: racedMember } = await admin
+            .from('members')
+            .select('id')
+            .eq('email', guest.email.toLowerCase())
+            .single()
+          if (racedMember?.id) {
+            memberUserId = racedMember.id
+          } else {
+            throw new Error(createErr?.message ?? 'Auth user creation failed')
+          }
+        } else {
+          memberUserId = created.user.id
         }
-        memberUserId = created.user.id
       }
+      if (!memberUserId) throw new Error('Failed to resolve a member id for this guest')
 
       await syncMember({ contact: ghlContact, userId: memberUserId, ctx: { supabase: admin } })
     } catch (err) {

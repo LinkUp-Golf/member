@@ -656,18 +656,22 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
 
   async function onSubmit(data: CourseFormValues) {
     const url = isEdit ? `/api/admin/courses/${editingCourse!.id}` : '/api/admin/courses'
-    const res = await fetch(url, {
-      method: isEdit ? 'PATCH' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...data,
-        cost_per_player: data.cost_per_player === '' ? null : Number(data.cost_per_player),
-        createCalendar: false,
-      }),
-    })
-    const json = await res.json().catch(() => ({}))
-    if (res.ok) onCreated()
-    else onError(json.error ?? (isEdit ? 'Failed to update course' : 'Failed to create course'))
+    try {
+      const res = await fetch(url, {
+        method: isEdit ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...data,
+          cost_per_player: data.cost_per_player === '' ? null : Number(data.cost_per_player),
+          createCalendar: false,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (res.ok) onCreated()
+      else onError(json.error ?? (isEdit ? 'Failed to update course' : 'Failed to create course'))
+    } catch {
+      onError('Network error. Check your connection and try again.')
+    }
   }
 
   // Input styling helpers

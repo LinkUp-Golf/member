@@ -198,12 +198,13 @@ export async function POST(request: NextRequest) {
   let eventTimezone = AVIARA_TIMEZONE
   let eventAddress = AVIARA_ADDRESS
   let eventDurationMinutes = GOLF_ROUND_DURATION_MINUTES
+  let eventCourseName = 'Aviara'
   let resolvedCourseId: string = member.home_course_id
 
   if (courseId) {
     const { data: course } = await adminSupabase
       .from('courses')
-      .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, city, state, meeting_duration_mins, cost_per_player')
+      .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, meeting_duration_mins, cost_per_player')
       .eq('id', courseId)
       .eq('approval_status', 'active')
       .single()
@@ -213,8 +214,9 @@ export async function POST(request: NextRequest) {
     }
     eventCalendarId = course.ghl_calendar_id
     eventTimezone = course.timezone || AVIARA_TIMEZONE
-    eventAddress = course.city ? course.city : AVIARA_ADDRESS
+    eventAddress = course.address || course.city || AVIARA_ADDRESS
     eventDurationMinutes = course.meeting_duration_mins || GOLF_ROUND_DURATION_MINUTES
+    eventCourseName = course.name
     resolvedCourseId = course.id
   }
 
@@ -316,7 +318,7 @@ export async function POST(request: NextRequest) {
 
   const bookingParams = {
     calendarId: eventCalendarId,
-    title: courseId ? `LinkUp @ ${eventAddress.split(',')[0]}` : 'LinkUp @ Aviara',
+    title: `LinkUp @ ${eventCourseName}`,
     startTime: startIso,
     endTime: endIso,
     timezone: eventTimezone,

@@ -23,11 +23,17 @@ export function getInitials(firstName: string, lastName: string): string {
 // DO NOT use this for display — the result renders in the browser's local timezone,
 // which will shift the date/time. For display, use booking_date + formatTeeTime(tee_time)
 // directly, since they are already stored in the course's local timezone.
-export function bookingToLocalDate(bookingDate: string, teeTime: string): Date {
+//
+// `timezone` should be the booking's own course.timezone — it defaults to
+// AVIARA_TIMEZONE only for call sites that don't have course data on hand
+// (or pre-multi-course data). Passing the wrong timezone shifts cancellation-
+// policy eligibility and upcoming/past bucketing for any course outside
+// Pacific time.
+export function bookingToLocalDate(bookingDate: string, teeTime: string, timezone: string = AVIARA_TIMEZONE): Date {
   const ref = new Date(`${bookingDate}T12:00:00Z`)
   const offsetStr =
     new Intl.DateTimeFormat('en-US', {
-      timeZone: AVIARA_TIMEZONE,
+      timeZone: timezone,
       timeZoneName: 'shortOffset',
     })
       .formatToParts(ref)

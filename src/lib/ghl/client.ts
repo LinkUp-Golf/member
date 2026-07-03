@@ -75,6 +75,25 @@ export async function getContactById(contactId: string): Promise<GHLContact | nu
   }
 }
 
+// Like getContactById, but rethrows as a GHLError instead of collapsing every
+// failure to null — used only by validateGHLMembership, which must tell "GHL
+// is genuinely down" (fail secure to cache) apart from "contact was actually
+// deleted" (fail closed, wipe cache). A raw fetch/network error here would
+// otherwise be indistinguishable from a real 404 and treated as a revoked
+// membership on every transient GHL outage.
+export async function getContactByIdStrict(contactId: string): Promise<GHLContact | null> {
+  try {
+    const res = await getClient().contacts.getContact({ contactId })
+    const contact = (res as { contact?: GHLContact })?.contact
+    return contact ?? null
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status
+    if (status === 404) return null
+    logger.warn('getContactByIdStrict failed', { action: 'ghl_contact_lookup', errorMessage: String(err) })
+    throw new GHLError('GHL contact lookup failed', ErrorCode.GHL_UNAVAILABLE, { contactId, statusCode: status })
+  }
+}
+
 export async function createContact(params: {
   firstName: string
   lastName: string

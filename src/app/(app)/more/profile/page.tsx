@@ -18,6 +18,7 @@ export default function MyProfilePage() {
   const [focusGroups, setFocusGroups] = useState<string[]>([])
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [avatarError, setAvatarError] = useState('')
+  const [saveError, setSaveError] = useState('')
   const avatarInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -83,6 +84,7 @@ export default function MyProfilePage() {
   async function save() {
     if (!user) return
     setSaving(true)
+    setSaveError('')
 
     const response = await apiClient.patch('/api/profile', {
       display_name: form.display_name,
@@ -100,6 +102,8 @@ export default function MyProfilePage() {
     if (!response.error) {
       await refetch()
       setEditing(false)
+    } else {
+      setSaveError(response.error.message || 'Failed to save. Please try again.')
     }
     setSaving(false)
   }
@@ -175,22 +179,27 @@ export default function MyProfilePage() {
       {/* Edit / Save toggle */}
       <div className="px-5 py-4">
         {editing ? (
-          <div className="flex gap-3">
-            <button
-              onClick={() => { setEditing(false); setForm(m.profile ?? {}) }}
-              className="btn btn-outline flex-1 justify-center"
-              disabled={saving}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={save}
-              className="btn btn-gold flex-1 justify-center"
-              disabled={saving}
-            >
-              {saving ? <Spinner className="w-4 h-4" /> : 'Save changes'}
-            </button>
-          </div>
+          <>
+            {saveError && (
+              <p className="text-xs text-red-500 mb-2">{saveError}</p>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setEditing(false); setForm(m.profile ?? {}) }}
+                className="btn btn-outline flex-1 justify-center"
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={save}
+                className="btn btn-gold flex-1 justify-center"
+                disabled={saving}
+              >
+                {saving ? <Spinner className="w-4 h-4" /> : 'Save changes'}
+              </button>
+            </div>
+          </>
         ) : (
           <button
             onClick={() => setEditing(true)}

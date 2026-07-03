@@ -29,6 +29,7 @@ export default function FocusLinkupsPage() {
   const [_loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   // Add custom group
   const [addingCustom, setAddingCustom] = useState(false)
@@ -73,8 +74,12 @@ export default function FocusLinkupsPage() {
 
     if (existing) {
       setToggling(category)
-      await apiClient.delete('/api/focus-linkups/subscriptions', { industry_focus: category })
-      setSubs(prev => prev.filter(s => !(s.industry_focus === category && !s.custom_label)))
+      const res = await apiClient.delete('/api/focus-linkups/subscriptions', { industry_focus: category })
+      if (res.error) {
+        setActionError('Failed to unsubscribe. Please try again.')
+      } else {
+        setSubs(prev => prev.filter(s => !(s.industry_focus === category && !s.custom_label)))
+      }
       setToggling(null)
     } else {
       if (atMax) return
@@ -157,8 +162,12 @@ export default function FocusLinkupsPage() {
     if (removing) return
     setRemoving(id)
     if (editingId === id) cancelEdit()
-    await apiClient.delete('/api/focus-linkups/subscriptions', { id })
-    setSubs(prev => prev.filter(s => s.id !== id))
+    const res = await apiClient.delete('/api/focus-linkups/subscriptions', { id })
+    if (res.error) {
+      setActionError('Failed to remove. Please try again.')
+    } else {
+      setSubs(prev => prev.filter(s => s.id !== id))
+    }
     setRemoving(null)
   }
 
@@ -176,6 +185,13 @@ export default function FocusLinkupsPage() {
       }
     >
       <div className="px-5 py-5 pb-8">
+        {actionError && (
+          <div className="mb-4 rounded-2xl px-4 py-3 flex items-center gap-3" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)' }}>
+            <span className="text-lg">⚠️</span>
+            <p className="flex-1 text-sm font-medium text-red-700">{actionError}</p>
+            <button type="button" onClick={() => setActionError(null)} className="text-xs" style={{ color: 'rgba(0,38,105,0.3)' }}>✕</button>
+          </div>
+        )}
         {/* Explainer */}
         <div className="card card-pad mb-5">
           <p className="text-sm text-green-900 leading-relaxed">

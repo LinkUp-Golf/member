@@ -26,6 +26,7 @@ export default function MemberEventsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [profileMemberId, setProfileMemberId] = useState<string | null>(null)
   const [submitBanner, setSubmitBanner] = useState(false)
+const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
     if (user) loadEvents()
@@ -49,14 +50,19 @@ export default function MemberEventsPage() {
 
   async function rsvp(eventId: string, status: 'attending' | 'maybe' | 'declined') {
     if (!user) return
-    await apiClient.post(`/api/events/${eventId}/rsvp`, { status })
+    const res = await apiClient.post(`/api/events/${eventId}/rsvp`, { status })
+    if (res.error) { setActionError('Failed to update your RSVP. Please try again.'); return }
     setRsvps(prev => ({ ...prev, [eventId]: status }))
   }
 
   async function deleteEvent(eventId: string) {
     setDeletingId(eventId)
-    await apiClient.delete(`/api/events/${eventId}`)
-    setEvents(prev => prev.filter(e => e.id !== eventId))
+    const res = await apiClient.delete(`/api/events/${eventId}`)
+    if (res.error) {
+      setActionError('Failed to delete the event. Please try again.')
+    } else {
+      setEvents(prev => prev.filter(e => e.id !== eventId))
+    }
     setDeletingId(null)
   }
 
@@ -65,6 +71,8 @@ export default function MemberEventsPage() {
     if (res.data) {
       setEvents(prev => prev.map(e => e.id === eventId ? { ...e, ...res.data } : e))
       setEditingId(null)
+    } else {
+      setActionError(res.error?.message ?? 'Failed to save changes. Please try again.')
     }
   }
 
@@ -106,6 +114,13 @@ export default function MemberEventsPage() {
                 <p className="text-xs mt-0.5" style={{ color: 'rgba(0,38,105,0.5)' }}>Pending review — once approved it will appear on the community calendar.</p>
               </div>
               <button type="button" onClick={() => setSubmitBanner(false)} className="text-xs" style={{ color: 'rgba(0,38,105,0.3)' }}>✕</button>
+            </div>
+          )}
+          {actionError && (
+            <div className="mb-4 rounded-2xl px-4 py-3 flex items-center gap-3" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)' }}>
+              <span className="text-lg">⚠️</span>
+              <p className="flex-1 text-sm font-medium text-red-700">{actionError}</p>
+              <button type="button" onClick={() => setActionError(null)} className="text-xs" style={{ color: 'rgba(0,38,105,0.3)' }}>✕</button>
             </div>
           )}
           {loading ? (

@@ -162,7 +162,9 @@ function canRemindPayment(b: BookingRow): boolean {
 
 function slotEndTime(teeTime: string): string {
   const [th = 0, tm = 0] = teeTime.split(':').map(Number)
-  const endMins = th * 60 + tm + GOLF_ROUND_DURATION_MINUTES
+  // Wrap into a 24h clock for display — a late tee time + round duration can
+  // cross midnight (e.g. hour 25), which formatTeeTime can't render correctly.
+  const endMins = (th * 60 + tm + GOLF_ROUND_DURATION_MINUTES) % 1440
   return formatTeeTime(`${String(Math.floor(endMins / 60)).padStart(2, '0')}:${String(endMins % 60).padStart(2, '0')}:00`)
 }
 
@@ -863,23 +865,47 @@ export default function AdminBookingsPage() {
 
   async function updateStatus(bookingId: string, status: BookingStatus) {
     setUpdatingStatus(bookingId)
-    await fetch(`/api/admin/bookings/${bookingId}/status`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    })
-    setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status } : b))
-    setUpdatingStatus(null)
+    try {
+      const res = await fetch(`/api/admin/bookings/${bookingId}/status`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      if (res.ok) {
+        setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status } : b))
+      } else {
+        const json = await res.json().catch(() => ({}))
+        setRequestToast({ msg: json.error ?? 'Failed to update status. Please try again.', ok: false })
+        setTimeout(() => setRequestToast(null), 3500)
+      }
+    } catch {
+      setRequestToast({ msg: 'Network error. Please try again.', ok: false })
+      setTimeout(() => setRequestToast(null), 3500)
+    } finally {
+      setUpdatingStatus(null)
+    }
   }
 
   async function saveNote(bookingId: string) {
     setSavingNote(bookingId)
-    await fetch(`/api/admin/bookings/${bookingId}/notes`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ admin_notes: noteValues[bookingId] ?? '' }),
-    })
-    setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, admin_notes: noteValues[bookingId] || null } : b))
-    setSavingNote(null)
-    setEditingNote(null)
+    try {
+      const res = await fetch(`/api/admin/bookings/${bookingId}/notes`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_notes: noteValues[bookingId] ?? '' }),
+      })
+      if (res.ok) {
+        setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, admin_notes: noteValues[bookingId] || null } : b))
+        setEditingNote(null)
+      } else {
+        const json = await res.json().catch(() => ({}))
+        setRequestToast({ msg: json.error ?? 'Failed to save note. Please try again.', ok: false })
+        setTimeout(() => setRequestToast(null), 3500)
+      }
+    } catch {
+      setRequestToast({ msg: 'Network error. Please try again.', ok: false })
+      setTimeout(() => setRequestToast(null), 3500)
+    } finally {
+      setSavingNote(null)
+    }
   }
 
   async function remindPayment(bookingId: string) {

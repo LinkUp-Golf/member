@@ -222,39 +222,44 @@ export default function BookPage() {
     setSubmitting(true);
     setError("");
 
-    const res = await fetch("/api/bookings/create", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        startTime: selectedSlot.startTime,
-        players: 1 + additionalPlayers.length,
-        additionalPlayers,
-        ...(selectedEvent ? { courseId: selectedEvent.id } : {}),
-      }),
-    });
-
-    const data = await res.json();
-    if (res.ok) {
-      setConfirmedBooking({
-        date: format(new Date(selectedDate + "T12:00:00"), "EEEE, MMMM d"),
-        time: formatSlotTime(selectedSlot.startTime),
-        players: 1 + additionalPlayers.length,
-        pendingNonMembers:
-          typeof data.pendingNonMembers === "number"
-            ? data.pendingNonMembers
-            : additionalPlayers.filter((p) => p.isNonMember).length,
-        bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
-        eventName: selectedEvent?.name ?? "Park Hyatt Aviara",
+    try {
+      const res = await fetch("/api/bookings/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          startTime: selectedSlot.startTime,
+          players: 1 + additionalPlayers.length,
+          additionalPlayers,
+          ...(selectedEvent ? { courseId: selectedEvent.id } : {}),
+        }),
       });
-      if (Array.isArray(data.bookings)) {
-        setMyBookings((prev) => [...(data.bookings as Booking[]), ...prev]);
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setConfirmedBooking({
+          date: format(new Date(selectedDate + "T12:00:00"), "EEEE, MMMM d"),
+          time: formatSlotTime(selectedSlot.startTime),
+          players: 1 + additionalPlayers.length,
+          pendingNonMembers:
+            typeof data.pendingNonMembers === "number"
+              ? data.pendingNonMembers
+              : additionalPlayers.filter((p) => p.isNonMember).length,
+          bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
+          eventName: selectedEvent?.name ?? "Park Hyatt Aviara",
+        });
+        if (Array.isArray(data.bookings)) {
+          setMyBookings((prev) => [...(data.bookings as Booking[]), ...prev]);
+        }
+        setStep("success");
+        fetchMonthSlots();
+      } else {
+        setError(data.error ?? "Something went wrong. Please try again.");
       }
-      setStep("success");
-      fetchMonthSlots();
-    } else {
-      setError(data.error ?? "Something went wrong. Please try again.");
+    } catch {
+      setError("Network error. Check your connection and try again.");
+    } finally {
+      setSubmitting(false);
     }
-    setSubmitting(false);
   }
 
   if (step === "success" && confirmedBooking) {
@@ -2932,11 +2937,15 @@ type BookingGroup = {
 // two separate booking groups can land on the same tee time by coincidence
 // and must not be merged into one card. Rows inserted together (one
 // transaction) share the exact same created_at, since Postgres evaluates
-// now() once per statement.
+// now() once per statement. Status is intentionally excluded from the key:
+// one player cancelling their own spot must stay nested in the same group
+// (as a cancelled row inside allRows), not fork into its own fabricated
+// single-row "booking" — which section a group displays under is decided
+// later, from the primary/booker row's status alone.
 function groupBookings(bookings: Booking[]): BookingGroup[] {
   const bySlot = new Map<string, Booking[]>();
   for (const b of bookings) {
-    const key = `${b.member_id}_${b.created_at}_${b.booking_date}_${b.tee_time}_${b.status === "cancelled" ? "cancelled" : "active"}`;
+    const key = `${b.member_id}_${b.created_at}_${b.booking_date}_${b.tee_time}`;
     const slot = bySlot.get(key) ?? [];
     slot.push(b);
     bySlot.set(key, slot);
@@ -2976,13 +2985,13 @@ function MyBookingsTab({
   const allGroups = groupBookings(bookings);
   const upcoming = allGroups.filter(
     (g) =>
-      bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) >= now &&
+      bookingToLocalDate(g.primary.booking_date, g.primary.tee_time, g.primary.course?.timezone) >= now &&
       g.primary.status !== "cancelled",
   );
   const cancelledAndPast = allGroups
     .filter(
       (g) =>
-        bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) < now ||
+        bookingToLocalDate(g.primary.booking_date, g.primary.tee_time, g.primary.course?.timezone) < now ||
         g.primary.status === "cancelled",
     )
     .sort(
@@ -2990,10 +2999,12 @@ function MyBookingsTab({
         bookingToLocalDate(
           b.primary.booking_date,
           b.primary.tee_time,
+          b.primary.course?.timezone,
         ).getTime() -
         bookingToLocalDate(
           a.primary.booking_date,
           a.primary.tee_time,
+          a.primary.course?.timezone,
         ).getTime(),
     );
 
@@ -3113,6 +3124,7 @@ function BookingCard({
   const localDt = bookingToLocalDate(
     group.primary.booking_date,
     group.primary.tee_time,
+    group.primary.course?.timezone,
   );
   const bookingDate = new Date(`${group.primary.booking_date}T12:00:00`);
   const bookingTime = formatTeeTime(group.primary.tee_time);

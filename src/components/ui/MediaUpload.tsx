@@ -67,12 +67,32 @@ export default function MediaUpload({
       const ext = file.name.split('.').pop()?.toLowerCase() ?? 'bin'
       const path = `${folder}/${crypto.randomUUID()}.${ext}`
 
+      // The Supabase storage client doesn't expose a way to abort an in-flight
+      // upload, so a timeout here can't actually cancel it — it can only stop
+      // waiting on it. If the real upload later resolves after we've already
+      // told the user it failed, observe the result instead of dropping it
+      // silently: clean up an orphaned file on late success, or just log a
+      // late failure (nothing to clean up there).
+      let timedOut = false
       const uploadPromise = supabase.storage
         .from('post-media')
         .upload(path, file, { cacheControl: '31536000', upsert: false })
+        .then(result => {
+          if (timedOut) {
+            if (result.data) {
+              supabase.storage.from('post-media').remove([path]).catch(() => {})
+            } else {
+              console.warn('[MediaUpload] upload failed after client-side timeout:', result.error)
+            }
+          }
+          return result
+        })
 
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Upload timed out. Check your connection and try again.')), 30000)
+        setTimeout(() => {
+          timedOut = true
+          reject(new Error('Upload timed out. Check your connection and try again.'))
+        }, 30000)
       )
 
       const { error: uploadError } = await Promise.race([uploadPromise, timeoutPromise])

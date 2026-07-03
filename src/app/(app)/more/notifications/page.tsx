@@ -83,6 +83,7 @@ export default function NotificationsPage() {
   const [loadingMore, setLoadingMore]       = useState(false)
   const [markingRead, setMarkingRead]       = useState(false)
   const [unreadCount, setUnreadCount]       = useState(0)
+  const [loadError, setLoadError]           = useState(false)
 
   const load = useCallback(async (cursor?: string | null) => {
     const url = cursor
@@ -92,17 +93,27 @@ export default function NotificationsPage() {
     return res.data
   }, [])
 
-  useEffect(() => {
-    if (!user) return
+  const loadInitial = useCallback(() => {
+    setLoading(true)
+    setLoadError(false)
     load().then(data => {
-      if (!data) return
+      if (!data) {
+        setLoadError(true)
+        setLoading(false)
+        return
+      }
       setNotifications(data.notifications)
       setHasMore(data.hasMore)
       setNextCursor(data.nextCursor)
       setUnreadCount(data.unread_count)
       setLoading(false)
     })
-  }, [user, load])
+  }, [load])
+
+  useEffect(() => {
+    if (!user) return
+    loadInitial()
+  }, [user, loadInitial])
 
   async function loadMore() {
     if (!nextCursor || loadingMore) return
@@ -158,6 +169,19 @@ export default function NotificationsPage() {
         {loading ? (
           <div className="px-5 space-y-3">
             {[1, 2, 3, 4, 5].map(i => <CardSkeleton key={i} lines={2} />)}
+          </div>
+        ) : loadError ? (
+          <div className="flex flex-col items-center text-center px-8 py-16">
+            <p className="font-sans font-black text-xl text-green-900 mb-2">Couldn&apos;t load notifications</p>
+            <p className="text-sm text-green-900/45 leading-relaxed max-w-xs mb-4">
+              Check your connection and try again.
+            </p>
+            <button
+              onClick={loadInitial}
+              className="text-sm font-semibold text-green-900 underline underline-offset-2"
+            >
+              Retry
+            </button>
           </div>
         ) : notifications.length === 0 ? (
           <div className="flex flex-col items-center text-center px-8 py-16">

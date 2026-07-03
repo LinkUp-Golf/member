@@ -23,7 +23,18 @@ export function resolveAppointmentIso(
   const startIso = `${bookingDate}T${time}${tzOffset}`
   const [th, tm] = time.split(':').map(Number)
   const endMinutes = (th ?? 0) * 60 + (tm ?? 0) + durationMinutes
-  const endIso = `${bookingDate}T${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}:00${tzOffset}`
+
+  // Roll over into the next calendar day(s) instead of producing an
+  // out-of-range hour (e.g. "25:00") — an invalid ISO timestamp GHL would
+  // reject or misinterpret. Late tee times + a long round duration can push
+  // the end time past midnight.
+  const daysOverflow = Math.floor(endMinutes / 1440)
+  const endMinutesInDay = endMinutes % 1440
+  const endDateStr = daysOverflow > 0
+    ? new Date(new Date(`${bookingDate}T12:00:00Z`).getTime() + daysOverflow * 86400000)
+      .toISOString().slice(0, 10)
+    : bookingDate
+  const endIso = `${endDateStr}T${String(Math.floor(endMinutesInDay / 60)).padStart(2, '0')}:${String(endMinutesInDay % 60).padStart(2, '0')}:00${tzOffset}`
 
   return { startIso, endIso }
 }

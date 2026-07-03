@@ -115,13 +115,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: bookingsError.message }, { status: 500 })
   }
 
-  // Fetch course names
+  // Fetch course names/timezones — each course's own timezone drives both
+  // the reminder-window math (7d/3d/6h before the booking's own local tee
+  // time) and the "on {date} at {time}" text in the notification.
   const courseIds = [...new Set((bookings ?? []).map(b => b.course_id))]
-  const courseMap = new Map<string, { name: string; city: string }>()
+  const courseMap = new Map<string, { name: string; city: string; timezone: string }>()
   if (courseIds.length > 0) {
     const { data: courses } = await admin
       .from('courses')
-      .select('id, name, city')
+      .select('id, name, city, timezone')
       .in('id', courseIds)
     courses?.forEach(c => courseMap.set(c.id, c))
   }
@@ -147,8 +149,8 @@ export async function GET(request: NextRequest) {
     const recipientId: string | null = booking.player_member_id ?? booking.member_id ?? null
     if (!recipientId) continue
 
-    const teeDate = bookingToLocalDate(booking.booking_date, booking.tee_time)
     const course  = courseMap.get(booking.course_id)
+    const teeDate = bookingToLocalDate(booking.booking_date, booking.tee_time, course?.timezone)
     const member  = memberMap.get(recipientId)
     const dateStr = format(teeDate, 'EEEE, MMMM d')
     const timeStr = format(teeDate, 'h:mm a')

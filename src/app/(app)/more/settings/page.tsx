@@ -58,6 +58,7 @@ export default function SettingsPage() {
 
   const [textSize, setTextSize] = useState(TEXT_SIZE_DEFAULT)
   const [savingTextSize, setSavingTextSize] = useState(false)
+  const [textSizeError, setTextSizeError] = useState(false)
 
   useEffect(() => {
     // Load saved preferences from localStorage
@@ -83,13 +84,20 @@ export default function SettingsPage() {
 
   async function handleSliderCommit(px: number) {
     setSavingTextSize(true)
+    setTextSizeError(false)
     try {
-      await fetch('/api/profile', {
+      const res = await fetch('/api/profile', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text_size: px }),
       })
-      await refetch()
+      if (res.ok) {
+        await refetch()
+      } else {
+        setTextSizeError(true)
+      }
+    } catch {
+      setTextSizeError(true)
     } finally {
       setSavingTextSize(false)
     }
@@ -242,6 +250,9 @@ export default function SettingsPage() {
               <span className="text-[11px] text-green-900/25">{TEXT_SIZE_MIN}px</span>
               <span className="text-[11px] text-green-900/25">{TEXT_SIZE_MAX}px</span>
             </div>
+            {textSizeError && (
+              <p className="text-xs text-red-600">Failed to save. Please try again.</p>
+            )}
           </div>
         </section>
 

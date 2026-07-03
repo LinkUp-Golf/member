@@ -229,7 +229,7 @@ export interface Booking {
   admin_notes?: string | null
   created_at: string
   booker_name?: string | null
-  course?: { name: string; city: string; state: string; payment_url: string | null } | null
+  course?: { name: string; city: string; state: string; payment_url: string | null; timezone: string } | null
 }
 
 export interface PlayHistory {
