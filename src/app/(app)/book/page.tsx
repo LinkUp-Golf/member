@@ -2607,6 +2607,214 @@ function CancelModal({
   );
 }
 
+// ---- Edit guest modal ---------------------------------------
+// Lets the booker fix a non-member guest's contact details while that
+// guest's booking row is still awaiting admin approval — e.g. when an
+// admin leaves a note asking for a corrected email or phone number.
+
+interface EditGuestTarget {
+  bookingId: string;
+  player: AdditionalPlayer;
+}
+
+function EditGuestModal({
+  target,
+  onDismiss,
+  onSaved,
+}: {
+  target: EditGuestTarget | null;
+  onDismiss: () => void;
+  onSaved: (bookingId: string, guestName: string, player: AdditionalPlayer) => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [mobile, setMobile] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const open = !!target;
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      setFirstName(target?.player.firstName ?? "");
+      setLastName(target?.player.lastName ?? "");
+      setEmail(target?.player.email ?? "");
+      setMobile(target?.player.mobile ?? "");
+      setError("");
+      const ids: number[] = [];
+      ids[0] = requestAnimationFrame(() => {
+        ids[1] = requestAnimationFrame(() => setVisible(true));
+      });
+      return () => ids.forEach((id) => cancelAnimationFrame(id));
+    } else {
+      setVisible(false);
+      const t = setTimeout(() => setMounted(false), 320);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, target?.bookingId]);
+
+  if (!mounted) return null;
+
+  const inputCls =
+    "w-full px-3 py-2 text-sm rounded-xl border bg-white outline-none transition-colors focus:border-green-700";
+  const inputStyle = { borderColor: "rgba(0,38,105,0.12)", color: "var(--color-green-900)" };
+
+  async function handleSave() {
+    if (!target) return;
+    if (!validateEmail(email).valid) {
+      setError("Enter a valid email address");
+      return;
+    }
+    if (!isValidGuestPhone(mobile)) {
+      setError("Enter a valid phone number");
+      return;
+    }
+    setError("");
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/bookings/${target.bookingId}/guest`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ firstName, lastName, email, mobile }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Failed to save changes. Please try again.");
+        return;
+      }
+      onSaved(target.bookingId, data.guest_name, data.additional_players[0]);
+      onDismiss();
+    } catch {
+      setError("Failed to save changes. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center md:p-6">
+      <button
+        type="button"
+        aria-label="Close"
+        className={[
+          "absolute inset-0 w-full h-full",
+          visible ? "opacity-100" : "opacity-0",
+        ].join(" ")}
+        style={{
+          background: "rgba(0,0,0,0.45)",
+          transition: "opacity 200ms ease-out",
+          willChange: "opacity",
+        }}
+        onClick={onDismiss}
+      />
+      <div
+        className={[
+          "relative bg-white rounded-t-3xl md:rounded-3xl px-5 pt-5 pb-8 space-y-4 w-full md:max-w-md",
+          visible ? "translate-y-0" : "translate-y-full",
+        ].join(" ")}
+        style={{
+          boxShadow: "0 -4px 32px rgba(0,0,0,0.12)",
+          transition: visible
+            ? "transform 340ms cubic-bezier(0.32,0.72,0,1)"
+            : "transform 240ms cubic-bezier(0.4,0,1,1)",
+          willChange: "transform",
+        }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <p
+            className="font-sans font-black text-lg"
+            style={{ color: "var(--color-green-900)" }}
+          >
+            Edit guest details
+          </p>
+          <button
+            onClick={onDismiss}
+            className="w-8 h-8 rounded-full flex items-center justify-center"
+            style={{
+              background: "rgba(0,38,105,0.06)",
+              color: "rgba(0,38,105,0.5)",
+            }}
+          >
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        </div>
+
+        <p className="text-xs" style={{ color: "rgba(0,38,105,0.45)" }}>
+          Still awaiting admin approval — you can fix their details until then.
+        </p>
+
+        {/* Form */}
+        <div className="grid grid-cols-2 gap-2.5">
+          <input
+            className={inputCls}
+            style={inputStyle}
+            placeholder="First name"
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
+          />
+          <input
+            className={inputCls}
+            style={inputStyle}
+            placeholder="Last name"
+            value={lastName}
+            onChange={(e) => setLastName(e.target.value)}
+          />
+        </div>
+        <input
+          type="email"
+          className={inputCls}
+          style={inputStyle}
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <input
+          type="tel"
+          className={inputCls}
+          style={inputStyle}
+          placeholder="Phone number"
+          value={mobile}
+          onChange={(e) => setMobile(e.target.value)}
+        />
+
+        {error && (
+          <p className="text-xs" style={{ color: "rgba(220,38,38,0.85)" }}>
+            {error}
+          </p>
+        )}
+
+        {/* CTA */}
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="w-full py-3.5 rounded-2xl text-sm font-semibold text-center disabled:opacity-60"
+          style={{ background: "var(--color-green-900)", color: "white" }}
+        >
+          {saving ? "Saving…" : "Save changes"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ---- Dinner RSVP widget ------------------------------------
 
 function DinnerRsvp({
@@ -2748,7 +2956,7 @@ function MyBookingsTab({
   bookings,
   onRefresh: _onRefresh,
   onSwitchToBook: _onSwitchToBook,
-  onUpdateBooking: _onUpdateBooking,
+  onUpdateBooking,
 }: {
   bookings: Booking[];
   onRefresh: () => void;
@@ -2757,6 +2965,7 @@ function MyBookingsTab({
 }) {
   const { user } = useProfile();
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
+  const [editTarget, setEditTarget] = useState<EditGuestTarget | null>(null);
 
   const now = new Date();
   const allGroups = groupBookings(bookings);
@@ -2793,6 +3002,17 @@ function MyBookingsTab({
         onDismiss={() => setCancelTarget(null)}
       />
 
+      <EditGuestModal
+        target={editTarget}
+        onDismiss={() => setEditTarget(null)}
+        onSaved={(bookingId, guestName, player) =>
+          onUpdateBooking(bookingId, {
+            guest_name: guestName,
+            additional_players: [player],
+          })
+        }
+      />
+
       {upcoming.length === 0 && cancelledAndPast.length === 0 && (
         <EmptyState
           icon="🗓️"
@@ -2811,6 +3031,7 @@ function MyBookingsTab({
                 group={group}
                 userId={user?.id}
                 onCancel={setCancelTarget}
+                onEditGuest={setEditTarget}
               />
             ))}
           </div>
@@ -2869,10 +3090,12 @@ function BookingCard({
   group,
   userId,
   onCancel,
+  onEditGuest,
 }: {
   group: BookingGroup;
   userId: string | undefined;
   onCancel: (target: CancelTarget) => void;
+  onEditGuest: (target: EditGuestTarget) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -2916,6 +3139,8 @@ function BookingCard({
           canCancel: canCancelPrimary,
           canPay: group.primary.status === "availability_confirmed",
           isYou: true,
+          adminNotes: group.primary.admin_notes ?? null,
+          editablePlayer: null as AdditionalPlayer | null,
         },
         ...activePlayers.map((p) => ({
           id: p.id,
@@ -2925,6 +3150,12 @@ function BookingCard({
           canCancel: hoursUntil > 0 && CANCELLABLE.includes(p.status),
           canPay: p.status === "availability_confirmed",
           isYou: false,
+          adminNotes: p.admin_notes ?? null,
+          // Only a still-pending non-member guest can be corrected — once an
+          // admin has set them up (or the row is cancelled/confirmed), GHL is
+          // already involved and editing here would silently drift out of sync.
+          editablePlayer:
+            p.status === "awaiting_approval" ? (p.additional_players?.[0] ?? null) : null,
         })),
       ]
     : (() => {
@@ -2941,6 +3172,8 @@ function BookingCard({
               : false,
             canPay: myRow?.status === "availability_confirmed",
             isYou: true,
+            adminNotes: myRow?.admin_notes ?? null,
+            editablePlayer: null as AdditionalPlayer | null,
           },
           {
             id: group.primary.id,
@@ -2950,6 +3183,8 @@ function BookingCard({
             canCancel: false,
             canPay: false,
             isYou: false,
+            adminNotes: group.primary.admin_notes ?? null,
+            editablePlayer: null as AdditionalPlayer | null,
           },
           ...otherPlayers.map((p) => ({
             id: p.id,
@@ -2957,8 +3192,10 @@ function BookingCard({
             status: p.status,
             ghlBookingId: null,
             canCancel: false,
+            editablePlayer: null as AdditionalPlayer | null,
             canPay: false,
             isYou: false,
+            adminNotes: p.admin_notes ?? null,
           })),
         ];
       })();
@@ -3037,6 +3274,7 @@ function BookingCard({
         >
           {allRows.map((row, idx) => {
             const canPay = row.canPay;
+            const editablePlayer = row.editablePlayer;
             return (
               <div
                 key={row.id}
@@ -3046,13 +3284,33 @@ function BookingCard({
                     idx === 0 ? "none" : "1px solid rgba(0,38,105,0.04)",
                 }}
               >
-                {/* Name */}
-                <span
-                  className="flex-1 text-xs font-medium truncate capitalize min-w-0"
-                  style={{ color: "var(--color-green-900)" }}
-                >
-                  {row.name}
-                </span>
+                {/* Name + admin note indicator */}
+                <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                  <span
+                    className="text-xs font-medium truncate capitalize"
+                    style={{ color: "var(--color-green-900)" }}
+                  >
+                    {row.name}
+                  </span>
+                  {row.adminNotes && (
+                    <div className="relative group flex-shrink-0">
+                      <span
+                        title={row.adminNotes}
+                        className="flex items-center justify-center w-4 h-4 rounded-full text-[10px] leading-none cursor-help flex-shrink-0"
+                        style={{ background: "rgba(234,179,8,0.15)", color: "#92640a" }}
+                        aria-label={`Admin note: ${row.adminNotes}`}
+                      >
+                        ⚠
+                      </span>
+                      <div
+                        className="absolute left-0 bottom-full mb-1.5 hidden group-hover:block w-56 max-w-[70vw] rounded-lg px-3 py-2 text-[11px] leading-snug shadow-lg z-20"
+                        style={{ background: "var(--color-green-900)", color: "white" }}
+                      >
+                        {row.adminNotes}
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 {/* Status badge or Pay CTA */}
                 {!canPay && <BookingStatusBadge status={row.status} />}
@@ -3075,6 +3333,26 @@ function BookingCard({
                       Payment link pending
                     </span>
                   )
+                )}
+
+                {/* Edit — booker only, while the guest is still awaiting approval */}
+                {editablePlayer && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onEditGuest({
+                        bookingId: row.id,
+                        player: editablePlayer,
+                      })
+                    }
+                    className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
+                    style={{
+                      color: "rgba(0,38,105,0.55)",
+                      background: "rgba(0,38,105,0.06)",
+                    }}
+                  >
+                    Edit
+                  </button>
                 )}
 
                 {/* Cancel */}
