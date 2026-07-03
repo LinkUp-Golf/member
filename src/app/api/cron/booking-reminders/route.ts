@@ -26,6 +26,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase-server'
 import { sendPushToMember } from '@/lib/push'
+import { triggerBookingReminderWebhook } from '@/lib/ghl/client'
 import { bookingToLocalDate } from '@/lib/utils'
 import { format, subDays, subHours, addDays } from 'date-fns'
 import { logger } from '@/lib/logger'
@@ -37,31 +38,37 @@ const WINDOW_MS = 8 * 60 * 1000
 type ReminderType = '7d' | '3d' | '6h'
 
 interface Reminder {
-  type:     ReminderType
-  flag:     'reminder_7d_sent' | 'reminder_3d_sent' | 'reminder_6h_sent'
+  type:        ReminderType
+  flag:        'reminder_7d_sent' | 'reminder_3d_sent' | 'reminder_6h_sent'
   // Returns the exact UTC moment this reminder should fire for a given tee time
-  targetFn: (teeTime: Date) => Date
-  label:    string
+  targetFn:    (teeTime: Date) => Date
+  label:       string
+  // "type" field sent in the GHL webhook payload — a slightly different
+  // format than the push notification's label (no "in " prefix).
+  webhookType: '7 days' | '3 days' | '6 hours'
 }
 
 const REMINDERS: Reminder[] = [
   {
-    type:     '7d',
-    flag:     'reminder_7d_sent',
-    targetFn: (tee) => subDays(tee, 7),
-    label:    'in 7 days',
+    type:        '7d',
+    flag:        'reminder_7d_sent',
+    targetFn:    (tee) => subDays(tee, 7),
+    label:       'in 7 days',
+    webhookType: '7 days',
   },
   {
-    type:     '3d',
-    flag:     'reminder_3d_sent',
-    targetFn: (tee) => subDays(tee, 3),
-    label:    'in 3 days',
+    type:        '3d',
+    flag:        'reminder_3d_sent',
+    targetFn:    (tee) => subDays(tee, 3),
+    label:       'in 3 days',
+    webhookType: '3 days',
   },
   {
-    type:     '6h',
-    flag:     'reminder_6h_sent',
-    targetFn: (tee) => subHours(tee, 6),
-    label:    'in 6 hours',
+    type:        '6h',
+    flag:        'reminder_6h_sent',
+    targetFn:    (tee) => subHours(tee, 6),
+    label:       'in 6 hours',
+    webhookType: '6 hours',
   },
 ]
 
@@ -108,15 +115,32 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: bookingsError.message }, { status: 500 })
   }
 
-  // Fetch course names
+  // Fetch course names/timezones — each course's own timezone drives both
+  // the reminder-window math (7d/3d/6h before the booking's own local tee
+  // time) and the "on {date} at {time}" text in the notification.
   const courseIds = [...new Set((bookings ?? []).map(b => b.course_id))]
-  const courseMap = new Map<string, { name: string; city: string }>()
+  const courseMap = new Map<string, { name: string; city: string; timezone: string }>()
   if (courseIds.length > 0) {
     const { data: courses } = await admin
       .from('courses')
-      .select('id, name, city')
+      .select('id, name, city, timezone')
       .in('id', courseIds)
     courses?.forEach(c => courseMap.set(c.id, c))
+  }
+
+  // Fetch recipient email/first name — needed for the GHL webhook payload
+  const recipientIds = [...new Set(
+    (bookings ?? [])
+      .map(b => b.player_member_id ?? b.member_id)
+      .filter((id): id is string => Boolean(id))
+  )]
+  const memberMap = new Map<string, { email: string; first_name: string | null }>()
+  if (recipientIds.length > 0) {
+    const { data: members } = await admin
+      .from('members')
+      .select('id, email, first_name')
+      .in('id', recipientIds)
+    members?.forEach(m => memberMap.set(m.id, m))
   }
 
   const results = { checked: bookings?.length ?? 0, sent: 0, errors: 0 }
@@ -125,8 +149,9 @@ export async function GET(request: NextRequest) {
     const recipientId: string | null = booking.player_member_id ?? booking.member_id ?? null
     if (!recipientId) continue
 
-    const teeDate = bookingToLocalDate(booking.booking_date, booking.tee_time)
     const course  = courseMap.get(booking.course_id)
+    const teeDate = bookingToLocalDate(booking.booking_date, booking.tee_time, course?.timezone)
+    const member  = memberMap.get(recipientId)
     const dateStr = format(teeDate, 'EEEE, MMMM d')
     const timeStr = format(teeDate, 'h:mm a')
     const venue   = course?.name ?? 'the course'
@@ -150,6 +175,18 @@ export async function GET(request: NextRequest) {
           url: '/book',
           tag: `booking-reminder-${booking.id}-${reminder.type}`,
         })
+
+        // Best-effort — triggerBookingReminderWebhook catches its own errors
+        // and returns false rather than throwing, so a GHL-side failure here
+        // never blocks the push notification or the reminder_*_sent flag.
+        if (member?.email) {
+          await triggerBookingReminderWebhook({
+            type: reminder.webhookType,
+            email: member.email,
+            firstName: member.first_name?.trim() || member.email,
+            content: body,
+          })
+        }
 
         await admin.from('notification_log').insert({
           member_id: recipientId,

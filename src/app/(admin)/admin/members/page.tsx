@@ -11,6 +11,7 @@ import {
   AdminButton,
 } from "@/components/admin/AdminUI";
 import { format, formatDistanceToNow } from "date-fns";
+import { formatInTimeZone } from "date-fns-tz";
 import type { MemberWithProfile } from "@/types";
 
 type FilterStatus =
@@ -320,7 +321,10 @@ export default function AdminMembersPage() {
                 <AdminTd>
                   <span className="text-xs text-gray-400">
                     {m.membership_start_date
-                      ? format(new Date(m.membership_start_date), "MMM d, yyyy")
+                      // membership_start_date is a plain calendar date, not an
+                      // instant — format in UTC so it doesn't shift a day
+                      // earlier for admins west of UTC.
+                      ? formatInTimeZone(new Date(m.membership_start_date), "UTC", "MMM d, yyyy")
                       : format(new Date(m.created_at), "MMM d, yyyy")}
                   </span>
                 </AdminTd>

@@ -16,6 +16,9 @@ interface Props {
   onEdit?: (messageId: string, newBody: string) => Promise<boolean>;
   onDelete?: (messageId: string) => Promise<boolean>;
   onRetry?: (tempId: string, body: string) => void;
+  /** Viewer's saved timezone preference (member_profiles.timezone) — falls
+   *  back to the browser's own zone when not set. */
+  timezone?: string | null;
 }
 
 export function MessageBubble({
@@ -28,6 +31,7 @@ export function MessageBubble({
   onEdit,
   onDelete,
   onRetry,
+  timezone,
 }: Props) {
   const isDeleted = !!msg.deleted_at;
   const isPending = !!msg.pending;
@@ -255,7 +259,7 @@ export function MessageBubble({
             className={`flex items-center gap-1 mt-0.5 ${isMe ? "flex-row-reverse mr-1" : "ml-1"}`}
           >
             <span className="text-[10px] text-green-900/30">
-              {formatMessageTime(msg.created_at)}
+              {formatMessageTime(msg.created_at, timezone)}
             </span>
             {msg.edited_at && !isDeleted && (
               <span className="text-[10px] text-green-900/30">edited</span>

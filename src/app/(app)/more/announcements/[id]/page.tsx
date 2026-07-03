@@ -159,7 +159,7 @@ function MediaCarousel({
     <div className="mb-5">
       {/* Slide track */}
       <div
-        className="relative rounded-2xl overflow-hidden bg-black"
+        className="relative rounded-2xl overflow-hidden bg-white"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
@@ -178,7 +178,7 @@ function MediaCarousel({
                   src={item.url}
                   controls
                   playsInline
-                  className="w-full max-h-72 object-contain block bg-black"
+                  className="w-full max-h-72 object-contain block bg-white"
                 />
               )}
             </div>

@@ -10,7 +10,7 @@ import { HighLevel } from '@gohighlevel/api-client'
 import type { GHLContact, GHLCalendarEvent, GHLBookingSlot } from '@/types'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
 import { logger } from '@/lib/logger'
-import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GOLF_ROUND_DURATION_MINUTES } from '@/lib/constants'
+import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GOLF_ROUND_DURATION_MINUTES, GHL_BOOKING_REMINDER_WEBHOOK_PATH } from '@/lib/constants'
 
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID ?? ''
 
@@ -43,7 +43,9 @@ async function ghlFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     const body = await res.text().catch(() => '')
     const code = res.status === 404 ? ErrorCode.GHL_CONTACT_NOT_FOUND : ErrorCode.GHL_UNAVAILABLE
     logger.error(`GHL ${res.status} ${path}: ${body.slice(0, 200)}`, { action: 'ghl_fetch_error', statusCode: res.status })
-    throw new GHLError(`GHL API error ${res.status}`, code, { path, statusCode: res.status })
+    let parsedBody: unknown
+    try { parsedBody = JSON.parse(body) } catch { /* not JSON */ }
+    throw new GHLError(`GHL API error ${res.status}`, code, { path, statusCode: res.status, body: parsedBody })
   }
 
   return res.json() as Promise<T>
@@ -73,12 +75,31 @@ export async function getContactById(contactId: string): Promise<GHLContact | nu
   }
 }
 
+// Like getContactById, but rethrows as a GHLError instead of collapsing every
+// failure to null — used only by validateGHLMembership, which must tell "GHL
+// is genuinely down" (fail secure to cache) apart from "contact was actually
+// deleted" (fail closed, wipe cache). A raw fetch/network error here would
+// otherwise be indistinguishable from a real 404 and treated as a revoked
+// membership on every transient GHL outage.
+export async function getContactByIdStrict(contactId: string): Promise<GHLContact | null> {
+  try {
+    const res = await getClient().contacts.getContact({ contactId })
+    const contact = (res as { contact?: GHLContact })?.contact
+    return contact ?? null
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status
+    if (status === 404) return null
+    logger.warn('getContactByIdStrict failed', { action: 'ghl_contact_lookup', errorMessage: String(err) })
+    throw new GHLError('GHL contact lookup failed', ErrorCode.GHL_UNAVAILABLE, { contactId, statusCode: status })
+  }
+}
+
 export async function createContact(params: {
   firstName: string
   lastName: string
   email: string
   phone?: string | null
-}): Promise<string | null> {
+}): Promise<string> {
   try {
     const data = await ghlFetch<{ contact: { id: string } }>('/contacts', {
       method: 'POST',
@@ -90,10 +111,19 @@ export async function createContact(params: {
         ...(params.phone ? { phone: params.phone } : {}),
       }),
     })
-    return data.contact?.id ?? null
+    const id = data.contact?.id
+    if (!id) throw new GHLError('GHL did not return a contact id', ErrorCode.GHL_UNAVAILABLE)
+    return id
   } catch (err) {
+    // Don't silently reuse whatever contact GHL matched on failure (e.g. a
+    // "duplicated contacts" rejection by phone/email) — that contact could
+    // belong to a different person entirely (like the booker), so misattaching
+    // the guest's appointment to it would be worse than failing loudly here.
+    const ghlMessage = err instanceof GHLError
+      ? (err.context?.body as { message?: string } | undefined)?.message
+      : undefined
     logger.warn('createContact failed', { action: 'ghl_contact_create', errorMessage: String(err) })
-    return null
+    throw new GHLError(ghlMessage ?? 'Failed to create GHL contact', ErrorCode.GHL_UNAVAILABLE)
   }
 }
 
@@ -134,6 +164,24 @@ export async function removeTagFromContact(contactId: string, tag: string): Prom
   }
 }
 
+// ---- Conversations -------------------------------------------
+
+// Sends an SMS immediately via the GHL Conversations API — no workflow or
+// automation involved, unlike triggerWorkflow/triggerBookingReminderWebhook
+// below. Used for admin-initiated, one-off nudges (e.g. "please pay now").
+export async function sendSms(contactId: string, message: string): Promise<boolean> {
+  try {
+    await ghlFetch('/conversations/messages', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'SMS', contactId, message }),
+    })
+    return true
+  } catch (err) {
+    logger.warn('sendSms failed', { action: 'ghl_sms_send', errorMessage: String(err) })
+    return false
+  }
+}
+
 // ---- Emails / Notifications (via GHL workflows) -------------
 
 export async function triggerWorkflow(params: {
@@ -149,6 +197,32 @@ export async function triggerWorkflow(params: {
     return true
   } catch (err) {
     logger.warn('triggerWorkflow failed', { action: 'ghl_workflow_trigger', errorMessage: String(err) })
+    return false
+  }
+}
+
+// Fires the GHL inbound webhook used for booking reminders (7d/3d/6h before
+// a tee time) — a plain POST to a workflow-trigger URL, not the REST API,
+// so it doesn't go through ghlFetch/GHL_BASE_URL.
+export async function triggerBookingReminderWebhook(payload: {
+  type: '7 days' | '3 days' | '6 hours'
+  email: string
+  firstName: string
+  content: string
+}): Promise<boolean> {
+  try {
+    const res = await fetch(`${GHL_BASE_URL}${GHL_BOOKING_REMINDER_WEBHOOK_PATH}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      logger.warn('triggerBookingReminderWebhook failed', { action: 'ghl_reminder_webhook', metadata: { statusCode: res.status } })
+      return false
+    }
+    return true
+  } catch (err) {
+    logger.warn('triggerBookingReminderWebhook failed', { action: 'ghl_reminder_webhook', errorMessage: String(err) })
     return false
   }
 }
@@ -305,6 +379,74 @@ export async function getContactBookings(contactId: string): Promise<GHLCalendar
   }
 }
 
+// ---- Calendar management (raw fetch) ------------------------
+
+export async function createGHLCalendar(params: {
+  name: string
+  slug: string
+  eventTitle: string
+  eventColor: string
+  meetingIntervalMins: number
+  meetingDurationMins: number
+  minSchedulingNoticeMins: number
+  dateRangeDays: number
+  preBufferMins: number
+  postBufferMins: number
+  seatsPerClass?: number | null
+}): Promise<string> {
+  const data = await ghlFetch<{ calendar?: { id: string }; id?: string }>('/calendars/', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: params.name,
+      calendarType: 'class_booking',
+      groupId: GHL_CALENDAR_PROVIDER_ID,
+      slug: params.slug,
+      eventTitle: params.eventTitle,
+      eventColor: params.eventColor,
+      locationId: GHL_LOCATION_ID,
+      isActive: true,
+      slotInterval: params.meetingIntervalMins,
+      slotDuration: params.meetingDurationMins,
+      preBuffer: params.preBufferMins,
+      slotBuffer: params.postBufferMins,
+      ...(params.seatsPerClass != null ? { appoinmentPerSlot: params.seatsPerClass } : {}),
+      allowBookingAfter: params.minSchedulingNoticeMins,
+      allowBookingFor: params.dateRangeDays,
+    }),
+  })
+  const id = (data.calendar?.id ?? (data as { id?: string }).id) ?? ''
+  if (!id) throw new GHLError('createGHLCalendar returned no id', ErrorCode.GHL_UNAVAILABLE)
+  return id
+}
+
+export async function createCalendarGroup(params: {
+  name: string
+  slug: string
+  description?: string | null
+}): Promise<string> {
+  const data = await ghlFetch<{ group?: { id: string } }>('/calendars/groups', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: params.name,
+      slug: params.slug,
+      locationId: GHL_LOCATION_ID,
+      ...(params.description ? { description: params.description } : {}),
+    }),
+  })
+  const id = data.group?.id ?? ''
+  if (!id) throw new GHLError('createCalendarGroup returned no id', ErrorCode.GHL_UNAVAILABLE)
+  return id
+}
+
+export async function deleteGHLCalendar(calendarId: string): Promise<boolean> {
+  try {
+    await ghlFetch(`/calendars/${calendarId}`, { method: 'DELETE' })
+    return true
+  } catch {
+    return false
+  }
+}
+
 // ---- Payments (raw fetch — SDK payment API differs) ---------
 
 export async function chargeForBooking(params: {
@@ -401,6 +543,65 @@ export async function updateOpportunityStage(
   } catch (err) {
     logger.warn('updateOpportunityStage failed', { action: 'ghl_opportunity_update', errorMessage: String(err) })
     return false
+  }
+}
+
+// ---- Tags list (for admin UI multi-select) ------------------
+
+export async function listLocationTags(): Promise<{ id: string; name: string }[]> {
+  try {
+    const data = await ghlFetch<{ tags?: { id: string; name: string }[] }>(
+      `/locations/${GHL_LOCATION_ID}/tags`
+    )
+    return data.tags ?? []
+  } catch {
+    return []
+  }
+}
+
+// ---- Calendar list (for admin UI calendar selector) ---------
+
+export interface GHLCalendarSummary {
+  id: string
+  name: string
+  calendarType: string
+  slug: string | null
+  groupId: string | null
+  // Booking settings returned by GHL on the calendar object
+  slotInterval: number | null
+  slotDuration: number | null
+  preBuffer: number | null
+  slotBuffer: number | null
+  appoinmentPerSlot: number | null
+  allowBookingAfter: number | null
+  allowBookingFor: number | null
+}
+
+export async function listCalendars(): Promise<GHLCalendarSummary[]> {
+  try {
+    // Fetch all calendars for this location then also try the groups endpoint
+    // to ensure we get every calendar including those in groups.
+    const [calsData, groupsData] = await Promise.allSettled([
+      ghlFetch<{ calendars?: GHLCalendarSummary[] }>(`/calendars/?locationId=${GHL_LOCATION_ID}`),
+      ghlFetch<{ groups?: { id: string; calendars?: GHLCalendarSummary[] }[] }>(
+        `/calendars/groups?locationId=${GHL_LOCATION_ID}`
+      ),
+    ])
+
+    const cals: GHLCalendarSummary[] = calsData.status === 'fulfilled' ? (calsData.value.calendars ?? []) : []
+
+    // Merge in any calendars found in groups that aren't in the main list
+    if (groupsData.status === 'fulfilled') {
+      for (const group of groupsData.value.groups ?? []) {
+        for (const cal of group.calendars ?? []) {
+          if (!cals.find(c => c.id === cal.id)) cals.push({ ...cal, groupId: group.id })
+        }
+      }
+    }
+
+    return cals
+  } catch {
+    return []
   }
 }
 

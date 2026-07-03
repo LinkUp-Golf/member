@@ -2,9 +2,11 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { formatInTimeZone } from 'date-fns-tz'
 import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import { formatRelativeTime } from '@/lib/utils'
+import { getBrowserTimezone } from '@/lib/timezone'
 import AppShell from '@/components/layout/AppShell'
 import { CardSkeleton } from '@/components/ui/Loading'
 import type { NotificationLog, NotificationType } from '@/types'
@@ -21,6 +23,7 @@ const TYPE_ICONS: Record<NotificationType, string> = {
   play_suggestion: '🏌️',
   guest_access:    '🔑',
   referral:        '🤝',
+  member_event:    '📅',
   test:            '🔔',
   general:         '📣',
 }
@@ -37,6 +40,7 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   play_suggestion: 'Play suggestion',
   guest_access:    'Guest access',
   referral:        'Referral',
+  member_event:    'Member event',
   test:            'Test',
   general:         'Notification',
 }
@@ -48,21 +52,28 @@ interface NotifResponse {
   unread_count: number
 }
 
-function groupByDate(items: NotificationLog[]): { label: string; items: NotificationLog[] }[] {
-  const now   = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const yesterday = new Date(today.getTime() - 86_400_000)
-  const weekAgo   = new Date(today.getTime() - 7 * 86_400_000)
+// Today/Yesterday boundaries use the viewer's saved timezone preference
+// (falling back to the browser's zone) so they match what the member set in
+// Settings rather than wherever their browser happens to think it is.
+function groupByDate(items: NotificationLog[], timezone?: string | null): { label: string; items: NotificationLog[] }[] {
+  const tz = timezone || getBrowserTimezone()
+  const dayKey = (d: Date) => formatInTimeZone(d, tz, 'yyyy-MM-dd')
+
+  const now = new Date()
+  const todayKey = dayKey(now)
+  const yesterdayKey = dayKey(new Date(now.getTime() - 86_400_000))
+  const weekAgo = new Date(now.getTime() - 7 * 86_400_000)
 
   const groups = new Map<string, NotificationLog[]>()
 
   for (const n of items) {
     const d = new Date(n.created_at)
+    const dKey = dayKey(d)
     let label: string
-    if (d >= today)          label = 'Today'
-    else if (d >= yesterday) label = 'Yesterday'
-    else if (d >= weekAgo)   label = 'This week'
-    else                     label = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    if (dKey === todayKey)     label = 'Today'
+    else if (dKey === yesterdayKey) label = 'Yesterday'
+    else if (d >= weekAgo)     label = 'This week'
+    else                       label = formatInTimeZone(d, tz, 'MMMM yyyy')
 
     const existing = groups.get(label)
     if (existing) existing.push(n)
@@ -73,7 +84,7 @@ function groupByDate(items: NotificationLog[]): { label: string; items: Notifica
 }
 
 export default function NotificationsPage() {
-  const { user } = useProfile()
+  const { user, profile } = useProfile()
   const [notifications, setNotifications]   = useState<NotificationLog[]>([])
   const [hasMore, setHasMore]               = useState(false)
   const [nextCursor, setNextCursor]         = useState<string | null>(null)
@@ -81,6 +92,7 @@ export default function NotificationsPage() {
   const [loadingMore, setLoadingMore]       = useState(false)
   const [markingRead, setMarkingRead]       = useState(false)
   const [unreadCount, setUnreadCount]       = useState(0)
+  const [loadError, setLoadError]           = useState(false)
 
   const load = useCallback(async (cursor?: string | null) => {
     const url = cursor
@@ -90,17 +102,27 @@ export default function NotificationsPage() {
     return res.data
   }, [])
 
-  useEffect(() => {
-    if (!user) return
+  const loadInitial = useCallback(() => {
+    setLoading(true)
+    setLoadError(false)
     load().then(data => {
-      if (!data) return
+      if (!data) {
+        setLoadError(true)
+        setLoading(false)
+        return
+      }
       setNotifications(data.notifications)
       setHasMore(data.hasMore)
       setNextCursor(data.nextCursor)
       setUnreadCount(data.unread_count)
       setLoading(false)
     })
-  }, [user, load])
+  }, [load])
+
+  useEffect(() => {
+    if (!user) return
+    loadInitial()
+  }, [user, loadInitial])
 
   async function loadMore() {
     if (!nextCursor || loadingMore) return
@@ -125,7 +147,7 @@ export default function NotificationsPage() {
     setMarkingRead(false)
   }
 
-  const groups = groupByDate(notifications)
+  const groups = groupByDate(notifications, profile?.profile?.timezone)
 
   return (
     <AppShell
@@ -156,6 +178,19 @@ export default function NotificationsPage() {
         {loading ? (
           <div className="px-5 space-y-3">
             {[1, 2, 3, 4, 5].map(i => <CardSkeleton key={i} lines={2} />)}
+          </div>
+        ) : loadError ? (
+          <div className="flex flex-col items-center text-center px-8 py-16">
+            <p className="font-sans font-black text-xl text-green-900 mb-2">Couldn&apos;t load notifications</p>
+            <p className="text-sm text-green-900/45 leading-relaxed max-w-xs mb-4">
+              Check your connection and try again.
+            </p>
+            <button
+              onClick={loadInitial}
+              className="text-sm font-semibold text-green-900 underline underline-offset-2"
+            >
+              Retry
+            </button>
           </div>
         ) : notifications.length === 0 ? (
           <div className="flex flex-col items-center text-center px-8 py-16">

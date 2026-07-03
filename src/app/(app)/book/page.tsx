@@ -7,12 +7,11 @@ import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
 import AppShell from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/Loading";
-import MemberProfileSheet from "@/components/ui/MemberProfileSheet";
 import EmptyState from "@/components/ui/EmptyState";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { formatTeeTime, cn, bookingToLocalDate } from "@/lib/utils";
-import Select from "@/components/ui/Select";
+import { formatInTimeZone } from "date-fns-tz";
 import {
   format,
   parse,
@@ -28,16 +27,16 @@ import type {
   GHLBookingSlot,
   AdditionalPlayer,
   MemberWithProfile,
+  Course,
 } from "@/types";
 import {
   BOOKING_PRICE_USD,
   POLICY_TIERS,
   GOLF_ROUND_DURATION_MINUTES,
-  AVIARA_TIMEZONE,
-  BOOKING_PAYMENT_URL,
   GHL_CANCEL_BOOKING_URL,
 } from "@/lib/constants";
 import { validateEmail } from "@/lib/validation";
+import { getBrowserTimezone } from "@/lib/timezone";
 
 type PlayerKind = "member" | "non_member";
 
@@ -62,47 +61,6 @@ interface DayPlayer {
 
 const BOOKING_MIN_DAYS = 0;
 
-const FALLBACK_TIMEZONES = [
-  "America/Los_Angeles",
-  "America/Denver",
-  "America/Chicago",
-  "America/New_York",
-  "America/Anchorage",
-  "Pacific/Honolulu",
-  "Asia/Manila",
-  "Asia/Singapore",
-  "Asia/Tokyo",
-  "Asia/Shanghai",
-  "Asia/Kolkata",
-  "Asia/Dubai",
-  "Europe/London",
-  "Europe/Paris",
-  "Europe/Berlin",
-  "Australia/Sydney",
-  "Pacific/Auckland",
-  "UTC",
-];
-
-function getBrowserTimezone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone;
-  } catch {
-    return "UTC";
-  }
-}
-
-function getAllTimezones(): string[] {
-  try {
-    const all = (
-      Intl as unknown as { supportedValuesOf?: (k: string) => string[] }
-    ).supportedValuesOf?.("timeZone");
-    if (all && all.length > 0) return all;
-  } catch {
-    /* ignore */
-  }
-  return FALLBACK_TIMEZONES;
-}
-
 function formatSlotTime(isoString: string): string {
   return formatTeeTime(isoString.split("T")[1]?.slice(0, 8) ?? "");
 }
@@ -119,15 +77,26 @@ function slotEndTime(startIso: string): string {
 }
 
 export default function BookPage() {
-  const { user } = useProfile();
+  const { user, profile } = useProfile();
   const searchParams = useSearchParams();
   const inviteMemberId = searchParams?.get("invite") ?? null;
 
   const today = useMemo(() => new Date(), []);
 
-  // Timezone — default to user's browser timezone
+  // Timezone — default to the member's saved preference (set via Settings),
+  // falling back to the browser-detected zone until a preference exists.
+  // Slot times are always displayed converted into *this* zone, not the
+  // selected course's — a member in Asia/Manila browsing a course in
+  // America/Chicago should see e.g. 4:35am, not the venue's 1:35pm. GHL
+  // buckets/labels slot dates and times for whichever timezone we request,
+  // so this is the single source of truth for every fetch and on-screen
+  // label in this file. (Storage is unaffected: booking_date/tee_time are
+  // still derived server-side from the course's own timezone — see
+  // bookings/create/route.ts.)
   const [timezone, setTimezone] = useState<string>(getBrowserTimezone);
-  const timezones = useMemo(getAllTimezones, []);
+  useEffect(() => {
+    if (profile?.profile?.timezone) setTimezone(profile.profile.timezone);
+  }, [profile?.profile?.timezone]);
 
   // Month navigation — start at the month containing the first bookable date
   const [currentMonth, setCurrentMonth] = useState<Date>(() =>
@@ -146,6 +115,9 @@ export default function BookPage() {
   );
   const [selectedSlot, setSelectedSlot] = useState<GHLBookingSlot | null>(null);
 
+  // Selected course (null = no course chosen yet)
+  const [selectedEvent, setSelectedEvent] = useState<Course | null>(null);
+
   // Booking flow
   const [step, setStep] = useState<Step>("select");
   const [submitting, setSubmitting] = useState(false);
@@ -156,6 +128,7 @@ export default function BookPage() {
     players: number;
     pendingNonMembers: number;
     bookingId: string | null;
+    eventName: string;
   } | null>(null);
 
   // My bookings tab
@@ -181,8 +154,9 @@ export default function BookPage() {
       return todayInThisMonth ? format(new Date(), "yyyy-MM-dd") : "";
     });
     try {
+      const eventParam = selectedEvent ? `&courseId=${selectedEvent.id}` : "";
       const res = await fetch(
-        `/api/bookings/create?month=${monthStr}&timezone=${encodeURIComponent(timezone)}`,
+        `/api/bookings/create?month=${monthStr}&timezone=${encodeURIComponent(timezone)}${eventParam}`,
       );
       const data = await res.json();
       setMonthSlots(data.slots ?? {});
@@ -190,7 +164,7 @@ export default function BookPage() {
       setMonthSlots({});
     }
     setLoadingMonth(false);
-  }, [currentMonth, timezone]);
+  }, [currentMonth, timezone, selectedEvent]);
 
   useEffect(() => {
     fetchMonthSlots();
@@ -204,22 +178,20 @@ export default function BookPage() {
       return;
     }
     setLoadingDayPlayers(true);
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    fetch(`/api/bookings/day?date=${selectedDate}&timezone=${encodeURIComponent(tz)}`)
+    fetch(
+      `/api/bookings/day?date=${selectedDate}&timezone=${encodeURIComponent(timezone)}`,
+    )
       .then((r) => r.json())
       .then((d) => setDayPlayers(Array.isArray(d.players) ? d.players : []))
       .catch(() => setDayPlayers([]))
       .finally(() => setLoadingDayPlayers(false));
-  }, [selectedDate, user]);
+  }, [selectedDate, user, timezone]);
 
   // These must stay above the early returns to satisfy the rules of hooks
-  const todayStr = useMemo(() => {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: AVIARA_TIMEZONE,
-    }).formatToParts(today);
-    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
-    return `${get("year")}-${get("month")}-${get("day")}`;
-  }, [today]);
+  const todayStr = useMemo(
+    () => formatInTimeZone(today, timezone, "yyyy-MM-dd"),
+    [today, timezone],
+  );
   const firstInWindowRef = useRef<HTMLButtonElement>(null);
   const selectedDateRef = useRef<HTMLButtonElement>(null);
   const firstInWindowDateStr = useMemo(() => {
@@ -254,37 +226,44 @@ export default function BookPage() {
     setSubmitting(true);
     setError("");
 
-    const res = await fetch("/api/bookings/create", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        startTime: selectedSlot.startTime,
-        players: 1 + additionalPlayers.length,
-        additionalPlayers,
-      }),
-    });
-
-    const data = await res.json();
-    if (res.ok) {
-      setConfirmedBooking({
-        date: format(new Date(selectedDate + "T12:00:00"), "EEEE, MMMM d"),
-        time: formatSlotTime(selectedSlot.startTime),
-        players: 1 + additionalPlayers.length,
-        pendingNonMembers:
-          typeof data.pendingNonMembers === "number"
-            ? data.pendingNonMembers
-            : additionalPlayers.filter((p) => p.isNonMember).length,
-        bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
+    try {
+      const res = await fetch("/api/bookings/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          startTime: selectedSlot.startTime,
+          players: 1 + additionalPlayers.length,
+          additionalPlayers,
+          ...(selectedEvent ? { courseId: selectedEvent.id } : {}),
+        }),
       });
-      if (Array.isArray(data.bookings)) {
-        setMyBookings((prev) => [...(data.bookings as Booking[]), ...prev]);
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setConfirmedBooking({
+          date: format(new Date(selectedDate + "T12:00:00"), "EEEE, MMMM d"),
+          time: formatSlotTime(selectedSlot.startTime),
+          players: 1 + additionalPlayers.length,
+          pendingNonMembers:
+            typeof data.pendingNonMembers === "number"
+              ? data.pendingNonMembers
+              : additionalPlayers.filter((p) => p.isNonMember).length,
+          bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
+          eventName: selectedEvent?.name ?? "Park Hyatt Aviara",
+        });
+        if (Array.isArray(data.bookings)) {
+          setMyBookings((prev) => [...(data.bookings as Booking[]), ...prev]);
+        }
+        setStep("success");
+        fetchMonthSlots();
+      } else {
+        setError(data.error ?? "Something went wrong. Please try again.");
       }
-      setStep("success");
-      fetchMonthSlots();
-    } else {
-      setError(data.error ?? "Something went wrong. Please try again.");
+    } catch {
+      setError("Network error. Check your connection and try again.");
+    } finally {
+      setSubmitting(false);
     }
-    setSubmitting(false);
   }
 
   if (step === "success" && confirmedBooking) {
@@ -294,6 +273,7 @@ export default function BookPage() {
         onDone={() => {
           setStep("select");
           setSelectedSlot(null);
+          setSelectedEvent(null);
         }}
         onUpdateBooking={(bookingId, updates) =>
           setMyBookings((prev) =>
@@ -316,6 +296,7 @@ export default function BookPage() {
         onBack={() => setStep("select")}
         inviteMemberId={inviteMemberId}
         bookerEmail={user?.email ?? ""}
+        eventName={selectedEvent?.name ?? null}
       />
     );
   }
@@ -354,7 +335,10 @@ export default function BookPage() {
     : [];
 
   return (
-    <AppShell title="Book" description="Park Hyatt Aviara">
+    <AppShell
+      title="Book"
+      description={selectedEvent ? selectedEvent.name : "Select an event"}
+    >
       {/* Tabs */}
       <div
         className="flex border-b bg-white"
@@ -381,296 +365,332 @@ export default function BookPage() {
       </div>
 
       {activeTab === "book" ? (
-        <div className="pb-8 md:max-w-2xl md:mx-auto">
-          {/* Timezone selector + view toggle */}
-          <div className="px-5 md:px-8 pt-4 pb-1 flex items-center gap-2">
-            <span
-              className="text-xs flex-shrink-0"
-              style={{ color: "rgba(0,38,105,0.4)" }}
-            >
-              Timezone
-            </span>
-            <Select
-              options={timezones.map((tz) => ({
-                value: tz,
-                label: tz.replace(/_/g, " "),
-              }))}
-              value={timezone}
-              onChange={setTimezone}
-              className="flex-1 min-w-0"
-              triggerClassName="w-full flex items-center justify-between gap-1.5 text-xs py-1.5 px-2.5 rounded-xl border border-green-900/10 bg-white text-green-900 focus:outline-none focus:ring-2 focus:ring-green-900/20 truncate"
-              searchPlaceholder="Search timezone…"
-            />
+        !selectedEvent ? (
+          <EventSelectionScreen
+            onSelect={(ev) => {
+              setSelectedEvent(ev);
+              setSelectedSlot(null);
+              setMonthSlots({});
+            }}
+          />
+        ) : (
+          <div className="pb-8 md:max-w-2xl md:mx-auto">
+            {/* Selected event banner */}
             <div
-              className="flex p-0.5 rounded-lg flex-shrink-0"
-              style={{ background: "rgba(0,38,105,0.06)" }}
+              className="px-5 md:px-8 pt-3 pb-2 flex items-center justify-between"
+              style={{ borderBottom: "1px solid rgba(0,38,105,0.06)" }}
             >
-              {(["day", "month"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setViewMode(mode)}
-                  className="px-2.5 py-1 text-xs font-semibold rounded-md capitalize transition-all"
-                  style={
-                    viewMode === mode
-                      ? {
-                          background: "white",
-                          color: "var(--color-green-900)",
-                          boxShadow: "0 1px 2px rgba(0,38,105,0.1)",
-                        }
-                      : { color: "rgba(0,38,105,0.45)" }
-                  }
+              <div>
+                <p
+                  className="text-xs font-semibold"
+                  style={{ color: "var(--color-green-900)" }}
                 >
-                  {mode}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Month navigation */}
-          <div className="px-5 md:px-8 pt-3 pb-2 flex items-center justify-between">
-            <button
-              onClick={() => setCurrentMonth((m) => addMonths(m, -1))}
-              disabled={!canGoPrev}
-              className="w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-20"
-              style={{ background: "rgba(0,38,105,0.05)" }}
-            >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2.5}
-                style={{ color: "var(--color-green-900)" }}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15.75 19.5L8.25 12l7.5-7.5"
-                />
-              </svg>
-            </button>
-
-            <p
-              className="font-sans font-black text-lg"
-              style={{ color: "var(--color-green-900)" }}
-            >
-              {format(currentMonth, "MMMM yyyy")}
-            </p>
-
-            <button
-              onClick={() => setCurrentMonth((m) => addMonths(m, 1))}
-              disabled={!canGoNext}
-              className="w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-20"
-              style={{ background: "rgba(0,38,105,0.05)" }}
-            >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2.5}
-                style={{ color: "var(--color-green-900)" }}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M8.25 4.5l7.5 7.5-7.5 7.5"
-                />
-              </svg>
-            </button>
-          </div>
-
-          {/* Date picker — day strip or month grid */}
-          <div className="px-5 md:px-8 pb-3">
-            {viewMode === "day" ? (
-              loadingMonth ? (
-                <div className="flex justify-center py-10">
-                  <Spinner className="text-green-700" />
-                </div>
-              ) : (
-                <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
-                  {monthDays.map((date) => {
-                    const day = date.getDate();
-                    const dateStr = getDateStr(day);
-                    const isPast = dateStr < todayStr;
-                    const isToday = dateStr === todayStr;
-                    const inView = !isPast;
-                    const hasSlots = hasDaySlots(day);
-                    const active = selectedDate === dateStr;
-
-                    const canClick = isToday || (inView && hasSlots);
-
-                    return (
-                      <button
-                        key={dateStr}
-                        ref={
-                          dateStr === selectedDate
-                            ? selectedDateRef
-                            : dateStr === firstInWindowDateStr
-                              ? firstInWindowRef
-                              : undefined
-                        }
-                        onClick={
-                          canClick
-                            ? () => {
-                                setSelectedDate(dateStr);
-                                setSelectedSlot(null);
-                              }
-                            : undefined
-                        }
-                        disabled={!canClick}
-                        className={cn(
-                          "flex-shrink-0 flex flex-col items-center px-3 py-3 rounded-2xl border min-w-[56px] transition-all duration-150",
-                          !canClick && !isToday && "cursor-not-allowed",
-                          isPast || !inView
-                            ? "opacity-50"
-                            : !hasSlots && "opacity-60",
-                          active
-                            ? "border-green-900"
-                            : "bg-white border-green-900/08",
-                        )}
-                        style={
-                          active
-                            ? {
-                                background: "var(--color-green-900)",
-                                opacity: hasSlots ? 1 : 0.45,
-                              }
-                            : {}
-                        }
-                      >
-                        <span
-                          className="text-[10px] uppercase tracking-wider font-medium"
-                          style={{
-                            color: active
-                              ? "rgba(133,187,101,0.8)"
-                              : "rgba(0,38,105,0.38)",
-                          }}
-                        >
-                          {format(date, "EEE")}
-                        </span>
-                        <span
-                          className="font-sans font-black text-2xl mt-0.5"
-                          style={{
-                            color: active ? "white" : "var(--color-green-900)",
-                          }}
-                        >
-                          {format(date, "d")}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )
-            ) : (
-              <MonthCalendarGrid
-                year={year}
-                month={month}
-                daysInMonth={daysInMonth}
-                selectedDate={selectedDate}
-                todayStr={todayStr}
-                firstInWindowDateStr={firstInWindowDateStr}
-                hasDaySlots={hasDaySlots}
-                getDateStr={getDateStr}
-                loadingMonth={loadingMonth}
-                onSelectDate={(dateStr) => {
-                  setSelectedDate(dateStr);
+                  {selectedEvent.name}
+                </p>
+                {(selectedEvent.city || selectedEvent.state) && (
+                  <p
+                    className="text-[10px] mt-0.5"
+                    style={{ color: "rgba(0,38,105,0.4)" }}
+                  >
+                    {[selectedEvent.city, selectedEvent.state]
+                      .filter(Boolean)
+                      .join(", ")}
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedEvent(null);
+                  setMonthSlots({});
                   setSelectedSlot(null);
                 }}
-                selectedDateRef={selectedDateRef}
-                firstInWindowRef={firstInWindowRef}
-              />
-            )}
-          </div>
+                className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                style={{
+                  background: "rgba(0,38,105,0.06)",
+                  color: "rgba(0,38,105,0.55)",
+                }}
+              >
+                Change
+              </button>
+            </div>
+            {/* Month navigation + view toggle */}
+            <div className="px-5 md:px-8 pt-4 pb-2 flex items-center justify-between">
+              <div className="flex-1 flex items-center justify-between mr-3">
+                <button
+                  onClick={() => setCurrentMonth((m) => addMonths(m, -1))}
+                  disabled={!canGoPrev}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-20"
+                  style={{ background: "rgba(0,38,105,0.05)" }}
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
+                    style={{ color: "var(--color-green-900)" }}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M15.75 19.5L8.25 12l7.5-7.5"
+                    />
+                  </svg>
+                </button>
 
-          {/* Who's playing on selected date */}
-          {selectedDate &&
-            !loadingMonth &&
-            (dayPlayers.length > 0 || loadingDayPlayers) && (
-              <div className="px-5 md:px-8 pb-1">
-                <p className="section-label mb-2">
-                  {loadingDayPlayers
-                    ? "Who's playing…"
-                    : `Who's playing · ${dayPlayers.length}`}
+                <p
+                  className="font-sans font-black text-lg"
+                  style={{ color: "var(--color-green-900)" }}
+                >
+                  {format(currentMonth, "MMMM yyyy")}
                 </p>
-                {loadingDayPlayers ? (
-                  <div className="flex gap-2">
-                    {[1, 2, 3, 4, 5, 6].map((i) => (
-                      <div
-                        key={i}
-                        className="flex flex-col items-center gap-1.5 animate-pulse flex-1 min-w-0"
-                      >
-                        <div
-                          className="w-10 h-10 rounded-full mx-auto"
-                          style={{ background: "rgba(0,38,105,0.08)" }}
-                        />
-                        <div
-                          className="w-8 h-2 rounded-full mx-auto"
-                          style={{ background: "rgba(0,38,105,0.08)" }}
-                        />
-                        <div
-                          className="w-6 h-1.5 rounded-full mx-auto"
-                          style={{ background: "rgba(0,38,105,0.05)" }}
-                        />
-                      </div>
-                    ))}
+
+                <button
+                  onClick={() => setCurrentMonth((m) => addMonths(m, 1))}
+                  disabled={!canGoNext}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-20"
+                  style={{ background: "rgba(0,38,105,0.05)" }}
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
+                    style={{ color: "var(--color-green-900)" }}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M8.25 4.5l7.5 7.5-7.5 7.5"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <div
+                className="flex rounded-lg flex-shrink-0"
+                style={{ background: "rgba(0,38,105,0.06)" }}
+              >
+                {(["day", "month"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setViewMode(mode)}
+                    className="h-9 px-2.5 py-1 text-xs font-semibold rounded-md capitalize transition-all"
+                    style={
+                      viewMode === mode
+                        ? {
+                            background: "white",
+                            color: "var(--color-green-900)",
+                            boxShadow: "0 1px 2px rgba(0,38,105,0.1)",
+                          }
+                        : { color: "rgba(0,38,105,0.45)" }
+                    }
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Date picker — day strip or month grid */}
+            <div className="px-5 md:px-8 pb-3">
+              {viewMode === "day" ? (
+                loadingMonth ? (
+                  <div className="flex justify-center py-10">
+                    <Spinner className="text-green-700" />
                   </div>
                 ) : (
-                  <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-1">
-                    {dayPlayers.map((p) => (
-                      <DayPlayerBubble key={p.member_id} player={p} />
+                  <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
+                    {monthDays.map((date) => {
+                      const day = date.getDate();
+                      const dateStr = getDateStr(day);
+                      const isPast = dateStr < todayStr;
+                      const isToday = dateStr === todayStr;
+                      const inView = !isPast;
+                      const hasSlots = hasDaySlots(day);
+                      const active = selectedDate === dateStr;
+
+                      const canClick = isToday || (inView && hasSlots);
+
+                      return (
+                        <button
+                          key={dateStr}
+                          ref={
+                            dateStr === selectedDate
+                              ? selectedDateRef
+                              : dateStr === firstInWindowDateStr
+                                ? firstInWindowRef
+                                : undefined
+                          }
+                          onClick={
+                            canClick
+                              ? () => {
+                                  setSelectedDate(dateStr);
+                                  setSelectedSlot(null);
+                                }
+                              : undefined
+                          }
+                          disabled={!canClick}
+                          className={cn(
+                            "flex-shrink-0 flex flex-col items-center px-3 py-3 rounded-2xl border min-w-[56px] transition-all duration-150",
+                            !canClick && !isToday && "cursor-not-allowed",
+                            isPast || !inView
+                              ? "opacity-50"
+                              : !hasSlots && "opacity-60",
+                            active
+                              ? "border-green-900"
+                              : "bg-white border-green-900/08",
+                          )}
+                          style={
+                            active
+                              ? {
+                                  background: "var(--color-green-900)",
+                                  opacity: hasSlots ? 1 : 0.45,
+                                }
+                              : {}
+                          }
+                        >
+                          <span
+                            className="text-[10px] uppercase tracking-wider font-medium"
+                            style={{
+                              color: active
+                                ? "rgba(133,187,101,0.8)"
+                                : "rgba(0,38,105,0.38)",
+                            }}
+                          >
+                            {format(date, "EEE")}
+                          </span>
+                          <span
+                            className="font-sans font-black text-2xl mt-0.5"
+                            style={{
+                              color: active
+                                ? "white"
+                                : "var(--color-green-900)",
+                            }}
+                          >
+                            {format(date, "d")}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )
+              ) : (
+                <MonthCalendarGrid
+                  year={year}
+                  month={month}
+                  daysInMonth={daysInMonth}
+                  selectedDate={selectedDate}
+                  todayStr={todayStr}
+                  firstInWindowDateStr={firstInWindowDateStr}
+                  hasDaySlots={hasDaySlots}
+                  getDateStr={getDateStr}
+                  loadingMonth={loadingMonth}
+                  onSelectDate={(dateStr) => {
+                    setSelectedDate(dateStr);
+                    setSelectedSlot(null);
+                  }}
+                  selectedDateRef={selectedDateRef}
+                  firstInWindowRef={firstInWindowRef}
+                />
+              )}
+            </div>
+
+            {/* Who's playing on selected date */}
+            {selectedDate &&
+              !loadingMonth &&
+              (dayPlayers.length > 0 || loadingDayPlayers) && (
+                <div className="px-5 md:px-8 pb-1">
+                  <p className="section-label mb-2">
+                    {loadingDayPlayers
+                      ? "Who's playing…"
+                      : `Who's playing · ${dayPlayers.length}`}
+                  </p>
+                  {loadingDayPlayers ? (
+                    <div className="flex gap-2">
+                      {[1, 2, 3, 4, 5, 6].map((i) => (
+                        <div
+                          key={i}
+                          className="flex flex-col items-center gap-1.5 animate-pulse flex-1 min-w-0"
+                        >
+                          <div
+                            className="w-10 h-10 rounded-full mx-auto"
+                            style={{ background: "rgba(0,38,105,0.08)" }}
+                          />
+                          <div
+                            className="w-8 h-2 rounded-full mx-auto"
+                            style={{ background: "rgba(0,38,105,0.08)" }}
+                          />
+                          <div
+                            className="w-6 h-1.5 rounded-full mx-auto"
+                            style={{ background: "rgba(0,38,105,0.05)" }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-1">
+                      {dayPlayers.map((p) => (
+                        <DayPlayerBubble key={p.member_id} player={p} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+            {/* Tee time slots for selected date */}
+            {selectedDate && !loadingMonth && (
+              <div className="px-5 md:px-8 pt-5">
+                <p className="section-label mb-3">
+                  Tee times —{" "}
+                  {format(new Date(selectedDate + "T12:00:00"), "EEE, MMM d")}
+                </p>
+
+                {selectedDateSlots.length === 0 ? (
+                  <EmptyState
+                    icon="⛳"
+                    title="No tee times"
+                    description="No open slots for this date."
+                  />
+                ) : (
+                  <div className="space-y-2">
+                    {selectedDateSlots.map((slot) => (
+                      <SlotRow
+                        key={slot.startTime}
+                        slot={slot}
+                        selected={selectedSlot?.startTime === slot.startTime}
+                        onSelect={() => setSelectedSlot(slot)}
+                        onContinue={() => setStep("confirm")}
+                      />
                     ))}
                   </div>
                 )}
               </div>
             )}
 
-          {/* Tee time slots for selected date */}
-          {selectedDate && !loadingMonth && (
-            <div className="px-5 md:px-8 pt-5">
-              <p className="section-label mb-3">
-                Tee times —{" "}
-                {format(new Date(selectedDate + "T12:00:00"), "EEE, MMM d")}
-              </p>
-
-              {selectedDateSlots.length === 0 ? (
-                <EmptyState
-                  icon="⛳"
-                  title="No tee times"
-                  description="No open slots for this date."
-                />
-              ) : (
-                <div className="space-y-2">
-                  {selectedDateSlots.map((slot) => (
-                    <SlotRow
-                      key={slot.startTime}
-                      slot={slot}
-                      selected={selectedSlot?.startTime === slot.startTime}
-                      onSelect={() => setSelectedSlot(slot)}
-                      onContinue={() => setStep("confirm")}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          <p
-            className="text-xs text-center mt-6 px-5 md:px-8 leading-relaxed"
-            style={{ color: "rgba(0,38,105,0.25)" }}
-          >
-            Select a date and tee time to submit a booking request.
-            <br />
-            Availability is confirmed by the team — payment link sent by email.
-          </p>
-        </div>
+            <p
+              className="text-xs text-center mt-6 px-5 md:px-8 leading-relaxed"
+              style={{ color: "rgba(0,38,105,0.25)" }}
+            >
+              Select a date and tee time to submit a booking request.
+              <br />
+              Availability is confirmed by the team — payment link sent by
+              email.
+            </p>
+          </div>
+        )
       ) : (
         <MyBookingsTab
           bookings={myBookings}
           onRefresh={loadMyBookings}
           onSwitchToBook={() => setActiveTab("book")}
           onUpdateBooking={(id, updates) =>
-            setMyBookings(prev => prev.map(b => b.id === id ? { ...b, ...updates } : b))
+            setMyBookings((prev) =>
+              prev.map((b) => (b.id === id ? { ...b, ...updates } : b)),
+            )
           }
         />
       )}
@@ -718,10 +738,13 @@ function MonthCalendarGrid({
   const DOW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
   const startDow = new Date(year, month, 1).getDay();
   const totalCells = Math.ceil((startDow + daysInMonth) / 7) * 7;
-  const cells: (number | null)[] = Array.from({ length: totalCells }, (_, i) => {
-    const d = i - startDow + 1;
-    return d >= 1 && d <= daysInMonth ? d : null;
-  });
+  const cells: (number | null)[] = Array.from(
+    { length: totalCells },
+    (_, i) => {
+      const d = i - startDow + 1;
+      return d >= 1 && d <= daysInMonth ? d : null;
+    },
+  );
 
   return (
     <div>
@@ -762,8 +785,16 @@ function MonthCalendarGrid({
               disabled={!canClick}
               className={cn(
                 "relative flex flex-col items-center justify-center aspect-square rounded-xl transition-all duration-150",
-                isPast ? "opacity-40" : !hasSlots && !isToday ? "opacity-50" : "",
-                !canClick ? "cursor-not-allowed" : active ? "" : "hover:bg-green-50/60",
+                isPast
+                  ? "opacity-40"
+                  : !hasSlots && !isToday
+                    ? "opacity-50"
+                    : "",
+                !canClick
+                  ? "cursor-not-allowed"
+                  : active
+                    ? ""
+                    : "hover:bg-green-50/60",
               )}
               style={active ? { background: "var(--color-green-900)" } : {}}
             >
@@ -796,7 +827,7 @@ function MonthCalendarGrid({
 
 // ---- Day player bubble + popover ----------------------------
 
-import type { MemberDetail } from "@/components/ui/MemberProfileSheet"
+import type { MemberDetail } from "@/components/ui/MemberProfileSheet";
 
 function DayPlayerBubble({ player }: { player: DayPlayer }) {
   const [detail, setDetail] = useState<MemberDetail | null>(null);
@@ -841,13 +872,13 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
 
   const prof = detail?.profile;
   const displayName = player.is_self
-    ? 'You'
+    ? "You"
     : prof?.display_name || `${player.first_name} ${player.last_name}`.trim();
   const initials =
     `${player.first_name[0] ?? ""}${player.last_name[0] ?? ""}`.toUpperCase();
   const avatarUrl = prof?.avatar_url ?? player.avatar_url;
-  const localDate = bookingToLocalDate(player.booking_date, player.tee_time);
-  const localTeeTime = `${String(localDate.getHours()).padStart(2, '0')}:${String(localDate.getMinutes()).padStart(2, '0')}:00`;
+  // tee_time is stored in course-local timezone; display it directly.
+  const localTeeTime = player.tee_time;
 
   return (
     <>
@@ -855,7 +886,7 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
         type="button"
         onClick={player.is_self ? undefined : openPopover}
         className="flex flex-col items-center gap-1 flex-shrink-0 w-14 transition-opacity active:opacity-60"
-        style={{ cursor: player.is_self ? 'default' : undefined }}
+        style={{ cursor: player.is_self ? "default" : undefined }}
       >
         {avatarUrl ? (
           <Image
@@ -1374,6 +1405,7 @@ function ConfirmScreen({
   onBack,
   inviteMemberId,
   bookerEmail,
+  eventName,
 }: {
   slot: GHLBookingSlot;
   date: string;
@@ -1384,6 +1416,7 @@ function ConfirmScreen({
   onBack: () => void;
   inviteMemberId?: string | null;
   bookerEmail: string;
+  eventName?: string | null;
 }) {
   const maxAdditional = Math.max(0, (slot.spotsOpen ?? 1) - 1);
   const [collapsed, setCollapsed] = useState<boolean[]>([]);
@@ -1423,7 +1456,8 @@ function ConfirmScreen({
   const normalisedBookerEmail = bookerEmail.trim().toLowerCase();
 
   function validateGuestEmail(value: string | undefined): true | string {
-    if (!value || !validateEmail(value).valid) return "Enter a valid email address";
+    if (!value || !validateEmail(value).valid)
+      return "Enter a valid email address";
     if (
       normalisedBookerEmail &&
       value.trim().toLowerCase() === normalisedBookerEmail
@@ -1499,7 +1533,10 @@ function ConfirmScreen({
   function rowValid(i: number): boolean {
     if (playerKinds[i] === "non_member") {
       const p = watchedPlayers?.[i];
-      return validateGuestEmail(p?.email) === true && validateGuestPhone(p?.mobile) === true;
+      return (
+        validateGuestEmail(p?.email) === true &&
+        validateGuestPhone(p?.mobile) === true
+      );
     }
     return !!playerSelections[i];
   }
@@ -1587,7 +1624,7 @@ function ConfirmScreen({
               className="text-xs uppercase tracking-widest mb-3"
               style={{ color: "rgba(0,38,105,0.35)", letterSpacing: "0.12em" }}
             >
-              Park Hyatt Aviara
+              {eventName ?? "Park Hyatt Aviara"}
             </p>
             <p
               className="font-sans font-black"
@@ -1890,7 +1927,10 @@ function ConfirmScreen({
                                   className={inputBase}
                                   style={
                                     rowErrors?.mobile
-                                      ? { ...inputStyle, borderColor: "#dc2626" }
+                                      ? {
+                                          ...inputStyle,
+                                          borderColor: "#dc2626",
+                                        }
                                       : inputStyle
                                   }
                                 />
@@ -1914,7 +1954,10 @@ function ConfirmScreen({
                                   className={inputBase}
                                   style={
                                     rowErrors?.email
-                                      ? { ...inputStyle, borderColor: "#dc2626" }
+                                      ? {
+                                          ...inputStyle,
+                                          borderColor: "#dc2626",
+                                        }
                                       : inputStyle
                                   }
                                 />
@@ -1924,9 +1967,13 @@ function ConfirmScreen({
                                   </p>
                                 )}
                               </div>
-                              {(rowErrors?.firstName || rowErrors?.lastName) && (
+                              {(rowErrors?.firstName ||
+                                rowErrors?.lastName) && (
                                 <p className="text-xs text-red-600">
-                                  {(rowErrors.firstName || rowErrors.lastName)?.message}
+                                  {
+                                    (rowErrors.firstName || rowErrors.lastName)
+                                      ?.message
+                                  }
                                 </p>
                               )}
                             </>
@@ -2189,22 +2236,35 @@ function SuccessScreen({
   onDone,
   onUpdateBooking,
 }: {
-  booking: { date: string; time: string; players: number; pendingNonMembers: number; bookingId: string | null };
+  booking: {
+    date: string;
+    time: string;
+    players: number;
+    pendingNonMembers: number;
+    bookingId: string | null;
+    eventName: string;
+  };
   onDone: () => void;
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
 }) {
-  const [dinnerRsvp, setDinnerRsvp] = useState<'yes' | 'no' | 'maybe' | null>(null);
+  const [dinnerRsvp, setDinnerRsvp] = useState<"yes" | "no" | "maybe" | null>(
+    null,
+  );
   const [submitting, setSubmitting] = useState(false);
 
   async function handleDone() {
     if (booking.bookingId && dinnerRsvp) {
       setSubmitting(true);
-      const res = await fetch(`/api/bookings/${booking.bookingId}/dinner-rsvp`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rsvp: dinnerRsvp }),
-      });
-      if (res.ok) onUpdateBooking(booking.bookingId, { dinner_rsvp: dinnerRsvp });
+      const res = await fetch(
+        `/api/bookings/${booking.bookingId}/dinner-rsvp`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rsvp: dinnerRsvp }),
+        },
+      );
+      if (res.ok)
+        onUpdateBooking(booking.bookingId, { dinner_rsvp: dinnerRsvp });
       setSubmitting(false);
     }
     onDone();
@@ -2234,7 +2294,7 @@ function SuccessScreen({
         {booking.date} at {booking.time}
       </p>
       <p className="text-sm mb-1" style={{ color: "rgba(0,38,105,0.5)" }}>
-        Park Hyatt Aviara
+        {booking.eventName}
       </p>
       {booking.players > 1 && (
         <p className="text-sm mb-8" style={{ color: "rgba(0,38,105,0.45)" }}>
@@ -2272,8 +2332,8 @@ function SuccessScreen({
           >
             {booking.pendingNonMembers} non-member guest
             {booking.pendingNonMembers !== 1 ? "s" : ""} need
-            {booking.pendingNonMembers !== 1 ? "" : "s"} admin approval. We&apos;ll
-            let you know once they&apos;re confirmed.
+            {booking.pendingNonMembers !== 1 ? "" : "s"} admin approval.
+            We&apos;ll let you know once they&apos;re confirmed.
           </p>
         )}
       </div>
@@ -2286,7 +2346,8 @@ function SuccessScreen({
             Staying for dinner?
           </p>
           <p className="text-sm mb-4" style={{ color: "rgba(0,38,105,0.6)" }}>
-            Let us know if you&apos;ll be joining for dinner after your round.
+            Should we reserve a seat for you at group table for post-golf
+            drinks/dinner?
           </p>
           <DinnerRsvp
             bookingId={booking.bookingId}
@@ -2303,10 +2364,10 @@ function SuccessScreen({
         disabled={(!!booking.bookingId && dinnerRsvp === null) || submitting}
         className="btn btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        {submitting ? 'Saving…' : 'Back to booking'}
+        {submitting ? "Saving…" : "Back to booking"}
       </button>
       {booking.bookingId && dinnerRsvp === null && (
-        <p className="text-xs mt-3" style={{ color: 'rgba(0,38,105,0.4)' }}>
+        <p className="text-xs mt-3" style={{ color: "rgba(0,38,105,0.4)" }}>
           Please let us know about dinner first.
         </p>
       )}
@@ -2542,13 +2603,221 @@ function CancelModal({
         {/* CTA */}
         <button
           onClick={() => {
-            window.open(cancelUrl, '_blank', 'noopener,noreferrer')
-            onDismiss()
+            window.open(cancelUrl, "_blank", "noopener,noreferrer");
+            onDismiss();
           }}
           className="w-full py-3.5 rounded-2xl text-sm font-semibold text-center"
           style={{ background: "rgba(220,38,38,0.9)", color: "white" }}
         >
           Continue to cancellation form
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---- Edit guest modal ---------------------------------------
+// Lets the booker fix a non-member guest's contact details while that
+// guest's booking row is still awaiting admin approval — e.g. when an
+// admin leaves a note asking for a corrected email or phone number.
+
+interface EditGuestTarget {
+  bookingId: string;
+  player: AdditionalPlayer;
+}
+
+function EditGuestModal({
+  target,
+  onDismiss,
+  onSaved,
+}: {
+  target: EditGuestTarget | null;
+  onDismiss: () => void;
+  onSaved: (bookingId: string, guestName: string, player: AdditionalPlayer) => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [mobile, setMobile] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const open = !!target;
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      setFirstName(target?.player.firstName ?? "");
+      setLastName(target?.player.lastName ?? "");
+      setEmail(target?.player.email ?? "");
+      setMobile(target?.player.mobile ?? "");
+      setError("");
+      const ids: number[] = [];
+      ids[0] = requestAnimationFrame(() => {
+        ids[1] = requestAnimationFrame(() => setVisible(true));
+      });
+      return () => ids.forEach((id) => cancelAnimationFrame(id));
+    } else {
+      setVisible(false);
+      const t = setTimeout(() => setMounted(false), 320);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, target?.bookingId]);
+
+  if (!mounted) return null;
+
+  const inputCls =
+    "w-full px-3 py-2 text-sm rounded-xl border bg-white outline-none transition-colors focus:border-green-700";
+  const inputStyle = { borderColor: "rgba(0,38,105,0.12)", color: "var(--color-green-900)" };
+
+  async function handleSave() {
+    if (!target) return;
+    if (!validateEmail(email).valid) {
+      setError("Enter a valid email address");
+      return;
+    }
+    if (!isValidGuestPhone(mobile)) {
+      setError("Enter a valid phone number");
+      return;
+    }
+    setError("");
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/bookings/${target.bookingId}/guest`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ firstName, lastName, email, mobile }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Failed to save changes. Please try again.");
+        return;
+      }
+      onSaved(target.bookingId, data.guest_name, data.additional_players[0]);
+      onDismiss();
+    } catch {
+      setError("Failed to save changes. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center md:p-6">
+      <button
+        type="button"
+        aria-label="Close"
+        className={[
+          "absolute inset-0 w-full h-full",
+          visible ? "opacity-100" : "opacity-0",
+        ].join(" ")}
+        style={{
+          background: "rgba(0,0,0,0.45)",
+          transition: "opacity 200ms ease-out",
+          willChange: "opacity",
+        }}
+        onClick={onDismiss}
+      />
+      <div
+        className={[
+          "relative bg-white rounded-t-3xl md:rounded-3xl px-5 pt-5 pb-8 space-y-4 w-full md:max-w-md",
+          visible ? "translate-y-0" : "translate-y-full",
+        ].join(" ")}
+        style={{
+          boxShadow: "0 -4px 32px rgba(0,0,0,0.12)",
+          transition: visible
+            ? "transform 340ms cubic-bezier(0.32,0.72,0,1)"
+            : "transform 240ms cubic-bezier(0.4,0,1,1)",
+          willChange: "transform",
+        }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <p
+            className="font-sans font-black text-lg"
+            style={{ color: "var(--color-green-900)" }}
+          >
+            Edit guest details
+          </p>
+          <button
+            onClick={onDismiss}
+            className="w-8 h-8 rounded-full flex items-center justify-center"
+            style={{
+              background: "rgba(0,38,105,0.06)",
+              color: "rgba(0,38,105,0.5)",
+            }}
+          >
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        </div>
+
+        <p className="text-xs" style={{ color: "rgba(0,38,105,0.45)" }}>
+          Still awaiting admin approval — you can fix their details until then.
+        </p>
+
+        {/* Form */}
+        <div className="grid grid-cols-2 gap-2.5">
+          <input
+            className={inputCls}
+            style={inputStyle}
+            placeholder="First name"
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
+          />
+          <input
+            className={inputCls}
+            style={inputStyle}
+            placeholder="Last name"
+            value={lastName}
+            onChange={(e) => setLastName(e.target.value)}
+          />
+        </div>
+        <input
+          type="email"
+          className={inputCls}
+          style={inputStyle}
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <input
+          type="tel"
+          className={inputCls}
+          style={inputStyle}
+          placeholder="Phone number"
+          value={mobile}
+          onChange={(e) => setMobile(e.target.value)}
+        />
+
+        {error && (
+          <p className="text-xs" style={{ color: "rgba(220,38,38,0.85)" }}>
+            {error}
+          </p>
+        )}
+
+        {/* CTA */}
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="w-full py-3.5 rounded-2xl text-sm font-semibold text-center disabled:opacity-60"
+          style={{ background: "var(--color-green-900)", color: "white" }}
+        >
+          {saving ? "Saving…" : "Save changes"}
         </button>
       </div>
     </div>
@@ -2561,24 +2830,27 @@ function DinnerRsvp({
   bookingId,
   current,
   onSaved,
-  layout = 'compact',
+  layout = "compact",
   autoSave = true,
 }: {
   bookingId: string;
-  current: 'yes' | 'no' | 'maybe' | null;
-  onSaved: (rsvp: 'yes' | 'no' | 'maybe') => void;
-  layout?: 'compact' | 'horizontal';
+  current: "yes" | "no" | "maybe" | null;
+  onSaved: (rsvp: "yes" | "no" | "maybe") => void;
+  layout?: "compact" | "horizontal";
   autoSave?: boolean;
 }) {
   const [saving, setSaving] = useState<string | null>(null);
 
-  async function pick(rsvp: 'yes' | 'no' | 'maybe') {
+  async function pick(rsvp: "yes" | "no" | "maybe") {
     if (saving) return;
-    if (!autoSave) { onSaved(rsvp); return; }
+    if (!autoSave) {
+      onSaved(rsvp);
+      return;
+    }
     setSaving(rsvp);
     const res = await fetch(`/api/bookings/${bookingId}/dinner-rsvp`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rsvp }),
     });
     if (res.ok) onSaved(rsvp);
@@ -2586,12 +2858,12 @@ function DinnerRsvp({
   }
 
   const opts = [
-    { value: 'yes' as const,   label: 'Yes' },
-    { value: 'no' as const,    label: 'No' },
-    { value: 'maybe' as const, label: '?' },
+    { value: "yes" as const, label: "Yes" },
+    { value: "no" as const, label: "No" },
+    { value: "maybe" as const, label: "Maybe" },
   ];
 
-  if (layout === 'horizontal') {
+  if (layout === "horizontal") {
     return (
       <div className="flex gap-2">
         {opts.map(({ value, label }) => {
@@ -2602,15 +2874,19 @@ function DinnerRsvp({
               onClick={() => pick(value)}
               disabled={!!saving}
               className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
-              style={active ? {
-                background: 'var(--color-green-900)',
-                color: 'var(--color-gold)',
-              } : {
-                background: 'rgba(0,38,105,0.06)',
-                color: 'rgba(0,38,105,0.5)',
-              }}
+              style={
+                active
+                  ? {
+                      background: "var(--color-green-900)",
+                      color: "var(--color-gold)",
+                    }
+                  : {
+                      background: "rgba(0,38,105,0.06)",
+                      color: "rgba(0,38,105,0.5)",
+                    }
+              }
             >
-              {saving === value ? '…' : label}
+              {saving === value ? "…" : label}
             </button>
           );
         })}
@@ -2620,7 +2896,10 @@ function DinnerRsvp({
 
   return (
     <div className="flex flex-col items-end gap-1 flex-shrink-0">
-      <p className="text-[10px] font-medium" style={{ color: 'rgba(0,38,105,0.38)' }}>
+      <p
+        className="text-[10px] font-medium"
+        style={{ color: "rgba(0,38,105,0.38)" }}
+      >
         Dinner?
       </p>
       <div className="flex gap-1">
@@ -2631,16 +2910,20 @@ function DinnerRsvp({
               key={value}
               onClick={() => pick(value)}
               disabled={!!saving}
-              className="w-7 h-7 rounded-full text-[11px] font-semibold transition-all disabled:opacity-50"
-              style={active ? {
-                background: 'var(--color-green-900)',
-                color: 'var(--color-gold)',
-              } : {
-                background: 'rgba(0,38,105,0.06)',
-                color: 'rgba(0,38,105,0.45)',
-              }}
+              className="h-7 px-2.5 rounded-full text-[11px] font-semibold transition-all disabled:opacity-50"
+              style={
+                active
+                  ? {
+                      background: "var(--color-green-900)",
+                      color: "var(--color-gold)",
+                    }
+                  : {
+                      background: "rgba(0,38,105,0.06)",
+                      color: "rgba(0,38,105,0.45)",
+                    }
+              }
             >
-              {saving === value ? '…' : label}
+              {saving === value ? "…" : label}
             </button>
           );
         })}
@@ -2654,18 +2937,27 @@ type BookingGroup = {
   players: Booking[];
 };
 
-
+// Grouped by (booker + tee time + created_at) rather than just date/time —
+// two separate booking groups can land on the same tee time by coincidence
+// and must not be merged into one card. Rows inserted together (one
+// transaction) share the exact same created_at, since Postgres evaluates
+// now() once per statement. Status is intentionally excluded from the key:
+// one player cancelling their own spot must stay nested in the same group
+// (as a cancelled row inside allRows), not fork into its own fabricated
+// single-row "booking" — which section a group displays under is decided
+// later, from the primary/booker row's status alone.
 function groupBookings(bookings: Booking[]): BookingGroup[] {
   const bySlot = new Map<string, Booking[]>();
   for (const b of bookings) {
-    const key = `${b.booking_date}_${b.tee_time}_${b.status === 'cancelled' ? 'cancelled' : 'active'}`;
+    const key = `${b.member_id}_${b.created_at}_${b.booking_date}_${b.tee_time}`;
     const slot = bySlot.get(key) ?? [];
     slot.push(b);
     bySlot.set(key, slot);
   }
   const groups: BookingGroup[] = [];
   for (const slot of bySlot.values()) {
-    const primary = slot.find((b) => b.guest_name === null && !b.player_member_id) ?? slot[0];
+    const primary =
+      slot.find((b) => b.guest_name === null && !b.player_member_id) ?? slot[0];
     if (!primary) continue;
     groups.push({ primary, players: slot.filter((b) => b.id !== primary.id) });
   }
@@ -2689,51 +2981,39 @@ function MyBookingsTab({
   onSwitchToBook: () => void;
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
 }) {
-  const { user, profile } = useProfile();
-  const [openMenu, setOpenMenu] = useState<{
-    id: string;
-    top: number;
-    right: number;
-  } | null>(null);
-  const [profileMemberId, setProfileMemberId] = useState<string | null>(null);
-
-  useEffect(() => {
-    function handleOutside(e: MouseEvent) {
-      if (
-        openMenu &&
-        !(e.target as Element).closest(`[data-menu-id="${openMenu.id}"]`) &&
-        !(e.target as Element).closest(`[data-menu-portal="${openMenu.id}"]`)
-      ) {
-        setOpenMenu(null);
-      }
-    }
-    document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
-  }, [openMenu]);
+  const { user } = useProfile();
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
+  const [editTarget, setEditTarget] = useState<EditGuestTarget | null>(null);
 
   const now = new Date();
   const allGroups = groupBookings(bookings);
   const upcoming = allGroups.filter(
     (g) =>
-      bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) >= now &&
+      bookingToLocalDate(g.primary.booking_date, g.primary.tee_time, g.primary.course?.timezone) >= now &&
       g.primary.status !== "cancelled",
   );
-  const cancelledUpcoming = allGroups.filter(
-    (g) =>
-      bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) >= now &&
-      g.primary.status === "cancelled",
-  );
-  const past = allGroups.filter(
-    (g) => bookingToLocalDate(g.primary.booking_date, g.primary.tee_time) < now,
-  );
+  const cancelledAndPast = allGroups
+    .filter(
+      (g) =>
+        bookingToLocalDate(g.primary.booking_date, g.primary.tee_time, g.primary.course?.timezone) < now ||
+        g.primary.status === "cancelled",
+    )
+    .sort(
+      (a, b) =>
+        bookingToLocalDate(
+          b.primary.booking_date,
+          b.primary.tee_time,
+          b.primary.course?.timezone,
+        ).getTime() -
+        bookingToLocalDate(
+          a.primary.booking_date,
+          a.primary.tee_time,
+          a.primary.course?.timezone,
+        ).getTime(),
+    );
 
   return (
     <div className="px-5 md:px-8 py-5 pb-8 md:max-w-2xl md:mx-auto">
-      <MemberProfileSheet
-        memberId={profileMemberId}
-        onClose={() => setProfileMemberId(null)}
-      />
       <CancelModal
         open={!!cancelTarget}
         bookingDateTime={cancelTarget?.bookingDateTime ?? ""}
@@ -2742,7 +3022,18 @@ function MyBookingsTab({
         onDismiss={() => setCancelTarget(null)}
       />
 
-      {upcoming.length === 0 && cancelledUpcoming.length === 0 && past.length === 0 && (
+      <EditGuestModal
+        target={editTarget}
+        onDismiss={() => setEditTarget(null)}
+        onSaved={(bookingId, guestName, player) =>
+          onUpdateBooking(bookingId, {
+            guest_name: guestName,
+            additional_players: [player],
+          })
+        }
+      />
+
+      {upcoming.length === 0 && cancelledAndPast.length === 0 && (
         <EmptyState
           icon="🗓️"
           title="No bookings yet"
@@ -2753,427 +3044,775 @@ function MyBookingsTab({
       {upcoming.length > 0 && (
         <>
           <p className="section-label mb-3">Upcoming</p>
-          <div className="space-y-2.5 mb-7">
-            {upcoming.map((group) => {
-              const activePlayers = group.players.filter(
-                (p) => p.status !== "cancelled",
+          <div className="space-y-2 mb-6">
+            {upcoming.map((group) => (
+              <BookingCard
+                key={group.primary.id}
+                group={group}
+                userId={user?.id}
+                onCancel={setCancelTarget}
+                onEditGuest={setEditTarget}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      {cancelledAndPast.length > 0 && (
+        <>
+          <p className="section-label mb-3">Past &amp; Cancelled</p>
+          <div className="space-y-1.5">
+            {cancelledAndPast.map((group) => {
+              const displayDate = new Date(
+                `${group.primary.booking_date}T12:00:00`,
               );
-              const totalAmount =
-                group.primary.amount_charged +
-                activePlayers.reduce((sum, p) => sum + p.amount_charged, 0);
-              const totalPlayers = 1 + activePlayers.length;
-
-              const iAmBooker = group.primary.member_id === user?.id;
-              const allPlayers = iAmBooker
-                ? [
-                    {
-                      id: group.primary.id,
-                      name: "You",
-                      booking: group.primary,
-                      isInvited: false,
-                    },
-                    ...activePlayers.map((p) => ({
-                      id: p.id,
-                      name:
-                        p.guest_name ??
-                        (p.member_id === user?.id ? "You" : "Guest"),
-                      booking: p,
-                      isInvited: true,
-                    })),
-                  ]
-                : [
-                    // Invited view — show only the user's own guest row, labelled "You"
-                    {
-                      id: group.primary.id,
-                      name: "You",
-                      booking: group.primary,
-                      isInvited: false,
-                    },
-                  ];
-
-              const playerCanAct = (b: typeof group.primary) =>
-                differenceInHours(
-                  bookingToLocalDate(b.booking_date, b.tee_time),
-                  new Date(),
-                ) > 0 &&
-                !["awaiting_approval", "tentative", "cancelled", "confirmed"].includes(b.status);
+              const displayTime = formatTeeTime(group.primary.tee_time);
+              const courseName = group.primary.course?.name ?? "Aviara";
+              const isCancelled = group.primary.status === "cancelled";
 
               return (
-                <div key={group.primary.id} className="card overflow-hidden">
-                  {/* Booking header */}
-                  <div className="px-5 pt-5 pb-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <p
-                          className="text-sm font-medium"
-                          style={{ color: "var(--color-green-900)" }}
-                        >
-                          {format(
-                            bookingToLocalDate(
-                              group.primary.booking_date,
-                              group.primary.tee_time,
-                            ),
-                            "EEE, MMM d",
-                          )}
-                        </p>
-                        {!iAmBooker && (
-                          <span
-                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0"
-                            style={{
-                              background: "rgba(133,187,101,0.12)",
-                              color: "var(--color-green-700)",
-                            }}
-                          >
-                            Invited
-                            {group.primary.booker_name
-                              ? ` by ${group.primary.booker_name}`
-                              : ""}
-                          </span>
-                        )}
-                      </div>
-                      {/* Dinner RSVP — shown for all active upcoming bookings */}
-                      {group.primary.status !== "cancelled" && (
-                        <DinnerRsvp
-                          bookingId={group.primary.id}
-                          current={group.primary.dinner_rsvp ?? null}
-                          onSaved={(rsvp) => onUpdateBooking(group.primary.id, { dinner_rsvp: rsvp })}
-                        />
-                      )}
-                    </div>
+                <div
+                  key={group.primary.id}
+                  className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl"
+                  style={{
+                    background: "rgba(0,38,105,0.025)",
+                    opacity: isCancelled ? 0.6 : 0.75,
+                  }}
+                >
+                  <div className="min-w-0">
+                    <p
+                      className={`text-sm font-medium truncate ${isCancelled ? "line-through" : ""}`}
+                      style={{ color: "var(--color-green-900)" }}
+                    >
+                      {courseName}
+                    </p>
                     <p
                       className="text-xs mt-0.5"
                       style={{ color: "rgba(0,38,105,0.45)" }}
                     >
-                      {(() => {
-                        const start = bookingToLocalDate(group.primary.booking_date, group.primary.tee_time);
-                        const end = addMinutes(start, GOLF_ROUND_DURATION_MINUTES);
-                        return `${format(start, "h:mm a")} – ${format(end, "h:mm a")}`;
-                      })()}{" "}
-                      · ${totalAmount.toFixed(0)}
-                      {iAmBooker &&
-                        totalPlayers > 1 &&
-                        ` · ${totalPlayers} players`}
+                      {format(displayDate, "EEE, MMM d, yyyy")} · {displayTime}
                     </p>
                   </div>
-
-                  {/* Per-player rows */}
-                  <div
-                    className="border-t"
-                    style={{ borderColor: "rgba(0,38,105,0.07)" }}
-                  >
-                    {allPlayers.map((player, idx) => {
-                      const dt = bookingToLocalDate(
-                        player.booking.booking_date,
-                        player.booking.tee_time,
-                      ).toISOString();
-                      const canAct = playerCanAct(player.booking);
-                      return (
-                        <div
-                          key={player.id}
-                          className="flex items-center gap-3 px-5 py-3"
-                          style={{
-                            borderTop:
-                              idx === 0
-                                ? "none"
-                                : "1px solid rgba(0,38,105,0.05)",
-                          }}
-                        >
-                          {/* Avatar — opens member profile sheet */}
-                          {(() => {
-                            const memberId =
-                              player.name === "You"
-                                ? (user?.id ?? null)
-                                : (player.booking.player_member_id ?? null);
-                            const raw =
-                              player.name === "You"
-                                ? `${profile?.first_name ?? ""} ${profile?.last_name ?? ""}`.trim()
-                                : player.name;
-                            const parts = raw.split(/\s+/).filter(Boolean);
-                            const initials =
-                              parts.length >= 2
-                                ? `${parts[0]?.[0] ?? ""}${parts[parts.length - 1]?.[0] ?? ""}`.toUpperCase()
-                                : (parts[0]?.[0] ?? "?").toUpperCase();
-                            const avatarUrl =
-                              player.name === "You"
-                                ? (profile?.profile?.avatar_url ?? null)
-                                : null;
-                            return (
-                              <button
-                                onClick={() =>
-                                  memberId && setProfileMemberId(memberId)
-                                }
-                                className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 overflow-hidden"
-                                style={{
-                                  background: "rgba(0,38,105,0.08)",
-                                  color: "var(--color-green-900)",
-                                  cursor: memberId ? "pointer" : "default",
-                                }}
-                              >
-                                {avatarUrl ? (
-                                  <Image
-                                    src={avatarUrl}
-                                    alt=""
-                                    width={28}
-                                    height={28}
-                                    className="w-full h-full object-cover"
-                                  />
-                                ) : (
-                                  initials
-                                )}
-                              </button>
-                            );
-                          })()}
-
-                          <div className="flex-1 flex items-center gap-1.5 min-w-0">
-                            <span
-                              className="text-sm font-medium truncate capitalize"
-                              style={{ color: "var(--color-green-900)" }}
-                            >
-                              {player.name}
-                            </span>
-                            {/* "Invited" pill — shown on guest rows */}
-                            {player.isInvited && (
-                              <span
-                                className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0"
-                                style={{
-                                  background: "rgba(234,179,8,0.1)",
-                                  color: "#92640a",
-                                }}
-                              >
-                                Invited
-                              </span>
-                            )}
-                            {/* "Invited X" — shown on booker's own row when they have guests */}
-                            {!player.isInvited &&
-                              iAmBooker &&
-                              activePlayers.length > 0 && (
-                                <span
-                                  className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5"
-                                  style={{
-                                    background: "rgba(0,38,105,0.06)",
-                                    color: "rgba(0,38,105,0.55)",
-                                  }}
-                                >
-                                  <svg
-                                    width="10"
-                                    height="10"
-                                    viewBox="0 0 16 16"
-                                    fill="currentColor"
-                                  >
-                                    <path d="M5.5 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM1 14s-.5 0-.5-.5C.5 11 2.5 9 5.5 9s5 2 5 4.5c0 .5-.5.5-.5.5H1ZM12 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM14.5 13.5h-2c0-1.1-.4-2.1-1-2.9.4-.1.7-.1 1-.1 2 0 3.5 1.6 3.5 3.5 0 .27-.23.5-.5.5Z" />
-                                  </svg>
-                                  +{activePlayers.length}
-                                </span>
-                              )}
-                          </div>
-
-                          {player.booking.status ===
-                          "availability_confirmed" ? (
-                            <a
-                              href={BOOKING_PAYMENT_URL}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-xs font-semibold flex items-center gap-0.5 flex-shrink-0"
-                              style={{ color: "#92640a" }}
-                            >
-                              Pay now
-                              <svg
-                                width="11"
-                                height="11"
-                                viewBox="0 0 12 12"
-                                fill="none"
-                              >
-                                <path
-                                  d="M2.5 6h7m-3-3 3 3-3 3"
-                                  stroke="currentColor"
-                                  strokeWidth="1.5"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                            </a>
-                          ) : (
-                            <BookingStatusBadge
-                              status={player.booking.status}
-                            />
-                          )}
-
-                          {/* 3-dot menu per player */}
-                          {canAct && (
-                            <div
-                              className="flex-shrink-0"
-                              data-menu-id={player.id}
-                            >
-                              <button
-                                onClick={(e) => {
-                                  const rect =
-                                    e.currentTarget.getBoundingClientRect();
-                                  setOpenMenu((prev) =>
-                                    prev?.id === player.id
-                                      ? null
-                                      : {
-                                          id: player.id,
-                                          top: rect.bottom + 4,
-                                          right: window.innerWidth - rect.right,
-                                        },
-                                  );
-                                }}
-                                className="w-6 h-6 flex items-center justify-center rounded-md transition-colors"
-                                style={{
-                                  color: "rgba(0,38,105,0.3)",
-                                  background:
-                                    openMenu?.id === player.id
-                                      ? "rgba(0,38,105,0.06)"
-                                      : "transparent",
-                                }}
-                              >
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 16 16"
-                                  fill="currentColor"
-                                >
-                                  <circle cx="8" cy="3" r="1.2" />
-                                  <circle cx="8" cy="8" r="1.2" />
-                                  <circle cx="8" cy="13" r="1.2" />
-                                </svg>
-                              </button>
-                              {openMenu?.id === player.id &&
-                                createPortal(
-                                  <div
-                                    data-menu-portal={player.id}
-                                    className="rounded-xl shadow-lg border overflow-hidden z-50"
-                                    style={{
-                                      position: "fixed",
-                                      top: openMenu.top,
-                                      right: openMenu.right,
-                                      minWidth: 155,
-                                      background: "white",
-                                      borderColor: "rgba(0,38,105,0.08)",
-                                    }}
-                                  >
-                                    <button
-                                      onClick={() => {
-                                        setOpenMenu(null);
-                                        setCancelTarget({
-                                          bookingDateTime: dt,
-                                          title: "Cancel booking",
-                                          ghlBookingId:
-                                            player.booking.ghl_booking_id ??
-                                            group.primary.ghl_booking_id ??
-                                            null,
-                                        });
-                                      }}
-                                      className="w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-red-50"
-                                      style={{ color: "rgba(220,38,38,0.8)" }}
-                                    >
-                                      Cancel booking
-                                    </button>
-                                  </div>,
-                                  document.body,
-                                )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {isCancelled && <BookingStatusBadge status="cancelled" />}
                 </div>
               );
             })}
           </div>
         </>
       )}
+    </div>
+  );
+}
 
-      {cancelledUpcoming.length > 0 && (
-        <>
-          <p className="section-label mb-3">Cancelled</p>
-          <div className="space-y-2 mb-7">
-            {cancelledUpcoming.map((group) => (
-              <div
-                key={group.primary.id}
-                className="card p-4 flex items-center justify-between gap-3"
-                style={{ opacity: 0.65 }}
+// ---- Booking card with player toggle ------------------------
+
+function BookingCard({
+  group,
+  userId,
+  onCancel,
+  onEditGuest,
+}: {
+  group: BookingGroup;
+  userId: string | undefined;
+  onCancel: (target: CancelTarget) => void;
+  onEditGuest: (target: EditGuestTarget) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const iAmBooker = group.primary.member_id === userId;
+  const activePlayers = group.players.filter((p) => p.status !== "cancelled");
+  // For invited members the group now includes all sibling rows, so total = 1 (primary) + all players
+  const totalPlayers = 1 + activePlayers.length;
+  // localDt is a UTC-correct timestamp used ONLY for logic (hours-until, cancel modal).
+  // For display use bookingDate / bookingTime to avoid browser-timezone shifting.
+  const localDt = bookingToLocalDate(
+    group.primary.booking_date,
+    group.primary.tee_time,
+    group.primary.course?.timezone,
+  );
+  const bookingDate = new Date(`${group.primary.booking_date}T12:00:00`);
+  const bookingTime = formatTeeTime(group.primary.tee_time);
+  const courseName = group.primary.course?.name ?? "Aviara";
+  const hoursUntil = differenceInHours(localDt, new Date());
+  // Cancel is only actionable once a booking has been confirmed/payment-ready —
+  // pending (tentative/awaiting_approval) bookings cannot be cancelled yet.
+  const CANCELLABLE = [
+    "availability_confirmed",
+    "payment_confirmed",
+    "confirmed",
+  ];
+  const canCancelPrimary =
+    hoursUntil > 0 && CANCELLABLE.includes(group.primary.status);
+  // All bookings (booker and invited) use the same collapsible card style.
+  const canExpand = true;
+
+  // ---- Build allRows -------------------------------------------------
+  // Booker: "You" = primary row, full actions on all rows
+  // Invited member: "You" = their own player row, can only cancel their own
+  // Status labels are identical for both — same STATUS_LABELS throughout
+  const allRows = iAmBooker
+    ? [
+        {
+          id: group.primary.id,
+          name: "You",
+          status: group.primary.status,
+          ghlBookingId: group.primary.ghl_booking_id ?? null,
+          canCancel: canCancelPrimary,
+          canPay: group.primary.status === "availability_confirmed",
+          isYou: true,
+          adminNotes: group.primary.admin_notes ?? null,
+          editablePlayer: null as AdditionalPlayer | null,
+        },
+        ...activePlayers.map((p) => ({
+          id: p.id,
+          name: p.guest_name ?? "Guest",
+          status: p.status,
+          ghlBookingId: p.ghl_booking_id ?? null,
+          canCancel: hoursUntil > 0 && CANCELLABLE.includes(p.status),
+          canPay: p.status === "availability_confirmed",
+          isYou: false,
+          adminNotes: p.admin_notes ?? null,
+          // Only a still-pending non-member guest can be corrected — once an
+          // admin has set them up (or the row is cancelled/confirmed), GHL is
+          // already involved and editing here would silently drift out of sync.
+          editablePlayer:
+            p.status === "awaiting_approval" ? (p.additional_players?.[0] ?? null) : null,
+        })),
+      ]
+    : (() => {
+        const myRow = group.players.find((p) => p.player_member_id === userId);
+        const otherPlayers = activePlayers.filter((p) => p.id !== myRow?.id);
+        return [
+          {
+            id: myRow?.id ?? group.primary.id,
+            name: "You",
+            status: myRow?.status ?? group.primary.status,
+            ghlBookingId: myRow?.ghl_booking_id ?? null,
+            canCancel: myRow
+              ? hoursUntil > 0 && CANCELLABLE.includes(myRow.status)
+              : false,
+            canPay: myRow?.status === "availability_confirmed",
+            isYou: true,
+            adminNotes: myRow?.admin_notes ?? null,
+            editablePlayer: null as AdditionalPlayer | null,
+          },
+          {
+            id: group.primary.id,
+            name: myRow?.booker_name ?? "Booker",
+            status: group.primary.status,
+            ghlBookingId: null,
+            canCancel: false,
+            canPay: false,
+            isYou: false,
+            adminNotes: group.primary.admin_notes ?? null,
+            editablePlayer: null as AdditionalPlayer | null,
+          },
+          ...otherPlayers.map((p) => ({
+            id: p.id,
+            name: p.guest_name ?? "Guest",
+            status: p.status,
+            ghlBookingId: null,
+            canCancel: false,
+            editablePlayer: null as AdditionalPlayer | null,
+            canPay: false,
+            isYou: false,
+            adminNotes: p.admin_notes ?? null,
+          })),
+        ];
+      })();
+
+  const hasPaymentDue = allRows.some((row) => row.canPay);
+
+  return (
+    <div
+      className="rounded-2xl border bg-white overflow-hidden"
+      style={{ borderColor: "rgba(0,38,105,0.08)" }}
+    >
+      {/* Main summary */}
+      <div className="px-4 py-3">
+        {/* Course + invited-by */}
+        <p
+          className="text-[10px] font-semibold uppercase tracking-wider truncate mb-1"
+          style={{ color: "rgba(0,38,105,0.35)" }}
+        >
+          {courseName}
+          {!iAmBooker && group.primary.booker_name && (
+            <span
+              className="normal-case tracking-normal ml-1.5 font-medium"
+              style={{ color: "var(--color-green-700)" }}
+            >
+              · invited by {group.primary.booker_name}
+            </span>
+          )}
+        </p>
+
+        {/* Date · time · player toggle — all on one line */}
+        <div className="flex items-center justify-between gap-2">
+          <p
+            className="text-sm font-semibold"
+            style={{ color: "var(--color-green-900)" }}
+          >
+            {format(bookingDate, "EEE, MMM d")}
+            <span
+              className="font-normal ml-1.5"
+              style={{ color: "rgba(0,38,105,0.45)" }}
+            >
+              · {bookingTime}
+            </span>
+          </p>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {hasPaymentDue && (
+              <span
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+                style={{ background: "rgba(146,100,10,0.1)", color: "#92640a" }}
               >
-                <div>
-                  <p
-                    className="text-sm line-through"
-                    style={{ color: "var(--color-green-900)" }}
-                  >
-                    {format(
-                      bookingToLocalDate(
-                        group.primary.booking_date,
-                        group.primary.tee_time,
-                      ),
-                      "EEE, MMM d, yyyy",
-                    )}
-                  </p>
-                  <p
-                    className="text-xs mt-0.5"
-                    style={{ color: "rgba(0,38,105,0.45)" }}
-                  >
-                    {(() => {
-                      const start = bookingToLocalDate(group.primary.booking_date, group.primary.tee_time);
-                      const end = addMinutes(start, GOLF_ROUND_DURATION_MINUTES);
-                      return `${format(start, "h:mm a")} – ${format(end, "h:mm a")}`;
-                    })()}
-                    {group.players.length > 0 &&
-                      ` · ${1 + group.players.length} players`}
-                  </p>
-                </div>
-                <BookingStatusBadge status="cancelled" />
-              </div>
-            ))}
+                💳 Payment due
+              </span>
+            )}
+            {canExpand && (
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                className="flex items-center gap-1 text-xs font-medium flex-shrink-0"
+                style={{ color: "rgba(0,38,105,0.45)" }}
+              >
+                {totalPlayers}p
+                <svg
+                  className={cn(
+                    "w-3 h-3 transition-transform duration-200",
+                    expanded ? "rotate-180" : "",
+                  )}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M19.5 8.25l-7.5 7.5-7.5-7.5"
+                  />
+                </svg>
+              </button>
+            )}
           </div>
-        </>
-      )}
+        </div>
+      </div>
 
-      {past.length > 0 && (
-        <>
-          <p className="section-label mb-3">Past rounds</p>
-          <div className="space-y-2">
-            {past.slice(0, 10).map((group) => (
+      {/* Expandable players panel */}
+      {canExpand && expanded && (
+        <div
+          className="border-t"
+          style={{ borderColor: "rgba(0,38,105,0.06)" }}
+        >
+          {allRows.map((row, idx) => {
+            const canPay = row.canPay;
+            const editablePlayer = row.editablePlayer;
+            return (
               <div
-                key={group.primary.id}
-                className="card p-4 flex items-center justify-between gap-3"
-                style={{ opacity: group.primary.status === "cancelled" ? 0.5 : 0.55 }}
+                key={row.id}
+                className="flex items-center gap-2.5 px-4 py-2.5"
+                style={{
+                  borderTop:
+                    idx === 0 ? "none" : "1px solid rgba(0,38,105,0.04)",
+                }}
               >
-                <div>
-                  <p
-                    className="text-sm"
+                {/* Name + admin note indicator */}
+                <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                  <span
+                    className="text-xs font-medium truncate capitalize"
                     style={{ color: "var(--color-green-900)" }}
                   >
-                    {format(
-                      bookingToLocalDate(
-                        group.primary.booking_date,
-                        group.primary.tee_time,
-                      ),
-                      "EEE, MMM d, yyyy",
-                    )}
-                  </p>
-                  <p
-                    className="text-xs mt-0.5"
-                    style={{ color: "rgba(0,38,105,0.5)" }}
-                  >
-                    {(() => {
-                      const start = bookingToLocalDate(group.primary.booking_date, group.primary.tee_time);
-                      const end = addMinutes(start, GOLF_ROUND_DURATION_MINUTES);
-                      return `${format(start, "h:mm a")} – ${format(end, "h:mm a")}`;
-                    })()}
-                    {group.players.length > 0 &&
-                      ` · ${1 + group.players.length} players`}
-                  </p>
+                    {row.name}
+                  </span>
+                  {row.adminNotes && (
+                    <div className="relative group flex-shrink-0">
+                      <span
+                        title={row.adminNotes}
+                        className="flex items-center justify-center w-4 h-4 rounded-full text-[10px] leading-none cursor-help flex-shrink-0"
+                        style={{ background: "rgba(234,179,8,0.15)", color: "#92640a" }}
+                        aria-label={`Admin note: ${row.adminNotes}`}
+                      >
+                        ⚠
+                      </span>
+                      <div
+                        className="absolute left-0 bottom-full mb-1.5 hidden group-hover:block w-56 max-w-[70vw] rounded-lg px-3 py-2 text-[11px] leading-snug shadow-lg z-20"
+                        style={{ background: "var(--color-green-900)", color: "white" }}
+                      >
+                        {row.adminNotes}
+                      </div>
+                    </div>
+                  )}
                 </div>
-                {group.primary.status === "cancelled" && (
-                  <BookingStatusBadge status="cancelled" />
+
+                {/* Status badge or Pay CTA */}
+                {!canPay && <BookingStatusBadge status={row.status} />}
+                {canPay && (
+                  group.primary.course?.payment_url ? (
+                    <a
+                      href={group.primary.course.payment_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
+                      style={{
+                        background: "rgba(146,100,10,0.1)",
+                        color: "#92640a",
+                      }}
+                    >
+                      Pay →
+                    </a>
+                  ) : (
+                    <span className="text-[11px] text-gray-400 flex-shrink-0">
+                      Payment link pending
+                    </span>
+                  )
+                )}
+
+                {/* Edit — booker only, while the guest is still awaiting approval */}
+                {editablePlayer && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onEditGuest({
+                        bookingId: row.id,
+                        player: editablePlayer,
+                      })
+                    }
+                    className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
+                    style={{
+                      color: "rgba(0,38,105,0.55)",
+                      background: "rgba(0,38,105,0.06)",
+                    }}
+                  >
+                    Edit
+                  </button>
+                )}
+
+                {/* Cancel */}
+                {row.canCancel && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onCancel({
+                        bookingDateTime: localDt.toISOString(),
+                        title: row.isYou
+                          ? "Cancel my booking"
+                          : `Cancel ${row.name}'s booking`,
+                        ghlBookingId: row.ghlBookingId,
+                      })
+                    }
+                    className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
+                    style={{
+                      color: "rgba(220,38,38,0.65)",
+                      background: "rgba(220,38,38,0.06)",
+                    }}
+                  >
+                    Cancel
+                  </button>
                 )}
               </div>
-            ))}
-          </div>
-        </>
+            );
+          })}
+        </div>
       )}
     </div>
   );
+}
+
+// ---- Event selection screen ---------------------------------
+
+type BookableCourse = Course & { has_access: boolean; access_requested: boolean };
+
+function EventSelectionScreen({
+  onSelect,
+}: {
+  onSelect: (course: Course) => void;
+}) {
+  const [events, setEvents] = useState<BookableCourse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [showCreateFeed, setShowCreateFeed] = useState(false);
+  const [requestingId, setRequestingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/courses")
+      .then(async (r) => {
+        if (!r.ok) throw new Error("Failed to load courses.");
+        return r.json();
+      })
+      .then((d) => {
+        setEvents(Array.isArray(d.courses) ? d.courses : []);
+      })
+      .catch(() => setError("Failed to load courses."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function requestAccess(courseId: string) {
+    setRequestingId(courseId);
+    try {
+      const res = await fetch("/api/event-access-requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ course_id: courseId }),
+      });
+      if (res.ok) {
+        setEvents((prev) =>
+          prev.map((c) => (c.id === courseId ? { ...c, access_requested: true } : c)),
+        );
+      } else {
+        setActionError("Failed to request access. Please try again.");
+        setTimeout(() => setActionError(""), 3500);
+      }
+    } finally {
+      setRequestingId(null);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 gap-4">
+        <Spinner className="text-green-700 w-6 h-6" />
+        <p className="text-sm" style={{ color: "rgba(0,38,105,0.4)" }}>
+          Loading events…
+        </p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="px-5 py-10 text-center">
+        <p className="text-sm text-red-500">{error}</p>
+      </div>
+    );
+  }
+
+  if (events.length === 0) {
+    return (
+      <div className="px-5 md:px-8 pt-5">
+        <EmptyState
+          icon="⛳"
+          title="No courses available"
+          description="There are no active courses linked to your membership right now."
+          action={
+            <button
+              type="button"
+              onClick={() => setShowCreateFeed(true)}
+              className="text-sm font-semibold underline underline-offset-2"
+              style={{ color: "var(--color-green-700)" }}
+            >
+              Click here to create a feed
+            </button>
+          }
+        />
+        {showCreateFeed && (
+          <CreateFeedDialog onClose={() => setShowCreateFeed(false)} />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="pb-8 md:max-w-2xl md:mx-auto">
+      <div className="px-5 md:px-8 pt-5 pb-2">
+        <p className="section-label mb-1">Select an event to book</p>
+        <p className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>
+          Choose an event below to see available times.
+        </p>
+        {actionError && (
+          <p className="text-xs mt-1.5" style={{ color: "rgba(220,38,38,0.85)" }}>
+            {actionError}
+          </p>
+        )}
+      </div>
+
+      <div className="px-5 md:px-8 pt-3">
+        <div className="card">
+          {events.map((course, i) => {
+            const borderStyle = {
+              borderBottom: i < events.length - 1 ? "1px solid rgba(0,38,105,0.06)" : "none",
+            };
+
+            return course.has_access ? (
+              <button
+                key={course.id}
+                type="button"
+                onClick={() => onSelect(course)}
+                className="w-full text-left flex items-start gap-3 px-4 py-4 transition-colors hover:bg-green-50/40 active:opacity-70"
+                style={borderStyle}
+              >
+                <CourseRowInner
+                  course={course}
+                  isRequesting={requestingId === course.id}
+                  onRequestAccess={requestAccess}
+                />
+              </button>
+            ) : (
+              <div
+                key={course.id}
+                className="w-full text-left flex items-start gap-3 px-4 py-4"
+                style={borderStyle}
+              >
+                <CourseRowInner
+                  course={course}
+                  isRequesting={requestingId === course.id}
+                  onRequestAccess={requestAccess}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CourseRowInner({
+  course,
+  isRequesting,
+  onRequestAccess,
+}: {
+  course: BookableCourse;
+  isRequesting: boolean;
+  onRequestAccess: (courseId: string) => void;
+}) {
+  return (
+    <>
+      {/* Venue logo — fixed square, pinned to the top so it never
+          stretches/shrinks based on how tall the text stack next to
+          it gets (e.g. whether the website icon row is present). */}
+      <div
+        className="relative w-24 h-24 aspect-square self-start rounded-xl overflow-hidden flex-shrink-0"
+        style={{ background: "rgba(0,38,105,0.03)" }}
+      >
+        <Image
+          src={course.logo_url}
+          alt=""
+          fill
+          unoptimized
+          className="object-contain"
+        />
+      </div>
+
+      {/* Row stack: name / location - address / price / access CTA / website icon */}
+      <div className="flex-1 min-w-0 flex flex-col gap-1">
+        <p
+          className="font-sans font-black text-base leading-tight truncate"
+          style={{ color: "var(--color-green-900)" }}
+        >
+          {course.name}
+        </p>
+
+        {(course.city || course.state || course.address) && (
+          <p
+            className="text-xs truncate"
+            style={{ color: "rgba(0,38,105,0.45)" }}
+          >
+            📍 {[course.city, course.state].filter(Boolean).join(", ")}
+            {course.address ? ` - ${course.address}` : ""}
+          </p>
+        )}
+
+        {course.cost_per_player != null && (
+          <span
+            className="text-xs font-bold"
+            style={{ color: "var(--color-gold-dark, #92640a)" }}
+          >
+            ${course.cost_per_player}/player
+          </span>
+        )}
+
+        {!course.has_access && (
+          <div className="flex justify-end -mb-1">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!course.access_requested) onRequestAccess(course.id);
+              }}
+              disabled={course.access_requested || isRequesting}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg flex-shrink-0 disabled:opacity-60"
+              style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+            >
+              {course.access_requested
+                ? "Access requested"
+                : isRequesting
+                  ? "Requesting…"
+                  : "Request access"}
+            </button>
+          </div>
+        )}
+
+        {course.booking_url && (
+          <div className="flex justify-end -mb-1">
+            <a
+              href={course.booking_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              aria-label="Visit website"
+              className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
+              style={{ color: "rgba(0,38,105,0.35)" }}
+            >
+              <svg
+                className="w-3.5 h-3.5 flex-shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+                />
+              </svg>
+            </a>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ---- Create Feed Dialog ------------------------------------
+
+function CreateFeedDialog({ onClose }: { onClose: () => void }) {
+  const [feedName, setFeedName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [err, setErr] = useState("");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const name = feedName.trim();
+    if (!name) {
+      setErr("Please enter a name for the feed.");
+      return;
+    }
+    setSubmitting(true);
+    setErr("");
+    try {
+      const res = await fetch("/api/focus-linkups/subscriptions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ industry_focus: name, custom_label: name }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setErr(data.error ?? "Something went wrong. Please try again.");
+        return;
+      }
+      setSubmitted(true);
+    } catch {
+      setErr("Something went wrong. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const dialog = (
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4">
+      {/* Backdrop */}
+      <button
+        type="button"
+        aria-label="Close"
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+      />
+
+      {/* Sheet */}
+      <div className="relative bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl px-6 pt-6 pb-8 shadow-2xl">
+        {/* Drag handle — mobile only */}
+        <div className="flex justify-center mb-5 sm:hidden">
+          <div
+            className="w-10 h-1 rounded-full"
+            style={{ background: "rgba(0,38,105,0.12)" }}
+          />
+        </div>
+
+        {submitted ? (
+          <div className="text-center py-4">
+            <p className="text-3xl mb-3">✅</p>
+            <p
+              className="font-sans font-black text-lg mb-2"
+              style={{ color: "var(--color-green-900)" }}
+            >
+              Feed requested!
+            </p>
+            <p className="text-sm mb-6" style={{ color: "rgba(0,38,105,0.5)" }}>
+              Our team will review your request and get in touch.
+            </p>
+            <button type="button" onClick={onClose} className="btn btn-primary">
+              Done
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} noValidate>
+            <h2
+              className="font-sans font-black text-xl mb-1"
+              style={{ color: "var(--color-green-900)" }}
+            >
+              Create New Feed
+            </h2>
+            <p className="text-sm mb-5" style={{ color: "rgba(0,38,105,0.5)" }}>
+              Request a new course or event feed. Our team will review and
+              activate it for your membership.
+            </p>
+
+            <label
+              htmlFor="new-feed-name"
+              className="block text-xs font-semibold mb-1.5"
+              style={{ color: "rgba(0,38,105,0.55)" }}
+            >
+              Feed name
+            </label>
+            <input
+              id="new-feed-name"
+              autoFocus
+              className="input w-full text-sm mb-1.5"
+              placeholder="e.g. Weekend Scramble, Corporate Golf Series…"
+              value={feedName}
+              onChange={(e) => {
+                setFeedName(e.target.value);
+                setErr("");
+              }}
+              disabled={submitting}
+            />
+            {err && <p className="text-xs text-red-500 mb-3">{err}</p>}
+
+            <div className="flex gap-3 mt-5">
+              <button
+                type="button"
+                onClick={onClose}
+                className="btn btn-outline flex-1 justify-center"
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submitting || !feedName.trim()}
+                className="btn btn-primary flex-1 justify-center disabled:opacity-50"
+              >
+                {submitting ? "Requesting…" : "Request feed"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+
+  // Portal to document.body so fixed positioning is never clipped by a parent stacking context
+  if (!mounted) return null;
+  return createPortal(dialog, document.body);
 }
 
 // ---- Shared -----------------------------------------------

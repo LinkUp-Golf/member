@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 
 type StatusAction = 'active' | 'suspended' | 'cancelled' | 'waitlist' | 'pending'
@@ -43,11 +44,24 @@ export const PATCH = withAuth(
         .single()
 
       if (member?.home_course_id) {
-        await admin
+        const { error: membershipError } = await admin
           .from('course_memberships')
           .update({ status: 'active' })
           .eq('member_id', memberId)
           .eq('course_id', member.home_course_id)
+
+        // Non-fatal to the request, but left unlogged this would silently
+        // leave membership_status = 'active' while course_memberships stays
+        // stale — the exact row RLS/get_member_course_ids() key off for
+        // course access, so a swallowed failure here breaks community
+        // visibility for this member with no trace of why.
+        if (membershipError) {
+          logger.error('Failed to activate course membership', {
+            action: 'members.status.course_membership_sync_failed',
+            userId: ctx.userId,
+            metadata: { member_id: memberId, course_id: member.home_course_id, error: membershipError.message },
+          })
+        }
       }
 
       if (member?.first_name) {

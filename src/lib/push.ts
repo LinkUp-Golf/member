@@ -231,4 +231,11 @@ export const NotificationTemplates = {
     url:   '/book',
     tag:   'booking-request-decision',
   }),
+
+  memberEventRejected: (eventTitle: string, reason: string): PushPayload => ({
+    title: 'Event submission not approved',
+    body:  `Your event "${eventTitle}" wasn't approved. Reason: ${reason}`,
+    url:   '/more/events',
+    tag:   'member-event-rejected',
+  }),
 }

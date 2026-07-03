@@ -23,7 +23,6 @@ interface DashboardData {
   roundsThisMonth: number;
   maxRounds: number;
   reservedRounds: number;
-  pendingModeration: number;
   pendingGuestAccess: number;
   pendingBookingRequests: number;
   recentMembers: Array<{
@@ -73,7 +72,6 @@ export default function AdminDashboard() {
       waitlistRes,
       pendingRes,
       roundsRes,
-      moderationRes,
       guestRes,
       bookingReqRes,
       recentMembersRes,
@@ -101,11 +99,6 @@ export default function AdminDashboard() {
         .eq("status", "confirmed")
         .gte("booking_date", monthStart)
         .lte("booking_date", monthEnd),
-      supabase
-        .from("announcements")
-        .select("id", { count: "exact" })
-        .in("course_id", courseIds)
-        .eq("status", "pending_review"),
       supabase
         .from("guest_access_requests")
         .select("id", { count: "exact" })
@@ -144,7 +137,6 @@ export default function AdminDashboard() {
       roundsThisMonth: roundsRes.count ?? 0,
       maxRounds,
       reservedRounds,
-      pendingModeration: moderationRes.count ?? 0,
       pendingGuestAccess: guestRes.count ?? 0,
       pendingBookingRequests: bookingReqRes.count ?? 0,
       recentMembers: recentMembersRes.data ?? [],
@@ -170,7 +162,6 @@ export default function AdminDashboard() {
   }
 
   const pendingActions =
-    data.pendingModeration +
     data.pendingGuestAccess +
     data.pendingBookingRequests +
     data.pendingCount;
@@ -191,8 +182,6 @@ export default function AdminDashboard() {
               your attention
             </p>
             <p className="text-xs text-yellow-600 mt-0.5">
-              {data.pendingModeration > 0 &&
-                `${data.pendingModeration} moderation · `}
               {data.pendingGuestAccess > 0 &&
                 `${data.pendingGuestAccess} guest access · `}
               {data.pendingBookingRequests > 0 &&
@@ -201,11 +190,6 @@ export default function AdminDashboard() {
                 `${data.pendingCount} member applications`}
             </p>
           </div>
-          <AdminButton
-            label="Review now"
-            onClick={() => router.push("/admin/moderation")}
-            variant="gold"
-          />
         </div>
       )}
 
@@ -230,12 +214,6 @@ export default function AdminDashboard() {
           colour={
             data.roundsThisMonth >= data.maxRounds * 0.9 ? "red" : "green"
           }
-        />
-        <StatCard
-          label="Pending moderation"
-          value={data.pendingModeration}
-          sub="Events and broadcasts awaiting review"
-          colour={data.pendingModeration > 0 ? "gold" : "gray"}
         />
         <StatCard
           label="Guest access requests"

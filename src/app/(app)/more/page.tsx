@@ -11,7 +11,7 @@ type SvgIcon = { type: 'svg'; name: IconName }
 type EmojiIcon = { type: 'emoji'; char: string }
 type ItemIcon = SvgIcon | EmojiIcon
 
-const MORE_ITEMS: { group: string; items: { href: string; label: string; icon: ItemIcon; desc: string }[] }[] = [
+const MORE_ITEMS: { group: string; items: { href: string; label: string; icon: ItemIcon; desc: string; external?: boolean }[] }[] = [
   {
     group: 'My account',
     items: [
@@ -33,8 +33,9 @@ const MORE_ITEMS: { group: string; items: { href: string; label: string; icon: I
     group: 'Settings',
     items: [
       { href: '/more/notifications', label: 'Notification Log', icon: { type: 'emoji', char: '🔔' },  desc: 'View your notification history' },
-      { href: '/more/settings',      label: 'Preferences',      icon: { type: 'svg', name: 'more' },  desc: 'Notifications, text size & display' },
+      { href: '/more/settings',      label: 'Preferences',      icon: { type: 'svg', name: 'more' },  desc: 'Notifications, text size, timezone & display' },
       { href: '/more/install',       label: 'Install App',       icon: { type: 'emoji', char: '📲' }, desc: 'Add LinkUp Golf to your home screen' },
+      { href: 'https://www.linkup.golf/terms-and-community-standards', label: 'Terms & Community Standards', icon: { type: 'emoji', char: '📄' }, desc: 'Our terms of service and community guidelines', external: true },
     ],
   },
 ]
@@ -94,6 +95,8 @@ export default function MorePage() {
                 <Link
                   key={item.href}
                   href={item.href}
+                  target={item.external ? '_blank' : undefined}
+                  rel={item.external ? 'noopener noreferrer' : undefined}
                   className="flex items-center gap-3.5 px-4 py-4 transition-colors hover:bg-green-50/60"
                   style={{
                     borderBottom: i < group.items.length - 1
@@ -115,7 +118,10 @@ export default function MorePage() {
                   </div>
                   <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                     strokeWidth={1.5} style={{ color: 'rgba(0,38,105,0.2)' }}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                    {item.external
+                      ? <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                      : <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                    }
                   </svg>
                 </Link>
               ))}

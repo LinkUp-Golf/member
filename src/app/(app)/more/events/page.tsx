@@ -26,6 +26,7 @@ export default function MemberEventsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [profileMemberId, setProfileMemberId] = useState<string | null>(null)
   const [submitBanner, setSubmitBanner] = useState(false)
+const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
     if (user) loadEvents()
@@ -49,14 +50,19 @@ export default function MemberEventsPage() {
 
   async function rsvp(eventId: string, status: 'attending' | 'maybe' | 'declined') {
     if (!user) return
-    await apiClient.post(`/api/events/${eventId}/rsvp`, { status })
+    const res = await apiClient.post(`/api/events/${eventId}/rsvp`, { status })
+    if (res.error) { setActionError('Failed to update your RSVP. Please try again.'); return }
     setRsvps(prev => ({ ...prev, [eventId]: status }))
   }
 
   async function deleteEvent(eventId: string) {
     setDeletingId(eventId)
-    await apiClient.delete(`/api/events/${eventId}`)
-    setEvents(prev => prev.filter(e => e.id !== eventId))
+    const res = await apiClient.delete(`/api/events/${eventId}`)
+    if (res.error) {
+      setActionError('Failed to delete the event. Please try again.')
+    } else {
+      setEvents(prev => prev.filter(e => e.id !== eventId))
+    }
     setDeletingId(null)
   }
 
@@ -65,6 +71,8 @@ export default function MemberEventsPage() {
     if (res.data) {
       setEvents(prev => prev.map(e => e.id === eventId ? { ...e, ...res.data } : e))
       setEditingId(null)
+    } else {
+      setActionError(res.error?.message ?? 'Failed to save changes. Please try again.')
     }
   }
 
@@ -91,7 +99,7 @@ export default function MemberEventsPage() {
               tab === t ? 'border-green-900 text-green-900' : 'border-transparent text-green-900/40'
             }`}
           >
-            {t === 'browse' ? 'Community Events' : 'Submit an event'}
+            {t === 'browse' ? 'Community Events' : 'Create an event'}
           </button>
         ))}
       </div>
@@ -108,6 +116,13 @@ export default function MemberEventsPage() {
               <button type="button" onClick={() => setSubmitBanner(false)} className="text-xs" style={{ color: 'rgba(0,38,105,0.3)' }}>✕</button>
             </div>
           )}
+          {actionError && (
+            <div className="mb-4 rounded-2xl px-4 py-3 flex items-center gap-3" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)' }}>
+              <span className="text-lg">⚠️</span>
+              <p className="flex-1 text-sm font-medium text-red-700">{actionError}</p>
+              <button type="button" onClick={() => setActionError(null)} className="text-xs" style={{ color: 'rgba(0,38,105,0.3)' }}>✕</button>
+            </div>
+          )}
           {loading ? (
             <div className="space-y-3">{[1,2,3].map(i => <CardSkeleton key={i} lines={3} />)}</div>
           ) : events.length === 0 ? (
@@ -118,7 +133,7 @@ export default function MemberEventsPage() {
                 Be the first to post a community event.
               </p>
               <button onClick={() => setTab('submit')} className="btn btn-primary">
-                Submit an event
+                Create an event
               </button>
 
             </div>
@@ -189,6 +204,7 @@ function EventCard({
   onSelectAttendee: (memberId: string) => void
 }) {
   const isPending   = e.status === 'pending_review'
+  const isRejected  = e.status === 'rejected'
   const isOrganizer = !!userId && e.organizer_id === userId
   const startDate  = new Date(e.event_date + 'T12:00:00')
   const endDate    = e.event_end_date ? new Date(e.event_end_date + 'T12:00:00') : null
@@ -204,17 +220,22 @@ function EventCard({
     : format(startDate, 'EEE, MMM d')
 
   return (
-    <div className="card overflow-hidden" style={isPending ? { opacity: 0.8 } : undefined}>
+    <div className="card overflow-hidden" style={(isPending || isRejected) ? { opacity: 0.8 } : undefined}>
       {/* Date header */}
       <div
         className="px-4 py-2.5 flex items-center justify-between"
-        style={{ background: isPending ? 'rgba(0,38,105,0.45)' : 'var(--color-green-900)' }}
+        style={{ background: isPending ? 'rgba(0,38,105,0.45)' : isRejected ? 'rgba(220,38,38,0.75)' : 'var(--color-green-900)' }}
       >
         <p className="text-sm font-medium text-white">{dateLabel}</p>
         <div className="flex items-center gap-2">
           {isPending && (
             <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-white/15 text-white/80">
               Pending
+            </span>
+          )}
+          {isRejected && (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-white/15 text-white/80">
+              Rejected
             </span>
           )}
           <p className="text-xs text-white/50">{e.event_time.slice(0, 5)}</p>
@@ -259,6 +280,12 @@ function EventCard({
           </a>
         )}
 
+        {isRejected && e.rejection_reason && (
+          <p className="text-[11px] text-red-600 bg-red-50 rounded-lg px-2.5 py-1.5 mt-2 whitespace-pre-wrap">
+            Not approved: {e.rejection_reason}
+          </p>
+        )}
+
         {/* Organizer + attendee avatars */}
         <div className="flex items-center justify-between mt-2">
           {e.organizer ? (
@@ -277,6 +304,10 @@ function EventCard({
         ) : isPending ? (
           <p className="text-[11px] text-green-900/35 mt-2 italic">
             Awaiting admin approval
+          </p>
+        ) : isRejected ? (
+          <p className="text-[11px] text-green-900/35 mt-2 italic">
+            {isOrganizer ? 'Edit and resubmit for review.' : 'This event was not approved.'}
           </p>
         ) : isOrganizer ? (
           <p className="text-[11px] text-green-900/35 mt-3 italic">
@@ -323,7 +354,10 @@ function EventEditForm({
   onSave: (payload: Partial<MemberEvent>) => void
   onCancel: () => void
 }) {
-  const today = new Date().toISOString().split('T')[0]!
+  // Local calendar day, not new Date().toISOString() (UTC) — for anyone west
+  // of UTC (all US timezones), UTC has already rolled to "tomorrow" for
+  // several hours every evening, which would wrongly block picking today.
+  const today = new Intl.DateTimeFormat('en-CA').format(new Date())
   const [title,       setTitle]       = useState(e.title)
   const [description, setDescription] = useState(e.description)
   const [date,        setDate]        = useState(e.event_date)
@@ -363,8 +397,8 @@ function EventEditForm({
         onChange={e => setEndDate(e.target.value)} placeholder="End date (optional)" />
       <input className={inputCls} placeholder="Location" value={location} onChange={e => setLocation(e.target.value)} />
       <input type="url" className={inputCls} placeholder="Link (optional)" value={url} onChange={e => setUrl(e.target.value)} />
-      {e.status === 'published' && (
-        <p className="text-[10px] text-amber-600 italic">Editing a published event sends it back for admin review.</p>
+      {(e.status === 'published' || e.status === 'rejected') && (
+        <p className="text-[10px] text-amber-600 italic">Saving sends this event back for admin review.</p>
       )}
       <div className="flex gap-2 pt-1">
         <button
@@ -458,7 +492,8 @@ function SubmitEventForm({
 }: {
   onSubmitted: (newEvent: MemberEvent) => void
 }) {
-  const todayStr = new Date().toISOString().split('T')[0]!
+  // Local calendar day, not new Date().toISOString() (UTC) — see EventEditForm.
+  const todayStr = new Intl.DateTimeFormat('en-CA').format(new Date())
   const [serverError, setServerError] = useState<string | null>(null)
 
   const {

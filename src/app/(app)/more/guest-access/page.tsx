@@ -163,7 +163,10 @@ function GuestAccessForm({
   onSubmit: (data: { courseId: string; reason: string; from: string; until: string }) => Promise<void>
   onCancel: () => void
 }) {
-  const today = new Date().toISOString().split('T')[0]
+  // Local calendar day, not new Date().toISOString() (UTC) — for anyone west
+  // of UTC (all US timezones), UTC has already rolled to "tomorrow" for
+  // several hours every evening, which would wrongly block picking today.
+  const today = new Intl.DateTimeFormat('en-CA').format(new Date())
   const [courseId, setCourseId] = useState(courses[0]?.id ?? '')
   const [from, setFrom] = useState('')
   const [until, setUntil] = useState('')

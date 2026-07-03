@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import { formatInTimeZone } from 'date-fns-tz'
+import { getBrowserTimezone } from '@/lib/timezone'
 import { MessageBubble } from './MessageBubble'
 import { TypingIndicator } from './TypingIndicator'
 import type { OptimisticMessage } from '@/types'
@@ -18,6 +20,9 @@ interface Props {
   onEdit?: (messageId: string, newBody: string) => Promise<boolean>
   onDelete?: (messageId: string) => Promise<boolean>
   onRetry?: (tempId: string, body: string) => void
+  /** Viewer's saved timezone preference (member_profiles.timezone) — falls
+   *  back to the browser's own zone when not set. */
+  timezone?: string | null
 }
 
 export function MessageList({
@@ -33,6 +38,7 @@ export function MessageList({
   onEdit,
   onDelete,
   onRetry,
+  timezone,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const topSentinelRef = useRef<HTMLDivElement>(null)
@@ -94,7 +100,7 @@ export function MessageList({
       })()
     : null
 
-  const grouped = groupByDate(messages)
+  const grouped = groupByDate(messages, timezone)
 
   return (
     <div className="flex flex-col min-h-full">
@@ -129,6 +135,7 @@ export function MessageList({
                   onEdit={onEdit}
                   onDelete={onDelete}
                   onRetry={onRetry}
+                  timezone={timezone}
                 />
               </div>
             )
@@ -149,12 +156,12 @@ export function MessageList({
 
 // ---- Helpers -------------------------------------------------
 
-function groupByDate(messages: OptimisticMessage[]) {
+function groupByDate(messages: OptimisticMessage[], timezone?: string | null) {
   const groups: { date: string; messages: OptimisticMessage[] }[] = []
   let currentDate = ''
 
   for (const msg of messages) {
-    const date = formatDateLabel(msg.created_at)
+    const date = formatDateLabel(msg.created_at, timezone)
     if (date !== currentDate) {
       currentDate = date
       groups.push({ date, messages: [] })
@@ -165,13 +172,18 @@ function groupByDate(messages: OptimisticMessage[]) {
   return groups
 }
 
-function formatDateLabel(iso: string): string {
-  const date = new Date(iso)
-  const today = new Date()
-  const yesterday = new Date(today)
-  yesterday.setDate(today.getDate() - 1)
+// Day boundaries are computed in the viewer's timezone preference (falling
+// back to the browser's zone) so "Today"/"Yesterday" match what the member
+// actually set in Settings, not just wherever their browser thinks it is.
+function formatDateLabel(iso: string, timezone?: string | null): string {
+  const tz = timezone || getBrowserTimezone()
+  const dayKey = (d: Date) => formatInTimeZone(d, tz, 'yyyy-MM-dd')
 
-  if (date.toDateString() === today.toDateString()) return 'Today'
-  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday'
-  return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+  const date = new Date(iso)
+  const now = new Date()
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+
+  if (dayKey(date) === dayKey(now)) return 'Today'
+  if (dayKey(date) === dayKey(yesterday)) return 'Yesterday'
+  return formatInTimeZone(date, tz, 'EEEE, MMMM d')
 }

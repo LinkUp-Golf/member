@@ -133,7 +133,7 @@ function PromoMediaCarousel({ mediaUrls, imageUrl, videoUrl }: { mediaUrls: stri
   return (
     <div className="mb-0">
       <div
-        className="relative overflow-hidden bg-black"
+        className="relative overflow-hidden bg-white"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
@@ -148,7 +148,7 @@ function PromoMediaCarousel({ mediaUrls, imageUrl, videoUrl }: { mediaUrls: stri
                   <Image src={item.url} alt="" fill className="object-contain" />
                 </div>
               ) : (
-                <video src={item.url} controls playsInline className="w-full max-h-72 object-contain block bg-black" />
+                <video src={item.url} controls playsInline className="w-full max-h-72 object-contain block bg-white" />
               )}
             </div>
           ))}
@@ -169,9 +169,9 @@ function PromoMediaCarousel({ mediaUrls, imageUrl, videoUrl }: { mediaUrls: stri
         )}
       </div>
       {items.length > 1 && (
-        <div className="flex justify-center gap-1.5 py-2.5 bg-black">
+        <div className="flex justify-center gap-1.5 mt-2.5">
           {items.map((_, i) => (
-            <button key={i} onClick={() => setCurrent(i)} className={`rounded-full transition-all duration-200 ${i === current ? 'w-4 h-1.5 bg-white/80' : 'w-1.5 h-1.5 bg-white/25'}`} aria-label={`Slide ${i + 1}`} />
+            <button key={i} onClick={() => setCurrent(i)} className={`rounded-full transition-all duration-200 ${i === current ? 'w-4 h-1.5 bg-green-700' : 'w-1.5 h-1.5 bg-green-900/20'}`} aria-label={`Slide ${i + 1}`} />
           ))}
         </div>
       )}

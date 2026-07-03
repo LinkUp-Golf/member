@@ -184,6 +184,7 @@ export default function ChatPage() {
               onEdit={editMessage}
               onDelete={deleteMessage}
               onRetry={handleRetry}
+              timezone={profile?.profile?.timezone}
             />
           )}
         </div>

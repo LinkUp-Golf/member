@@ -40,6 +40,7 @@ export default function MemberProfileSheet({
 
   useEffect(() => {
     if (memberId) {
+      let cancelled = false
       setDetail(null)
       setHasPlayedWith(false)
       setFocusGroups([])
@@ -48,13 +49,14 @@ export default function MemberProfileSheet({
       fetch(`/api/members/${memberId}`)
         .then(r => r.json())
         .then(d => {
+          if (cancelled) return // a different member was opened before this resolved
           setDetail(d.member ?? null)
           setHasPlayedWith(!!d.hasPlayedWith)
           setFocusGroups(Array.isArray(d.focusLinkupGroups) ? d.focusLinkupGroups : [])
         })
         .catch(() => {})
-        .finally(() => setLoading(false))
-      return
+        .finally(() => { if (!cancelled) setLoading(false) })
+      return () => { cancelled = true }
     }
     setVisible(false)
     const t = setTimeout(() => { setMounted(false); setDetail(null) }, 320)

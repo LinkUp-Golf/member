@@ -9,7 +9,7 @@ import { validateString, validateDate } from '@/lib/validation'
 import type { AuthContext } from '@/lib/auth/types'
 
 // PATCH /api/events/[id]  — organizer updates their own event
-// If the event was published, it reverts to pending_review for re-approval.
+// If the event was published or rejected, it reverts to pending_review for re-approval.
 export const PATCH = withAuth(async (
   req: NextRequest,
   ctx: AuthContext,
@@ -66,10 +66,11 @@ export const PATCH = withAuth(async (
   if (body.location    !== undefined) update.location     = (body.location as string).trim()
   if ('external_url'   in body)       update.external_url = body.external_url ?? null
 
-  // Editing a published event sends it back for re-approval
-  if (existing.status === 'published') {
+  // Editing a published or rejected event sends it back for re-approval
+  if (existing.status === 'published' || existing.status === 'rejected') {
     update.status = 'pending_review'
     update.reviewed_by = null
+    update.rejection_reason = null
   }
 
   const { data, error } = await supabase

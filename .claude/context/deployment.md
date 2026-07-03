@@ -60,12 +60,17 @@ Declared in `vercel.json`:
 
 | Path | Schedule (UTC) | Work |
 |------|----------------|------|
-| `/api/cron/daily` | `0 8 * * *` (08:00 daily) | expire guest memberships; send Focus LinkUp 2w/1w notifications |
-| `/api/cron/play-suggestions` | `0 9 * * 1` (09:00 Mondays) | play-partner suggestions |
+| `/api/cron/booking-reminders` | `*/15 * * * *` (every 15 min) | push + SMS reminders 7 days, 3 days, and 6 hours before each booking's tee time |
 
 - Each handler verifies `Authorization: Bearer ${CRON_SECRET}` before running.
 - Add new cron jobs by adding both the `vercel.json` entry **and** the
   `CRON_SECRET` check in the handler.
+- `/api/cron/daily` (guest-membership expiry, Focus LinkUp notifications) and
+  `/api/cron/play-suggestions` (weekly play-partner suggestions) were removed.
+  Their `vercel.json` entries had already been dropped in favor of
+  `booking-reminders` without deleting the route files or updating these
+  docs — if that functionality is needed again, treat it as a fresh
+  implementation rather than restoring the old routes as-is.
 
 ## PWA / Caching Notes
 

@@ -1,9 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import { formatInTimeZone } from 'date-fns-tz'
 import { useProfile } from '@/hooks/useProfile'
 import { usePushNotifications } from '@/hooks/usePushNotifications'
+import { useLocationTimezone } from '@/hooks/useLocationTimezone'
 import { Spinner } from '@/components/ui/Loading'
+import Select from '@/components/ui/Select'
+import { getAllTimezones, getBrowserTimezone } from '@/lib/timezone'
 
 const TEXT_SIZE_MIN = 12
 const TEXT_SIZE_MAX = 26
@@ -39,6 +43,15 @@ const PREF_LABELS: Record<keyof NotifPrefs, { label: string; desc: string }> = {
 export default function SettingsPage() {
   const { user, profile, signOut, refetch } = useProfile()
   const { permission, subscribed, requesting, requestPermission, unsubscribe } = usePushNotifications()
+  const {
+    permission: geoPermission,
+    isLoading: detectingLocation,
+    detectFromLocation,
+    setManualTimezone,
+  } = useLocationTimezone(refetch)
+
+  const timezones = useMemo(() => getAllTimezones().map(tz => ({ value: tz, label: tz })), [])
+  const effectiveTimezone = profile?.profile?.timezone ?? getBrowserTimezone()
 
   const [prefs, setPrefs] = useState<NotifPrefs>(DEFAULT_PREFS)
   const [saving, setSaving] = useState(false)
@@ -46,6 +59,7 @@ export default function SettingsPage() {
 
   const [textSize, setTextSize] = useState(TEXT_SIZE_DEFAULT)
   const [savingTextSize, setSavingTextSize] = useState(false)
+  const [textSizeError, setTextSizeError] = useState(false)
 
   useEffect(() => {
     // Load saved preferences from localStorage
@@ -71,13 +85,20 @@ export default function SettingsPage() {
 
   async function handleSliderCommit(px: number) {
     setSavingTextSize(true)
+    setTextSizeError(false)
     try {
-      await fetch('/api/profile', {
+      const res = await fetch('/api/profile', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text_size: px }),
       })
-      await refetch()
+      if (res.ok) {
+        await refetch()
+      } else {
+        setTextSizeError(true)
+      }
+    } catch {
+      setTextSizeError(true)
     } finally {
       setSavingTextSize(false)
     }
@@ -230,6 +251,56 @@ export default function SettingsPage() {
               <span className="text-[11px] text-green-900/25">{TEXT_SIZE_MIN}px</span>
               <span className="text-[11px] text-green-900/25">{TEXT_SIZE_MAX}px</span>
             </div>
+            {textSizeError && (
+              <p className="text-xs text-red-600">Failed to save. Please try again.</p>
+            )}
+          </div>
+        </section>
+
+        {/* Location & Timezone */}
+        <section>
+          <p className="section-label mb-3">Location & timezone</p>
+          <div className="card card-pad space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-green-900/40 mb-0.5">Current timezone</p>
+                <p className="text-sm font-medium text-green-900">{effectiveTimezone}</p>
+              </div>
+            </div>
+
+            {geoPermission === 'unsupported' ? (
+              <p className="text-xs text-green-900/50 italic">
+                Location detection isn&apos;t supported on this browser. Set your timezone manually below.
+              </p>
+            ) : geoPermission === 'denied' ? (
+              <p className="text-xs text-green-900/55 leading-relaxed">
+                You&apos;ve blocked location access. To use it for an accurate timezone, allow location for app.linkup.golf in your browser or device settings — or set your timezone manually below.
+              </p>
+            ) : (
+              <div>
+                <p className="text-xs text-green-900/55 mb-3 leading-relaxed">
+                  We use your device&apos;s location to keep your timezone accurate — handy when traveling.
+                </p>
+                <button
+                  onClick={detectFromLocation}
+                  disabled={detectingLocation}
+                  className="btn btn-primary btn-sm"
+                >
+                  {detectingLocation ? <Spinner className="w-3.5 h-3.5 text-gold" /> : 'Update using my location'}
+                </button>
+              </div>
+            )}
+
+            <div>
+              <p className="text-xs text-green-900/40 mb-1.5">Or set manually</p>
+              <Select
+                options={timezones}
+                value={effectiveTimezone}
+                onChange={setManualTimezone}
+                placeholder="Select timezone…"
+                searchPlaceholder="Search timezones…"
+              />
+            </div>
           </div>
         </section>
 
@@ -249,7 +320,10 @@ export default function SettingsPage() {
               <p className="text-xs text-green-900/40 mb-0.5">Member since</p>
               <p className="text-sm text-green-900">
                 {profile?.membership_start_date
-                  ? new Date(profile.membership_start_date).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+                  // membership_start_date is a plain calendar date, not an instant —
+                  // format in UTC so it doesn't shift to the previous month for
+                  // anyone west of UTC (new Date('2026-01-01') parses as UTC midnight).
+                  ? formatInTimeZone(new Date(profile.membership_start_date), 'UTC', 'MMMM yyyy')
                   : 'Active member'}
               </p>
             </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useUser } from './AuthContext'
 import type { MemberWithProfile } from '@/types'
@@ -25,8 +25,17 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [profileLoading, setProfileLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Tracks the most recently requested user id so a slow/retrying fetch for a
+  // user who has since signed out (or been replaced by a different signed-in
+  // user) can't clobber state with stale data once it finally resolves.
+  const currentUserIdRef = useRef<string | undefined>(user?.id)
+  useEffect(() => {
+    currentUserIdRef.current = user?.id
+  }, [user?.id])
+
   const doFetch = useCallback(async () => {
-    if (!user) {
+    const fetchUserId = user?.id
+    if (!fetchUserId) {
       setProfile(null)
       return
     }
@@ -41,8 +50,10 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         const { data, error: dbError } = await supabase
           .from('members')
           .select('*, profile:member_profiles(*), home_course:courses!members_home_course_id_fkey(*)')
-          .eq('id', user.id)
+          .eq('id', fetchUserId)
           .single()
+
+        if (currentUserIdRef.current !== fetchUserId) return // stale — a newer fetch owns state now
 
         if (!dbError && data) {
           setProfile(data as MemberWithProfile)
@@ -56,6 +67,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
           setProfile(null)
         }
       } catch {
+        if (currentUserIdRef.current !== fetchUserId) return
         if (attempt < 3) {
           await new Promise(r => setTimeout(r, 500 * attempt))
         } else {

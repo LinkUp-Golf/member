@@ -62,9 +62,17 @@ Key patterns to preserve:
   `is_admin()`.
 - **Ownership writes:** insert/update policies check `... = auth.uid()` (e.g.
   `members`, `bookings`, `member_profiles`, RSVPs).
-- **Messages are private even from admins.** The `messages` SELECT policy
-  intentionally **omits `is_admin()`** — only conversation participants can read.
-  Preserve this; do not add admin read access to messages.
+- **Messages are private from the anon/member client, but admins have an
+  explicit oversight tool.** The `messages` SELECT RLS policy intentionally
+  **omits `is_admin()`** — regular member-authenticated queries can never read
+  a conversation they're not a participant in. Admin access instead goes
+  through `/api/admin/messaging/conversations` and
+  `/api/admin/messaging/conversations/[id]/messages`, which use the
+  service-role client (bypasses RLS entirely) behind `requireAdmin: true`.
+  This is a deliberate trust & safety feature (any admin can browse any DM or
+  group, including deleted messages, with no per-conversation gate), not a
+  bug — when reviewing this code, don't "fix" it by adding admin read access
+  at the RLS layer or by restricting the API routes' scope.
 - **`invite_tokens` is intentionally RLS-exempt** — accessed only via the admin
   (service-role) client server-side. Do not query it with the anon client.
 - **`play_history` has no INSERT policy** — rows are written only by the booking

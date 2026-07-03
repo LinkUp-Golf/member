@@ -13,7 +13,7 @@ import { InviteItem } from '@/components/messages/InviteItem'
 import type { ConversationWithDetails } from '@/types'
 
 export default function MessagesPage() {
-  const { user } = useProfile()
+  const { user, profile } = useProfile()
   const router = useRouter()
   const [conversations, setConversations] = useState<ConversationWithDetails[]>([])
   const [loading, setLoading] = useState(true)
@@ -122,6 +122,7 @@ export default function MessagesPage() {
                 conversation={conv}
                 currentUserId={user?.id ?? ''}
                 isOnline={directOther ? isOnline(directOther.id) : false}
+                timezone={profile?.profile?.timezone}
               />
             )
           })}

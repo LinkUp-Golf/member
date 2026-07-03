@@ -25,7 +25,7 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
       .from('member_events')
       .select('*, organizer:members!organizer_id(first_name, last_name)')
       .eq('course_id', member.home_course_id)
-      .in('status', ['published', 'pending_review'])
+      .in('status', ['published', 'pending_review', 'rejected'])
       .gte('event_date', today())
       .order('event_date', { ascending: true }),
 
