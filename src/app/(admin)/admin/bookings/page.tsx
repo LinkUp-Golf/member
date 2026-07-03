@@ -74,11 +74,6 @@ interface CourseListItem {
   required_tags: string[]
 }
 
-interface AccessRequestRow {
-  id: string
-  member: { first_name: string; last_name: string; email: string } | null
-}
-
 interface AccessMemberRow {
   id: string
   first_name: string
@@ -533,10 +528,6 @@ export default function AdminBookingsPage() {
   const [remindedPaymentIds, setRemindedPaymentIds] = useState<Set<string>>(new Set())
   const noteRef = useRef<HTMLTextAreaElement>(null)
 
-  const [accessRequests, setAccessRequests] = useState<AccessRequestRow[]>([])
-  const [loadingAccessRequests, setLoadingAccessRequests] = useState(false)
-  const [processingRequestId, setProcessingRequestId] = useState<string | null>(null)
-
   const [activeTab, setActiveTab] = useState<'bookings' | 'access'>('bookings')
   const [allMembers, setAllMembers] = useState<AccessMemberRow[]>([])
   const [loadingMembers, setLoadingMembers] = useState(false)
@@ -661,37 +652,6 @@ export default function AdminBookingsPage() {
 
   useEffect(() => { loadBookings() }, [loadBookings])
   useEffect(() => { if (editingNote && noteRef.current) noteRef.current.focus() }, [editingNote])
-
-  const loadAccessRequests = useCallback(async () => {
-    if (courseFilter === 'all') { setAccessRequests([]); return }
-    setLoadingAccessRequests(true)
-    try {
-      const res = await fetch(`/api/admin/event-access-requests?courseId=${courseFilter}`)
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) { setAccessRequests([]); return }
-      setAccessRequests(((json.requests ?? []) as (AccessRequestRow & { status: string })[]).filter(r => r.status === 'pending'))
-    } finally {
-      setLoadingAccessRequests(false)
-    }
-  }, [courseFilter])
-
-  useEffect(() => { loadAccessRequests() }, [loadAccessRequests])
-
-  async function decideAccessRequest(id: string, action: 'approve' | 'deny') {
-    setProcessingRequestId(id)
-    const res = await fetch(`/api/admin/event-access-requests/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action }),
-    })
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({}))
-      setRequestToast({ msg: json.error ?? 'Action failed. Please try again.', ok: false })
-      setTimeout(() => setRequestToast(null), 3500)
-    }
-    await loadAccessRequests()
-    setProcessingRequestId(null)
-  }
 
   async function decideBookingRequest(id: string, action: 'setup' | 'reject') {
     setProcessingBookingRequestId(id)
@@ -1103,11 +1063,6 @@ export default function AdminBookingsPage() {
               }`}
             >
               {tab === 'bookings' ? 'Bookings' : 'Access'}
-              {tab === 'access' && accessRequests.length > 0 && (
-                <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600">
-                  {accessRequests.length}
-                </span>
-              )}
             </button>
           ))}
         </div>
@@ -1115,52 +1070,6 @@ export default function AdminBookingsPage() {
 
       {courseFilter !== 'all' && activeTab === 'access' ? (
         <div className="space-y-8">
-          {/* Access requests */}
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <h2 className="text-sm font-bold text-gray-700">Access Requests</h2>
-              {accessRequests.length > 0 && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-orange-50 text-orange-600">
-                  {accessRequests.length} pending
-                </span>
-              )}
-            </div>
-            {loadingAccessRequests ? (
-              <div className="h-12 bg-gray-100 rounded-xl animate-pulse" />
-            ) : accessRequests.length === 0 ? (
-              <p className="text-xs text-gray-400 italic px-1">No pending access requests for this event.</p>
-            ) : (
-              <div className="space-y-2">
-                {accessRequests.map(r => (
-                  <div key={r.id} className="bg-white border border-gray-100 rounded-xl shadow-sm px-4 py-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-800 truncate capitalize">
-                        {r.member?.first_name} {r.member?.last_name}
-                      </p>
-                      <p className="text-xs text-gray-400 truncate">{r.member?.email}</p>
-                    </div>
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                      <button
-                        onClick={() => decideAccessRequest(r.id, 'approve')}
-                        disabled={processingRequestId === r.id}
-                        className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-green-900 text-white disabled:opacity-50"
-                      >
-                        ✓ Approve
-                      </button>
-                      <button
-                        onClick={() => decideAccessRequest(r.id, 'deny')}
-                        disabled={processingRequestId === r.id}
-                        className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600 disabled:opacity-50"
-                      >
-                        ✕ Reject
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
           {/* Add an existing member directly */}
           <div>
             <h2 className="text-sm font-bold text-gray-700 mb-2">Add Member</h2>
