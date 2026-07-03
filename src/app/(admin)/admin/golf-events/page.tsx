@@ -165,7 +165,8 @@ export default function AdminCoursesPage() {
   const loadCourses = useCallback(async () => {
     setLoading(true)
     const res = await fetch('/api/admin/courses')
-    const json = await res.json()
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) showToast(json.error ?? 'Failed to load courses.', false)
     setCourses(Array.isArray(json.courses) ? json.courses : [])
     setLoading(false)
   }, [])
@@ -179,7 +180,7 @@ export default function AdminCoursesPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'approve' }),
     })
-    const json = await res.json()
+    const json = await res.json().catch(() => ({}))
     if (res.ok) showToast('Course approved' + (json.course?.ghl_calendar_id ? ' — GHL calendar created.' : '.'))
     else showToast(json.error ?? 'Approval failed.', false)
     await loadCourses()
@@ -194,7 +195,7 @@ export default function AdminCoursesPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'reject', rejection_reason: rejectReason.trim() }),
     })
-    const json = await res.json()
+    const json = await res.json().catch(() => ({}))
     if (res.ok) { showToast('Course rejected.'); setRejectingId(null); setRejectReason('') }
     else showToast(json.error ?? 'Rejection failed.', false)
     await loadCourses()
@@ -204,7 +205,7 @@ export default function AdminCoursesPage() {
   async function deleteCourse(course: CourseRow) {
     setProcessing(course.id)
     const res = await fetch(`/api/admin/courses/${course.id}`, { method: 'DELETE' })
-    const json = await res.json()
+    const json = await res.json().catch(() => ({}))
     if (res.ok) {
       showToast('Course deleted.')
       setDeletingId(null)
@@ -228,7 +229,7 @@ export default function AdminCoursesPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ approval_status: active ? 'archived' : 'active' }),
     })
-    const json = await res.json()
+    const json = await res.json().catch(() => ({}))
     if (res.ok) showToast(active ? 'Course archived.' : 'Course reactivated.')
     else showToast(json.error ?? 'Update failed.', false)
     await loadCourses()
@@ -639,12 +640,12 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
   const [tagSearch, setTagSearch] = useState('')
 
   useEffect(() => {
-    fetch('/api/admin/ghl/tags').then(r => r.json()).then(d => setGhlTags(d.tags ?? [])).finally(() => setTagsLoading(false))
+    fetch('/api/admin/ghl/tags').then(r => r.json()).then(d => setGhlTags(d.tags ?? [])).catch(() => setGhlTags([])).finally(() => setTagsLoading(false))
     const calParams = new URLSearchParams()
     if (editingCourse?.ghl_group_id) calParams.set('groupId', editingCourse.ghl_group_id)
     if (editingCourse?.id) calParams.set('excludeCourseId', editingCourse.id)
     const calUrl = `/api/admin/ghl/calendars${calParams.toString() ? `?${calParams}` : ''}`
-    fetch(calUrl).then(r => r.json()).then(d => setGhlCalendars(d.calendars ?? [])).finally(() => setCalsLoading(false))
+    fetch(calUrl).then(r => r.json()).then(d => setGhlCalendars(d.calendars ?? [])).catch(() => setGhlCalendars([])).finally(() => setCalsLoading(false))
   }, [editingCourse?.ghl_group_id])
 
   const selectedCalendar = ghlCalendars.find(c => c.id === watchedCalendarId) ?? null
@@ -664,7 +665,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
         createCalendar: false,
       }),
     })
-    const json = await res.json()
+    const json = await res.json().catch(() => ({}))
     if (res.ok) onCreated()
     else onError(json.error ?? (isEdit ? 'Failed to update course' : 'Failed to create course'))
   }

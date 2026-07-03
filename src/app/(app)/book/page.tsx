@@ -3400,10 +3400,14 @@ function EventSelectionScreen({
   const [error, setError] = useState("");
   const [showCreateFeed, setShowCreateFeed] = useState(false);
   const [requestingId, setRequestingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
 
   useEffect(() => {
     fetch("/api/courses")
-      .then((r) => r.json())
+      .then(async (r) => {
+        if (!r.ok) throw new Error("Failed to load courses.");
+        return r.json();
+      })
       .then((d) => {
         setEvents(Array.isArray(d.courses) ? d.courses : []);
       })
@@ -3423,6 +3427,9 @@ function EventSelectionScreen({
         setEvents((prev) =>
           prev.map((c) => (c.id === courseId ? { ...c, access_requested: true } : c)),
         );
+      } else {
+        setActionError("Failed to request access. Please try again.");
+        setTimeout(() => setActionError(""), 3500);
       }
     } finally {
       setRequestingId(null);
@@ -3480,6 +3487,11 @@ function EventSelectionScreen({
         <p className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>
           Choose an event below to see available times.
         </p>
+        {actionError && (
+          <p className="text-xs mt-1.5" style={{ color: "rgba(220,38,38,0.85)" }}>
+            {actionError}
+          </p>
+        )}
       </div>
 
       <div className="px-5 md:px-8 pt-3">
@@ -3654,11 +3666,16 @@ function CreateFeedDialog({ onClose }: { onClose: () => void }) {
     setSubmitting(true);
     setErr("");
     try {
-      await fetch("/api/focus-linkups/subscriptions", {
+      const res = await fetch("/api/focus-linkups/subscriptions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ industry_focus: name, custom_label: name }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setErr(data.error ?? "Something went wrong. Please try again.");
+        return;
+      }
       setSubmitted(true);
     } catch {
       setErr("Something went wrong. Please try again.");

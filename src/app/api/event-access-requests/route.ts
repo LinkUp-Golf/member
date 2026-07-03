@@ -34,6 +34,21 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    // Concurrent duplicate submission raced past the pending-check above and
+    // hit the partial unique index — return the now-existing row instead of
+    // a raw constraint error, keeping this endpoint idempotent as documented.
+    if (error.code === '23505') {
+      const { data: raced } = await supabase
+        .from('event_access_requests')
+        .select('*')
+        .eq('member_id', ctx.userId)
+        .eq('course_id', body.course_id)
+        .eq('status', 'pending')
+        .maybeSingle()
+      if (raced) return NextResponse.json(raced)
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
   return NextResponse.json(data, { status: 201 })
 })

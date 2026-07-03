@@ -28,12 +28,17 @@ function isGeolocationSupported(): boolean {
 }
 
 async function patchProfile(body: Record<string, unknown>): Promise<boolean> {
-  const res = await fetch('/api/profile', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  return res.ok
+  try {
+    const res = await fetch('/api/profile', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return res.ok
+  } catch {
+    // Offline / DNS failure / aborted request — treat like any other failed save.
+    return false
+  }
 }
 
 export function useLocationTimezone(refetch?: () => Promise<void>): UseLocationTimezoneReturn {

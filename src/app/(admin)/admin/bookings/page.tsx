@@ -476,21 +476,30 @@ export default function AdminBookingsPage() {
   const loadAccessRequests = useCallback(async () => {
     if (courseFilter === 'all') { setAccessRequests([]); return }
     setLoadingAccessRequests(true)
-    const res = await fetch(`/api/admin/event-access-requests?courseId=${courseFilter}`)
-    const json = await res.json()
-    setAccessRequests(((json.requests ?? []) as (AccessRequestRow & { status: string })[]).filter(r => r.status === 'pending'))
-    setLoadingAccessRequests(false)
+    try {
+      const res = await fetch(`/api/admin/event-access-requests?courseId=${courseFilter}`)
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) { setAccessRequests([]); return }
+      setAccessRequests(((json.requests ?? []) as (AccessRequestRow & { status: string })[]).filter(r => r.status === 'pending'))
+    } finally {
+      setLoadingAccessRequests(false)
+    }
   }, [courseFilter])
 
   useEffect(() => { loadAccessRequests() }, [loadAccessRequests])
 
   async function decideAccessRequest(id: string, action: 'approve' | 'deny') {
     setProcessingRequestId(id)
-    await fetch(`/api/admin/event-access-requests/${id}`, {
+    const res = await fetch(`/api/admin/event-access-requests/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action }),
     })
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}))
+      setRequestToast({ msg: json.error ?? 'Action failed. Please try again.', ok: false })
+      setTimeout(() => setRequestToast(null), 3500)
+    }
     await loadAccessRequests()
     setProcessingRequestId(null)
   }
@@ -562,11 +571,16 @@ export default function AdminBookingsPage() {
   async function grantAccess(memberId: string) {
     if (!currentCourse?.access_tag) return
     setProcessingMemberId(memberId)
-    await fetch('/api/admin/members/bulk-tags', {
+    const res = await fetch('/api/admin/members/bulk-tags', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ memberIds: [memberId], tag: currentCourse.access_tag, action: 'add' }),
     })
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}))
+      setRequestToast({ msg: json.error ?? 'Failed to grant access. Please try again.', ok: false })
+      setTimeout(() => setRequestToast(null), 3500)
+    }
     await loadMembers()
     setAddMemberSearch('')
     setProcessingMemberId(null)
@@ -575,11 +589,16 @@ export default function AdminBookingsPage() {
   async function revokeAccess(memberId: string) {
     if (!currentCourse?.access_tag) return
     setProcessingMemberId(memberId)
-    await fetch('/api/admin/members/bulk-tags', {
+    const res = await fetch('/api/admin/members/bulk-tags', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ memberIds: [memberId], tag: currentCourse.access_tag, action: 'remove' }),
     })
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}))
+      setRequestToast({ msg: json.error ?? 'Failed to remove access. Please try again.', ok: false })
+      setTimeout(() => setRequestToast(null), 3500)
+    }
     await loadMembers()
     setProcessingMemberId(null)
   }

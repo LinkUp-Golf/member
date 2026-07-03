@@ -17,6 +17,9 @@ export const POST = withAuth(
     const tag = body.tag?.trim()
 
     if (!memberIds.length) return NextResponse.json({ error: 'memberIds is required' }, { status: 400 })
+    if (memberIds.length > 100) {
+      return NextResponse.json({ error: 'Please select 100 members or fewer per batch' }, { status: 400 })
+    }
     if (!tag) return NextResponse.json({ error: 'tag is required' }, { status: 400 })
     if (body.action !== 'add' && body.action !== 'remove') {
       return NextResponse.json({ error: 'action must be "add" or "remove"' }, { status: 400 })

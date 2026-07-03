@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { createGHLCalendar } from '@/lib/ghl/client'
+import { validateTimezone } from '@/lib/validation'
 import { AVIARA_TIMEZONE } from '@/lib/constants'
 import type { AuthContext } from '@/lib/auth/types'
 import type { Course } from '@/types'
@@ -58,6 +59,10 @@ export const POST = withAuth(
 
     if (body.map_link?.trim() && !isValidUrl(body.map_link.trim())) {
       return NextResponse.json({ error: 'Map link must be a valid URL (e.g. https://maps.google.com/...)' }, { status: 400 })
+    }
+
+    if (body.timezone && !validateTimezone(body.timezone, 'timezone').valid) {
+      return NextResponse.json({ error: 'Timezone must be a valid IANA timezone (e.g. America/Los_Angeles)' }, { status: 400 })
     }
 
     const admin = createAdminClient()
@@ -115,7 +120,14 @@ export const POST = withAuth(
       .select()
       .single()
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) {
+      // Concurrent create raced past the pre-check above and hit the slug's
+      // unique constraint — surface the same clean 409 instead of a raw 500.
+      if (error.code === '23505') {
+        return NextResponse.json({ error: `The slug "${slug}" is already taken. Choose a different one.` }, { status: 409 })
+      }
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
     return NextResponse.json({ course: data }, { status: 201 })
   },
   { requireAdmin: true, skipGHLCheck: true }

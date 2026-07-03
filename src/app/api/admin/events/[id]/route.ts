@@ -89,10 +89,12 @@ export const PATCH = withAuth(
 
     const rejectionReason = body.status === 'rejected' ? trimmedReason : null
 
-    await admin
+    const { error: statusError } = await admin
       .from('member_events')
       .update({ status: body.status, reviewed_by: ctx.userId, rejection_reason: rejectionReason })
       .eq('id', id)
+
+    if (statusError) return NextResponse.json({ error: statusError.message }, { status: 500 })
 
     if (rejectionReason) {
       void sendPushToMember(

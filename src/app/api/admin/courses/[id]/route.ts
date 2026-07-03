@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { createGHLCalendar, deleteGHLCalendar } from '@/lib/ghl/client'
+import { validateTimezone } from '@/lib/validation'
 import type { AuthContext } from '@/lib/auth/types'
 import type { Course } from '@/types'
 
@@ -94,6 +95,10 @@ export const PATCH = withAuth(
       }
     }
 
+    if ('timezone' in body && body.timezone && !validateTimezone(body.timezone, 'timezone').valid) {
+      return NextResponse.json({ error: 'Timezone must be a valid IANA timezone (e.g. America/Los_Angeles)' }, { status: 400 })
+    }
+
     // logo_url is required — reject attempts to clear it, but allow omitting
     // the key entirely (no change) or replacing it with a new upload.
     if ('logo_url' in body && !body.logo_url?.trim()) {
@@ -151,7 +156,15 @@ export const PATCH = withAuth(
     if (!Object.keys(updates).length) return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
 
     const { data, error } = await admin.from('courses').update(updates).eq('id', id).select().single()
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) {
+      // Concurrent edit raced past the pre-check above and hit the slug's
+      // unique constraint — surface the same clean 409 instead of a raw 500.
+      if (error.code === '23505') {
+        const attemptedSlug = typeof updates.slug === 'string' ? updates.slug : 'value'
+        return NextResponse.json({ error: `The slug "${attemptedSlug}" is already taken. Choose a different one.` }, { status: 409 })
+      }
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
     return NextResponse.json({ course: data })
   },
   { requireAdmin: true, skipGHLCheck: true }
@@ -178,12 +191,23 @@ export const DELETE = withAuth(
     const admin = createAdminClient()
 
     // 1. Check ALL bookings — any status (active, past, cancelled)
-    const [{ count: totalBookings }, { count: activeBookings }, { count: homeMembers }] =
+    const [totalBookingsRes, activeBookingsRes, homeMembersRes] =
       await Promise.all([
         admin.from('bookings').select('id', { count: 'exact', head: true }).eq('course_id', id),
         admin.from('bookings').select('id', { count: 'exact', head: true }).eq('course_id', id).neq('status', 'cancelled'),
         admin.from('members').select('id', { count: 'exact', head: true }).eq('home_course_id', id),
       ])
+
+    // Fail secure: if any safety check itself failed, block the delete rather
+    // than treating a DB error as "no bookings/members found".
+    const checkError = totalBookingsRes.error ?? activeBookingsRes.error ?? homeMembersRes.error
+    if (checkError) {
+      return NextResponse.json({ error: `Could not verify it's safe to delete this course: ${checkError.message}` }, { status: 500 })
+    }
+
+    const totalBookings = totalBookingsRes.count
+    const activeBookings = activeBookingsRes.count
+    const homeMembers = homeMembersRes.count
 
     const reasons: string[] = []
     if ((totalBookings ?? 0) > 0) {

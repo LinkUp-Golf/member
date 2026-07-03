@@ -300,7 +300,19 @@ export async function POST(request: NextRequest) {
   }
 
   // Build start/end ISO strings with AVIARA_TIMEZONE offset — format: "YYYY-MM-DDTHH:MM:SS±HHMM"
-  const { startIso, endIso } = resolveAppointmentIso(bookingDate, timeNormalized, eventTimezone, eventDurationMinutes)
+  // A misconfigured course timezone (invalid IANA string) throws here — the admin
+  // routes validate on write, but this guards against any pre-existing bad data.
+  let startIso: string
+  let endIso: string
+  try {
+    ({ startIso, endIso } = resolveAppointmentIso(bookingDate, timeNormalized, eventTimezone, eventDurationMinutes))
+  } catch (err) {
+    console.error('[booking/create] Invalid course timezone:', eventTimezone, String(err))
+    return NextResponse.json(
+      { error: 'This course is misconfigured (invalid timezone). Please contact support.' },
+      { status: 422 }
+    )
+  }
 
   const bookingParams = {
     calendarId: eventCalendarId,
@@ -429,7 +441,7 @@ export async function POST(request: NextRequest) {
   void adminSupabase
     .from('announcements')
     .insert({
-      course_id: member.home_course_id,
+      course_id: resolvedCourseId,
       author_id: user.id,
       type: 'booking',
       title: `${memberName}${playerSuffix} is playing on ${displayDate}`,
@@ -447,7 +459,7 @@ export async function POST(request: NextRequest) {
       if (error) console.error('[booking/create] Announcement insert failed (non-fatal):', error)
     })
 
-  void getCache(COURSE_ANN_NS).clear(courseAnnPrefix(member.home_course_id)).catch((e) => {
+  void getCache(COURSE_ANN_NS).clear(courseAnnPrefix(resolvedCourseId)).catch((e) => {
     console.error('[booking/create] Cache clear failed (non-fatal):', e)
   })
 
