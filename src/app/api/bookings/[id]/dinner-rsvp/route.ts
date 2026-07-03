@@ -4,6 +4,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
+import { formatInTimeZone } from 'date-fns-tz'
 import { sendPushToAdmins } from '@/lib/push'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -53,7 +54,9 @@ export const PATCH = withAuth(async (
 
   // Notify admins when response is "maybe" so they can follow up
   if (body.rsvp === 'maybe') {
-    const dateStr = new Date(booking.booking_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+    // booking_date is a plain calendar date, not an instant — format in UTC
+    // explicitly rather than relying on the server runtime's own timezone.
+    const dateStr = formatInTimeZone(new Date(booking.booking_date), 'UTC', 'EEE, MMM d')
     sendPushToAdmins({
       title: 'Dinner RSVP — maybe',
       body: `A member on the ${dateStr} booking is unsure about staying for dinner.`,

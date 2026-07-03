@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { formatInTimeZone } from 'date-fns-tz'
 import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
@@ -170,7 +171,10 @@ export default function MyProfilePage() {
           )}
           {m.membership_start_date && (
             <span className="profile-tag">
-              Member since {new Date(m.membership_start_date).getFullYear()}
+              {/* membership_start_date is a plain calendar date, not an instant —
+                  read the year in UTC so a Jan 1 start date doesn't show as the
+                  previous year for anyone west of UTC. */}
+              Member since {formatInTimeZone(new Date(m.membership_start_date), 'UTC', 'yyyy')}
             </span>
           )}
         </div>

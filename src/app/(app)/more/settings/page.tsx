@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
+import { formatInTimeZone } from 'date-fns-tz'
 import { useProfile } from '@/hooks/useProfile'
 import { usePushNotifications } from '@/hooks/usePushNotifications'
 import { useLocationTimezone } from '@/hooks/useLocationTimezone'
@@ -319,7 +320,10 @@ export default function SettingsPage() {
               <p className="text-xs text-green-900/40 mb-0.5">Member since</p>
               <p className="text-sm text-green-900">
                 {profile?.membership_start_date
-                  ? new Date(profile.membership_start_date).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+                  // membership_start_date is a plain calendar date, not an instant —
+                  // format in UTC so it doesn't shift to the previous month for
+                  // anyone west of UTC (new Date('2026-01-01') parses as UTC midnight).
+                  ? formatInTimeZone(new Date(profile.membership_start_date), 'UTC', 'MMMM yyyy')
                   : 'Active member'}
               </p>
             </div>

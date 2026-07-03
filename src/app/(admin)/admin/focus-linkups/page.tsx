@@ -143,7 +143,9 @@ export default function AdminFocusLinkupsPage() {
     );
   }
 
-  const todayISO = new Date().toISOString().slice(0, 10);
+  // Local calendar day, not new Date().toISOString() (UTC) — see events page
+  // for why UTC-today mis-buckets upcoming/past near midnight for US admins.
+  const todayISO = new Intl.DateTimeFormat("en-CA").format(new Date());
   const upcoming = linkups.filter((l) => l.focus_date >= todayISO);
   const past = linkups.filter((l) => l.focus_date < todayISO);
 
@@ -396,7 +398,8 @@ function CreateFocusLinkupForm({
   onCreated: () => void;
   onCancel: () => void;
 }) {
-  const today = new Date().toISOString().split("T")[0];
+  // Local calendar day, not new Date().toISOString() (UTC) — see events page.
+  const today = new Intl.DateTimeFormat("en-CA").format(new Date());
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [date, setDate] = useState("");

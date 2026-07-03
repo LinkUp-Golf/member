@@ -68,7 +68,14 @@ export async function GET(request: NextRequest) {
   const endDate = format(new Date(year, monthIdx + 1, 0), 'yyyy-MM-dd')
 
   let calendarId = AVIARA_CALENDAR_ID
-  let timezone = searchParams.get('timezone') || AVIARA_TIMEZONE
+  // Slot listing is displayed in the *browsing member's* timezone, not the
+  // course's — GHL buckets/labels each returned slot's date+time for
+  // whichever timezone we ask for, so a member in Asia/Manila browsing a
+  // course in America/Chicago should see (and pick) times converted to
+  // their own zone (e.g. 4:35am, not the venue's 1:35pm). The venue's own
+  // timezone is still what the POST step below uses to derive booking_date/
+  // tee_time for storage — that's a separate, correct concern from display.
+  const timezone = searchParams.get('timezone') || AVIARA_TIMEZONE
   let calendarUserId: string | undefined = AVIARA_CALENDAR_USER_ID || undefined
 
   if (courseId) {
@@ -84,7 +91,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Course not found or booking not yet configured' }, { status: 404 })
     }
     calendarId = course.ghl_calendar_id
-    timezone = course.timezone || timezone
     calendarUserId = course.ghl_calendar_user_id || undefined
   }
 

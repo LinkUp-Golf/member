@@ -11,6 +11,7 @@ import EmptyState from "@/components/ui/EmptyState";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { formatTeeTime, cn, bookingToLocalDate } from "@/lib/utils";
+import { formatInTimeZone } from "date-fns-tz";
 import {
   format,
   parse,
@@ -32,7 +33,6 @@ import {
   BOOKING_PRICE_USD,
   POLICY_TIERS,
   GOLF_ROUND_DURATION_MINUTES,
-  AVIARA_TIMEZONE,
   GHL_CANCEL_BOOKING_URL,
 } from "@/lib/constants";
 import { validateEmail } from "@/lib/validation";
@@ -85,6 +85,14 @@ export default function BookPage() {
 
   // Timezone — default to the member's saved preference (set via Settings),
   // falling back to the browser-detected zone until a preference exists.
+  // Slot times are always displayed converted into *this* zone, not the
+  // selected course's — a member in Asia/Manila browsing a course in
+  // America/Chicago should see e.g. 4:35am, not the venue's 1:35pm. GHL
+  // buckets/labels slot dates and times for whichever timezone we request,
+  // so this is the single source of truth for every fetch and on-screen
+  // label in this file. (Storage is unaffected: booking_date/tee_time are
+  // still derived server-side from the course's own timezone — see
+  // bookings/create/route.ts.)
   const [timezone, setTimezone] = useState<string>(getBrowserTimezone);
   useEffect(() => {
     if (profile?.profile?.timezone) setTimezone(profile.profile.timezone);
@@ -170,24 +178,20 @@ export default function BookPage() {
       return;
     }
     setLoadingDayPlayers(true);
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     fetch(
-      `/api/bookings/day?date=${selectedDate}&timezone=${encodeURIComponent(tz)}`,
+      `/api/bookings/day?date=${selectedDate}&timezone=${encodeURIComponent(timezone)}`,
     )
       .then((r) => r.json())
       .then((d) => setDayPlayers(Array.isArray(d.players) ? d.players : []))
       .catch(() => setDayPlayers([]))
       .finally(() => setLoadingDayPlayers(false));
-  }, [selectedDate, user]);
+  }, [selectedDate, user, timezone]);
 
   // These must stay above the early returns to satisfy the rules of hooks
-  const todayStr = useMemo(() => {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: AVIARA_TIMEZONE,
-    }).formatToParts(today);
-    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
-    return `${get("year")}-${get("month")}-${get("day")}`;
-  }, [today]);
+  const todayStr = useMemo(
+    () => formatInTimeZone(today, timezone, "yyyy-MM-dd"),
+    [today, timezone],
+  );
   const firstInWindowRef = useRef<HTMLButtonElement>(null);
   const selectedDateRef = useRef<HTMLButtonElement>(null);
   const firstInWindowDateStr = useMemo(() => {

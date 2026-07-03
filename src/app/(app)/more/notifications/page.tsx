@@ -2,9 +2,11 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { formatInTimeZone } from 'date-fns-tz'
 import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import { formatRelativeTime } from '@/lib/utils'
+import { getBrowserTimezone } from '@/lib/timezone'
 import AppShell from '@/components/layout/AppShell'
 import { CardSkeleton } from '@/components/ui/Loading'
 import type { NotificationLog, NotificationType } from '@/types'
@@ -50,21 +52,28 @@ interface NotifResponse {
   unread_count: number
 }
 
-function groupByDate(items: NotificationLog[]): { label: string; items: NotificationLog[] }[] {
-  const now   = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const yesterday = new Date(today.getTime() - 86_400_000)
-  const weekAgo   = new Date(today.getTime() - 7 * 86_400_000)
+// Today/Yesterday boundaries use the viewer's saved timezone preference
+// (falling back to the browser's zone) so they match what the member set in
+// Settings rather than wherever their browser happens to think it is.
+function groupByDate(items: NotificationLog[], timezone?: string | null): { label: string; items: NotificationLog[] }[] {
+  const tz = timezone || getBrowserTimezone()
+  const dayKey = (d: Date) => formatInTimeZone(d, tz, 'yyyy-MM-dd')
+
+  const now = new Date()
+  const todayKey = dayKey(now)
+  const yesterdayKey = dayKey(new Date(now.getTime() - 86_400_000))
+  const weekAgo = new Date(now.getTime() - 7 * 86_400_000)
 
   const groups = new Map<string, NotificationLog[]>()
 
   for (const n of items) {
     const d = new Date(n.created_at)
+    const dKey = dayKey(d)
     let label: string
-    if (d >= today)          label = 'Today'
-    else if (d >= yesterday) label = 'Yesterday'
-    else if (d >= weekAgo)   label = 'This week'
-    else                     label = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    if (dKey === todayKey)     label = 'Today'
+    else if (dKey === yesterdayKey) label = 'Yesterday'
+    else if (d >= weekAgo)     label = 'This week'
+    else                       label = formatInTimeZone(d, tz, 'MMMM yyyy')
 
     const existing = groups.get(label)
     if (existing) existing.push(n)
@@ -75,7 +84,7 @@ function groupByDate(items: NotificationLog[]): { label: string; items: Notifica
 }
 
 export default function NotificationsPage() {
-  const { user } = useProfile()
+  const { user, profile } = useProfile()
   const [notifications, setNotifications]   = useState<NotificationLog[]>([])
   const [hasMore, setHasMore]               = useState(false)
   const [nextCursor, setNextCursor]         = useState<string | null>(null)
@@ -138,7 +147,7 @@ export default function NotificationsPage() {
     setMarkingRead(false)
   }
 
-  const groups = groupByDate(notifications)
+  const groups = groupByDate(notifications, profile?.profile?.timezone)
 
   return (
     <AppShell

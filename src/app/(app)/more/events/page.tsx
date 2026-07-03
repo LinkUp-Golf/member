@@ -354,7 +354,10 @@ function EventEditForm({
   onSave: (payload: Partial<MemberEvent>) => void
   onCancel: () => void
 }) {
-  const today = new Date().toISOString().split('T')[0]!
+  // Local calendar day, not new Date().toISOString() (UTC) — for anyone west
+  // of UTC (all US timezones), UTC has already rolled to "tomorrow" for
+  // several hours every evening, which would wrongly block picking today.
+  const today = new Intl.DateTimeFormat('en-CA').format(new Date())
   const [title,       setTitle]       = useState(e.title)
   const [description, setDescription] = useState(e.description)
   const [date,        setDate]        = useState(e.event_date)
@@ -489,7 +492,8 @@ function SubmitEventForm({
 }: {
   onSubmitted: (newEvent: MemberEvent) => void
 }) {
-  const todayStr = new Date().toISOString().split('T')[0]!
+  // Local calendar day, not new Date().toISOString() (UTC) — see EventEditForm.
+  const todayStr = new Intl.DateTimeFormat('en-CA').format(new Date())
   const [serverError, setServerError] = useState<string | null>(null)
 
   const {
