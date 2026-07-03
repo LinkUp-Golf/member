@@ -3421,19 +3421,15 @@ function BookingCard({
 
 // ---- Event selection screen ---------------------------------
 
-type BookableCourse = Course & { has_access: boolean; access_requested: boolean };
-
 function EventSelectionScreen({
   onSelect,
 }: {
   onSelect: (course: Course) => void;
 }) {
-  const [events, setEvents] = useState<BookableCourse[]>([]);
+  const [events, setEvents] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showCreateFeed, setShowCreateFeed] = useState(false);
-  const [requestingId, setRequestingId] = useState<string | null>(null);
-  const [actionError, setActionError] = useState("");
 
   useEffect(() => {
     fetch("/api/courses")
@@ -3447,27 +3443,6 @@ function EventSelectionScreen({
       .catch(() => setError("Failed to load courses."))
       .finally(() => setLoading(false));
   }, []);
-
-  async function requestAccess(courseId: string) {
-    setRequestingId(courseId);
-    try {
-      const res = await fetch("/api/event-access-requests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ course_id: courseId }),
-      });
-      if (res.ok) {
-        setEvents((prev) =>
-          prev.map((c) => (c.id === courseId ? { ...c, access_requested: true } : c)),
-        );
-      } else {
-        setActionError("Failed to request access. Please try again.");
-        setTimeout(() => setActionError(""), 3500);
-      }
-    } finally {
-      setRequestingId(null);
-    }
-  }
 
   if (loading) {
     return (
@@ -3520,11 +3495,6 @@ function EventSelectionScreen({
         <p className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>
           Choose an event below to see available times.
         </p>
-        {actionError && (
-          <p className="text-xs mt-1.5" style={{ color: "rgba(220,38,38,0.85)" }}>
-            {actionError}
-          </p>
-        )}
       </div>
 
       <div className="px-5 md:px-8 pt-3">
@@ -3534,7 +3504,7 @@ function EventSelectionScreen({
               borderBottom: i < events.length - 1 ? "1px solid rgba(0,38,105,0.06)" : "none",
             };
 
-            return course.has_access ? (
+            return (
               <button
                 key={course.id}
                 type="button"
@@ -3542,24 +3512,8 @@ function EventSelectionScreen({
                 className="w-full text-left flex items-start gap-3 px-4 py-4 transition-colors hover:bg-green-50/40 active:opacity-70"
                 style={borderStyle}
               >
-                <CourseRowInner
-                  course={course}
-                  isRequesting={requestingId === course.id}
-                  onRequestAccess={requestAccess}
-                />
+                <CourseRowInner course={course} />
               </button>
-            ) : (
-              <div
-                key={course.id}
-                className="w-full text-left flex items-start gap-3 px-4 py-4"
-                style={borderStyle}
-              >
-                <CourseRowInner
-                  course={course}
-                  isRequesting={requestingId === course.id}
-                  onRequestAccess={requestAccess}
-                />
-              </div>
             );
           })}
         </div>
@@ -3568,15 +3522,7 @@ function EventSelectionScreen({
   );
 }
 
-function CourseRowInner({
-  course,
-  isRequesting,
-  onRequestAccess,
-}: {
-  course: BookableCourse;
-  isRequesting: boolean;
-  onRequestAccess: (courseId: string) => void;
-}) {
+function CourseRowInner({ course }: { course: Course }) {
   return (
     <>
       {/* Venue logo — fixed square, pinned to the top so it never
@@ -3621,27 +3567,6 @@ function CourseRowInner({
           >
             ${course.cost_per_player}/player
           </span>
-        )}
-
-        {!course.has_access && (
-          <div className="flex justify-end -mb-1">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (!course.access_requested) onRequestAccess(course.id);
-              }}
-              disabled={course.access_requested || isRequesting}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg flex-shrink-0 disabled:opacity-60"
-              style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
-            >
-              {course.access_requested
-                ? "Access requested"
-                : isRequesting
-                  ? "Requesting…"
-                  : "Request access"}
-            </button>
-          </div>
         )}
 
         {course.booking_url && (
