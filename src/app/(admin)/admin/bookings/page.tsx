@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { AdminPageHeader, StatCard } from '@/components/admin/AdminUI'
 import Select from '@/components/ui/Select'
-import { format, addDays, subDays, isToday } from 'date-fns'
+import { format, addDays, subDays, isToday, differenceInCalendarDays } from 'date-fns'
 import { formatTeeTime } from '@/lib/utils'
 import { GOLF_ROUND_DURATION_MINUTES } from '@/lib/constants'
 import type { AdditionalPlayer } from '@/types'
@@ -49,11 +49,13 @@ const STATUS_FILTERS = ['all', 'tentative', 'awaiting_approval', 'availability_c
 type StatusFilter = typeof STATUS_FILTERS[number]
 
 // Payment Overdue isn't a real booking status — it's availability_confirmed
-// (member notified, "Payment due" on their side) rows whose tee time is
-// within the next 3 days and still unpaid. See loadBookings for the query.
+// (member notified, "Payment due" on their side) rows, i.e. still unpaid.
+// The filter itself matches any unpaid row regardless of date; the "days
+// left" badge on each row (see paymentDaysLeftLabel) is what calls out the
+// ones whose tee time is coming up within this window.
 const PAYMENT_OVERDUE_WINDOW_DAYS = 3
 const STATUS_FILTER_LABELS: Partial<Record<StatusFilter, string>> = {
-  payment_overdue: `⚠ Payment overdue (within ${PAYMENT_OVERDUE_WINDOW_DAYS}d)`,
+  payment_overdue: '⚠ Unpaid — payment not yet received',
 }
 
 const DINNER_FILTERS = ['all', 'yes', 'no', 'maybe', 'none'] as const
@@ -136,6 +138,28 @@ function playerInfo(b: BookingRow): { name: string; sub: string; badge?: string 
   return { name: `${b.member?.first_name ?? ''} ${b.member?.last_name ?? ''}`.trim(), sub: b.member?.email ?? '' }
 }
 
+// "Days left" badge for a player row that's unpaid (availability_confirmed)
+// and whose tee time falls within the same window the Payment Overdue filter
+// uses, so the badge always matches what that filter would surface.
+function paymentDaysLeftLabel(b: BookingRow): string | null {
+  if (b.status !== 'availability_confirmed') return null
+  const daysLeft = differenceInCalendarDays(new Date(`${b.booking_date}T12:00:00`), new Date())
+  if (daysLeft < 0 || daysLeft > PAYMENT_OVERDUE_WINDOW_DAYS) return null
+  if (daysLeft === 0) return 'Due today'
+  if (daysLeft === 1) return '1 day left'
+  return `${daysLeft} days left`
+}
+
+// Whether a payment reminder SMS can be sent for this row. Members (booker
+// or invited) always have a GHL contact from signup; a non-member guest's
+// contact is resolved server-side by the email captured at booking time —
+// only missing if that email is somehow absent.
+function canRemindPayment(b: BookingRow): boolean {
+  if (b.player_member_id) return true
+  if (!b.guest_name) return true
+  return !!b.additional_players?.[0]?.email
+}
+
 function slotEndTime(teeTime: string): string {
   const [th = 0, tm = 0] = teeTime.split(':').map(Number)
   const endMins = th * 60 + tm + GOLF_ROUND_DURATION_MINUTES
@@ -160,6 +184,9 @@ function SlotCard({
   noteRef,
   processingBookingRequestId,
   onDecideRequest,
+  remindingPayment,
+  remindedPaymentIds,
+  onRemindPayment,
 }: {
   slot: TeeSlot
   showCourseName: boolean
@@ -176,9 +203,13 @@ function SlotCard({
   noteRef: React.RefObject<HTMLTextAreaElement>
   processingBookingRequestId: string | null
   onDecideRequest: (id: string, action: 'setup' | 'reject') => void
+  remindingPayment: string | null
+  remindedPaymentIds: Set<string>
+  onRemindPayment: (id: string) => void
 }) {
   const isExpanded = expandedSlots.has(slot.key)
   const totalAmount = slot.rows.reduce((sum, b) => sum + Number(b.amount_charged), 0)
+  const unpaidCount = slot.rows.filter(b => b.status === 'availability_confirmed').length
 
   // Status breakdown for the slot header
   const statusBreakdown = slot.rows.reduce<Record<string, number>>((acc, b) => {
@@ -236,6 +267,11 @@ function SlotCard({
         <div className="flex-shrink-0 text-right">
           <p className="text-xs font-semibold text-green-700">${totalAmount.toFixed(0)}</p>
           <p className="text-[10px] text-gray-400">{slot.rows.length}p</p>
+          {unpaidCount > 0 && (
+            <span className="inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 whitespace-nowrap">
+              ⚠ {unpaidCount} unpaid
+            </span>
+          )}
         </div>
       </button>
 
@@ -245,6 +281,9 @@ function SlotCard({
           {slot.rows.map(b => {
             const info = playerInfo(b)
             const sm = STATUS_META[b.status] ?? STATUS_META.tentative
+            const daysLeftLabel = paymentDaysLeftLabel(b)
+            const showRemindCta = !!daysLeftLabel && canRemindPayment(b)
+            const alreadyReminded = remindedPaymentIds.has(b.id)
             return (
               <div key={b.id} className="px-4 py-3">
                 {/* Top: name + status (side by side) */}
@@ -256,6 +295,21 @@ function SlotCard({
                         <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 flex-shrink-0">
                           {info.badge}
                         </span>
+                      )}
+                      {daysLeftLabel && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 flex-shrink-0 whitespace-nowrap">
+                          ⏳ {daysLeftLabel}
+                        </span>
+                      )}
+                      {showRemindCta && (
+                        <button
+                          type="button"
+                          onClick={() => onRemindPayment(b.id)}
+                          disabled={remindingPayment === b.id || alreadyReminded}
+                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:hover:bg-red-600 flex-shrink-0 whitespace-nowrap transition-colors"
+                        >
+                          {remindingPayment === b.id ? 'Sending…' : alreadyReminded ? '✓ Texted' : '📲 Text to pay'}
+                        </button>
                       )}
                     </div>
                     <p className="text-xs text-gray-400 mt-0.5 truncate">{info.sub}</p>
@@ -473,6 +527,8 @@ export default function AdminBookingsPage() {
   const [noteValues, setNoteValues] = useState<Record<string, string>>({})
   const [savingNote, setSavingNote] = useState<string | null>(null)
   const [expandedSlots, setExpandedSlots] = useState<Set<string>>(new Set())
+  const [remindingPayment, setRemindingPayment] = useState<string | null>(null)
+  const [remindedPaymentIds, setRemindedPaymentIds] = useState<Set<string>>(new Set())
   const noteRef = useRef<HTMLTextAreaElement>(null)
 
   const [accessRequests, setAccessRequests] = useState<AccessRequestRow[]>([])
@@ -516,15 +572,13 @@ export default function AdminBookingsPage() {
     // Upcoming: today → 365 days ahead (ascending)
     // Past:     365 days ago → yesterday (descending — most recent first)
     // A custom From/To range overrides the view-based window when both are set.
-    // Payment Overdue overrides both — it's inherently "next N days", regardless
-    // of the Upcoming/Past toggle or a custom range.
-    const isPaymentOverdue = statusFilter === 'payment_overdue'
+    // Payment status (unpaid) is just another status filter — it doesn't
+    // override the date window. The "days left" badge (see paymentDaysLeftLabel)
+    // is what narrows attention to bookings within PAYMENT_OVERDUE_WINDOW_DAYS.
     const isUpcoming  = view === 'upcoming'
     const hasCustomRange = !!customFrom && !!customTo
-    const rangeStart  = isPaymentOverdue ? today
-      : hasCustomRange ? customFrom : isUpcoming ? today : format(subDays(new Date(), 365), 'yyyy-MM-dd')
-    const rangeEnd    = isPaymentOverdue ? format(addDays(new Date(), PAYMENT_OVERDUE_WINDOW_DAYS), 'yyyy-MM-dd')
-      : hasCustomRange ? customTo   : isUpcoming ? format(addDays(new Date(), 365), 'yyyy-MM-dd') : format(subDays(new Date(), 1), 'yyyy-MM-dd')
+    const rangeStart  = hasCustomRange ? customFrom : isUpcoming ? today : format(subDays(new Date(), 365), 'yyyy-MM-dd')
+    const rangeEnd    = hasCustomRange ? customTo   : isUpcoming ? format(addDays(new Date(), 365), 'yyyy-MM-dd') : format(subDays(new Date(), 1), 'yyyy-MM-dd')
 
     const { data: courses } = await supabase
       .from('courses')
@@ -828,6 +882,20 @@ export default function AdminBookingsPage() {
     setEditingNote(null)
   }
 
+  async function remindPayment(bookingId: string) {
+    setRemindingPayment(bookingId)
+    const res = await fetch(`/api/admin/bookings/${bookingId}/remind-payment`, { method: 'POST' })
+    if (res.ok) {
+      setRemindedPaymentIds(prev => new Set(prev).add(bookingId))
+      setRequestToast({ msg: 'Payment reminder texted.', ok: true })
+    } else {
+      const json = await res.json().catch(() => ({}))
+      setRequestToast({ msg: json.error ?? 'Failed to send reminder. Please try again.', ok: false })
+    }
+    setTimeout(() => setRequestToast(null), 3500)
+    setRemindingPayment(null)
+  }
+
   function toggleSlot(key: string) {
     setExpandedSlots(prev => {
       const next = new Set(prev)
@@ -864,6 +932,7 @@ export default function AdminBookingsPage() {
     onNoteChange: (id: string, val: string) => setNoteValues(prev => ({ ...prev, [id]: val })),
     onSaveNote: saveNote, savingNote, noteRef,
     processingBookingRequestId, onDecideRequest: decideBookingRequest,
+    remindingPayment, remindedPaymentIds, onRemindPayment: remindPayment,
   }
 
   // Shared between the desktop inline grid and the mobile drawer — id suffix

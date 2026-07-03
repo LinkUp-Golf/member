@@ -145,6 +145,24 @@ export async function removeTagFromContact(contactId: string, tag: string): Prom
   }
 }
 
+// ---- Conversations -------------------------------------------
+
+// Sends an SMS immediately via the GHL Conversations API — no workflow or
+// automation involved, unlike triggerWorkflow/triggerBookingReminderWebhook
+// below. Used for admin-initiated, one-off nudges (e.g. "please pay now").
+export async function sendSms(contactId: string, message: string): Promise<boolean> {
+  try {
+    await ghlFetch('/conversations/messages', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'SMS', contactId, message }),
+    })
+    return true
+  } catch (err) {
+    logger.warn('sendSms failed', { action: 'ghl_sms_send', errorMessage: String(err) })
+    return false
+  }
+}
+
 // ---- Emails / Notifications (via GHL workflows) -------------
 
 export async function triggerWorkflow(params: {
