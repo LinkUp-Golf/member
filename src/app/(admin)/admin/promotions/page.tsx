@@ -174,7 +174,7 @@ function PromotionThumb({ promo }: { promo: Promotion }) {
   const isVideo = ['mp4', 'webm', 'mov', 'quicktime'].includes(ext);
   const count = promo.media_urls?.length ?? ((promo.image_url ? 1 : 0) + (promo.video_url ? 1 : 0));
   return (
-    <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-black flex-shrink-0">
+    <div className="relative w-10 h-10 rounded-lg overflow-hidden border border-gray-200 bg-white flex-shrink-0">
       {isVideo ? (
         <video src={url} className="w-full h-full object-cover" muted playsInline />
       ) : (

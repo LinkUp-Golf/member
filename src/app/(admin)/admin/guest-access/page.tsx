@@ -74,46 +74,63 @@ export default function AdminGuestAccessPage() {
     setProcessing(id)
     const supabase = createClient()
 
-    await supabase
-      .from('guest_access_requests')
-      .update({ status: decision, reviewed_by: user?.id })
-      .eq('id', id)
+    try {
+      const { error: statusError } = await supabase
+        .from('guest_access_requests')
+        .update({ status: decision, reviewed_by: user?.id })
+        .eq('id', id)
 
-    if (decision === 'approved') {
-      await supabase.from('course_memberships').upsert({
-        member_id: request.requesting_member_id,
-        course_id: request.target_course_id,
-        access_type: 'guest',
-        status: 'active',
-        granted_by: user?.id,
-        valid_from: request.visit_from,
-        valid_until: request.visit_until,
-      }, { onConflict: 'member_id,course_id,access_type' })
+      if (statusError) {
+        showToast('Failed to update the request. Please try again.', false)
+        return
+      }
 
-      const member = request.requesting_member
-      if (!member) { showToast('Access approved.'); return }
-      await supabase.from('announcements').insert({
-        course_id: request.target_course_id,
-        author_id: user?.id,
-        type: 'visiting_member',
-        title: `${member.first_name} ${member.last_name} is visiting`,
-        body: `${member.first_name} ${member.last_name} (${member.profile?.role_title ?? ''}, ${member.profile?.business_name ?? ''}) is visiting from ${formatBookingDate(request.visit_from)} to ${formatBookingDate(request.visit_until)}. Reach out to play a round together.`,
-        metadata: {
-          visiting_member_id: request.requesting_member_id,
-          visit_from: request.visit_from,
-          visit_until: request.visit_until,
-        },
-        status: 'published',
-        published_at: new Date().toISOString(),
-      })
+      if (decision === 'approved') {
+        const { error: membershipError } = await supabase.from('course_memberships').upsert({
+          member_id: request.requesting_member_id,
+          course_id: request.target_course_id,
+          access_type: 'guest',
+          status: 'active',
+          granted_by: user?.id,
+          valid_from: request.visit_from,
+          valid_until: request.visit_until,
+        }, { onConflict: 'member_id,course_id,access_type' })
 
-      showToast('Access approved and visiting member announcement posted.')
-    } else {
-      showToast('Request denied.')
+        if (membershipError) {
+          showToast('Request marked approved, but granting course access failed — please grant it manually.', false)
+          return
+        }
+
+        const member = request.requesting_member
+        if (!member) { showToast('Access approved.'); return }
+
+        const { error: announcementError } = await supabase.from('announcements').insert({
+          course_id: request.target_course_id,
+          author_id: user?.id,
+          type: 'visiting_member',
+          title: `${member.first_name} ${member.last_name} is visiting`,
+          body: `${member.first_name} ${member.last_name} (${member.profile?.role_title ?? ''}, ${member.profile?.business_name ?? ''}) is visiting from ${formatBookingDate(request.visit_from)} to ${formatBookingDate(request.visit_until)}. Reach out to play a round together.`,
+          metadata: {
+            visiting_member_id: request.requesting_member_id,
+            visit_from: request.visit_from,
+            visit_until: request.visit_until,
+          },
+          status: 'published',
+          published_at: new Date().toISOString(),
+        })
+
+        showToast(
+          announcementError
+            ? 'Access approved, but the visiting-member announcement failed to post.'
+            : 'Access approved and visiting member announcement posted.'
+        )
+      } else {
+        showToast('Request denied.')
+      }
+    } finally {
+      await loadRequests()
+      setProcessing(null)
     }
-
-    await loadRequests()
-    setProcessing(null)
   }
 
   async function revoke(id: string) {

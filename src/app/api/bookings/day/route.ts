@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
+import { formatInTimeZone, getTimezoneOffset } from 'date-fns-tz'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { AVIARA_TIMEZONE } from '@/lib/constants'
@@ -18,44 +19,20 @@ export interface DayPlayer {
   is_self: boolean
 }
 
-// Returns the Aviara date ("YYYY-MM-DD") and time ("HH:MM:SS") for a given UTC timestamp.
-function aviaraParts(utcMs: number): { date: string; time: string } {
+// Returns the course-local date ("YYYY-MM-DD") and time ("HH:MM:SS") for a
+// given UTC timestamp, in the given course's own timezone.
+function courseParts(utcMs: number, timezone: string): { date: string; time: string } {
   const d = new Date(utcMs)
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: AVIARA_TIMEZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).formatToParts(d)
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00'
   return {
-    date: `${get('year')}-${get('month')}-${get('day')}`,
-    time: `${get('hour')}:${get('minute')}:${get('second')}`,
+    date: formatInTimeZone(d, timezone, 'yyyy-MM-dd'),
+    time: formatInTimeZone(d, timezone, 'HH:mm:ss'),
   }
-}
-
-// Returns the UTC offset in milliseconds for the given IANA timezone on the given date string.
-function tzOffsetMs(tz: string, dateStr: string): number {
-  // Use noon UTC of the date as a stable DST-safe reference point.
-  const ref = new Date(`${dateStr}T12:00:00Z`)
-  const raw = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    timeZoneName: 'shortOffset',
-  }).formatToParts(ref).find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+0'
-  const m = raw.match(/GMT([+-])(\d+)(?::(\d+))?/)
-  const sign = m?.[1] === '-' ? -1 : 1
-  const h = parseInt(m?.[2] ?? '0', 10)
-  const min = parseInt(m?.[3] ?? '0', 10)
-  return sign * (h * 60 + min) * 60_000
 }
 
 // GET /api/bookings/day?date=YYYY-MM-DD&timezone=IANA_TZ
 // Returns members (same home course) who have confirmed bookings on the given LOCAL date.
-// The timezone param converts the user's local day to the correct Aviara date range.
+// The timezone param converts the user's local day to the correct date range
+// in the member's home course's own timezone (not necessarily Aviara).
 export const GET = withAuth(
   async (req: NextRequest, ctx: AuthContext) => {
     const date = req.nextUrl.searchParams.get('date')
@@ -63,33 +40,36 @@ export const GET = withAuth(
       return NextResponse.json({ error: 'date param required (YYYY-MM-DD)' }, { status: 400 })
     }
 
-    const clientTz = req.nextUrl.searchParams.get('timezone') ?? AVIARA_TIMEZONE
-    let timezone = AVIARA_TIMEZONE
-    try {
-      new Intl.DateTimeFormat('en-US', { timeZone: clientTz })
-      timezone = clientTz
-    } catch {
-      // invalid timezone string — fall back to Aviara
-    }
-
-    // Convert user's local day (00:00 – 23:59) to UTC using their offset.
-    const offsetMs = tzOffsetMs(timezone, date)
-    const dayStartUtc = new Date(`${date}T00:00:00Z`).getTime() - offsetMs
-    const dayEndUtc = new Date(`${date}T23:59:59Z`).getTime() - offsetMs
-
-    // Map those UTC boundaries to Aviara date + time.
-    const avStart = aviaraParts(dayStartUtc)
-    const avEnd = aviaraParts(dayEndUtc)
-
     const admin = createAdminClient()
 
     const { data: member } = await admin
       .from('members')
-      .select('home_course_id')
+      .select('home_course_id, home_course:courses!members_home_course_id_fkey(timezone)')
       .eq('id', ctx.userId)
       .single()
 
     if (!member) return NextResponse.json({ players: [] })
+
+    const homeCourseTimezone = (member.home_course as unknown as { timezone: string } | null)?.timezone ?? AVIARA_TIMEZONE
+
+    const clientTz = req.nextUrl.searchParams.get('timezone') ?? homeCourseTimezone
+    let timezone = homeCourseTimezone
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: clientTz })
+      timezone = clientTz
+    } catch {
+      // invalid timezone string — fall back to the home course's own timezone
+    }
+
+    // Convert user's local day (00:00 – 23:59) to UTC using their offset.
+    // Noon UTC of the date is used as a stable DST-safe reference point.
+    const offsetMs = getTimezoneOffset(timezone, new Date(`${date}T12:00:00Z`))
+    const dayStartUtc = new Date(`${date}T00:00:00Z`).getTime() - offsetMs
+    const dayEndUtc = new Date(`${date}T23:59:59Z`).getTime() - offsetMs
+
+    // Map those UTC boundaries to the home course's own date + time.
+    const courseStart = courseParts(dayStartUtc, homeCourseTimezone)
+    const courseEnd = courseParts(dayEndUtc, homeCourseTimezone)
 
     // Base query — apply course / status / guest filters.
     let bookingsQuery = admin
@@ -99,17 +79,17 @@ export const GET = withAuth(
       .is('guest_name', null)
       .in('status', ['availability_confirmed', 'payment_confirmed', 'confirmed'])
 
-    if (avStart.date === avEnd.date) {
-      // User's local day falls entirely within one Aviara calendar date.
+    if (courseStart.date === courseEnd.date) {
+      // User's local day falls entirely within one home-course calendar date.
       bookingsQuery = bookingsQuery
-        .eq('booking_date', avStart.date)
-        .gte('tee_time', avStart.time)
-        .lte('tee_time', avEnd.time)
+        .eq('booking_date', courseStart.date)
+        .gte('tee_time', courseStart.time)
+        .lte('tee_time', courseEnd.time)
     } else {
-      // User's local day spans two Aviara calendar dates (e.g. UTC+8 users).
+      // User's local day spans two home-course calendar dates (e.g. UTC+8 users).
       bookingsQuery = bookingsQuery.or(
-        `and(booking_date.eq.${avStart.date},tee_time.gte.${avStart.time}),` +
-          `and(booking_date.eq.${avEnd.date},tee_time.lte.${avEnd.time})`,
+        `and(booking_date.eq.${courseStart.date},tee_time.gte.${courseStart.time}),` +
+          `and(booking_date.eq.${courseEnd.date},tee_time.lte.${courseEnd.time})`,
       )
     }
 

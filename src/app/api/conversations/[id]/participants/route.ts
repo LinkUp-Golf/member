@@ -124,7 +124,15 @@ export const POST = withAuth(async (
     .from('conversation_participants')
     .insert({ conversation_id: convId, member_id, role: 'member', status: 'pending' })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    // Concurrent duplicate invite raced past the check above and hit the
+    // unique(conversation_id, member_id) constraint — surface the same
+    // friendly 409 the pre-check gives, not a raw constraint error.
+    if (error.code === '23505') {
+      return NextResponse.json({ error: 'Member is already in this group' }, { status: 409 })
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
 
   // Notify the invited member (fire-and-forget)
   ;(async () => {

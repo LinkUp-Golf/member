@@ -13,7 +13,7 @@
 //  - Tag missing                                  → deny + destroy session
 // ============================================================
 
-import { getContactById } from '@/lib/ghl/client'
+import { getContactByIdStrict } from '@/lib/ghl/client'
 import { getCache, GHL_AUTH_CACHE_KEY, GHL_AUTH_CACHE_NS, GHL_AUTH_TTL_MS } from '@/lib/cache'
 import { logger, auditLog } from '@/lib/logger'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
@@ -55,7 +55,7 @@ export async function validateGHLMembership(params: {
   let ghlError: Error | null = null
 
   try {
-    contact = await getContactById(ghlContactId)
+    contact = await getContactByIdStrict(ghlContactId)
   } catch (err) {
     ghlError = err instanceof Error ? err : new Error(String(err))
   }

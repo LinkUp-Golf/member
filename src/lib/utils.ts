@@ -4,8 +4,10 @@
 
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
-import { format, formatDistanceToNow, isToday, isYesterday } from 'date-fns'
+import { formatDistanceToNow } from 'date-fns'
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { AVIARA_TIMEZONE } from '@/lib/constants'
+import { getBrowserTimezone } from '@/lib/timezone'
 
 // ---- Class name helper --------------------------------------
 export function cn(...inputs: ClassValue[]) {
@@ -19,31 +21,53 @@ export function getInitials(firstName: string, lastName: string): string {
 
 // ---- Date formatting ----------------------------------------
 
-export function bookingToLocalDate(bookingDate: string, teeTime: string): Date {
-  const ref = new Date(`${bookingDate}T12:00:00Z`)
-  const offsetStr =
-    new Intl.DateTimeFormat('en-US', {
-      timeZone: AVIARA_TIMEZONE,
-      timeZoneName: 'shortOffset',
-    })
-      .formatToParts(ref)
-      .find((p) => p.type === 'timeZoneName')?.value ?? 'GMT-7'
-  const m = offsetStr.match(/GMT([+-])(\d+)(?::(\d+))?/)
-  const tzOffset = m
-    ? `${m[1]}${(m[2] ?? '7').padStart(2, '0')}:${(m[3] ?? '0').padStart(2, '0')}`
-    : '-07:00'
-  return new Date(`${bookingDate}T${teeTime}${tzOffset}`)
+// Returns a JS Date (UTC) for past/future comparisons and hour-difference logic.
+// DO NOT use this for display — the result renders in the browser's local timezone,
+// which will shift the date/time. For display, use booking_date + formatTeeTime(tee_time)
+// directly, since they are already stored in the course's local timezone.
+//
+// `timezone` should be the booking's own course.timezone — it defaults to
+// AVIARA_TIMEZONE only for call sites that don't have course data on hand
+// (or pre-multi-course data). Passing the wrong timezone shifts cancellation-
+// policy eligibility and upcoming/past bucketing for any course outside
+// Pacific time.
+export function bookingToLocalDate(bookingDate: string, teeTime: string, timezone: string = AVIARA_TIMEZONE): Date {
+  return fromZonedTime(`${bookingDate}T${teeTime}`, timezone)
 }
 
-export function formatMessageTime(dateString: string): string {
+// Calendar-day key ("2026-01-15") for a Date in a given IANA timezone —
+// used to compare "is this the same day" without the runtime's own local
+// zone leaking in.
+function dayKey(date: Date, timezone: string): string {
+  return formatInTimeZone(date, timezone, 'yyyy-MM-dd')
+}
+
+// Personal/viewer-perspective timestamp (messages, notifications, admin
+// views) — pass the *viewer's* saved timezone preference (member_profiles.timezone)
+// so "Today"/"Yesterday" and the rendered clock time match what they actually
+// set. Omit `timezone` (or pass null/undefined, e.g. no preference saved yet)
+// to fall back to the runtime's own zone.
+// Do NOT use this for booking tee times — those are anchored to the course's
+// own timezone regardless of viewer (see formatTeeTime / bookingToLocalDate).
+export function formatMessageTime(dateString: string, timezone?: string | null): string {
+  const tz = timezone || getBrowserTimezone()
   const date = new Date(dateString)
-  if (isToday(date)) return format(date, 'h:mm a')
-  if (isYesterday(date)) return 'Yesterday'
-  return format(date, 'MMM d')
+  const now = new Date()
+  if (dayKey(date, tz) === dayKey(now, tz)) {
+    return formatInTimeZone(date, tz, 'h:mm a')
+  }
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  if (dayKey(date, tz) === dayKey(yesterday, tz)) return 'Yesterday'
+  return formatInTimeZone(date, tz, 'MMM d')
 }
 
+// dateString here is always a plain "YYYY-MM-DD" calendar date (booking_date,
+// visit_from/until, event_date, promo expires_at) — not a specific instant.
+// Format it as UTC so it renders as the literal calendar date everywhere,
+// instead of `new Date('2026-01-15')` (parsed as UTC midnight) shifting to
+// the previous day once rendered in any timezone behind UTC.
 export function formatBookingDate(dateString: string): string {
-  return format(new Date(dateString), 'EEEE, MMMM d')
+  return formatInTimeZone(new Date(dateString), 'UTC', 'EEEE, MMMM d')
 }
 
 export function formatTeeTime(timeString: string): string {

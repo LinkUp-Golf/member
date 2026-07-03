@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import Icon from "@/components/ui/Icon";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useProfile } from "@/hooks/useProfile";
+import { useLocationTimezone } from "@/hooks/useLocationTimezone";
 
 const NAV_ITEMS = [
   { href: "/home", label: "Home", icon: "home" },
@@ -26,7 +27,8 @@ const DISMISSED_KEY = "linkup-notif-prompt-dismissed";
 export default function AppNav({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { permission, isSubscribed, subscribe } = usePushNotifications();
-  const { profile, loading } = useProfile();
+  const { profile, loading, refetch } = useProfile();
+  const { detectFromLocation } = useLocationTimezone(refetch);
   const [dismissed, setDismissed] = useState(true); // start hidden, reveal after mount
   const [fontReady, setFontReady] = useState(false);
 
@@ -36,6 +38,18 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
     document.documentElement.style.fontSize = `${px}px`;
     setFontReady(true);
   }, [loading, profile]);
+
+  // Ask for location once per member, as soon as the app opens, so the
+  // timezone preference is accurate without requiring a trip to Settings.
+  // Safe to fire unconditionally: browsers don't re-prompt once a choice
+  // (allow/block) has already been made for this origin.
+  const autoDetectRef = useRef(false);
+  useEffect(() => {
+    if (loading || autoDetectRef.current) return;
+    if (!profile || profile.profile?.timezone) return;
+    autoDetectRef.current = true;
+    detectFromLocation();
+  }, [loading, profile, detectFromLocation]);
 
   // Show the in-app prompt banner when permission hasn't been decided yet
   // and the user hasn't dismissed it before. Must be user-gesture driven

@@ -41,6 +41,7 @@ export type NotificationType =
   | 'play_suggestion'
   | 'guest_access'
   | 'referral'
+  | 'member_event'
   | 'test'
   | 'general'
 export type RSVPStatus = 'attending' | 'maybe' | 'declined'
@@ -81,13 +82,19 @@ export const INDUSTRY_CATEGORIES: IndustryCategory[] = [
 // ---- Database Row Types ------------------------------------
 // These match the Supabase table schemas exactly
 
+export type CourseApprovalStatus = 'pending' | 'active' | 'rejected' | 'archived'
+
 export interface Course {
   id: string
   name: string
   slug: string
+  logo_url: string
   city: string
   state: string
   country: string
+  address: string | null
+  phone: string | null
+  map_link: string | null
   access_tag: string
   max_members: number
   max_rounds_per_month: number
@@ -95,6 +102,41 @@ export interface Course {
   timezone: string
   active: boolean
   created_at: string
+
+  // GHL booking calendar
+  ghl_calendar_id: string | null
+  ghl_calendar_user_id: string | null
+
+  // Per-course booking config
+  cost_per_player: number | null
+  booking_rules: string | null
+  required_tags: string[]
+  meeting_interval_mins: number
+  meeting_duration_mins: number
+  min_scheduling_notice_mins: number
+  date_range_days: number
+  pre_buffer_mins: number
+  post_buffer_mins: number
+  seats_per_class: number | null
+
+  // Optional description shown in the admin and used as the GHL group description
+  description: string | null
+
+  // Website shown to members (any valid URL, optional) — labelled "Website" in the admin UI
+  booking_url: string | null
+
+  // Payment link members are sent to for confirmed bookings — required per course
+  payment_url: string | null
+
+  // GHL Calendar Group for this course (auto-created on course creation)
+  ghl_group_id: string | null
+
+  // Approval workflow
+  approval_status: CourseApprovalStatus
+  requested_by: string | null
+  reviewed_by: string | null
+  rejection_reason: string | null
+  requester?: { first_name: string; last_name: string } | null
 }
 
 export interface Member {
@@ -138,6 +180,10 @@ export interface MemberProfile {
   profile_visible: boolean
   show_handicap: boolean
   text_size: number
+  timezone: string | null
+  latitude: number | null
+  longitude: number | null
+  location_updated_at: string | null
   updated_at: string
 }
 
@@ -183,6 +229,7 @@ export interface Booking {
   admin_notes?: string | null
   created_at: string
   booker_name?: string | null
+  course?: { name: string; city: string; state: string; payment_url: string | null; timezone: string } | null
 }
 
 export interface PlayHistory {
@@ -270,6 +317,7 @@ export interface MemberEvent {
   max_attendees: number | null
   status: ModerationStatus
   reviewed_by: string | null
+  rejection_reason: string | null
   created_at: string
   organizer?: { first_name: string; last_name: string } | null
 }

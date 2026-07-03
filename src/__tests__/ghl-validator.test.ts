@@ -5,7 +5,7 @@ import { GHLError, ErrorCode } from '@/lib/errors/app-error'
 // ---- Module mocks ------------------------------------------
 // Mock the GHL client so no real HTTP calls are made
 vi.mock('@/lib/ghl/client', () => ({
-  getContactById: vi.fn(),
+  getContactByIdStrict: vi.fn(),
 }))
 
 // Replace the cache singleton for isolation
@@ -18,11 +18,11 @@ vi.mock('@/lib/cache', async (importOriginal) => {
   }
 })
 
-import { getContactById } from '@/lib/ghl/client'
+import { getContactByIdStrict } from '@/lib/ghl/client'
 import { validateGHLMembership, invalidateMembershipCache } from '@/lib/auth/ghl-validator'
 import { getCache } from '@/lib/cache'
 
-const mockGetContactById = vi.mocked(getContactById)
+const mockGetContactById = vi.mocked(getContactByIdStrict)
 
 const VALID_CONTACT = {
   id: 'ghl-contact-001',

@@ -8,6 +8,7 @@ import { apiClient } from "@/lib/api-client";
 import Avatar from "@/components/ui/Avatar";
 import { Spinner } from "@/components/ui/Loading";
 import AppShell from "@/components/layout/AppShell";
+import { RateLimitBanner } from "@/components/ui/RateLimitModal";
 import type { MemberWithProfile } from "@/types";
 
 export default function MemberProfilePage() {
@@ -42,6 +43,7 @@ export default function MemberProfilePage() {
   }, [id, loadMember]);
 
   const [startingConv, setStartingConv] = useState(false);
+  const [blocked, setBlocked] = useState<{ title: string; message: string } | null>(null);
 
   async function startConversation() {
     if (!user || !member || startingConv) return;
@@ -53,7 +55,21 @@ export default function MemberProfilePage() {
     });
 
     setStartingConv(false);
-    if (res.data?.id) router.push(`/messages/${res.data.id}`);
+
+    if (res.status === 403) {
+      setBlocked({ title: "Messaging Restricted", message: "The app anti-spam setting limits users to messaging and invite thresholds. You have exceeded this threshhold. You will be able to message and invite again in 3 hours." });
+      return;
+    }
+    if (res.status === 429) {
+      setBlocked({ title: "Limit Reached", message: res.error?.message ?? "Too many invitations. Please try again later." });
+      return;
+    }
+    if (res.error || !res.data) {
+      setBlocked({ title: "Couldn't Start Conversation", message: res.error?.message ?? "Something went wrong. Please try again." });
+      return;
+    }
+
+    router.push(`/messages/${res.data.id}`);
   }
 
   if (loading) {
@@ -106,6 +122,12 @@ export default function MemberProfilePage() {
           )}
         </div>
       </div>
+
+      {blocked && (
+        <div className="px-5 pt-4">
+          <RateLimitBanner title={blocked.title} message={blocked.message} onClose={() => setBlocked(null)} />
+        </div>
+      )}
 
       {/* Action buttons */}
       <div className="px-5 py-4 flex gap-3">

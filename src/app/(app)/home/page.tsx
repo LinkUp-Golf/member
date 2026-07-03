@@ -262,7 +262,7 @@ function AnnouncementThumbnail({ announcement }: { announcement: Announcement })
   const count = announcement.media_urls?.length
     ?? ((announcement.image_url ? 1 : 0) + (announcement.video_url ? 1 : 0))
   return (
-    <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 bg-black">
+    <div className="relative w-16 h-16 rounded-xl overflow-hidden border border-gray-200 flex-shrink-0 bg-white">
       {first.isVideo ? (
         <video src={first.url} className="w-full h-full object-cover" muted playsInline />
       ) : (
@@ -498,7 +498,7 @@ function PromoCard({ promo }: { promo: Promotion }) {
           )}
         </div>
         {mediaUrl && (
-          <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 bg-black">
+          <div className="relative w-16 h-16 rounded-xl overflow-hidden border border-gray-200 flex-shrink-0 bg-white">
             {isVideo ? (
               <video src={mediaUrl} className="w-full h-full object-cover" muted playsInline />
             ) : (

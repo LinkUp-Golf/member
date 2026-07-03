@@ -21,7 +21,7 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { getAvailableSlots, createBooking, getContactByEmail } from '@/lib/ghl/client'
-import { resolveAviaraAppointmentIso } from '@/lib/ghl/booking-time'
+import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
 import { sendPushToMembers, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
@@ -36,6 +36,7 @@ import {
   BOOKING_PRICE_USD,
   AVIARA_TIMEZONE,
   AVIARA_ADDRESS,
+  GOLF_ROUND_DURATION_MINUTES,
 } from '@/lib/constants'
 
 const AVIARA_CALENDAR_ID = process.env.GHL_AVIARA_CALENDAR_ID ?? ''
@@ -58,9 +59,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'month parameter required (YYYY-MM)' }, { status: 400 })
   }
 
-  // Client sends its own timezone; fall back to Aviara timezone
-  const clientTz = searchParams.get('timezone') ?? ''
-  const timezone = clientTz || AVIARA_TIMEZONE
+  const courseId = searchParams.get('courseId')
 
   const [yearStr, monthStr] = month.split('-')
   const year = parseInt(yearStr ?? '0', 10)
@@ -68,12 +67,39 @@ export async function GET(request: NextRequest) {
   const startDate = format(new Date(year, monthIdx, 1), 'yyyy-MM-dd')
   const endDate = format(new Date(year, monthIdx + 1, 0), 'yyyy-MM-dd')
 
+  let calendarId = AVIARA_CALENDAR_ID
+  // Slot listing is displayed in the *browsing member's* timezone, not the
+  // course's — GHL buckets/labels each returned slot's date+time for
+  // whichever timezone we ask for, so a member in Asia/Manila browsing a
+  // course in America/Chicago should see (and pick) times converted to
+  // their own zone (e.g. 4:35am, not the venue's 1:35pm). The venue's own
+  // timezone is still what the POST step below uses to derive booking_date/
+  // tee_time for storage — that's a separate, correct concern from display.
+  const timezone = searchParams.get('timezone') || AVIARA_TIMEZONE
+  let calendarUserId: string | undefined = AVIARA_CALENDAR_USER_ID || undefined
+
+  if (courseId) {
+    const adminSupabase = createAdminClient()
+    const { data: course } = await adminSupabase
+      .from('courses')
+      .select('ghl_calendar_id, ghl_calendar_user_id, timezone')
+      .eq('id', courseId)
+      .eq('approval_status', 'active')
+      .single()
+
+    if (!course?.ghl_calendar_id) {
+      return NextResponse.json({ error: 'Course not found or booking not yet configured' }, { status: 404 })
+    }
+    calendarId = course.ghl_calendar_id
+    calendarUserId = course.ghl_calendar_user_id || undefined
+  }
+
   const slots = await getAvailableSlots({
-    calendarId: AVIARA_CALENDAR_ID,
+    calendarId,
     startDate,
     endDate,
     timezone,
-    userId: AVIARA_CALENDAR_USER_ID || undefined,
+    userId: calendarUserId,
     sendSeatsPerSlot: true,
   })
 
@@ -98,10 +124,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   }
 
-  const { startTime: slotStartTime, focusLinkupId, additionalPlayers } = body as {
+  const { startTime: slotStartTime, focusLinkupId, additionalPlayers, courseId } = body as {
     startTime: string
     focusLinkupId?: string
     additionalPlayers?: AdditionalPlayer[]
+    courseId?: string
   }
   const rawExtraPlayers = additionalPlayers ?? []
 
@@ -150,23 +177,11 @@ export async function POST(request: NextRequest) {
     nonMemberGuests: nonMemberPlayers.length,
   })
 
-  // Convert slot ISO datetime to date + time in AVIARA_TIMEZONE, regardless of the
-  // timezone the client used when fetching slots.
+  // Convert slot ISO datetime to date + time in event/Aviara timezone
   const slotMoment = new Date(slotStartTime)
   if (isNaN(slotMoment.getTime())) {
     return NextResponse.json({ error: 'Invalid startTime value' }, { status: 400 })
   }
-  const localParts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: AVIARA_TIMEZONE,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hour12: false,
-  }).formatToParts(slotMoment)
-  const lp = (type: string) => localParts.find(p => p.type === type)?.value ?? '00'
-  const bookingDate = `${lp('year')}-${lp('month')}-${lp('day')}`
-  const timeNormalized = `${lp('hour')}:${lp('minute')}:${lp('second')}`
-
-  console.log('[booking/create] Resolved in AVIARA_TIMEZONE:', { bookingDate, timeNormalized })
 
   const { data: member, error: memberError } = await supabase
     .from('members')
@@ -182,6 +197,46 @@ export async function POST(request: NextRequest) {
   console.log('[booking/create] Member found:', { memberId: member.id, courseId: member.home_course_id })
 
   const adminSupabase = createAdminClient()
+
+  // Resolve course calendar settings — use the selected course when provided,
+  // fall back to the Aviara env-var constants for backward compatibility.
+  let eventCalendarId = AVIARA_CALENDAR_ID
+  let eventTimezone = AVIARA_TIMEZONE
+  let eventAddress = AVIARA_ADDRESS
+  let eventDurationMinutes = GOLF_ROUND_DURATION_MINUTES
+  let eventCourseName = 'Aviara'
+  let resolvedCourseId: string = member.home_course_id
+
+  if (courseId) {
+    const { data: course } = await adminSupabase
+      .from('courses')
+      .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, meeting_duration_mins, cost_per_player')
+      .eq('id', courseId)
+      .eq('approval_status', 'active')
+      .single()
+
+    if (!course?.ghl_calendar_id) {
+      return NextResponse.json({ error: 'Course not found or booking not yet configured' }, { status: 404 })
+    }
+    eventCalendarId = course.ghl_calendar_id
+    eventTimezone = course.timezone || AVIARA_TIMEZONE
+    eventAddress = course.address || course.city || AVIARA_ADDRESS
+    eventDurationMinutes = course.meeting_duration_mins || GOLF_ROUND_DURATION_MINUTES
+    eventCourseName = course.name
+    resolvedCourseId = course.id
+  }
+
+  const localParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: eventTimezone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).formatToParts(slotMoment)
+  const lp = (type: string) => localParts.find(p => p.type === type)?.value ?? '00'
+  const bookingDate = `${lp('year')}-${lp('month')}-${lp('day')}`
+  const timeNormalized = `${lp('hour')}:${lp('minute')}:${lp('second')}`
+
+  console.log('[booking/create] Resolved in event/Aviara timezone:', { bookingDate, timeNormalized })
   const memberName = `${member.first_name} ${member.last_name}`
   // Non-members are pending approval, so they don't count toward the confirmed
   // group size used for the GHL booking and community announcement.
@@ -253,15 +308,27 @@ export async function POST(request: NextRequest) {
   }
 
   // Build start/end ISO strings with AVIARA_TIMEZONE offset — format: "YYYY-MM-DDTHH:MM:SS±HHMM"
-  const { startIso, endIso } = resolveAviaraAppointmentIso(bookingDate, timeNormalized)
+  // A misconfigured course timezone (invalid IANA string) throws here — the admin
+  // routes validate on write, but this guards against any pre-existing bad data.
+  let startIso: string
+  let endIso: string
+  try {
+    ({ startIso, endIso } = resolveAppointmentIso(bookingDate, timeNormalized, eventTimezone, eventDurationMinutes))
+  } catch (err) {
+    console.error('[booking/create] Invalid course timezone:', eventTimezone, String(err))
+    return NextResponse.json(
+      { error: 'This course is misconfigured (invalid timezone). Please contact support.' },
+      { status: 422 }
+    )
+  }
 
   const bookingParams = {
-    calendarId: AVIARA_CALENDAR_ID,
-    title: 'LinkUp @ Aviara',
+    calendarId: eventCalendarId,
+    title: `LinkUp @ ${eventCourseName}`,
     startTime: startIso,
     endTime: endIso,
-    timezone: AVIARA_TIMEZONE,
-    address: AVIARA_ADDRESS,
+    timezone: eventTimezone,
+    address: eventAddress,
   }
 
   // Step 1: Create GHL appointment for the primary booker — must succeed
@@ -310,7 +377,7 @@ export async function POST(request: NextRequest) {
   const rows = [
     {
       member_id: user.id,
-      course_id: member.home_course_id,
+      course_id: resolvedCourseId,
       booking_date: bookingDate,
       tee_time: timeNormalized,
       players: 1,
@@ -323,7 +390,7 @@ export async function POST(request: NextRequest) {
     },
     ...memberPlayers.map((p, i) => ({
       member_id: user.id,
-      course_id: member.home_course_id,
+      course_id: resolvedCourseId,
       booking_date: bookingDate,
       tee_time: timeNormalized,
       players: 1,
@@ -340,7 +407,7 @@ export async function POST(request: NextRequest) {
     // appointment, status → tentative) or rejects it (status → cancelled).
     ...nonMemberPlayers.map((p) => ({
       member_id: user.id,
-      course_id: member.home_course_id,
+      course_id: resolvedCourseId,
       booking_date: bookingDate,
       tee_time: timeNormalized,
       players: 1,
@@ -382,7 +449,7 @@ export async function POST(request: NextRequest) {
   void adminSupabase
     .from('announcements')
     .insert({
-      course_id: member.home_course_id,
+      course_id: resolvedCourseId,
       author_id: user.id,
       type: 'booking',
       title: `${memberName}${playerSuffix} is playing on ${displayDate}`,
@@ -400,7 +467,7 @@ export async function POST(request: NextRequest) {
       if (error) console.error('[booking/create] Announcement insert failed (non-fatal):', error)
     })
 
-  void getCache(COURSE_ANN_NS).clear(courseAnnPrefix(member.home_course_id)).catch((e) => {
+  void getCache(COURSE_ANN_NS).clear(courseAnnPrefix(resolvedCourseId)).catch((e) => {
     console.error('[booking/create] Cache clear failed (non-fatal):', e)
   })
 

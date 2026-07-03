@@ -104,7 +104,7 @@ export default function MultiMediaUpload({
           {value.map(f => (
             <div
               key={f.id}
-              className="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200 bg-black flex-shrink-0"
+              className="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200 bg-white flex-shrink-0"
             >
               {f.mediaType === 'image' ? (
                 <Image src={f.previewUrl} alt="" fill className="object-cover" unoptimized />

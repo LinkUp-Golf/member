@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { formatInTimeZone } from 'date-fns-tz'
 import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
@@ -18,6 +19,7 @@ export default function MyProfilePage() {
   const [focusGroups, setFocusGroups] = useState<string[]>([])
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [avatarError, setAvatarError] = useState('')
+  const [saveError, setSaveError] = useState('')
   const avatarInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -83,6 +85,7 @@ export default function MyProfilePage() {
   async function save() {
     if (!user) return
     setSaving(true)
+    setSaveError('')
 
     const response = await apiClient.patch('/api/profile', {
       display_name: form.display_name,
@@ -100,6 +103,8 @@ export default function MyProfilePage() {
     if (!response.error) {
       await refetch()
       setEditing(false)
+    } else {
+      setSaveError(response.error.message || 'Failed to save. Please try again.')
     }
     setSaving(false)
   }
@@ -166,7 +171,10 @@ export default function MyProfilePage() {
           )}
           {m.membership_start_date && (
             <span className="profile-tag">
-              Member since {new Date(m.membership_start_date).getFullYear()}
+              {/* membership_start_date is a plain calendar date, not an instant —
+                  read the year in UTC so a Jan 1 start date doesn't show as the
+                  previous year for anyone west of UTC. */}
+              Member since {formatInTimeZone(new Date(m.membership_start_date), 'UTC', 'yyyy')}
             </span>
           )}
         </div>
@@ -175,22 +183,27 @@ export default function MyProfilePage() {
       {/* Edit / Save toggle */}
       <div className="px-5 py-4">
         {editing ? (
-          <div className="flex gap-3">
-            <button
-              onClick={() => { setEditing(false); setForm(m.profile ?? {}) }}
-              className="btn btn-outline flex-1 justify-center"
-              disabled={saving}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={save}
-              className="btn btn-gold flex-1 justify-center"
-              disabled={saving}
-            >
-              {saving ? <Spinner className="w-4 h-4" /> : 'Save changes'}
-            </button>
-          </div>
+          <>
+            {saveError && (
+              <p className="text-xs text-red-500 mb-2">{saveError}</p>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setEditing(false); setForm(m.profile ?? {}) }}
+                className="btn btn-outline flex-1 justify-center"
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={save}
+                className="btn btn-gold flex-1 justify-center"
+                disabled={saving}
+              >
+                {saving ? <Spinner className="w-4 h-4" /> : 'Save changes'}
+              </button>
+            </div>
+          </>
         ) : (
           <button
             onClick={() => setEditing(true)}
