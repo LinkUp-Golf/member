@@ -67,6 +67,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
         .eq('member_id', inv.member_id)   // same booker
         .eq('booking_date', inv.booking_date)
         .eq('tee_time', inv.tee_time)
+        .eq('created_at', inv.created_at) // same transaction — not just a coincidental same-slot booking
         .neq('id', inv.id)                // exclude the invited member's own row
 
       for (const s of siblings ?? []) {

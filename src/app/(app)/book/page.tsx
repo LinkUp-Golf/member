@@ -2928,10 +2928,15 @@ type BookingGroup = {
   players: Booking[];
 };
 
+// Grouped by (booker + tee time + created_at) rather than just date/time —
+// two separate booking groups can land on the same tee time by coincidence
+// and must not be merged into one card. Rows inserted together (one
+// transaction) share the exact same created_at, since Postgres evaluates
+// now() once per statement.
 function groupBookings(bookings: Booking[]): BookingGroup[] {
   const bySlot = new Map<string, Booking[]>();
   for (const b of bookings) {
-    const key = `${b.booking_date}_${b.tee_time}_${b.status === "cancelled" ? "cancelled" : "active"}`;
+    const key = `${b.member_id}_${b.created_at}_${b.booking_date}_${b.tee_time}_${b.status === "cancelled" ? "cancelled" : "active"}`;
     const slot = bySlot.get(key) ?? [];
     slot.push(b);
     bySlot.set(key, slot);

@@ -14,6 +14,8 @@ type BookingStatus = 'tentative' | 'availability_confirmed' | 'payment_confirmed
 
 interface BookingRow {
   id: string
+  member_id: string
+  created_at: string
   booking_date: string
   tee_time: string
   players: number
@@ -83,20 +85,28 @@ interface AccessMemberRow {
   ghl_tags: string[]
 }
 
-type TeeSlot = { key: string; booking_date: string; tee_time: string; rows: BookingRow[] }
+type TeeSlot = { key: string; booking_date: string; tee_time: string; created_at: string; rows: BookingRow[] }
 type DateGroup = { date: string; label: string; isToday: boolean; slots: TeeSlot[] }
 
+// Grouped by (booker + tee time + created_at) rather than just date/time —
+// two separate booking groups can land on the same tee time by coincidence
+// and must not be merged into one slot. Rows inserted together (one
+// transaction) share the exact same created_at, since Postgres evaluates
+// now() once per statement.
 function groupBySlot(bookings: BookingRow[]): TeeSlot[] {
   const map = new Map<string, BookingRow[]>()
   for (const b of bookings) {
-    const key = `${b.booking_date}_${b.tee_time}`
+    const key = `${b.member_id}_${b.created_at}_${b.booking_date}_${b.tee_time}`
     const arr = map.get(key) ?? []
     arr.push(b)
     map.set(key, arr)
   }
   return [...map.entries()]
-    .map(([key, rows]) => ({ key, booking_date: rows[0]!.booking_date, tee_time: rows[0]!.tee_time, rows }))
-    .sort((a, b) => a.key.localeCompare(b.key))
+    .map(([key, rows]) => {
+      const first = rows[0]!
+      return { key, booking_date: first.booking_date, tee_time: first.tee_time, created_at: first.created_at, rows }
+    })
+    .sort((a, b) => a.tee_time.localeCompare(b.tee_time) || a.created_at.localeCompare(b.created_at))
 }
 
 function groupByDate(slots: TeeSlot[]): DateGroup[] {
@@ -542,7 +552,7 @@ export default function AdminBookingsPage() {
 
     if (matchingCourseIds.length === 0) { setBookings([]); setLoading(false); return }
 
-    const SELECT = 'id, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name)'
+    const SELECT = 'id, member_id, created_at, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name)'
     const SELECT_NO_DINNER = SELECT.replace('dinner_rsvp, ', '')
 
     function buildQuery(select: string) {
