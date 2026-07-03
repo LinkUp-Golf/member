@@ -43,8 +43,16 @@ const STATUS_META: Record<BookingStatus, { label: string; colour: string; dot: s
 }
 
 const ALL_STATUSES = Object.keys(STATUS_META) as BookingStatus[]
-const STATUS_FILTERS = ['all', 'tentative', 'awaiting_approval', 'availability_confirmed', 'payment_confirmed', 'confirmed', 'cancelled'] as const
+const STATUS_FILTERS = ['all', 'tentative', 'awaiting_approval', 'availability_confirmed', 'payment_confirmed', 'confirmed', 'cancelled', 'payment_overdue'] as const
 type StatusFilter = typeof STATUS_FILTERS[number]
+
+// Payment Overdue isn't a real booking status — it's availability_confirmed
+// (member notified, "Payment due" on their side) rows whose tee time is
+// within the next 3 days and still unpaid. See loadBookings for the query.
+const PAYMENT_OVERDUE_WINDOW_DAYS = 3
+const STATUS_FILTER_LABELS: Partial<Record<StatusFilter, string>> = {
+  payment_overdue: `⚠ Payment overdue (within ${PAYMENT_OVERDUE_WINDOW_DAYS}d)`,
+}
 
 const DINNER_FILTERS = ['all', 'yes', 'no', 'maybe', 'none'] as const
 type DinnerFilter = typeof DINNER_FILTERS[number]
@@ -322,6 +330,114 @@ function SlotCard({
   )
 }
 
+// ---- Filter helpers ---------------------------------------------------
+
+function FilterField({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string
+  htmlFor?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-1 min-w-0">
+      <label htmlFor={htmlFor} className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
+        {label}
+      </label>
+      {children}
+    </div>
+  )
+}
+
+function FunnelIcon() {
+  return (
+    <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h18M6 9h12M9.75 13.5h4.5M11.25 18h1.5" />
+    </svg>
+  )
+}
+
+// Mobile-only bottom sheet holding every filter field — desktop shows them
+// inline instead (see the "hidden sm:grid" block in the main render).
+function FiltersDrawer({
+  open,
+  onClose,
+  onClear,
+  hasActiveFilters,
+  children,
+}: {
+  open: boolean
+  onClose: () => void
+  onClear: () => void
+  hasActiveFilters: boolean
+  children: React.ReactNode
+}) {
+  const [mounted, setMounted] = useState(false)
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true)
+      const ids: number[] = []
+      ids[0] = requestAnimationFrame(() => { ids[1] = requestAnimationFrame(() => setVisible(true)) })
+      return () => ids.forEach(id => cancelAnimationFrame(id))
+    } else {
+      setVisible(false)
+      const t = setTimeout(() => setMounted(false), 250)
+      return () => clearTimeout(t)
+    }
+  }, [open])
+
+  if (!mounted) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end sm:hidden">
+      <button
+        type="button"
+        aria-label="Close filters"
+        className="absolute inset-0 w-full h-full"
+        style={{ background: 'rgba(0,0,0,0.4)', opacity: visible ? 1 : 0, transition: 'opacity 200ms ease-out' }}
+        onClick={onClose}
+      />
+      <div
+        className="relative bg-white rounded-t-2xl px-4 pt-4 pb-6 max-h-[85vh] overflow-y-auto"
+        style={{
+          transform: visible ? 'translateY(0)' : 'translateY(100%)',
+          transition: visible ? 'transform 280ms cubic-bezier(0.32,0.72,0,1)' : 'transform 200ms cubic-bezier(0.4,0,1,1)',
+        }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-bold text-gray-800">Filters</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="w-8 h-8 rounded-full flex items-center justify-center bg-gray-100 text-gray-500"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="space-y-3">{children}</div>
+
+        {hasActiveFilters && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="w-full mt-5 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ---- Main page -------------------------------------------------------
 
 export default function AdminBookingsPage() {
@@ -361,6 +477,7 @@ export default function AdminBookingsPage() {
 
   const [processingBookingRequestId, setProcessingBookingRequestId] = useState<string | null>(null)
   const [requestToast, setRequestToast] = useState<{ msg: string; ok: boolean } | null>(null)
+  const [filtersOpen, setFiltersOpen] = useState(false)
 
   // Sync URL → filter when navigating from the nav sidebar (clicking a specific
   // course under "Booking Courses"). Once a course is pinned this way, the
@@ -389,10 +506,15 @@ export default function AdminBookingsPage() {
     // Upcoming: today → 365 days ahead (ascending)
     // Past:     365 days ago → yesterday (descending — most recent first)
     // A custom From/To range overrides the view-based window when both are set.
+    // Payment Overdue overrides both — it's inherently "next N days", regardless
+    // of the Upcoming/Past toggle or a custom range.
+    const isPaymentOverdue = statusFilter === 'payment_overdue'
     const isUpcoming  = view === 'upcoming'
     const hasCustomRange = !!customFrom && !!customTo
-    const rangeStart  = hasCustomRange ? customFrom : isUpcoming ? today : format(subDays(new Date(), 365), 'yyyy-MM-dd')
-    const rangeEnd    = hasCustomRange ? customTo   : isUpcoming ? format(addDays(new Date(), 365), 'yyyy-MM-dd') : format(subDays(new Date(), 1), 'yyyy-MM-dd')
+    const rangeStart  = isPaymentOverdue ? today
+      : hasCustomRange ? customFrom : isUpcoming ? today : format(subDays(new Date(), 365), 'yyyy-MM-dd')
+    const rangeEnd    = isPaymentOverdue ? format(addDays(new Date(), PAYMENT_OVERDUE_WINDOW_DAYS), 'yyyy-MM-dd')
+      : hasCustomRange ? customTo   : isUpcoming ? format(addDays(new Date(), 365), 'yyyy-MM-dd') : format(subDays(new Date(), 1), 'yyyy-MM-dd')
 
     const { data: courses } = await supabase
       .from('courses')
@@ -430,7 +552,8 @@ export default function AdminBookingsPage() {
         .in('course_id', matchingCourseIds)
         .gte('booking_date', rangeStart)
         .lte('booking_date', rangeEnd)
-      if (statusFilter !== 'all') q = q.eq('status', statusFilter)
+      if (statusFilter === 'payment_overdue') q = q.eq('status', 'availability_confirmed')
+      else if (statusFilter !== 'all') q = q.eq('status', statusFilter)
       if (dinnerFilter !== 'all') {
         q = dinnerFilter === 'none' ? q.is('dinner_rsvp', null) : q.eq('dinner_rsvp', dinnerFilter)
       }
@@ -628,6 +751,18 @@ export default function AdminBookingsPage() {
   const hasActiveFilters = statusFilter !== 'all' || dinnerFilter !== 'all'
     || locationFilter !== 'all' || tagFilter !== 'all' || !!eventNameFilter || !!search || !!customFrom || !!customTo
 
+  // Count of active fields inside the mobile Filters drawer specifically
+  // (excludes Search, which stays visible outside the drawer) — drives the
+  // badge on the mobile "Filters" button.
+  const activeFilterCount = [
+    statusFilter !== 'all',
+    dinnerFilter !== 'all',
+    !!customFrom || !!customTo,
+    locationFilter !== 'all',
+    tagFilter !== 'all',
+    !!eventNameFilter,
+  ].filter(Boolean).length
+
   function clearFilters() {
     setSearch('')
     setStatusFilter('all')
@@ -719,6 +854,93 @@ export default function AdminBookingsPage() {
     onNoteChange: (id: string, val: string) => setNoteValues(prev => ({ ...prev, [id]: val })),
     onSaveNote: saveNote, savingNote, noteRef,
     processingBookingRequestId, onDecideRequest: decideBookingRequest,
+  }
+
+  // Shared between the desktop inline grid and the mobile drawer — id suffix
+  // keeps the two rendered copies' element ids unique in the DOM.
+  function renderFilterFields(idSuffix: string) {
+    return (
+      <>
+        <FilterField label="Status" htmlFor={`status-${idSuffix}`}>
+          <Select
+            id={`status-${idSuffix}`}
+            value={statusFilter}
+            onChange={v => setStatusFilter(v as StatusFilter)}
+            options={STATUS_FILTERS.map(s => ({
+              value: s,
+              label: s === 'all' ? 'All statuses' : (STATUS_FILTER_LABELS[s] ?? STATUS_META[s as BookingStatus].label),
+            }))}
+            placeholder="All statuses"
+            className="w-full"
+            triggerClassName="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg flex items-center justify-between gap-2 bg-white"
+          />
+        </FilterField>
+        <FilterField label="Dinner RSVP" htmlFor={`dinner-${idSuffix}`}>
+          <Select
+            id={`dinner-${idSuffix}`}
+            value={dinnerFilter}
+            onChange={v => setDinnerFilter(v as DinnerFilter)}
+            options={DINNER_FILTERS.map(d => ({ value: d, label: DINNER_FILTER_LABELS[d] }))}
+            placeholder="All dinner RSVPs"
+            className="w-full"
+            triggerClassName="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg flex items-center justify-between gap-2 bg-white"
+          />
+        </FilterField>
+        <FilterField label="From" htmlFor={`from-${idSuffix}`}>
+          <input
+            id={`from-${idSuffix}`}
+            type="date" value={customFrom}
+            onChange={e => setCustomFrom(e.target.value)}
+            className="w-full px-2.5 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
+          />
+        </FilterField>
+        <FilterField label="To" htmlFor={`to-${idSuffix}`}>
+          <input
+            id={`to-${idSuffix}`}
+            type="date" value={customTo}
+            onChange={e => setCustomTo(e.target.value)}
+            className="w-full px-2.5 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
+          />
+        </FilterField>
+
+        {courseFilter === 'all' && (
+          <>
+            <FilterField label="Location" htmlFor={`location-${idSuffix}`}>
+              <Select
+                id={`location-${idSuffix}`}
+                value={locationFilter}
+                onChange={setLocationFilter}
+                options={[{ value: 'all', label: 'All locations' }, ...locationOptions.map(l => ({ value: l, label: l }))]}
+                placeholder="All locations"
+                searchPlaceholder="Search locations…"
+                className="w-full"
+                triggerClassName="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg flex items-center justify-between gap-2 bg-white"
+              />
+            </FilterField>
+            <FilterField label="Tags" htmlFor={`tags-${idSuffix}`}>
+              <Select
+                id={`tags-${idSuffix}`}
+                value={tagFilter}
+                onChange={setTagFilter}
+                options={[{ value: 'all', label: 'All tags' }, ...tagOptions.map(t => ({ value: t, label: t }))]}
+                placeholder="All tags"
+                searchPlaceholder="Search tags…"
+                className="w-full"
+                triggerClassName="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg flex items-center justify-between gap-2 bg-white"
+              />
+            </FilterField>
+            <FilterField label="Event name" htmlFor={`event-name-${idSuffix}`}>
+              <input
+                id={`event-name-${idSuffix}`}
+                type="text" placeholder="Event name…" value={eventNameFilter}
+                onChange={e => setEventNameFilter(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
+              />
+            </FilterField>
+          </>
+        )}
+      </>
+    )
   }
 
   // ---- Render ---------------------------------------------------------
@@ -911,13 +1133,27 @@ export default function AdminBookingsPage() {
 
       {/* Filter bar */}
       <div className="space-y-2 mb-5">
-        {/* Row 1: search + actions */}
+        {/* Row 1: search + actions. On mobile, a "Filters" button opens the
+            drawer below instead of showing every field inline. */}
         <div className="flex items-center gap-2">
           <input
             type="text" placeholder="Search player…" value={search}
             onChange={e => setSearch(e.target.value)}
             className="flex-1 min-w-0 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
           />
+          <button
+            type="button"
+            onClick={() => setFiltersOpen(true)}
+            className="sm:hidden relative flex-shrink-0 flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <FunnelIcon />
+            Filters
+            {activeFilterCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-green-900 text-white text-[9px] font-bold flex items-center justify-center">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
           {allSlots.length > 0 && (
             <div className="hidden sm:flex items-center gap-1">
               <button onClick={expandAll}  className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-50">Expand all</button>
@@ -930,73 +1166,33 @@ export default function AdminBookingsPage() {
           </button>
         </div>
 
-        {/* Row 2: filter controls — compact dropdowns, wraps responsively.
+        {/* Row 2: filter controls — desktop/tablet only, laid out in a grid so
+            fields wrap predictably instead of an uneven flex-wrap cascade.
             Course selection itself lives in the sidebar's "Booking Courses"
             list; location/tags/event name only make sense while browsing
             "All Bookings" (they narrow across courses), so they're hidden
             once a specific course is pinned via the sidebar. */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <Select
-            value={statusFilter}
-            onChange={v => setStatusFilter(v as StatusFilter)}
-            options={STATUS_FILTERS.map(s => ({ value: s, label: s === 'all' ? 'All statuses' : STATUS_META[s as BookingStatus].label }))}
-            placeholder="All statuses"
-            className="w-full sm:w-40"
-            triggerClassName="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg flex items-center justify-between gap-2 bg-white"
-          />
-          <Select
-            value={dinnerFilter}
-            onChange={v => setDinnerFilter(v as DinnerFilter)}
-            options={DINNER_FILTERS.map(d => ({ value: d, label: DINNER_FILTER_LABELS[d] }))}
-            placeholder="All dinner RSVPs"
-            className="w-full sm:w-40"
-            triggerClassName="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg flex items-center justify-between gap-2 bg-white"
-          />
-          <input
-            type="date" value={customFrom} aria-label="From date"
-            onChange={e => setCustomFrom(e.target.value)}
-            className="px-2.5 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
-          />
-          <input
-            type="date" value={customTo} aria-label="To date"
-            onChange={e => setCustomTo(e.target.value)}
-            className="px-2.5 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
-          />
-
-          {courseFilter === 'all' && (
-            <>
-              <Select
-                value={locationFilter}
-                onChange={setLocationFilter}
-                options={[{ value: 'all', label: 'All locations' }, ...locationOptions.map(l => ({ value: l, label: l }))]}
-                placeholder="All locations"
-                searchPlaceholder="Search locations…"
-                className="w-full sm:w-44"
-                triggerClassName="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg flex items-center justify-between gap-2 bg-white"
-              />
-              <Select
-                value={tagFilter}
-                onChange={setTagFilter}
-                options={[{ value: 'all', label: 'All tags' }, ...tagOptions.map(t => ({ value: t, label: t }))]}
-                placeholder="All tags"
-                searchPlaceholder="Search tags…"
-                className="w-full sm:w-36"
-                triggerClassName="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg flex items-center justify-between gap-2 bg-white"
-              />
-              <input
-                type="text" placeholder="Event name…" value={eventNameFilter}
-                onChange={e => setEventNameFilter(e.target.value)}
-                className="w-full sm:w-44 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
-              />
-            </>
-          )}
+        <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-3 items-start">
+          {renderFilterFields('desktop')}
 
           {hasActiveFilters && (
-            <button onClick={clearFilters} className="text-xs font-medium text-gray-400 hover:text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-50">
+            <button
+              onClick={clearFilters}
+              className="self-end text-xs font-medium text-gray-400 hover:text-gray-600 px-2 py-2 rounded-lg hover:bg-gray-50 justify-self-start"
+            >
               Clear filters
             </button>
           )}
         </div>
+
+        <FiltersDrawer
+          open={filtersOpen}
+          onClose={() => setFiltersOpen(false)}
+          onClear={() => { clearFilters(); setFiltersOpen(false) }}
+          hasActiveFilters={hasActiveFilters}
+        >
+          {renderFilterFields('mobile')}
+        </FiltersDrawer>
       </div>
 
       {/* Bookings */}
