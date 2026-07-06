@@ -101,29 +101,7 @@ export default function AdminGuestAccessPage() {
           return
         }
 
-        const member = request.requesting_member
-        if (!member) { showToast('Access approved.'); return }
-
-        const { error: announcementError } = await supabase.from('announcements').insert({
-          course_id: request.target_course_id,
-          author_id: user?.id,
-          type: 'visiting_member',
-          title: `${member.first_name} ${member.last_name} is visiting`,
-          body: `${member.first_name} ${member.last_name} (${member.profile?.role_title ?? ''}, ${member.profile?.business_name ?? ''}) is visiting from ${formatBookingDate(request.visit_from)} to ${formatBookingDate(request.visit_until)}. Reach out to play a round together.`,
-          metadata: {
-            visiting_member_id: request.requesting_member_id,
-            visit_from: request.visit_from,
-            visit_until: request.visit_until,
-          },
-          status: 'published',
-          published_at: new Date().toISOString(),
-        })
-
-        showToast(
-          announcementError
-            ? 'Access approved, but the visiting-member announcement failed to post.'
-            : 'Access approved and visiting member announcement posted.'
-        )
+        showToast('Access approved.')
       } else {
         showToast('Request denied.')
       }

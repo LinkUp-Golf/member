@@ -6,20 +6,18 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
-import { formatBookingDate, formatTeeTime, truncate, formatRelativeTime } from "@/lib/utils";
-import Avatar from "@/components/ui/Avatar";
+import { formatBookingDate, formatTeeTime, formatRelativeTime } from "@/lib/utils";
 import EmptyState from "@/components/ui/EmptyState";
 import AppShell from '@/components/layout/AppShell';
 import InstallBanner from '@/components/ui/InstallBanner';
 import Icon, { type IconName } from '@/components/ui/Icon';
 import NotificationBell from '@/components/ui/NotificationBell';
 import MessagesIcon from '@/components/ui/MessagesIcon';
-import { CardSkeleton, MemberRowSkeleton } from "@/components/ui/Loading";
+import { CardSkeleton } from "@/components/ui/Loading";
 import type {
   Booking,
   Announcement,
   Promotion,
-  MemberWithProfile,
 } from "@/types";
 
 export default function HomePage() {
@@ -27,7 +25,6 @@ export default function HomePage() {
   const [nextBooking, setNextBooking] = useState<Booking | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
-  const [newMembers, setNewMembers] = useState<MemberWithProfile[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [greeting, setGreeting] = useState('');
@@ -49,20 +46,16 @@ export default function HomePage() {
   }, [user, authLoading, refetch]);
 
   async function loadHomeData() {
-    const [bookingRes, announcementRes, promoRes, memberRes] =
+    const [bookingRes, announcementRes, promoRes] =
       await Promise.all([
         apiClient.get<Booking[]>("/api/bookings?upcoming=true&limit=1"),
         apiClient.get<Announcement[]>("/api/announcements?limit=20"),
         apiClient.get<Promotion[]>("/api/promotions?limit=2"),
-        apiClient.get<MemberWithProfile[]>(
-          "/api/members?limit=2&exclude_self=true&order=created_at"
-        ),
       ]);
 
     setNextBooking(bookingRes.data?.[0] ?? null);
     setAnnouncements(announcementRes.data ?? []);
     setPromotions(promoRes.data ?? []);
-    setNewMembers(memberRes.data ?? []);
     setLoading(false);
   }
 
@@ -189,59 +182,6 @@ export default function HomePage() {
             <EmptyState compact icon="📢" title="No announcements yet" description="Course news and community highlights will appear here." />
           )}
         </section>
-
-        {/* New Members */}
-        {(loading || newMembers.length > 0) && (
-          <section>
-            <div className="flex items-center justify-between mb-3.5">
-              <p className="section-label !mb-0">New Members</p>
-              <Link href="/members" className="text-xs font-medium" style={{ color: 'var(--color-green-600)' }}>
-                All members →
-              </Link>
-            </div>
-            {loading ? (
-              <div className="card">
-                <MemberRowSkeleton />
-                <MemberRowSkeleton />
-              </div>
-            ) : (
-              <div className="card">
-                {newMembers.map((m) => (
-                  <Link
-                    key={m.id}
-                    href={`/members/${m.id}`}
-                    className="member-row"
-                  >
-                    <Avatar
-                      firstName={m.first_name}
-                      lastName={m.last_name}
-                      avatarUrl={m.profile?.avatar_url}
-                      size="md"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium capitalize" style={{ color: 'var(--color-green-900)' }}>
-                        {m.first_name} {m.last_name}
-                      </p>
-                      <p className="text-xs mt-0.5" style={{ color: 'rgba(0,38,105,0.55)' }}>
-                        {m.profile?.role_title ?? ""}
-                        {m.profile?.business_name ? `, ${m.profile.business_name}` : ""}
-                      </p>
-                      {m.profile?.value_offered && (
-                        <span className="tag mt-1.5">
-                          Offers: {truncate(m.profile.value_offered, 40)}
-                        </span>
-                      )}
-                    </div>
-                    <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                      strokeWidth={1.5} style={{ color: 'rgba(0,38,105,0.2)' }}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                    </svg>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
       </div>
     </AppShell>
   );
@@ -290,12 +230,10 @@ function StackIcon() {
 }
 
 const ANNOUNCEMENT_TYPES: Record<string, { icon: IconName; color: string; iconColor: string }> = {
-  new_member:      { icon: 'new-member',       color: 'rgba(133,187,101,0.12)', iconColor: 'var(--color-green-700)' },
-  booking:         { icon: 'tee-time',          color: 'rgba(0,38,105,0.07)',    iconColor: 'rgba(0,38,105,0.5)' },
-  visiting_member: { icon: 'visiting-member',   color: 'rgba(26,85,173,0.08)',   iconColor: 'rgba(26,85,173,0.6)' },
   member_event:    { icon: 'next-round',        color: 'rgba(0,38,105,0.07)',    iconColor: 'rgba(0,38,105,0.5)' },
+  new_course:      { icon: 'tee-time',          color: 'rgba(0,38,105,0.07)',    iconColor: 'rgba(0,38,105,0.5)' },
   admin_broadcast: { icon: 'announcement',      color: 'rgba(133,187,101,0.12)', iconColor: 'var(--color-green-700)' },
-  focus_linkup:    { icon: 'focus-linkup',      color: 'rgba(0,38,105,0.07)',    iconColor: 'rgba(0,38,105,0.5)' },
+  promotion:       { icon: 'announcement',      color: 'rgba(200,160,40,0.14)',  iconColor: 'var(--color-gold)' },
 }
 
 function PinnedCarousel({ announcements }: { announcements: Announcement[] }) {

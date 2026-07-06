@@ -11,21 +11,17 @@ import { formatRelativeTime } from '@/lib/utils'
 import type { Announcement } from '@/types'
 
 const TYPE_ICONS: Record<string, string> = {
-  new_member:       '👋',
-  booking:          '⛳',
-  visiting_member:  '✈️',
   member_event:     '📅',
+  new_course:       '⛳',
   admin_broadcast:  '📢',
-  focus_linkup:     '🎯',
+  promotion:        '🎁',
 }
 
 const TYPE_LABELS: Record<string, string> = {
-  new_member:       'New member',
-  booking:          'Tee time',
-  visiting_member:  'Visiting member',
   member_event:     'Member event',
+  new_course:       'New course',
   admin_broadcast:  'Announcement',
-  focus_linkup:     'Focus LinkUp',
+  promotion:        'Promotion',
 }
 
 export default function AnnouncementsPage() {

@@ -10,7 +10,6 @@ export const dynamic = 'force-dynamic'
 //   1. Validate member
 //   2. Create GHL calendar appointment
 //   3. Write one booking row per player to Supabase (status = 'tentative')
-//   4. Post community announcement
 //
 // GET /api/bookings/create?month=YYYY-MM&timezone=...
 //   Returns available tee-time slots from the GHL Aviara calendar.
@@ -22,8 +21,6 @@ import { cookies } from 'next/headers'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { getAvailableSlots, createBooking, getContactByEmail } from '@/lib/ghl/client'
 import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
-import { getCache } from '@/lib/cache'
-import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
 import { sendPushToMembers, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { format } from 'date-fns'
@@ -238,9 +235,6 @@ export async function POST(request: NextRequest) {
 
   console.log('[booking/create] Resolved in event/Aviara timezone:', { bookingDate, timeNormalized })
   const memberName = `${member.first_name} ${member.last_name}`
-  // Non-members are pending approval, so they don't count toward the confirmed
-  // group size used for the GHL booking and community announcement.
-  const totalPlayers = 1 + memberPlayers.length
 
   // ---- Validate everyone up front, before touching GHL --------------------
   // Fail fast with a clear message rather than getting partway through and
@@ -441,35 +435,7 @@ export async function POST(request: NextRequest) {
   const primaryBookingId =
     (insertedBookings.find(b => b.guest_name === null) ?? insertedBookings[0])?.id ?? ''
 
-  // Both GHL appointment and Supabase rows are committed — respond immediately.
-  // Announcement + cache invalidation are non-critical and run after the response.
-  const playerSuffix = totalPlayers > 1 ? ` +${memberPlayers.length} guest${memberPlayers.length !== 1 ? 's' : ''}` : ''
   const displayDate = format(new Date(`${bookingDate}T12:00:00`), 'EEEE, MMMM d')
-
-  void adminSupabase
-    .from('announcements')
-    .insert({
-      course_id: resolvedCourseId,
-      author_id: user.id,
-      type: 'booking',
-      title: `${memberName}${playerSuffix} is playing on ${displayDate}`,
-      body: `${member.first_name} has booked a tee time at ${timeNormalized.slice(0, 5)} on ${displayDate}${totalPlayers > 1 ? ` for ${totalPlayers} players` : ''}. Want to join? Send them a message.`,
-      metadata: {
-        booking_id: primaryBookingId,
-        booking_date: bookingDate,
-        tee_time: timeNormalized,
-        member_id: user.id,
-      },
-      status: 'published',
-      published_at: new Date().toISOString(),
-    })
-    .then(({ error }) => {
-      if (error) console.error('[booking/create] Announcement insert failed (non-fatal):', error)
-    })
-
-  void getCache(COURSE_ANN_NS).clear(courseAnnPrefix(resolvedCourseId)).catch((e) => {
-    console.error('[booking/create] Cache clear failed (non-fatal):', e)
-  })
 
   // Notify members who were invited as additional players
   const invitedMemberIds = memberPlayers

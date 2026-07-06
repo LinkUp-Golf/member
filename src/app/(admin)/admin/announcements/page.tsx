@@ -18,9 +18,7 @@ import {
 import FormField from "@/components/admin/FormField";
 import { formatRelativeTime } from "@/lib/utils";
 import MultiMediaUpload, { type MediaFile } from "@/components/ui/MultiMediaUpload";
-import { INDUSTRY_CATEGORIES } from "@/types";
 import type { AnnouncementType, ModerationStatus } from "@/types";
-import { FEATURES } from "@/lib/features";
 
 interface AnnouncementRow {
   id: string;
@@ -49,18 +47,14 @@ interface AnnouncementPayload {
 }
 
 const TYPE_OPTIONS = [
-  { value: "admin_broadcast", label: "Admin broadcast" },
-  ...(FEATURES.FOCUS_LINKUPS ? [{ value: "focus_linkup", label: "Focus LinkUp reminder" }] : []),
-  { value: "new_member", label: "New member welcome" },
+  { value: "admin_broadcast", label: "Announcement" },
 ];
 
 const TYPE_ICONS: Record<string, string> = {
-  new_member: "👋",
-  booking: "⛳",
-  visiting_member: "✈️",
   member_event: "📅",
+  new_course: "⛳",
   admin_broadcast: "📢",
-  focus_linkup: "🎯",
+  promotion: "🎁",
 };
 
 const MAX_PINNED = 5
@@ -353,7 +347,6 @@ function AnnouncementForm({
   const {
     register,
     handleSubmit: rhfSubmit,
-    watch,
     control,
     formState: { errors, isSubmitting },
     setError: _setFieldError,
@@ -365,22 +358,12 @@ function AnnouncementForm({
     },
   })
 
-  const watchedType = watch('type')
-  const [focusCategories, setFocusCategories] = useState<string[]>(
-    () => initial?.focus_linkup_categories ?? []
-  )
   const [mediaFiles, setMediaFiles] = useState<MediaFile[]>(() => initial ? initMediaFiles(initial) : [])
   const [uploadStatus, setUploadStatus] = useState<string | null>(null)
   const [serverError, setServerError] = useState<string | null>(null)
 
   const isEditing = !!initial
   const saving = isSubmitting
-
-  function toggleFocusCategory(cat: string) {
-    setFocusCategories(prev =>
-      prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
-    )
-  }
 
   function handleCancel() {
     mediaFiles.forEach(f => { if (f.file) URL.revokeObjectURL(f.previewUrl) })
@@ -427,7 +410,7 @@ function AnnouncementForm({
         image_url: resolved.find(m => m.mediaType === 'image')?.url ?? null,
         video_url: resolved.find(m => m.mediaType === 'video')?.url ?? null,
         media_urls: resolved.map(m => m.url),
-        focus_linkup_categories: values.type === 'focus_linkup' ? focusCategories : [],
+        focus_linkup_categories: [],
       })
       if (err) { await cleanup(); setServerError(err) }
     } catch (e) {
@@ -461,33 +444,6 @@ function AnnouncementForm({
               )}
             />
           </FormField>
-
-          {watchedType === 'focus_linkup' && (
-            <FormField label="Target audience" htmlFor="focus-cats">
-              <p className="text-xs text-gray-400 mb-2">
-                Select the Focus LinkUp categories to notify. Leave empty to send to all members.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {INDUSTRY_CATEGORIES.map(cat => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => toggleFocusCategory(cat)}
-                    className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                      focusCategories.includes(cat)
-                        ? 'bg-green-900 text-white border-green-900'
-                        : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
-              {focusCategories.length === 0 && (
-                <p className="text-xs text-amber-600 mt-1.5">No categories selected — announcement will reach all members.</p>
-              )}
-            </FormField>
-          )}
 
           <FormField label="Title" htmlFor="broadcast-title" required error={errors.title?.message}>
             <input
@@ -527,9 +483,7 @@ function AnnouncementForm({
 
           {!isEditing && (
             <p className="text-xs text-gray-400">
-              {watchedType === 'focus_linkup' && focusCategories.length > 0
-                ? `Only members subscribed to: ${focusCategories.join(', ')} will see this.`
-                : 'This will be published immediately and visible to all Aviara members.'}
+              This will be published immediately and visible to all Aviara members.
             </p>
           )}
 
