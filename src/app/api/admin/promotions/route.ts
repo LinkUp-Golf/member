@@ -7,10 +7,11 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { getCache } from '@/lib/cache'
 import { COURSE_PROMO_NS, coursePromoPrefix } from '@/lib/cache/keys'
 import { sendPushToCourse, sendPushToMembers, NotificationTemplates } from '@/lib/push'
+import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(
-  async (req: NextRequest, _ctx: AuthContext) => {
+  async (req: NextRequest, ctx: AuthContext) => {
     const body = await req.json() as {
       course_id: string | null
       title: string
@@ -51,6 +52,20 @@ export const POST = withAuth(
     }).select().single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+    // Post a matching announcement — course-scoped promos get one row,
+    // global promos fan out to every active course's feed.
+    const announcementCourseIds = data.course_id ? [data.course_id] : await activeCourseIds(admin)
+    void postAnnouncementToCourses(admin, announcementCourseIds, {
+      type: 'promotion',
+      authorId: ctx.userId,
+      title: data.title,
+      body: data.description,
+      image_url: data.image_url,
+      video_url: data.video_url,
+      media_urls: data.media_urls,
+      metadata: { promotion_id: data.id },
+    }).catch(err => console.error('[promotions/create] Announcement post failed (non-fatal):', err))
 
     // Promotions can be course-specific (course_id set) or global (null).
     // Bust the specific course cache when scoped, or all course caches when global.

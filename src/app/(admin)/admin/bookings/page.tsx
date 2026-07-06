@@ -64,6 +64,15 @@ const DINNER_FILTER_LABELS: Record<DinnerFilter, string> = {
   all: 'All', yes: '🍽 Yes', no: '🍽 No', maybe: '🍽 Maybe', none: 'No response',
 }
 
+// "Who's Playing" is a 30-day-lookahead preset of the date-range toggle —
+// who's actually teeing off soon, without scrolling through the full
+// 365-day "Upcoming" window.
+const WHOS_PLAYING_WINDOW_DAYS = 30
+type BookingsView = 'upcoming' | 'past' | 'whos-playing'
+const VIEW_LABELS: Record<BookingsView, string> = {
+  upcoming: 'Upcoming', past: 'Past', 'whos-playing': "Who's Playing",
+}
+
 interface CourseListItem {
   id: string
   name: string
@@ -507,7 +516,7 @@ export default function AdminBookingsPage() {
 
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState<'upcoming' | 'past'>('upcoming')
+  const [view, setView] = useState<BookingsView>('upcoming')
   const [courseList, setCourseList] = useState<CourseListItem[]>([])
   const [courseFilter, setCourseFilter] = useState<string>(urlCourseId)
   const [search, setSearch] = useState('')
@@ -562,16 +571,22 @@ export default function AdminBookingsPage() {
     const supabase = createClient()
     const today    = format(new Date(), 'yyyy-MM-dd')
 
-    // Upcoming: today → 365 days ahead (ascending)
-    // Past:     365 days ago → yesterday (descending — most recent first)
+    // Upcoming:     today → 365 days ahead (ascending)
+    // Who's Playing: today → 30 days ahead (ascending) — a shorter lookahead
+    //               preset of the same "upcoming" window.
+    // Past:         365 days ago → yesterday (descending — most recent first)
     // A custom From/To range overrides the view-based window when both are set.
     // Payment status (unpaid) is just another status filter — it doesn't
     // override the date window. The "days left" badge (see paymentDaysLeftLabel)
     // is what narrows attention to bookings within PAYMENT_OVERDUE_WINDOW_DAYS.
-    const isUpcoming  = view === 'upcoming'
+    const isUpcoming  = view !== 'past'
     const hasCustomRange = !!customFrom && !!customTo
     const rangeStart  = hasCustomRange ? customFrom : isUpcoming ? today : format(subDays(new Date(), 365), 'yyyy-MM-dd')
-    const rangeEnd    = hasCustomRange ? customTo   : isUpcoming ? format(addDays(new Date(), 365), 'yyyy-MM-dd') : format(subDays(new Date(), 1), 'yyyy-MM-dd')
+    const rangeEnd    = hasCustomRange
+      ? customTo
+      : view === 'whos-playing' ? format(addDays(new Date(), WHOS_PLAYING_WINDOW_DAYS), 'yyyy-MM-dd')
+      : isUpcoming ? format(addDays(new Date(), 365), 'yyyy-MM-dd')
+      : format(subDays(new Date(), 1), 'yyyy-MM-dd')
 
     const { data: courses } = await supabase
       .from('courses')
@@ -1030,19 +1045,19 @@ export default function AdminBookingsPage() {
             ? `${courseList.length} active course${courseList.length !== 1 ? 's' : ''}`
             : undefined}
         />
-        {/* Upcoming / Past toggle — compact on mobile */}
+        {/* Upcoming / Who's Playing / Past toggle — compact on mobile */}
         <div className="flex p-0.5 rounded-xl flex-shrink-0 self-start" style={{ background: 'rgba(0,38,105,0.06)' }}>
-          {(['upcoming', 'past'] as const).map(v => (
+          {(['upcoming', 'whos-playing', 'past'] as const).map(v => (
             <button
               key={v}
               type="button"
               onClick={() => setView(v)}
-              className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold rounded-[10px] transition-all"
+              className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold rounded-[10px] transition-all whitespace-nowrap"
               style={view === v
                 ? { background: 'white', color: 'var(--color-green-900)', boxShadow: '0 1px 3px rgba(0,38,105,0.1)' }
                 : { color: 'rgba(0,38,105,0.45)' }}
             >
-              {v === 'upcoming' ? 'Upcoming' : 'Past'}
+              {VIEW_LABELS[v]}
             </button>
           ))}
         </div>
@@ -1264,7 +1279,7 @@ export default function AdminBookingsPage() {
 
       {!loading && filtered.length > 0 && (
         <p className="text-xs text-gray-400 mt-5 text-right">
-          {filtered.length} player{filtered.length !== 1 ? 's' : ''} · {allSlots.length} tee slot{allSlots.length !== 1 ? 's' : ''} · {view === 'upcoming' ? 'upcoming' : 'past'}
+          {filtered.length} player{filtered.length !== 1 ? 's' : ''} · {allSlots.length} tee slot{allSlots.length !== 1 ? 's' : ''} · {VIEW_LABELS[view].toLowerCase()}
         </p>
       )}
         </>

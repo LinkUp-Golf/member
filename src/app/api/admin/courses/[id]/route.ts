@@ -6,6 +6,7 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { createGHLCalendar, deleteGHLCalendar } from '@/lib/ghl/client'
 import { validateTimezone } from '@/lib/validation'
+import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
 import type { AuthContext } from '@/lib/auth/types'
 import type { Course } from '@/types'
 
@@ -59,6 +60,18 @@ export const PATCH = withAuth(
           .update({ approval_status: 'active', ghl_calendar_id: ghlCalendarId, reviewed_by: ctx.userId })
           .eq('id', id).select().single()
         if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+        // This is the "goes live" moment for a member-requested course.
+        void activeCourseIds(admin, data.id)
+          .then(courseIds => postAnnouncementToCourses(admin, courseIds, {
+            type: 'new_course',
+            authorId: ctx.userId,
+            title: `New course added: ${data.name}`,
+            body: `${data.name} is now available for booking. Check it out and get your next round on the books.`,
+            metadata: { course_id: data.id },
+          }))
+          .catch(err => console.error('[courses/approve] Announcement post failed (non-fatal):', err))
+
         return NextResponse.json({ course: data })
       }
 
