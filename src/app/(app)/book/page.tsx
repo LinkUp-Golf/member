@@ -3416,10 +3416,20 @@ function EventSelectionScreen({
 }: {
   onSelect: (course: Course) => void;
 }) {
+  // `events` is the full, unfiltered list — fetched once, used only to
+  // build the location filter's options so they don't shrink as filters
+  // are applied. `filteredEvents` is what's actually displayed, and comes
+  // straight from the server (search/location are applied server-side).
   const [events, setEvents] = useState<Course[]>([]);
+  const [filteredEvents, setFilteredEvents] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filtering, setFiltering] = useState(false);
   const [error, setError] = useState("");
   const [showCreateFeed, setShowCreateFeed] = useState(false);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [locationFilter, setLocationFilter] = useState("all");
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/courses")
@@ -3428,11 +3438,60 @@ function EventSelectionScreen({
         return r.json();
       })
       .then((d) => {
-        setEvents(Array.isArray(d.courses) ? d.courses : []);
+        const list = Array.isArray(d.courses) ? d.courses : [];
+        setEvents(list);
+        setFilteredEvents(list);
       })
       .catch(() => setError("Failed to load courses."))
       .finally(() => setLoading(false));
   }, []);
+
+  // Debounce the search box so it doesn't hit the server on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const eventLocation = (e: Course) =>
+    [e.city, e.state].filter(Boolean).join(", ");
+
+  const locationOptions = useMemo(() => {
+    const map = new Map<string, { city: string | null; state: string | null }>();
+    events.forEach((e) => {
+      if (!e.city && !e.state) return;
+      const label = eventLocation(e);
+      if (!map.has(label)) map.set(label, { city: e.city, state: e.state });
+    });
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [events]);
+  const locations = useMemo(
+    () => locationOptions.map(([label]) => label),
+    [locationOptions],
+  );
+
+  // Server-side filtering — refetch whenever the debounced search or the
+  // selected location changes. Skipped when neither is active, since the
+  // unfiltered list from the initial load above already covers that case.
+  useEffect(() => {
+    if (loading) return;
+    if (!debouncedSearch && locationFilter === "all") {
+      setFilteredEvents(events);
+      return;
+    }
+    const params = new URLSearchParams();
+    if (debouncedSearch) params.set("search", debouncedSearch);
+    if (locationFilter !== "all") {
+      const parts = locationOptions.find(([label]) => label === locationFilter)?.[1];
+      if (parts?.city) params.set("city", parts.city);
+      if (parts?.state) params.set("state", parts.state);
+    }
+    setFiltering(true);
+    fetch(`/api/courses?${params.toString()}`)
+      .then((r) => r.json())
+      .then((d) => setFilteredEvents(Array.isArray(d.courses) ? d.courses : []))
+      .catch(() => setFilteredEvents([]))
+      .finally(() => setFiltering(false));
+  }, [debouncedSearch, locationFilter, loading, locationOptions, events]);
 
   if (loading) {
     return (
@@ -3480,32 +3539,221 @@ function EventSelectionScreen({
 
   return (
     <div className="pb-8 md:max-w-2xl md:mx-auto">
-      <div className="px-5 md:px-8 pt-5 pb-2">
-        <p className="section-label mb-1">Select an event to book</p>
-        <p className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>
-          Choose an event below to see available times.
-        </p>
-      </div>
+      {events.length > 1 && (
+        <div className="px-5 md:px-8 pt-5 pb-1 flex items-center gap-2">
+          <div
+            className="flex items-center gap-2 flex-1 min-w-0 bg-white rounded-xl px-3 py-2.5 border"
+            style={{ borderColor: "rgba(0,38,105,0.1)" }}
+          >
+            <svg
+              className="w-4 h-4 flex-shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              style={{ color: "rgba(0,38,105,0.32)" }}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+              />
+            </svg>
+            <input
+              type="search"
+              placeholder="Search by event name…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="flex-1 min-w-0 bg-transparent text-sm outline-none"
+              style={{ color: "var(--color-green-900)" }}
+            />
+          </div>
+          {locations.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setFiltersOpen(true)}
+              aria-label="Filter by location"
+              className="relative flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-xl border transition-colors hover:bg-green-50/60 active:opacity-70"
+              style={{
+                borderColor: "rgba(0,38,105,0.1)",
+                background: "white",
+                color: "rgba(0,38,105,0.5)",
+              }}
+            >
+              <FunnelIcon />
+              {locationFilter !== "all" && (
+                <span
+                  className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 border-white"
+                  style={{ background: "var(--color-gold)" }}
+                />
+              )}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="px-5 md:px-8 pt-3">
-        <div className="card">
-          {events.map((course, i) => {
-            const borderStyle = {
-              borderBottom: i < events.length - 1 ? "1px solid rgba(0,38,105,0.06)" : "none",
-            };
+        {filtering ? (
+          <div className="flex justify-center py-10">
+            <Spinner className="text-green-700 w-5 h-5" />
+          </div>
+        ) : filteredEvents.length === 0 ? (
+          <EmptyState
+            compact
+            icon="🔍"
+            title="No events match your search"
+            description="Try a different name or location."
+          />
+        ) : (
+          <div className="card">
+            {filteredEvents.map((course, i) => {
+              const borderStyle = {
+                borderBottom: i < filteredEvents.length - 1 ? "1px solid rgba(0,38,105,0.06)" : "none",
+              };
 
-            return (
-              <button
-                key={course.id}
-                type="button"
-                onClick={() => onSelect(course)}
-                className="w-full text-left flex items-start gap-3 px-4 py-4 transition-colors hover:bg-green-50/40 active:opacity-70"
-                style={borderStyle}
-              >
-                <CourseRowInner course={course} />
-              </button>
-            );
-          })}
+              return (
+                <button
+                  key={course.id}
+                  type="button"
+                  onClick={() => onSelect(course)}
+                  className="w-full text-left flex items-start gap-3 px-4 py-4 transition-colors hover:bg-green-50/40 active:opacity-70"
+                  style={borderStyle}
+                >
+                  <CourseRowInner course={course} />
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <EventLocationFilterDrawer
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        locations={locations}
+        value={locationFilter}
+        onChange={setLocationFilter}
+      />
+    </div>
+  );
+}
+
+function FunnelIcon() {
+  return (
+    <svg
+      className="w-3.5 h-3.5 flex-shrink-0"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3 4.5h18M6 9h12M9.75 13.5h4.5M11.25 18h1.5"
+      />
+    </svg>
+  );
+}
+
+function EventLocationFilterDrawer({
+  open,
+  onClose,
+  locations,
+  value,
+  onChange,
+}: {
+  open: boolean;
+  onClose: () => void;
+  locations: string[];
+  value: string;
+  onChange: (location: string) => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      const ids: number[] = [];
+      ids[0] = requestAnimationFrame(() => {
+        ids[1] = requestAnimationFrame(() => setVisible(true));
+      });
+      return () => ids.forEach((id) => cancelAnimationFrame(id));
+    } else {
+      setVisible(false);
+      const t = setTimeout(() => setMounted(false), 250);
+      return () => clearTimeout(t);
+    }
+  }, [open]);
+
+  if (!mounted) return null;
+
+  function choose(loc: string) {
+    onChange(loc);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end">
+      <button
+        type="button"
+        aria-label="Close filters"
+        className="absolute inset-0 w-full h-full"
+        style={{
+          background: "rgba(0,0,0,0.4)",
+          opacity: visible ? 1 : 0,
+          transition: "opacity 200ms ease-out",
+        }}
+        onClick={onClose}
+      />
+      <div
+        className="relative bg-white rounded-t-2xl px-5 pt-4 pb-8 max-h-[75vh] overflow-y-auto"
+        style={{
+          transform: visible ? "translateY(0)" : "translateY(100%)",
+          transition: visible
+            ? "transform 280ms cubic-bezier(0.32,0.72,0,1)"
+            : "transform 200ms cubic-bezier(0.4,0,1,1)",
+        }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2
+            className="text-sm font-bold"
+            style={{ color: "var(--color-green-900)" }}
+          >
+            Filter by location
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="w-8 h-8 rounded-full flex items-center justify-center"
+            style={{ background: "rgba(0,38,105,0.06)", color: "rgba(0,38,105,0.5)" }}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => choose("all")}
+            className={`chip ${value === "all" ? "active" : ""}`}
+          >
+            All locations
+          </button>
+          {locations.map((loc) => (
+            <button
+              key={loc}
+              type="button"
+              onClick={() => choose(loc)}
+              className={`chip ${value === loc ? "active" : ""}`}
+            >
+              {loc}
+            </button>
+          ))}
         </div>
       </div>
     </div>
