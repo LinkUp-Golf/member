@@ -6,6 +6,8 @@ import { apiClient } from '@/lib/api-client'
 import { createClient } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import { cn } from '@/lib/utils'
+import IconBadge from '@/components/ui/IconBadge'
+import { Bell } from 'lucide-react'
 
 interface Props {
   className?: string
@@ -54,39 +56,15 @@ export default function NotificationBell({ className, variant = 'light' }: Props
     <button
       onClick={() => router.push('/more/notifications')}
       className={cn(
-        'relative flex items-center justify-center w-9 h-9 rounded-xl transition-colors',
+        'focus-ring relative flex items-center justify-center w-9 h-9 rounded-xl transition-all active:scale-90',
         variant === 'light' ? 'hover:bg-white/10' : 'hover:bg-green-900/06',
         iconColor,
         className
       )}
       aria-label={`Notifications${unreadCount > 0 ? ` — ${unreadCount} unread` : ''}`}
     >
-      <BellIcon className="w-5 h-5" />
-      {unreadCount > 0 && (
-        <span
-          className="absolute top-0.5 right-0.5 min-w-[16px] h-4 flex items-center justify-center px-1 rounded-full text-[9px] font-bold leading-none text-white"
-          style={{ background: '#e53935' }}
-        >
-          {unreadCount > 99 ? '99+' : unreadCount}
-        </span>
-      )}
+      <Bell className="w-5 h-5" strokeWidth={1.75} />
+      <IconBadge count={unreadCount} />
     </button>
-  )
-}
-
-function BellIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.75}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-    </svg>
   )
 }

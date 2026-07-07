@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Image from 'next/image'
 import { useParams } from 'next/navigation'
+import { ChevronLeft, ChevronRight, Pin, Megaphone } from 'lucide-react'
 import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import AppShell from '@/components/layout/AppShell'
@@ -10,21 +11,17 @@ import { formatRelativeTime } from '@/lib/utils'
 import type { Announcement } from '@/types'
 
 const TYPE_ICONS: Record<string, string> = {
-  new_member:      '👋',
-  booking:         '⛳',
-  visiting_member: '✈️',
   member_event:    '📅',
+  new_course:      '⛳',
   admin_broadcast: '📢',
-  focus_linkup:    '🎯',
+  promotion:       '🎁',
 }
 
 const TYPE_LABELS: Record<string, string> = {
-  new_member:      'New member',
-  booking:         'Tee time',
-  visiting_member: 'Visiting member',
   member_event:    'Member event',
+  new_course:      'New course',
   admin_broadcast: 'Announcement',
-  focus_linkup:    'Focus LinkUp',
+  promotion:       'Promotion',
 }
 
 export default function AnnouncementDetailPage() {
@@ -67,7 +64,7 @@ export default function AnnouncementDetailPage() {
           </div>
         ) : notFound || !announcement ? (
           <div className="text-center py-20">
-            <p className="text-3xl mb-3">📢</p>
+            <Megaphone className="w-9 h-9 mx-auto mb-3 text-green-900/25" strokeWidth={1.5} />
             <p className="font-sans font-black text-xl text-green-900 mb-2">Not found</p>
             <p className="text-sm text-green-900/45">This announcement is no longer available.</p>
           </div>
@@ -78,7 +75,7 @@ export default function AnnouncementDetailPage() {
                 className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full mb-3"
                 style={{ background: 'rgba(200,160,60,0.12)', color: 'rgba(160,120,20,1)', border: '1px solid rgba(200,160,60,0.25)' }}
               >
-                📌 Pinned announcement
+                <Pin className="w-3 h-3" strokeWidth={2.5} fill="currentColor" /> Pinned announcement
               </div>
             )}
             <div className="flex items-center gap-2 mb-3">
@@ -191,21 +188,21 @@ function MediaCarousel({
             {current > 0 && (
               <button
                 onClick={() => setCurrent(c => c - 1)}
-                className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center"
+                className="focus-ring absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center active:scale-90 transition-transform"
                 style={{ background: 'rgba(0,0,0,0.45)' }}
                 aria-label="Previous"
               >
-                <ChevronLeft />
+                <ChevronLeft className="w-4 h-4 text-white" strokeWidth={2} />
               </button>
             )}
             {current < items.length - 1 && (
               <button
                 onClick={() => setCurrent(c => c + 1)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center"
+                className="focus-ring absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center active:scale-90 transition-transform"
                 style={{ background: 'rgba(0,0,0,0.45)' }}
                 aria-label="Next"
               >
-                <ChevronRight />
+                <ChevronRight className="w-4 h-4 text-white" strokeWidth={2} />
               </button>
             )}
           </>
@@ -233,18 +230,3 @@ function MediaCarousel({
   )
 }
 
-function ChevronLeft() {
-  return (
-    <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-    </svg>
-  )
-}
-
-function ChevronRight() {
-  return (
-    <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-    </svg>
-  )
-}

@@ -2,12 +2,14 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { SquarePen, MessageCircle } from 'lucide-react'
 import { useProfile } from '@/hooks/useProfile'
 import { createClient } from '@/lib/supabase'
 import { apiClient } from '@/lib/api-client'
 import { usePresence } from '@/hooks/usePresence'
 import AppShell from '@/components/layout/AppShell'
 import { MemberRowSkeleton } from '@/components/ui/Loading'
+import EmptyState from '@/components/ui/EmptyState'
 import { ConversationItem } from '@/components/messages/ConversationItem'
 import { InviteItem } from '@/components/messages/InviteItem'
 import type { ConversationWithDetails } from '@/types'
@@ -69,11 +71,11 @@ export default function MessagesPage() {
       end={
         <button
           onClick={() => router.push('/messages/new')}
-          className="w-9 h-9 rounded-full flex items-center justify-center transition-colors"
+          className="focus-ring w-9 h-9 rounded-full flex items-center justify-center transition-all hover:bg-white/[0.16] active:scale-90"
           style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)' }}
           aria-label="New message"
         >
-          <ComposeIcon />
+          <SquarePen className="w-[1.1rem] h-[1.1rem]" strokeWidth={1.9} />
         </button>
       }
     >
@@ -136,30 +138,17 @@ export default function MessagesPage() {
 
 function EmptyInbox({ onCompose }: { onCompose: () => void }) {
   return (
-    <div className="px-5 py-16 text-center">
-      <div
-        className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl mb-5 mx-auto"
-        style={{ background: 'rgba(0,38,105,0.06)' }}
-      >
-        💬
-      </div>
-      <p className="font-sans font-black text-xl mb-2" style={{ color: 'var(--color-green-900)' }}>
-        No messages yet
-      </p>
-      <p className="text-sm mb-7" style={{ color: 'rgba(0,38,105,0.42)' }}>
-        Start a conversation with a fellow member.
-      </p>
-      <button onClick={onCompose} className="btn btn-primary">
-        Start a conversation
-      </button>
+    <div className="px-5 py-10">
+      <EmptyState
+        icon={<MessageCircle className="w-6 h-6" strokeWidth={1.75} />}
+        title="No messages yet"
+        description="Start a conversation with a fellow member."
+        action={
+          <button onClick={onCompose} className="btn btn-primary">
+            Start a conversation
+          </button>
+        }
+      />
     </div>
-  )
-}
-
-function ComposeIcon() {
-  return (
-    <svg style={{ width: '1.1rem', height: '1.1rem' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-    </svg>
   )
 }

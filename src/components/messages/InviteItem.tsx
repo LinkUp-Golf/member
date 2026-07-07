@@ -33,7 +33,7 @@ export function InviteItem({ conversation: conv, currentUserId, onRespond }: Pro
       style={{ borderBottom: '1px solid rgba(0,38,105,0.06)' }}
     >
       {/* Group avatar */}
-      <div className="flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-lg font-serif"
+      <div className="flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-lg font-sans font-bold"
         style={{ background: 'var(--color-green-800)', color: 'var(--color-gold)', border: '2px solid rgba(133,187,101,0.2)' }}
       >
         #
@@ -53,7 +53,7 @@ export function InviteItem({ conversation: conv, currentUserId, onRespond }: Pro
           <button
             onClick={() => respond('accept')}
             disabled={loading !== null}
-            className="flex-1 py-1.5 rounded-xl text-xs font-semibold transition-opacity disabled:opacity-50"
+            className="focus-ring flex-1 py-1.5 rounded-xl text-xs font-semibold transition-all active:scale-[0.97] disabled:opacity-50"
             style={{ background: 'var(--color-green-800)', color: '#fff' }}
           >
             {loading === 'accept' ? 'Accepting…' : 'Accept'}
@@ -61,7 +61,7 @@ export function InviteItem({ conversation: conv, currentUserId, onRespond }: Pro
           <button
             onClick={() => respond('decline')}
             disabled={loading !== null}
-            className="flex-1 py-1.5 rounded-xl text-xs font-semibold border transition-opacity disabled:opacity-50"
+            className="focus-ring flex-1 py-1.5 rounded-xl text-xs font-semibold border transition-all active:scale-[0.97] disabled:opacity-50"
             style={{ borderColor: 'rgba(0,38,105,0.15)', color: 'rgba(0,38,105,0.6)', background: 'transparent' }}
           >
             {loading === 'decline' ? 'Declining…' : 'Decline'}

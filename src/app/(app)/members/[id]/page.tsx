@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { MessageCircle, CalendarPlus, Flag, Lightbulb } from "lucide-react";
 import { useProfile } from "@/hooks/useProfile"
 import { apiClient } from "@/lib/api-client";
 import Avatar from "@/components/ui/Avatar";
@@ -118,7 +119,10 @@ export default function MemberProfilePage() {
             <span className="profile-tag">{member.home_course.city}</span>
           )}
           {playedTogether && (
-            <span className="profile-tag">⛳ Played together</span>
+            <span className="profile-tag flex items-center gap-1">
+              <Flag className="w-3 h-3" strokeWidth={2.25} fill="currentColor" />
+              Played together
+            </span>
           )}
         </div>
       </div>
@@ -139,7 +143,7 @@ export default function MemberProfilePage() {
           {startingConv ? (
             <Spinner className="w-4 h-4 text-gold" />
           ) : (
-            <MessageIcon />
+            <MessageCircle className="w-4 h-4" strokeWidth={1.9} />
           )}
           Message
         </button>
@@ -147,14 +151,16 @@ export default function MemberProfilePage() {
           href={`/book?invite=${member.id}`}
           className="btn btn-outline flex-1 justify-center"
         >
-          <CalendarIcon /> Invite to round
+          <CalendarPlus className="w-4 h-4" strokeWidth={1.9} /> Invite to round
         </Link>
       </div>
 
       {/* Play suggestion */}
       {!playedTogether && (
         <div className="mx-5 mb-4 rounded-xl bg-green-50 border border-green-900/10 p-3.5 flex items-start gap-3">
-          <span className="text-lg">💡</span>
+          <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(133,187,101,0.15)', color: 'var(--color-green-700)' }}>
+            <Lightbulb className="w-4 h-4" strokeWidth={1.9} />
+          </div>
           <div>
             <p className="text-sm text-green-900 font-medium">
               You haven&apos;t played with <span className="capitalize">{member.first_name}</span>{" "}
@@ -242,40 +248,6 @@ export default function MemberProfilePage() {
 }
 
 // ---- Inline icons -------------------------------------------
-function MessageIcon() {
-  return (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={1.5}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z"
-      />
-    </svg>
-  );
-}
-function CalendarIcon() {
-  return (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={1.5}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5m-9-6h.008v.008H12v-.008zM12 15h.008v.008H12V15zm0 2.25h.008v.008H12v-.008zM9.75 15h.008v.008H9.75V15zm0 2.25h.008v.008H9.75v-.008zM7.5 15h.008v.008H7.5V15zm0 2.25h.008v.008H7.5v-.008zm6.75-4.5h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V15zm0 2.25h.008v.008h-.008v-.008zm2.25-4.5h.008v.008H16.5v-.008zm0 2.25h.008v.008H16.5V15z"
-      />
-    </svg>
-  );
-}
 function LinkedInIcon() {
   return (
     <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">

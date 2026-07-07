@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase'
 import { apiClient } from '@/lib/api-client'
 import { useProfile } from '@/hooks/useProfile'
 import Icon from '@/components/ui/Icon'
+import IconBadge from '@/components/ui/IconBadge'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -49,7 +50,7 @@ export default function MessagesIcon({ className, variant = 'light' }: Props) {
     <Link
       href="/messages"
       className={cn(
-        'relative flex items-center justify-center w-9 h-9 rounded-xl transition-colors',
+        'focus-ring relative flex items-center justify-center w-9 h-9 rounded-xl transition-all active:scale-90',
         variant === 'light' ? 'hover:bg-white/10' : 'hover:bg-green-900/06',
         iconColor,
         className
@@ -57,14 +58,7 @@ export default function MessagesIcon({ className, variant = 'light' }: Props) {
       aria-label={`Messages${count > 0 ? ` — ${count} unread` : ''}`}
     >
       <Icon name="messages" className="w-5 h-5" />
-      {count > 0 && (
-        <span
-          className="absolute top-0.5 right-0.5 min-w-[16px] h-4 flex items-center justify-center px-1 rounded-full text-[9px] font-bold leading-none text-white"
-          style={{ background: '#e53935' }}
-        >
-          {count > 99 ? '99+' : count}
-        </span>
-      )}
+      <IconBadge count={count} />
     </Link>
   )
 }

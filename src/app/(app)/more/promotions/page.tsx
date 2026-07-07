@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import { Gift } from "lucide-react";
 import { useProfile } from "@/hooks/useProfile"
 import { apiClient } from "@/lib/api-client";
 import AppShell from "@/components/layout/AppShell";
@@ -47,10 +48,10 @@ export default function PromotionsPage() {
         ) : promotions.length === 0 ? (
           <div className="flex flex-col items-center text-center px-8 py-16">
             <div
-              className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl mb-5"
-              style={{ background: 'rgba(133,187,101,0.1)', border: '1.5px solid rgba(133,187,101,0.2)' }}
+              className="w-20 h-20 rounded-3xl flex items-center justify-center mb-5"
+              style={{ background: 'rgba(133,187,101,0.1)', border: '1.5px solid rgba(133,187,101,0.2)', color: 'var(--color-green-700)' }}
             >
-              🎁
+              <Gift className="w-8 h-8" strokeWidth={1.5} />
             </div>
             <p className="font-sans font-black text-xl text-green-900 mb-2">No offers right now</p>
             <p className="text-sm text-green-900/45 leading-relaxed max-w-xs">

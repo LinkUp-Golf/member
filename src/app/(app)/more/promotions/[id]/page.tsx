@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Image from 'next/image'
 import { useParams } from 'next/navigation'
+import { Gift } from 'lucide-react'
 import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import AppShell from '@/components/layout/AppShell'
@@ -50,7 +51,7 @@ export default function PromotionDetailPage() {
           </div>
         ) : notFound || !promo ? (
           <div className="text-center py-20 px-8">
-            <p className="text-3xl mb-3">🎁</p>
+            <Gift className="w-9 h-9 mx-auto mb-3 text-green-900/25" strokeWidth={1.5} />
             <p className="font-sans font-black text-xl text-green-900 mb-2">Offer not found</p>
             <p className="text-sm text-green-900/45">This offer may have expired or been removed.</p>
           </div>

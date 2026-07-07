@@ -32,14 +32,14 @@ export function ConversationItem({ conversation: conv, currentUserId, isOnline, 
   return (
     <Link
       href={`/messages/${conv.id}`}
-      className="flex items-center gap-3.5 px-5 py-4 bg-white hover:bg-green-50 transition-colors"
+      className="focus-ring flex items-center gap-3.5 px-5 py-4 bg-white hover:bg-green-50 active:bg-green-50 transition-colors"
       style={{ borderBottom: '1px solid rgba(0,38,105,0.06)' }}
     >
       {/* Avatar */}
       <div className="relative flex-shrink-0">
         {conv.type === 'group' ? (
           <div
-            className="w-11 h-11 rounded-full flex items-center justify-center text-lg font-serif"
+            className="w-11 h-11 rounded-full flex items-center justify-center text-lg font-sans font-bold"
             style={{ background: 'var(--color-green-800)', color: 'var(--color-gold)', border: '2px solid rgba(133,187,101,0.2)' }}
           >
             #

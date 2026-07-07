@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
+import { MessageCircle } from 'lucide-react'
 import { useProfile } from '@/hooks/useProfile'
 import AppShell from '@/components/layout/AppShell'
 import Avatar from '@/components/ui/Avatar'
@@ -125,7 +126,7 @@ export default function ChatPage() {
                     size="sm"
                   />
                 ) : (
-                  <div className="w-9 h-9 rounded-full bg-green-700 flex items-center justify-center text-gold text-sm font-serif">
+                  <div className="w-9 h-9 rounded-full bg-green-700 flex items-center justify-center text-gold text-sm font-sans font-bold">
                     #
                   </div>
                 )}
@@ -230,10 +231,10 @@ function EmptyState({ name }: { name: string }) {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center py-16">
       <div
-        className="w-14 h-14 rounded-full flex items-center justify-center mb-4 text-2xl"
-        style={{ background: 'rgba(0,38,105,0.06)' }}
+        className="w-14 h-14 rounded-full flex items-center justify-center mb-4"
+        style={{ background: 'rgba(0,38,105,0.06)', color: 'var(--color-green-600)' }}
       >
-        💬
+        <MessageCircle className="w-6 h-6" strokeWidth={1.75} />
       </div>
       <p className="text-sm font-medium text-green-900/60 mb-1">Start the conversation</p>
       <p className="text-xs text-green-900/35 italic">Say hello to {name}</p>

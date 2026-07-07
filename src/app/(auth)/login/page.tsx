@@ -2,6 +2,8 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { motion } from "framer-motion";
+import { MailCheck } from "lucide-react";
 import { Spinner } from "@/components/ui/Loading";
 import Logo from "@/components/ui/Logo";
 import { createClient } from "@/lib/supabase";
@@ -130,7 +132,7 @@ function LoginForm() {
   return (
     <div
       className="min-h-screen flex flex-col"
-      style={{ background: "#002669" }}
+      style={{ background: "var(--color-green-900)" }}
     >
       <div className="flex-1 flex flex-col items-center justify-center px-8 pt-16 pb-8">
         {/* Logo */}
@@ -147,8 +149,18 @@ function LoginForm() {
         />
 
         {state === "sent" ? (
-          <div className="text-center animate-fade-in">
-            <div className="text-4xl mb-4">✉️</div>
+          <motion.div
+            className="text-center"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <div
+              className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
+              style={{ background: "rgba(133,187,101,0.15)", color: "var(--color-gold)" }}
+            >
+              <MailCheck className="w-7 h-7" strokeWidth={1.75} />
+            </div>
             <h2 className="font-sans font-black text-2xl text-white mb-3">
               Check your email
             </h2>
@@ -167,13 +179,18 @@ function LoginForm() {
                 setErrorMessage("");
                 localStorage.removeItem(LAST_EMAIL_KEY);
               }}
-              className="mt-6 text-xs underline text-white/30"
+              className="focus-ring mt-6 text-xs underline text-white/30 hover:text-white/50 transition-colors rounded"
             >
               Try a different email
             </button>
-          </div>
+          </motion.div>
         ) : (
-          <div className="w-full max-w-sm animate-fade-in">
+          <motion.div
+            className="w-full max-w-sm"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          >
             <h2 className="font-sans font-black text-2xl text-white text-center mb-2">
               Sign in
             </h2>
@@ -191,7 +208,7 @@ function LoginForm() {
                 placeholder="your@email.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3.5 rounded-xl text-sm outline-none transition-colors"
+                className="w-full px-4 py-3.5 rounded-xl text-sm outline-none transition-all focus:bg-white/[0.1] focus:border-white/25"
                 style={{
                   background: "rgba(255,255,255,0.07)",
                   border: "0.5px solid rgba(255,255,255,0.12)",
@@ -209,8 +226,8 @@ function LoginForm() {
               <button
                 type="submit"
                 disabled={state === "loading" || !email.trim()}
-                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
-                style={{ background: "#85bb65", color: "#002669" }}
+                className="focus-ring w-full flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-semibold transition-all active:scale-[0.98] disabled:opacity-50"
+                style={{ background: "var(--color-gold)", color: "var(--color-green-950)" }}
               >
                 {state === "loading" ? (
                   <Spinner className="text-green-900" />
@@ -219,7 +236,7 @@ function LoginForm() {
                 )}
               </button>
             </form>
-          </div>
+          </motion.div>
         )}
       </div>
 

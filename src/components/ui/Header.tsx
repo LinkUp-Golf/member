@@ -15,7 +15,7 @@ export default function Header({ title, description, end, className, hideMessage
     <div className={cn('top-bar', className)}>
       <div className="flex items-center justify-between">
         <div>
-          <div className="font-sans font-black text-2xl capitalize" style={{ color: 'var(--color-gold)' }}>{title}</div>
+          <div className="text-h1 capitalize" style={{ color: 'var(--color-gold)' }}>{title}</div>
           {description && <div className="logo-subtitle">{description}</div>}
         </div>
         <div className="flex items-center gap-1">
