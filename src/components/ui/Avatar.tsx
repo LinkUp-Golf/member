@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import Image from 'next/image'
 import { getInitials, cn } from '@/lib/utils'
 
@@ -30,7 +31,7 @@ const PX_SIZES = {
   xl: 80,
 }
 
-export default function Avatar({ firstName, lastName, avatarUrl, size = 'md', className }: AvatarProps) {
+function Avatar({ firstName, lastName, avatarUrl, size = 'md', className }: AvatarProps) {
   const initials = getInitials(firstName, lastName)
 
   if (avatarUrl) {
@@ -56,3 +57,5 @@ export default function Avatar({ firstName, lastName, avatarUrl, size = 'md', cl
     </div>
   )
 }
+
+export default memo(Avatar)

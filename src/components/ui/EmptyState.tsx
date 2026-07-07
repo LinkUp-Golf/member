@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { memo, type ReactNode } from 'react'
 
 interface EmptyStateProps {
   /** A Lucide icon element (e.g. <Search />) is preferred; a string emoji is still supported. */
@@ -10,7 +10,7 @@ interface EmptyStateProps {
   compact?: boolean
 }
 
-export default function EmptyState({ icon, title, description, action, compact }: EmptyStateProps) {
+function EmptyState({ icon, title, description, action, compact }: EmptyStateProps) {
   const isGlyph = typeof icon === 'string'
 
   return (
@@ -34,3 +34,5 @@ export default function EmptyState({ icon, title, description, action, compact }
     </div>
   )
 }
+
+export default memo(EmptyState)

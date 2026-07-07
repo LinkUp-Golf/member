@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import { apiClient } from '@/lib/api-client'
 import type { ConversationWithDetails } from '@/types'
 
@@ -10,7 +10,7 @@ interface Props {
   onRespond: (conversationId: string) => void
 }
 
-export function InviteItem({ conversation: conv, currentUserId, onRespond }: Props) {
+export const InviteItem = memo(function InviteItem({ conversation: conv, currentUserId, onRespond }: Props) {
   const [loading, setLoading] = useState<'accept' | 'decline' | null>(null)
 
   const inviter = conv.participants.find(
@@ -78,4 +78,4 @@ export function InviteItem({ conversation: conv, currentUserId, onRespond }: Pro
       </div>
     </div>
   )
-}
+})

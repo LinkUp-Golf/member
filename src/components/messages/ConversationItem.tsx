@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import Link from 'next/link'
 import Avatar from '@/components/ui/Avatar'
 import { PresenceIndicator } from './PresenceIndicator'
@@ -13,7 +14,7 @@ interface Props {
   timezone?: string | null
 }
 
-export function ConversationItem({ conversation: conv, currentUserId, isOnline, timezone }: Props) {
+export const ConversationItem = memo(function ConversationItem({ conversation: conv, currentUserId, isOnline, timezone }: Props) {
   const others = conv.participants
     .filter(p => p.member?.id !== currentUserId)
     .map(p => p.member)
@@ -99,4 +100,4 @@ export function ConversationItem({ conversation: conv, currentUserId, isOnline, 
       )}
     </Link>
   )
-}
+})

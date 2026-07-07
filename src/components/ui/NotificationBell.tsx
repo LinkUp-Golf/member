@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useId } from 'react'
+import { useEffect, useState, useCallback, useId, memo } from 'react'
 import { useRouter } from 'next/navigation'
 import { apiClient } from '@/lib/api-client'
 import { createClient } from '@/lib/supabase'
@@ -15,7 +15,7 @@ interface Props {
   variant?: 'light' | 'dark'
 }
 
-export default function NotificationBell({ className, variant = 'light' }: Props) {
+function NotificationBell({ className, variant = 'light' }: Props) {
   const [unreadCount, setUnreadCount] = useState(0)
   const router = useRouter()
   const { user } = useProfile()
@@ -68,3 +68,5 @@ export default function NotificationBell({ className, variant = 'light' }: Props
     </button>
   )
 }
+
+export default memo(NotificationBell)

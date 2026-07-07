@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, memo } from "react";
 import Link from "next/link";
 import { Search, X, ChevronRight, Users } from "lucide-react";
 import { useProfile } from "@/hooks/useProfile";
@@ -23,7 +23,16 @@ export default function MembersPage() {
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState(FILTER_ALL);
 
-  const filters = [FILTER_ALL, ...INDUSTRY_CATEGORIES.map(shortCategory)];
+  const filters = useMemo(() => [FILTER_ALL, ...INDUSTRY_CATEGORIES.map(shortCategory)], []);
+
+  const loadMembers = useCallback(async () => {
+    const response = await apiClient.get<MemberWithProfile[]>("/api/members");
+    if (!response.error && response.data) {
+      setMembers(response.data);
+      setFiltered(response.data);
+    }
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -32,7 +41,7 @@ export default function MembersPage() {
     } else {
       setLoading(false);
     }
-  }, [user, authLoading]);
+  }, [user, authLoading, loadMembers]);
 
   const applyFilters = useCallback(() => {
     let result = members;
@@ -63,15 +72,6 @@ export default function MembersPage() {
   useEffect(() => {
     applyFilters();
   }, [applyFilters]);
-
-  async function loadMembers() {
-    const response = await apiClient.get<MemberWithProfile[]>("/api/members");
-    if (!response.error && response.data) {
-      setMembers(response.data);
-      setFiltered(response.data);
-    }
-    setLoading(false);
-  }
 
   return (
     <AppShell title="Members" description={`${members.length} active members`}>
@@ -158,7 +158,7 @@ export default function MembersPage() {
 
 // ---- Member row component -----------------------------------
 
-function MemberRow({
+const MemberRow = memo(function MemberRow({
   member: m,
   currentUserId,
 }: {
@@ -211,4 +211,4 @@ function MemberRow({
       />
     </Link>
   );
-}
+});

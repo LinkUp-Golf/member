@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo, memo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -32,22 +32,20 @@ export default function HomePage() {
   const [greeting, setGreeting] = useState('');
   const firstName = profile?.first_name ?? "";
 
+  const pinnedAnnouncements = useMemo(
+    () => announcements.filter(a => a.is_pinned),
+    [announcements]
+  );
+  const regularAnnouncements = useMemo(
+    () => announcements.filter(a => !a.is_pinned).slice(0, 3),
+    [announcements]
+  );
+
   useEffect(() => {
     setGreeting(getGreeting());
   }, []);
 
-  useEffect(() => {
-    if (authLoading) return;
-    if (!user) {
-      // Auth resolved but no session — retry profile fetch once in case of race
-      refetch();
-      setLoading(false);
-      return;
-    }
-    loadHomeData();
-  }, [user, authLoading, refetch]);
-
-  async function loadHomeData() {
+  const loadHomeData = useCallback(async () => {
     const [bookingRes, announcementRes, promoRes] =
       await Promise.all([
         apiClient.get<Booking[]>("/api/bookings?upcoming=true&limit=1"),
@@ -59,7 +57,18 @@ export default function HomePage() {
     setAnnouncements(announcementRes.data ?? []);
     setPromotions(promoRes.data ?? []);
     setLoading(false);
-  }
+  }, []);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      // Auth resolved but no session — retry profile fetch once in case of race
+      refetch();
+      setLoading(false);
+      return;
+    }
+    loadHomeData();
+  }, [user, authLoading, refetch, loadHomeData]);
 
   return (
     <AppShell>
@@ -172,16 +181,12 @@ export default function HomePage() {
               <CardSkeleton lines={2} />
               <CardSkeleton lines={2} />
             </div>
-          ) : announcements.length > 0 ? (() => {
-              const pinned  = announcements.filter(a => a.is_pinned)
-              const regular = announcements.filter(a => !a.is_pinned).slice(0, 3)
-              return (
-                <div className="space-y-2.5">
-                  {pinned.length > 0 && <PinnedCarousel announcements={pinned} />}
-                  {regular.map(a => <AnnouncementCard key={a.id} announcement={a} />)}
-                </div>
-              )
-            })() : (
+          ) : announcements.length > 0 ? (
+              <div className="space-y-2.5">
+                {pinnedAnnouncements.length > 0 && <PinnedCarousel announcements={pinnedAnnouncements} />}
+                {regularAnnouncements.map(a => <AnnouncementCard key={a.id} announcement={a} />)}
+              </div>
+            ) : (
             <EmptyState compact icon={<Megaphone className="w-5 h-5" strokeWidth={1.75} />} title="No announcements yet" description="Course news and community highlights will appear here." />
           )}
         </motion.section>
@@ -199,7 +204,7 @@ function announcementFirstMedia(a: Announcement): { url: string; isVideo: boolea
   return { url, isVideo: ['mp4', 'webm', 'mov', 'quicktime'].includes(ext) }
 }
 
-function AnnouncementThumbnail({ announcement }: { announcement: Announcement }) {
+const AnnouncementThumbnail = memo(function AnnouncementThumbnail({ announcement }: { announcement: Announcement }) {
   const first = announcementFirstMedia(announcement)
   if (!first) return null
   const count = announcement.media_urls?.length
@@ -220,9 +225,9 @@ function AnnouncementThumbnail({ announcement }: { announcement: Announcement })
       )}
     </div>
   )
-}
+})
 
-function StackIcon() {
+const StackIcon = memo(function StackIcon() {
   return (
     <svg className="w-2.5 h-2.5" viewBox="0 0 16 16" fill="currentColor">
       <rect x="3" y="6" width="10" height="8" rx="1.5" opacity="0.6" />
@@ -230,7 +235,7 @@ function StackIcon() {
       <rect x="5" y="2" width="10" height="8" rx="1.5" />
     </svg>
   )
-}
+})
 
 const ANNOUNCEMENT_TYPES: Record<string, { icon: IconName; color: string; iconColor: string }> = {
   member_event:    { icon: 'next-round',        color: 'rgba(0,38,105,0.07)',    iconColor: 'rgba(0,38,105,0.5)' },
@@ -239,7 +244,7 @@ const ANNOUNCEMENT_TYPES: Record<string, { icon: IconName; color: string; iconCo
   promotion:       { icon: 'announcement',      color: 'rgba(200,160,40,0.14)',  iconColor: 'var(--color-gold)' },
 }
 
-function PinnedCarousel({ announcements }: { announcements: Announcement[] }) {
+const PinnedCarousel = memo(function PinnedCarousel({ announcements }: { announcements: Announcement[] }) {
   const router = useRouter()
   const [current, setCurrent] = useState(0)
   const [timerKey, setTimerKey] = useState(0)
@@ -255,10 +260,10 @@ function PinnedCarousel({ announcements }: { announcements: Announcement[] }) {
     return () => clearInterval(id)
   }, [multi, announcements.length, timerKey])
 
-  function navigate(idx: number) {
+  const navigate = useCallback((idx: number) => {
     setCurrent(idx)
     setTimerKey(k => k + 1) // restart the 7-s timer
-  }
+  }, [])
 
   if (announcements.length === 0) return null
 
@@ -368,9 +373,9 @@ function PinnedCarousel({ announcements }: { announcements: Announcement[] }) {
       </div>
     </div>
   )
-}
+})
 
-function AnnouncementCard({ announcement }: { announcement: Announcement }) {
+const AnnouncementCard = memo(function AnnouncementCard({ announcement }: { announcement: Announcement }) {
   const meta = ANNOUNCEMENT_TYPES[announcement.type] ?? { icon: 'announcement' as IconName, color: 'rgba(0,38,105,0.07)', iconColor: 'rgba(0,38,105,0.5)' }
 
   return (
@@ -395,9 +400,9 @@ function AnnouncementCard({ announcement }: { announcement: Announcement }) {
       <AnnouncementThumbnail announcement={announcement} />
     </Link>
   )
-}
+})
 
-function PromoCard({ promo }: { promo: Promotion }) {
+const PromoCard = memo(function PromoCard({ promo }: { promo: Promotion }) {
   const mediaUrl = promo.media_urls?.[0] ?? promo.image_url ?? promo.video_url ?? null
   const mediaCount = promo.media_urls?.length ?? ((promo.image_url ? 1 : 0) + (promo.video_url ? 1 : 0))
   const isVideo = mediaUrl
@@ -449,7 +454,7 @@ function PromoCard({ promo }: { promo: Promotion }) {
       </div>
     </Link>
   )
-}
+})
 
 
 function getGreeting(): string {

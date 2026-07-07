@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, memo } from 'react'
 import { useRouter } from 'next/navigation'
 import { SquarePen, MessageCircle } from 'lucide-react'
 import { useProfile } from '@/hooks/useProfile'
@@ -28,8 +28,14 @@ export default function MessagesPage() {
   // One presence channel for the whole inbox (uses userId as key per user)
   const { isOnline } = usePresence('inbox', user?.id ?? null)
 
-  const pendingInvites = conversations.filter(c => c.my_status === 'pending')
-  const activeConversations = conversations.filter(c => c.my_status !== 'pending')
+  const pendingInvites = useMemo(
+    () => conversations.filter(c => c.my_status === 'pending'),
+    [conversations]
+  )
+  const activeConversations = useMemo(
+    () => conversations.filter(c => c.my_status !== 'pending'),
+    [conversations]
+  )
 
   const loadConversations = useCallback(async () => {
     if (!user) return
@@ -37,6 +43,14 @@ export default function MessagesPage() {
     if (res.data) setConversations(res.data)
     setLoading(false)
   }, [user])
+
+  const handleInviteRespond = useCallback(() => {
+    loadConversations()
+  }, [loadConversations])
+
+  const goToNewMessage = useCallback(() => {
+    router.push('/messages/new')
+  }, [router])
 
   useEffect(() => {
     if (!user) return
@@ -70,7 +84,7 @@ export default function MessagesPage() {
       hideMessagesLink
       end={
         <button
-          onClick={() => router.push('/messages/new')}
+          onClick={goToNewMessage}
           className="focus-ring w-9 h-9 rounded-full flex items-center justify-center transition-all hover:bg-white/[0.16] active:scale-90"
           style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)' }}
           aria-label="New message"
@@ -84,7 +98,7 @@ export default function MessagesPage() {
           {Array.from({ length: 5 }).map((_, i) => <MemberRowSkeleton key={i} />)}
         </div>
       ) : pendingInvites.length === 0 && activeConversations.length === 0 ? (
-        <EmptyInbox onCompose={() => router.push('/messages/new')} />
+        <EmptyInbox onCompose={goToNewMessage} />
       ) : (
         <div>
           {pendingInvites.length > 0 && (
@@ -100,7 +114,7 @@ export default function MessagesPage() {
                   key={conv.id}
                   conversation={conv}
                   currentUserId={user?.id ?? ''}
-                  onRespond={() => loadConversations()}
+                  onRespond={handleInviteRespond}
                 />
               ))}
               {activeConversations.length > 0 && (
@@ -136,7 +150,7 @@ export default function MessagesPage() {
 
 // ---- Sub-components -----------------------------------------
 
-function EmptyInbox({ onCompose }: { onCompose: () => void }) {
+const EmptyInbox = memo(function EmptyInbox({ onCompose }: { onCompose: () => void }) {
   return (
     <div className="px-5 py-10">
       <EmptyState
@@ -151,4 +165,4 @@ function EmptyInbox({ onCompose }: { onCompose: () => void }) {
       />
     </div>
   )
-}
+})

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useId } from 'react'
+import { useEffect, useState, useCallback, useId, memo } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import { apiClient } from '@/lib/api-client'
@@ -14,7 +14,7 @@ interface Props {
   variant?: 'light' | 'dark'
 }
 
-export default function MessagesIcon({ className, variant = 'light' }: Props) {
+function MessagesIcon({ className, variant = 'light' }: Props) {
   const [count, setCount] = useState(0)
   const { user } = useProfile()
   const instanceId = useId().replace(/:/g, '')
@@ -62,3 +62,5 @@ export default function MessagesIcon({ className, variant = 'light' }: Props) {
     </Link>
   )
 }
+
+export default memo(MessagesIcon)

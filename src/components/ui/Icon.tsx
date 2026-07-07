@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import {
   Home,
   CalendarPlus,
@@ -35,8 +36,10 @@ interface IconProps {
   strokeWidth?: number
 }
 
-export default function Icon({ name, className = 'w-5 h-5', strokeWidth = 2 }: IconProps) {
+function Icon({ name, className = 'w-5 h-5', strokeWidth = 2 }: IconProps) {
   const LucideIconComponent = ICONS[name]
   if (!LucideIconComponent) return null
   return <LucideIconComponent className={className} strokeWidth={strokeWidth} aria-hidden="true" />
 }
+
+export default memo(Icon)
