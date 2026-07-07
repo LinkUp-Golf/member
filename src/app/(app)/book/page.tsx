@@ -9,7 +9,8 @@ import AppShell from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/Loading";
 import EmptyState from "@/components/ui/EmptyState";
 import Image from "next/image";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { MessageCircle } from "lucide-react";
 import { formatTeeTime, cn, bookingToLocalDate } from "@/lib/utils";
 import { formatInTimeZone } from "date-fns-tz";
 import {
@@ -57,6 +58,24 @@ interface DayPlayer {
   tee_time: string;
   players: number;
   is_self: boolean;
+}
+
+// FIFO payment gate: a member must resolve ALL unresolved (unpaid) bookings
+// before creating another, at any course. A member can already have more
+// than one — LinkUp is adding this rule to an app already in production, so
+// existing accounts may carry several unresolved bookings from before the
+// rule existed. Mirrors PendingPaymentBooking returned by
+// GET /api/bookings/pending-payment and POST /api/bookings/create's 409.
+interface PendingPayment {
+  id: string;
+  course_id: string;
+  course_name: string;
+  booking_date: string;
+  tee_time: string;
+  payment_url: string | null;
+  status: string;
+  player_name: string;
+  target_member_id: string | null;
 }
 
 const BOOKING_MIN_DAYS = 0;
@@ -131,6 +150,12 @@ export default function BookPage() {
   const [dayPlayers, setDayPlayers] = useState<DayPlayer[]>([]);
   const [loadingDayPlayers, setLoadingDayPlayers] = useState(false);
 
+  // FIFO payment gate — every one of the member's bookings awaiting payment.
+  // Starts loading=true (rather than assuming none) so the tee-time slot
+  // list doesn't briefly render as bookable before the check resolves.
+  const [pendingBookings, setPendingBookings] = useState<PendingPayment[]>([]);
+  const [loadingPendingBookings, setLoadingPendingBookings] = useState(true);
+
   const fetchMonthSlots = useCallback(async () => {
     setLoadingMonth(true);
     setSelectedSlot(null);
@@ -162,6 +187,9 @@ export default function BookPage() {
   }, [fetchMonthSlots]);
   useEffect(() => {
     if (user) loadMyBookings();
+  }, [user]);
+  useEffect(() => {
+    if (user) loadPendingPayment();
   }, [user]);
   useEffect(() => {
     if (!selectedDate || !user) {
@@ -211,6 +239,20 @@ export default function BookPage() {
     setMyBookings(response.data ?? []);
   }
 
+  async function loadPendingPayment() {
+    try {
+      const res = await fetch("/api/bookings/pending-payment");
+      const data = await res.json();
+      setPendingBookings(
+        Array.isArray(data.pendingBookings) ? data.pendingBookings : [],
+      );
+    } catch {
+      setPendingBookings([]);
+    } finally {
+      setLoadingPendingBookings(false);
+    }
+  }
+
   async function submitBooking(additionalPlayers: AdditionalPlayer[]) {
     if (!selectedSlot || !user || !selectedDate) return;
     setSubmitting(true);
@@ -246,8 +288,12 @@ export default function BookPage() {
         }
         setStep("success");
         fetchMonthSlots();
+        loadPendingPayment();
       } else {
         setError(data.error ?? "Something went wrong. Please try again.");
+        if (Array.isArray(data.pendingBookings)) {
+          setPendingBookings(data.pendingBookings);
+        }
       }
     } catch {
       setError("Network error. Check your connection and try again.");
@@ -323,6 +369,8 @@ export default function BookPage() {
   const selectedDateSlots = selectedDate
     ? (monthSlots[selectedDate] ?? [])
     : [];
+  const singlePendingBooking =
+    pendingBookings.length === 1 ? pendingBookings[0] : undefined;
 
   return (
     <AppShell
@@ -362,6 +410,7 @@ export default function BookPage() {
               setSelectedSlot(null);
               setMonthSlots({});
             }}
+            pendingBookings={pendingBookings}
           />
         ) : (
           <div className="pb-8 md:max-w-2xl md:mx-auto">
@@ -404,6 +453,18 @@ export default function BookPage() {
                 Change
               </button>
             </div>
+
+            {loadingPendingBookings ? (
+              <div
+                className="mx-5 md:mx-8 mt-3 h-16 rounded-2xl animate-pulse"
+                style={{ background: "rgba(0,38,105,0.04)" }}
+              />
+            ) : (
+              pendingBookings.length > 0 && (
+                <PendingPaymentBanner pending={pendingBookings} />
+              )
+            )}
+
             {/* Month navigation + view toggle */}
             <div className="px-5 md:px-8 pt-4 pb-2 flex items-center justify-between">
               <div className="flex-1 flex items-center justify-between mr-3">
@@ -639,7 +700,32 @@ export default function BookPage() {
                   {format(new Date(selectedDate + "T12:00:00"), "EEE, MMM d")}
                 </p>
 
-                {selectedDateSlots.length === 0 ? (
+                {loadingPendingBookings ? (
+                  <div className="space-y-2">
+                    {[1, 2, 3].map((i) => (
+                      <div
+                        key={i}
+                        className="h-[68px] rounded-2xl animate-pulse"
+                        style={{ background: "rgba(0,38,105,0.05)" }}
+                      />
+                    ))}
+                  </div>
+                ) : singlePendingBooking || pendingBookings.length > 1 ? (
+                  <EmptyState
+                    compact
+                    icon="💳"
+                    title={
+                      singlePendingBooking
+                        ? "Payment due first"
+                        : `${pendingBookings.length} bookings need resolving`
+                    }
+                    description={
+                      singlePendingBooking
+                        ? `Resolve your round at ${singlePendingBooking.course_name} on ${formatPendingDate(singlePendingBooking.booking_date)} before booking another.`
+                        : "Resolve all of your pending bookings above before booking another round."
+                    }
+                  />
+                ) : selectedDateSlots.length === 0 ? (
                   <EmptyState
                     icon="⛳"
                     title="No tee times"
@@ -1371,6 +1457,143 @@ function SlotRow({
         )}
       </div>
     </button>
+  );
+}
+
+// ---- FIFO payment gate banner ---------------------------------
+
+function formatPendingDate(dateStr: string): string {
+  return format(new Date(`${dateStr}T12:00:00`), "EEEE, MMMM d");
+}
+
+// Every entry here is, by construction, status === 'availability_confirmed'
+// (see UNPAID_BOOKING_STATUSES) — the FIFO gate only ever flags rounds that
+// are actually ready to be paid for, never ones still awaiting admin/GHL
+// confirmation.
+// Bookings are paid in the order they're queued (soonest tee time first), so
+// only the next one in line gets a "Pay now" CTA — showing one per row was
+// redundant once the header already says how many are due. Every row still
+// names whose round it is (a group booking's players move through the GHL
+// payment pipeline independently, so a pending row might be a guest's, not
+// the member's own) and links out to that booking's full details.
+// A single-card, paged view rather than a full list: which one gets paid
+// first isn't necessarily the oldest — that's a business/admin call, not
+// something the UI should presume — so every pending booking is fully
+// payable, and prev/next just lets the member browse between them.
+function PendingPaymentBanner({ pending }: { pending: PendingPayment[] }) {
+  const router = useRouter();
+  const [index, setIndex] = useState(0);
+  const [messaging, setMessaging] = useState(false);
+  const [messageError, setMessageError] = useState("");
+  const current = pending[Math.min(index, pending.length - 1)];
+  if (!current) return null;
+
+  const hasMultiple = pending.length > 1;
+  const whose = current.player_name === "You" ? "your" : `${current.player_name}'s`;
+
+  async function messageMember(memberId: string) {
+    setMessaging(true);
+    setMessageError("");
+    const res = await apiClient.post<{ id: string }>("/api/conversations", {
+      type: "direct",
+      participant_ids: [memberId],
+    });
+    setMessaging(false);
+    if (res.error || !res.data) {
+      setMessageError(res.error?.message ?? "Couldn't open the conversation.");
+      return;
+    }
+    router.push(`/messages/${res.data.id}`);
+  }
+
+  return (
+    <div
+      className="mx-5 md:mx-8 mt-3 px-4 py-3 rounded-2xl border"
+      style={{
+        background: "rgba(146,100,10,0.06)",
+        borderColor: "rgba(146,100,10,0.25)",
+      }}
+    >
+      <div className="flex items-start gap-3">
+        <span className="text-lg leading-none mt-0.5">💳</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold" style={{ color: "#92640a" }}>
+              {hasMultiple ? `Payment due (${index + 1} of ${pending.length})` : "Payment due"}
+            </p>
+            {hasMultiple && (
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  type="button"
+                  aria-label="Previous payment due"
+                  disabled={index === 0}
+                  onClick={() => setIndex((i) => Math.max(0, i - 1))}
+                  className="w-6 h-6 flex items-center justify-center rounded-lg disabled:opacity-30 transition-opacity"
+                  style={{ background: "rgba(146,100,10,0.12)", color: "#92640a" }}
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  aria-label="Next payment due"
+                  disabled={index === pending.length - 1}
+                  onClick={() => setIndex((i) => Math.min(pending.length - 1, i + 1))}
+                  className="w-6 h-6 flex items-center justify-center rounded-lg disabled:opacity-30 transition-opacity"
+                  style={{ background: "rgba(146,100,10,0.12)", color: "#92640a" }}
+                >
+                  ›
+                </button>
+              </div>
+            )}
+          </div>
+          <p
+            className="text-xs mt-0.5 leading-relaxed"
+            style={{ color: "rgba(0,38,105,0.55)" }}
+          >
+            Complete payment for {whose} round at {current.course_name} on{" "}
+            {formatPendingDate(current.booking_date)} at{" "}
+            {formatTeeTime(current.tee_time)} before booking another.
+          </p>
+          <div className="flex items-center gap-2 mt-2">
+            {current.payment_url ? (
+              <a
+                href={current.payment_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg"
+                style={{ background: "var(--color-gold)", color: "var(--color-green-900)" }}
+              >
+                Pay now →
+              </a>
+            ) : (
+              <span className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>
+                Payment link unavailable — contact support.
+              </span>
+            )}
+            {/* Message the guest whose payment this is — never shown for the
+                member's own rows, and only when the guest is a fellow
+                member (non-member guests have no account to message). */}
+            {current.target_member_id && (
+              <button
+                type="button"
+                aria-label={`Message ${current.player_name}`}
+                disabled={messaging}
+                onClick={() => messageMember(current.target_member_id as string)}
+                className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-lg disabled:opacity-50 transition-opacity"
+                style={{ background: "rgba(0,38,105,0.06)", color: "rgba(0,38,105,0.55)" }}
+              >
+                <MessageCircle className="w-3.5 h-3.5" strokeWidth={2} />
+              </button>
+            )}
+          </div>
+          {messageError && (
+            <p className="text-xs mt-1" style={{ color: "#b91c1c" }}>
+              {messageError}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2623,7 +2846,11 @@ function EditGuestModal({
 }: {
   target: EditGuestTarget | null;
   onDismiss: () => void;
-  onSaved: (bookingId: string, guestName: string, player: AdditionalPlayer) => void;
+  onSaved: (
+    bookingId: string,
+    guestName: string,
+    player: AdditionalPlayer,
+  ) => void;
 }) {
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
@@ -2661,7 +2888,10 @@ function EditGuestModal({
 
   const inputCls =
     "w-full px-3 py-2 text-sm rounded-xl border bg-white outline-none transition-colors focus:border-green-700";
-  const inputStyle = { borderColor: "rgba(0,38,105,0.12)", color: "var(--color-green-900)" };
+  const inputStyle = {
+    borderColor: "rgba(0,38,105,0.12)",
+    color: "var(--color-green-900)",
+  };
 
   async function handleSave() {
     if (!target) return;
@@ -2979,14 +3209,20 @@ function MyBookingsTab({
   const allGroups = groupBookings(bookings);
   const upcoming = allGroups.filter(
     (g) =>
-      bookingToLocalDate(g.primary.booking_date, g.primary.tee_time, g.primary.course?.timezone) >= now &&
-      g.primary.status !== "cancelled",
+      bookingToLocalDate(
+        g.primary.booking_date,
+        g.primary.tee_time,
+        g.primary.course?.timezone,
+      ) >= now && g.primary.status !== "cancelled",
   );
   const cancelledAndPast = allGroups
     .filter(
       (g) =>
-        bookingToLocalDate(g.primary.booking_date, g.primary.tee_time, g.primary.course?.timezone) < now ||
-        g.primary.status === "cancelled",
+        bookingToLocalDate(
+          g.primary.booking_date,
+          g.primary.tee_time,
+          g.primary.course?.timezone,
+        ) < now || g.primary.status === "cancelled",
     )
     .sort(
       (a, b) =>
@@ -3166,7 +3402,9 @@ function BookingCard({
           // admin has set them up (or the row is cancelled/confirmed), GHL is
           // already involved and editing here would silently drift out of sync.
           editablePlayer:
-            p.status === "awaiting_approval" ? (p.additional_players?.[0] ?? null) : null,
+            p.status === "awaiting_approval"
+              ? (p.additional_players?.[0] ?? null)
+              : null,
         })),
       ]
     : (() => {
@@ -3320,14 +3558,20 @@ function BookingCard({
                       <span
                         title={row.adminNotes}
                         className="flex items-center justify-center w-4 h-4 rounded-full text-[10px] leading-none cursor-help flex-shrink-0"
-                        style={{ background: "rgba(234,179,8,0.15)", color: "#92640a" }}
+                        style={{
+                          background: "rgba(234,179,8,0.15)",
+                          color: "#92640a",
+                        }}
                         aria-label={`Admin note: ${row.adminNotes}`}
                       >
                         ⚠
                       </span>
                       <div
                         className="absolute left-0 bottom-full mb-1.5 hidden group-hover:block w-56 max-w-[70vw] rounded-lg px-3 py-2 text-[11px] leading-snug shadow-lg z-20"
-                        style={{ background: "var(--color-green-900)", color: "white" }}
+                        style={{
+                          background: "var(--color-green-900)",
+                          color: "white",
+                        }}
                       >
                         {row.adminNotes}
                       </div>
@@ -3337,8 +3581,8 @@ function BookingCard({
 
                 {/* Status badge or Pay CTA */}
                 {!canPay && <BookingStatusBadge status={row.status} />}
-                {canPay && (
-                  group.primary.course?.payment_url ? (
+                {canPay &&
+                  (group.primary.course?.payment_url ? (
                     <a
                       href={group.primary.course.payment_url}
                       target="_blank"
@@ -3355,8 +3599,7 @@ function BookingCard({
                     <span className="text-[11px] text-gray-400 flex-shrink-0">
                       Payment link pending
                     </span>
-                  )
-                )}
+                  ))}
 
                 {/* Edit — booker only, while the guest is still awaiting approval */}
                 {editablePlayer && (
@@ -3413,8 +3656,10 @@ function BookingCard({
 
 function EventSelectionScreen({
   onSelect,
+  pendingBookings,
 }: {
   onSelect: (course: Course) => void;
+  pendingBookings: PendingPayment[];
 }) {
   // `events` is the full, unfiltered list — fetched once, used only to
   // build the location filter's options so they don't shrink as filters
@@ -3456,7 +3701,10 @@ function EventSelectionScreen({
     [e.city, e.state].filter(Boolean).join(", ");
 
   const locationOptions = useMemo(() => {
-    const map = new Map<string, { city: string | null; state: string | null }>();
+    const map = new Map<
+      string,
+      { city: string | null; state: string | null }
+    >();
     events.forEach((e) => {
       if (!e.city && !e.state) return;
       const label = eventLocation(e);
@@ -3481,7 +3729,9 @@ function EventSelectionScreen({
     const params = new URLSearchParams();
     if (debouncedSearch) params.set("search", debouncedSearch);
     if (locationFilter !== "all") {
-      const parts = locationOptions.find(([label]) => label === locationFilter)?.[1];
+      const parts = locationOptions.find(
+        ([label]) => label === locationFilter,
+      )?.[1];
       if (parts?.city) params.set("city", parts.city);
       if (parts?.state) params.set("state", parts.state);
     }
@@ -3608,7 +3858,10 @@ function EventSelectionScreen({
           <div className="card">
             {filteredEvents.map((course, i) => {
               const borderStyle = {
-                borderBottom: i < filteredEvents.length - 1 ? "1px solid rgba(0,38,105,0.06)" : "none",
+                borderBottom:
+                  i < filteredEvents.length - 1
+                    ? "1px solid rgba(0,38,105,0.06)"
+                    : "none",
               };
 
               return (
@@ -3616,10 +3869,13 @@ function EventSelectionScreen({
                   key={course.id}
                   type="button"
                   onClick={() => onSelect(course)}
-                  className="w-full text-left flex items-start gap-3 px-4 py-4 transition-colors hover:bg-green-50/40 active:opacity-70"
+                  className="w-full text-left flex items-stretch gap-3 px-4 py-4 transition-colors hover:bg-green-50/40 active:opacity-70"
                   style={borderStyle}
                 >
-                  <CourseRowInner course={course} />
+                  <CourseRowInner
+                    course={course}
+                    pendingBookings={pendingBookings}
+                  />
                 </button>
               );
             })}
@@ -3728,10 +3984,23 @@ function EventLocationFilterDrawer({
             onClick={onClose}
             aria-label="Close"
             className="w-8 h-8 rounded-full flex items-center justify-center"
-            style={{ background: "rgba(0,38,105,0.06)", color: "rgba(0,38,105,0.5)" }}
+            style={{
+              background: "rgba(0,38,105,0.06)",
+              color: "rgba(0,38,105,0.5)",
+            }}
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
@@ -3760,7 +4029,20 @@ function EventLocationFilterDrawer({
   );
 }
 
-function CourseRowInner({ course }: { course: Course }) {
+function CourseRowInner({
+  course,
+  pendingBookings,
+}: {
+  course: Course;
+  pendingBookings?: PendingPayment[];
+}) {
+  // pendingBookings only ever contains bookings awaiting payment (status
+  // 'availability_confirmed') — see UNPAID_BOOKING_STATUSES — so a match
+  // here always means "payment due", never "still awaiting confirmation".
+  const isPendingCourse = Boolean(
+    pendingBookings?.some((p) => p.course_id === course.id),
+  );
+
   return (
     <>
       {/* Venue logo — fixed square, pinned to the top so it never
@@ -3779,7 +4061,10 @@ function CourseRowInner({ course }: { course: Course }) {
         />
       </div>
 
-      {/* Row stack: name / location - address / price / access CTA / website icon */}
+      {/* Row stack: name / location - address / price / access CTA / website icon.
+          Stretched to the full row height (button uses items-stretch) so the
+          icon row can be pinned to the bottom with mt-auto regardless of how
+          little text sits above it. */}
       <div className="flex-1 min-w-0 flex flex-col gap-1">
         <p
           className="font-sans font-black text-base leading-tight truncate"
@@ -3807,55 +4092,73 @@ function CourseRowInner({ course }: { course: Course }) {
           </span>
         )}
 
-        {(course.map_link || course.booking_url) && (
-          <div className="flex justify-end items-center gap-2 -mb-1">
-            {course.map_link && (
-              <a
-                href={course.map_link}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                aria-label="View on map"
-                className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
-                style={{ color: "rgba(0,38,105,0.35)" }}
-              >
-                <svg
-                  className="w-3.5 h-3.5 flex-shrink-0"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
-                </svg>
-              </a>
+        {(isPendingCourse || course.map_link || course.booking_url) && (
+          <div
+            className={cn(
+              "flex items-center gap-2 mt-auto -mb-1",
+              isPendingCourse ? "justify-between" : "justify-end",
             )}
-            {course.booking_url && (
-              <a
-                href={course.booking_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                aria-label="Visit website"
-                className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
-                style={{ color: "rgba(0,38,105,0.35)" }}
+          >
+            {isPendingCourse && (
+              <span
+                className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0"
+                style={{ background: "rgba(146,100,10,0.12)", color: "#92640a" }}
               >
-                <svg
-                  className="w-3.5 h-3.5 flex-shrink-0"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
-                  />
-                </svg>
-              </a>
+                💳 Payment due
+              </span>
             )}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {course.map_link && (
+                <a
+                  href={course.map_link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="View on map"
+                  className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
+                  style={{ color: "rgba(0,38,105,0.35)" }}
+                >
+                  <svg
+                    className="w-3.5 h-3.5 flex-shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={1.75}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.159.69.159 1.006 0z"
+                    />
+                  </svg>
+                </a>
+              )}
+              {course.booking_url && (
+                <a
+                  href={course.booking_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Visit website"
+                  className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
+                  style={{ color: "rgba(0,38,105,0.35)" }}
+                >
+                  <svg
+                    className="w-3.5 h-3.5 flex-shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+                    />
+                  </svg>
+                </a>
+              )}
+            </div>
           </div>
         )}
       </div>

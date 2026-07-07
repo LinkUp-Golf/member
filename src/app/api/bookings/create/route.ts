@@ -23,6 +23,7 @@ import { getAvailableSlots, createBooking, getContactByEmail } from '@/lib/ghl/c
 import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { sendPushToMembers, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
+import { findPendingPaymentBookings } from '@/lib/bookings/pending-payment'
 import { format } from 'date-fns'
 import type { AdditionalPlayer } from '@/types'
 
@@ -191,6 +192,24 @@ export async function POST(request: NextRequest) {
   console.log('[booking/create] Member found:', { memberId: member.id, courseId: member.home_course_id })
 
   const adminSupabase = createAdminClient()
+
+  // First-in-first-out: a member may only hold bookings awaiting payment
+  // (status 'availability_confirmed' — a payment link has been sent) — every
+  // one of them must be paid before another booking can be created, across
+  // any course. Since this rule is being added to an app already in
+  // production, a member may already have more than one booking awaiting
+  // payment on their account; surface all of them, not just one. Check this
+  // before touching GHL so a blocked member fails fast with a clear message.
+  const pendingBookings = await findPendingPaymentBookings(adminSupabase, user.id)
+  const [firstPendingBooking] = pendingBookings
+  if (firstPendingBooking) {
+    const pendingDate = format(new Date(`${firstPendingBooking.booking_date}T12:00:00`), 'EEEE, MMMM d')
+    const error =
+      pendingBookings.length === 1
+        ? `You have a payment due for your booking at ${firstPendingBooking.course_name} on ${pendingDate}. Please pay before booking again.`
+        : `You have ${pendingBookings.length} bookings with payment due. Please pay them before booking again.`
+    return NextResponse.json({ error, pendingBookings }, { status: 409 })
+  }
 
   // Resolve course calendar settings — use the selected course when provided,
   // fall back to the Aviara env-var constants for backward compatibility.
