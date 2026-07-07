@@ -215,7 +215,9 @@ function SlotCard({
 }) {
   const isExpanded = expandedSlots.has(slot.key)
   const totalAmount = slot.rows.reduce((sum, b) => sum + Number(b.amount_charged), 0)
-  const unpaidCount = slot.rows.filter(b => b.status === 'availability_confirmed').length
+  const activeRows = slot.rows.filter(b => b.status !== 'cancelled')
+  const paidCount = activeRows.filter(b => ['payment_confirmed', 'confirmed'].includes(b.status)).length
+  const allPaid = activeRows.length > 0 && paidCount === activeRows.length
 
   // Status breakdown for the slot header
   const statusBreakdown = slot.rows.reduce<Record<string, number>>((acc, b) => {
@@ -273,9 +275,11 @@ function SlotCard({
         <div className="flex-shrink-0 text-right">
           <p className="text-xs font-semibold text-green-700">${totalAmount.toFixed(0)}</p>
           <p className="text-[10px] text-gray-400">{slot.rows.length}p</p>
-          {unpaidCount > 0 && (
-            <span className="inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 whitespace-nowrap">
-              ⚠ {unpaidCount} unpaid
+          {activeRows.length > 0 && (
+            <span className={`inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${
+              allPaid ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'
+            }`}>
+              {allPaid ? '✓' : '⚠'} {paidCount}/{activeRows.length} members paid
             </span>
           )}
         </div>

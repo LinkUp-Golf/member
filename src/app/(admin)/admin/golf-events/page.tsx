@@ -51,6 +51,15 @@ function DotsVertical() {
   )
 }
 
+function MapPinIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+    </svg>
+  )
+}
+
 function CourseMenuItem({ label, danger, disabled, onClick }: { label: string; danger?: boolean; disabled?: boolean; onClick: () => void }) {
   return (
     <button
@@ -337,7 +346,19 @@ export default function AdminCoursesPage() {
                 <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
-                      <h3 className="font-semibold text-gray-900 truncate min-w-0">{course.name}</h3>
+                      <h3 className="font-semibold text-gray-900 truncate min-w-0">
+                        {course.booking_url ? (
+                          <a
+                            href={course.booking_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="hover:text-blue-700 hover:underline"
+                          >
+                            {course.name}
+                          </a>
+                        ) : course.name}
+                      </h3>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
                         {course.approval_status !== 'active' && (
                           <Badge label={sm.label} colour={sm.colour} />
@@ -376,9 +397,25 @@ export default function AdminCoursesPage() {
                   </div>
 
                   {(course.city || course.state || course.address) && (
-                    <p className="text-xs text-gray-500">
-                      📍 {[course.city, course.state].filter(Boolean).join(', ')}
-                      {course.address ? ` - ${course.address}` : ''}
+                    <p className="text-xs text-gray-500 flex items-center gap-1">
+                      {course.map_link ? (
+                        <a
+                          href={course.map_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          aria-label="View on map"
+                          className="flex-shrink-0 text-gray-400 hover:text-blue-600 transition-colors"
+                        >
+                          <MapPinIcon className="w-3.5 h-3.5" />
+                        </a>
+                      ) : (
+                        <MapPinIcon className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                      )}
+                      <span>
+                        {[course.city, course.state].filter(Boolean).join(', ')}
+                        {course.address ? ` - ${course.address}` : ''}
+                      </span>
                     </p>
                   )}
 
