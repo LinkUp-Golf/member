@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
 //   2. Create GHL calendar appointment
 //   3. Write one booking row per player to Supabase (status = 'tentative')
 //
-// GET /api/bookings/create?month=YYYY-MM&timezone=...
+// GET /api/bookings/create?month=YYYY-MM&courseId=...
 //   Returns available tee-time slots from the GHL Aviara calendar.
 // ============================================================
 
@@ -40,7 +40,7 @@ const AVIARA_CALENDAR_ID = process.env.GHL_AVIARA_CALENDAR_ID ?? ''
 const AVIARA_CALENDAR_USER_ID = process.env.GHL_AVIARA_CALENDAR_USER_ID ?? ''
 
 // ============================================================
-// GET /api/bookings/create?month=YYYY-MM&timezone=...
+// GET /api/bookings/create?month=YYYY-MM&courseId=...
 // Returns all available slots for the month, keyed by date.
 // ============================================================
 export async function GET(request: NextRequest) {
@@ -65,14 +65,10 @@ export async function GET(request: NextRequest) {
   const endDate = format(new Date(year, monthIdx + 1, 0), 'yyyy-MM-dd')
 
   let calendarId = AVIARA_CALENDAR_ID
-  // Slot listing is displayed in the *browsing member's* timezone, not the
-  // course's — GHL buckets/labels each returned slot's date+time for
-  // whichever timezone we ask for, so a member in Asia/Manila browsing a
-  // course in America/Chicago should see (and pick) times converted to
-  // their own zone (e.g. 4:35am, not the venue's 1:35pm). The venue's own
-  // timezone is still what the POST step below uses to derive booking_date/
-  // tee_time for storage — that's a separate, correct concern from display.
-  const timezone = searchParams.get('timezone') || AVIARA_TIMEZONE
+  // Slot listing is always displayed in the *course's own* timezone — a tee
+  // time is an appointment at that venue's local wall-clock time, regardless
+  // of where the browsing member happens to be.
+  let timezone = AVIARA_TIMEZONE
   let calendarUserId: string | undefined = AVIARA_CALENDAR_USER_ID || undefined
 
   if (courseId) {
@@ -89,6 +85,7 @@ export async function GET(request: NextRequest) {
     }
     calendarId = course.ghl_calendar_id
     calendarUserId = course.ghl_calendar_user_id || undefined
+    timezone = course.timezone || AVIARA_TIMEZONE
   }
 
   const slots = await getAvailableSlots({

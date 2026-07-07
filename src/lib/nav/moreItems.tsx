@@ -1,4 +1,4 @@
-import { Gift, Bell, Smartphone, FileText } from 'lucide-react'
+import { Gift, Bell, Smartphone, FileText, Settings } from 'lucide-react'
 import Icon, { type IconName } from '@/components/ui/Icon'
 import { FEATURES } from '@/lib/features'
 
@@ -39,7 +39,7 @@ export const MORE_ITEMS: { group: string; items: MoreItem[] }[] = [
     group: 'Settings',
     items: [
       { href: '/more/notifications', label: 'Notification Log', icon: <Bell className="w-5 h-5" strokeWidth={1.9} />, desc: 'View your notification history' },
-      { href: '/more/settings', label: 'Preferences', icon: svgIcon('more'), desc: 'Notifications, text size, timezone & display' },
+      { href: '/more/settings', label: 'Preferences', icon: <Settings className="w-5 h-5" strokeWidth={1.9} />, desc: 'Notifications, text size & display' },
       { href: '/more/install', label: 'Install App', icon: <Smartphone className="w-5 h-5" strokeWidth={1.9} />, desc: 'Add LinkUp Golf to your home screen' },
       { href: 'https://www.linkup.golf/terms-and-community-standards', label: 'Terms & Community Standards', icon: <FileText className="w-5 h-5" strokeWidth={1.9} />, desc: 'Our terms of service and community guidelines', external: true },
     ],

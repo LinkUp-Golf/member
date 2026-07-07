@@ -52,11 +52,9 @@ interface NotifResponse {
   unread_count: number
 }
 
-// Today/Yesterday boundaries use the viewer's saved timezone preference
-// (falling back to the browser's zone) so they match what the member set in
-// Settings rather than wherever their browser happens to think it is.
-function groupByDate(items: NotificationLog[], timezone?: string | null): { label: string; items: NotificationLog[] }[] {
-  const tz = timezone || getBrowserTimezone()
+// Today/Yesterday boundaries use the viewer's own browser timezone.
+function groupByDate(items: NotificationLog[]): { label: string; items: NotificationLog[] }[] {
+  const tz = getBrowserTimezone()
   const dayKey = (d: Date) => formatInTimeZone(d, tz, 'yyyy-MM-dd')
 
   const now = new Date()
@@ -84,7 +82,7 @@ function groupByDate(items: NotificationLog[], timezone?: string | null): { labe
 }
 
 export default function NotificationsPage() {
-  const { user, profile } = useProfile()
+  const { user } = useProfile()
   const [notifications, setNotifications]   = useState<NotificationLog[]>([])
   const [hasMore, setHasMore]               = useState(false)
   const [nextCursor, setNextCursor]         = useState<string | null>(null)
@@ -147,7 +145,7 @@ export default function NotificationsPage() {
     setMarkingRead(false)
   }
 
-  const groups = groupByDate(notifications, profile?.profile?.timezone)
+  const groups = groupByDate(notifications)
 
   return (
     <AppShell

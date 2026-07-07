@@ -9,12 +9,9 @@ interface Props {
   conversation: ConversationWithDetails
   currentUserId: string
   isOnline?: boolean
-  /** Viewer's saved timezone preference (member_profiles.timezone) — falls
-   *  back to the browser's own zone when not set. */
-  timezone?: string | null
 }
 
-export const ConversationItem = memo(function ConversationItem({ conversation: conv, currentUserId, isOnline, timezone }: Props) {
+export const ConversationItem = memo(function ConversationItem({ conversation: conv, currentUserId, isOnline }: Props) {
   const others = conv.participants
     .filter(p => p.member?.id !== currentUserId)
     .map(p => p.member)
@@ -75,7 +72,7 @@ export const ConversationItem = memo(function ConversationItem({ conversation: c
             {displayName}
           </span>
           <span className="text-[10px] flex-shrink-0 ml-2" style={{ color: 'rgba(0,38,105,0.32)' }}>
-            {lastMsg ? formatMessageTime(lastMsg.created_at, timezone) : ''}
+            {lastMsg ? formatMessageTime(lastMsg.created_at) : ''}
           </span>
         </div>
         <p

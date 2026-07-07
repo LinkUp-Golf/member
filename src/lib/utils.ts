@@ -43,14 +43,12 @@ function dayKey(date: Date, timezone: string): string {
 }
 
 // Personal/viewer-perspective timestamp (messages, notifications, admin
-// views) — pass the *viewer's* saved timezone preference (member_profiles.timezone)
-// so "Today"/"Yesterday" and the rendered clock time match what they actually
-// set. Omit `timezone` (or pass null/undefined, e.g. no preference saved yet)
-// to fall back to the runtime's own zone.
+// views) — always uses the viewer's own browser-detected timezone, since
+// there's no per-member timezone preference to defer to.
 // Do NOT use this for booking tee times — those are anchored to the course's
 // own timezone regardless of viewer (see formatTeeTime / bookingToLocalDate).
-export function formatMessageTime(dateString: string, timezone?: string | null): string {
-  const tz = timezone || getBrowserTimezone()
+export function formatMessageTime(dateString: string): string {
+  const tz = getBrowserTimezone()
   const date = new Date(dateString)
   const now = new Date()
   if (dayKey(date, tz) === dayKey(now, tz)) {

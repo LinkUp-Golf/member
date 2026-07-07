@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, memo, type ReactNode } from "react";
+import { useEffect, useState, useCallback, memo, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -9,7 +9,6 @@ import { cn } from "@/lib/utils";
 import Icon, { type IconName } from "@/components/ui/Icon";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useProfile } from "@/hooks/useProfile";
-import { useLocationTimezone } from "@/hooks/useLocationTimezone";
 import { MORE_ITEMS } from "@/lib/nav/moreItems";
 
 // Extracted + memoized so a pathname change (i.e. every navigation) only
@@ -107,8 +106,7 @@ const DISMISSED_KEY = "linkup-notif-prompt-dismissed";
 export default function AppNav({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { permission, isSubscribed, subscribe } = usePushNotifications();
-  const { profile, loading, refetch } = useProfile();
-  const { detectFromLocation } = useLocationTimezone(refetch);
+  const { profile, loading } = useProfile();
   const [dismissed, setDismissed] = useState(true); // start hidden, reveal after mount
 
   // Applies the member's saved text-size preference once it loads. The shell
@@ -119,18 +117,6 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
     const px = profile?.profile?.text_size ?? 16;
     document.documentElement.style.fontSize = `${px}px`;
   }, [loading, profile]);
-
-  // Ask for location once per member, as soon as the app opens, so the
-  // timezone preference is accurate without requiring a trip to Settings.
-  // Safe to fire unconditionally: browsers don't re-prompt once a choice
-  // (allow/block) has already been made for this origin.
-  const autoDetectRef = useRef(false);
-  useEffect(() => {
-    if (loading || autoDetectRef.current) return;
-    if (!profile || profile.profile?.timezone) return;
-    autoDetectRef.current = true;
-    detectFromLocation();
-  }, [loading, profile, detectFromLocation]);
 
   // Show the in-app prompt banner when permission hasn't been decided yet
   // and the user hasn't dismissed it before. Must be user-gesture driven

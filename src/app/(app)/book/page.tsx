@@ -34,9 +34,9 @@ import {
   POLICY_TIERS,
   GOLF_ROUND_DURATION_MINUTES,
   GHL_CANCEL_BOOKING_URL,
+  AVIARA_TIMEZONE,
 } from "@/lib/constants";
 import { validateEmail } from "@/lib/validation";
-import { getBrowserTimezone } from "@/lib/timezone";
 
 type PlayerKind = "member" | "non_member";
 
@@ -77,26 +77,11 @@ function slotEndTime(startIso: string): string {
 }
 
 export default function BookPage() {
-  const { user, profile } = useProfile();
+  const { user } = useProfile();
   const searchParams = useSearchParams();
   const inviteMemberId = searchParams?.get("invite") ?? null;
 
   const today = useMemo(() => new Date(), []);
-
-  // Timezone — default to the member's saved preference (set via Settings),
-  // falling back to the browser-detected zone until a preference exists.
-  // Slot times are always displayed converted into *this* zone, not the
-  // selected course's — a member in Asia/Manila browsing a course in
-  // America/Chicago should see e.g. 4:35am, not the venue's 1:35pm. GHL
-  // buckets/labels slot dates and times for whichever timezone we request,
-  // so this is the single source of truth for every fetch and on-screen
-  // label in this file. (Storage is unaffected: booking_date/tee_time are
-  // still derived server-side from the course's own timezone — see
-  // bookings/create/route.ts.)
-  const [timezone, setTimezone] = useState<string>(getBrowserTimezone);
-  useEffect(() => {
-    if (profile?.profile?.timezone) setTimezone(profile.profile.timezone);
-  }, [profile?.profile?.timezone]);
 
   // Month navigation — start at the month containing the first bookable date
   const [currentMonth, setCurrentMonth] = useState<Date>(() =>
@@ -117,6 +102,12 @@ export default function BookPage() {
 
   // Selected course (null = no course chosen yet)
   const [selectedEvent, setSelectedEvent] = useState<Course | null>(null);
+
+  // Tee times always display in the *selected course's* own timezone — a tee
+  // time is an appointment at that venue's local wall-clock time, regardless
+  // of where the browsing member happens to be. Falls back to the legacy
+  // single-venue default before a course has been chosen.
+  const timezone = selectedEvent?.timezone ?? AVIARA_TIMEZONE;
 
   // Booking flow
   const [step, setStep] = useState<Step>("select");
@@ -156,7 +147,7 @@ export default function BookPage() {
     try {
       const eventParam = selectedEvent ? `&courseId=${selectedEvent.id}` : "";
       const res = await fetch(
-        `/api/bookings/create?month=${monthStr}&timezone=${encodeURIComponent(timezone)}${eventParam}`,
+        `/api/bookings/create?month=${monthStr}${eventParam}`,
       );
       const data = await res.json();
       setMonthSlots(data.slots ?? {});
@@ -164,7 +155,7 @@ export default function BookPage() {
       setMonthSlots({});
     }
     setLoadingMonth(false);
-  }, [currentMonth, timezone, selectedEvent]);
+  }, [currentMonth, selectedEvent]);
 
   useEffect(() => {
     fetchMonthSlots();
@@ -178,14 +169,12 @@ export default function BookPage() {
       return;
     }
     setLoadingDayPlayers(true);
-    fetch(
-      `/api/bookings/day?date=${selectedDate}&timezone=${encodeURIComponent(timezone)}`,
-    )
+    fetch(`/api/bookings/day?date=${selectedDate}`)
       .then((r) => r.json())
       .then((d) => setDayPlayers(Array.isArray(d.players) ? d.players : []))
       .catch(() => setDayPlayers([]))
       .finally(() => setLoadingDayPlayers(false));
-  }, [selectedDate, user, timezone]);
+  }, [selectedDate, user]);
 
   // These must stay above the early returns to satisfy the rules of hooks
   const todayStr = useMemo(

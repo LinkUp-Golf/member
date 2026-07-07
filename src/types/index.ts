@@ -178,10 +178,6 @@ export interface MemberProfile {
   profile_visible: boolean
   show_handicap: boolean
   text_size: number
-  timezone: string | null
-  latitude: number | null
-  longitude: number | null
-  location_updated_at: string | null
   updated_at: string
 }
 

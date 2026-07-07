@@ -3,12 +3,10 @@ export const dynamic = 'force-dynamic'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { find as findTimezone } from 'geo-tz'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createRouteHandlerClient } from '@/lib/supabase-server'
 import { getCache } from '@/lib/cache'
 import { MEMBER_DETAIL_NS, memberDetailKey } from '@/lib/cache/keys'
-import { validateTimezone, validateCoordinates } from '@/lib/validation'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
@@ -35,30 +33,12 @@ export const PATCH = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     'role_title', 'industry_category', 'value_offered', 'value_sought',
     'non_golf_hobbies', 'linkedin_url', 'handicap_index', 'preferred_play_times',
     'play_frequency', 'open_to_golf_travel', 'family_golfers',
-    'profile_visible', 'show_handicap', 'text_size', 'timezone',
-    'latitude', 'longitude',
+    'profile_visible', 'show_handicap', 'text_size',
   ]
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   for (const key of allowed) {
     if (key in body) updates[key] = body[key]
-  }
-
-  // GPS coordinates take priority over any client-sent timezone: resolve
-  // the IANA zone server-side so the client never needs timezone-boundary data.
-  if ('latitude' in updates || 'longitude' in updates) {
-    const coordsResult = validateCoordinates(updates.latitude, updates.longitude)
-    if (!coordsResult.valid) {
-      return NextResponse.json({ error: coordsResult.errors[0] }, { status: 400 })
-    }
-    const [resolvedTimezone] = findTimezone(updates.latitude as number, updates.longitude as number)
-    updates.timezone = resolvedTimezone ?? null
-    updates.location_updated_at = new Date().toISOString()
-  } else if ('timezone' in updates) {
-    const tzResult = validateTimezone(updates.timezone, 'timezone')
-    if (!tzResult.valid) {
-      return NextResponse.json({ error: tzResult.errors[0] }, { status: 400 })
-    }
   }
 
   const { data, error } = await supabase

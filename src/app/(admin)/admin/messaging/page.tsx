@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { formatInTimeZone } from 'date-fns-tz'
 import { createClient } from '@/lib/supabase'
 import { apiClient } from '@/lib/api-client'
-import { useProfile } from '@/hooks/useProfile'
 import { formatRelativeTime, truncate } from '@/lib/utils'
 import { getBrowserTimezone } from '@/lib/timezone'
 import {
@@ -347,8 +346,6 @@ function MessageThreadPanel({
   onClose: () => void
   showBackButton?: boolean
 }) {
-  const { profile } = useProfile()
-  const timezone = profile?.profile?.timezone
   const [messages, setMessages] = useState<AdminMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [hasMore, setHasMore] = useState(false)
@@ -469,7 +466,7 @@ function MessageThreadPanel({
                         {sender ? `${sender.first_name} ${sender.last_name}` : 'Unknown'}
                       </span>
                       <span className="text-[10px] text-gray-400">
-                        {formatInTimeZone(new Date(msg.created_at), timezone || getBrowserTimezone(), 'M/d/yyyy, h:mm:ss a')}
+                        {formatInTimeZone(new Date(msg.created_at), getBrowserTimezone(), 'M/d/yyyy, h:mm:ss a')}
                       </span>
                       {isEdited  && <Badge label="edited"  colour="gray" />}
                       {isDeleted && <Badge label="deleted" colour="red"  />}
@@ -495,8 +492,6 @@ function MessageThreadPanel({
 // ============================================================
 
 function ControlsTab() {
-  const { profile } = useProfile()
-  const timezone = profile?.profile?.timezone
   const [muted, setMuted] = useState<MutedMember[]>([])
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<string | null>(null)
@@ -692,7 +687,7 @@ function ControlsTab() {
                   <p className="text-xs text-gray-400">
                     {isPermanent(m.messaging_muted_until)
                       ? 'Muted permanently'
-                      : `Until ${formatInTimeZone(new Date(m.messaging_muted_until), timezone || getBrowserTimezone(), 'M/d/yyyy, h:mm:ss a')}`
+                      : `Until ${formatInTimeZone(new Date(m.messaging_muted_until), getBrowserTimezone(), 'M/d/yyyy, h:mm:ss a')}`
                     }
                     {!isPermanent(m.messaging_muted_until) && (
                       <> · {formatRelativeTime(m.messaging_muted_until)} remaining</>

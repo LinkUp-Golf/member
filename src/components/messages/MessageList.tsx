@@ -20,9 +20,6 @@ interface Props {
   onEdit?: (messageId: string, newBody: string) => Promise<boolean>
   onDelete?: (messageId: string) => Promise<boolean>
   onRetry?: (tempId: string, body: string) => void
-  /** Viewer's saved timezone preference (member_profiles.timezone) — falls
-   *  back to the browser's own zone when not set. */
-  timezone?: string | null
 }
 
 export function MessageList({
@@ -38,7 +35,6 @@ export function MessageList({
   onEdit,
   onDelete,
   onRetry,
-  timezone,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const topSentinelRef = useRef<HTMLDivElement>(null)
@@ -100,7 +96,7 @@ export function MessageList({
       })()
     : null
 
-  const grouped = groupByDate(messages, timezone)
+  const grouped = groupByDate(messages)
 
   return (
     <div className="flex flex-col min-h-full">
@@ -135,7 +131,6 @@ export function MessageList({
                   onEdit={onEdit}
                   onDelete={onDelete}
                   onRetry={onRetry}
-                  timezone={timezone}
                 />
               </div>
             )
@@ -156,12 +151,12 @@ export function MessageList({
 
 // ---- Helpers -------------------------------------------------
 
-function groupByDate(messages: OptimisticMessage[], timezone?: string | null) {
+function groupByDate(messages: OptimisticMessage[]) {
   const groups: { date: string; messages: OptimisticMessage[] }[] = []
   let currentDate = ''
 
   for (const msg of messages) {
-    const date = formatDateLabel(msg.created_at, timezone)
+    const date = formatDateLabel(msg.created_at)
     if (date !== currentDate) {
       currentDate = date
       groups.push({ date, messages: [] })
@@ -172,11 +167,9 @@ function groupByDate(messages: OptimisticMessage[], timezone?: string | null) {
   return groups
 }
 
-// Day boundaries are computed in the viewer's timezone preference (falling
-// back to the browser's zone) so "Today"/"Yesterday" match what the member
-// actually set in Settings, not just wherever their browser thinks it is.
-function formatDateLabel(iso: string, timezone?: string | null): string {
-  const tz = timezone || getBrowserTimezone()
+// Day boundaries are computed in the viewer's own browser timezone.
+function formatDateLabel(iso: string): string {
+  const tz = getBrowserTimezone()
   const dayKey = (d: Date) => formatInTimeZone(d, tz, 'yyyy-MM-dd')
 
   const date = new Date(iso)

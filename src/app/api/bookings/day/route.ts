@@ -2,10 +2,8 @@ export const dynamic = 'force-dynamic'
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
-import { formatInTimeZone, getTimezoneOffset } from 'date-fns-tz'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { AVIARA_TIMEZONE } from '@/lib/constants'
 import type { AuthContext } from '@/lib/auth/types'
 
 export interface DayPlayer {
@@ -19,20 +17,11 @@ export interface DayPlayer {
   is_self: boolean
 }
 
-// Returns the course-local date ("YYYY-MM-DD") and time ("HH:MM:SS") for a
-// given UTC timestamp, in the given course's own timezone.
-function courseParts(utcMs: number, timezone: string): { date: string; time: string } {
-  const d = new Date(utcMs)
-  return {
-    date: formatInTimeZone(d, timezone, 'yyyy-MM-dd'),
-    time: formatInTimeZone(d, timezone, 'HH:mm:ss'),
-  }
-}
-
-// GET /api/bookings/day?date=YYYY-MM-DD&timezone=IANA_TZ
-// Returns members (same home course) who have confirmed bookings on the given LOCAL date.
-// The timezone param converts the user's local day to the correct date range
-// in the member's home course's own timezone (not necessarily Aviara).
+// GET /api/bookings/day?date=YYYY-MM-DD
+// Returns members (home course) who have confirmed bookings on the given
+// date. "date" is always the course's own local calendar date — booking_date
+// is stored as a literal course-local date already, so no timezone
+// conversion is needed here.
 export const GET = withAuth(
   async (req: NextRequest, ctx: AuthContext) => {
     const date = req.nextUrl.searchParams.get('date')
@@ -44,56 +33,19 @@ export const GET = withAuth(
 
     const { data: member } = await admin
       .from('members')
-      .select('home_course_id, home_course:courses!members_home_course_id_fkey(timezone)')
+      .select('home_course_id')
       .eq('id', ctx.userId)
       .single()
 
     if (!member) return NextResponse.json({ players: [] })
 
-    const homeCourseTimezone = (member.home_course as unknown as { timezone: string } | null)?.timezone ?? AVIARA_TIMEZONE
-
-    const clientTz = req.nextUrl.searchParams.get('timezone') ?? homeCourseTimezone
-    let timezone = homeCourseTimezone
-    try {
-      new Intl.DateTimeFormat('en-US', { timeZone: clientTz })
-      timezone = clientTz
-    } catch {
-      // invalid timezone string — fall back to the home course's own timezone
-    }
-
-    // Convert user's local day (00:00 – 23:59) to UTC using their offset.
-    // Noon UTC of the date is used as a stable DST-safe reference point.
-    const offsetMs = getTimezoneOffset(timezone, new Date(`${date}T12:00:00Z`))
-    const dayStartUtc = new Date(`${date}T00:00:00Z`).getTime() - offsetMs
-    const dayEndUtc = new Date(`${date}T23:59:59Z`).getTime() - offsetMs
-
-    // Map those UTC boundaries to the home course's own date + time.
-    const courseStart = courseParts(dayStartUtc, homeCourseTimezone)
-    const courseEnd = courseParts(dayEndUtc, homeCourseTimezone)
-
-    // Base query — apply course / status / guest filters.
-    let bookingsQuery = admin
+    const { data: bookings } = await admin
       .from('bookings')
       .select('member_id, booking_date, tee_time, players')
       .eq('course_id', member.home_course_id)
+      .eq('booking_date', date)
       .is('guest_name', null)
       .in('status', ['availability_confirmed', 'payment_confirmed', 'confirmed'])
-
-    if (courseStart.date === courseEnd.date) {
-      // User's local day falls entirely within one home-course calendar date.
-      bookingsQuery = bookingsQuery
-        .eq('booking_date', courseStart.date)
-        .gte('tee_time', courseStart.time)
-        .lte('tee_time', courseEnd.time)
-    } else {
-      // User's local day spans two home-course calendar dates (e.g. UTC+8 users).
-      bookingsQuery = bookingsQuery.or(
-        `and(booking_date.eq.${courseStart.date},tee_time.gte.${courseStart.time}),` +
-          `and(booking_date.eq.${courseEnd.date},tee_time.lte.${courseEnd.time})`,
-      )
-    }
-
-    const { data: bookings } = await bookingsQuery
 
     if (!bookings?.length) return NextResponse.json({ players: [] })
 
