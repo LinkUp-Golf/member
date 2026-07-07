@@ -169,12 +169,13 @@ export default function BookPage() {
       return;
     }
     setLoadingDayPlayers(true);
-    fetch(`/api/bookings/day?date=${selectedDate}`)
+    const courseParam = selectedEvent ? `&courseId=${selectedEvent.id}` : "";
+    fetch(`/api/bookings/day?date=${selectedDate}${courseParam}`)
       .then((r) => r.json())
       .then((d) => setDayPlayers(Array.isArray(d.players) ? d.players : []))
       .catch(() => setDayPlayers([]))
       .finally(() => setLoadingDayPlayers(false));
-  }, [selectedDate, user]);
+  }, [selectedDate, user, selectedEvent]);
 
   // These must stay above the early returns to satisfy the rules of hooks
   const todayStr = useMemo(
@@ -897,7 +898,7 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
           </div>
         )}
         <span
-          className="text-[10px] font-medium text-center leading-tight truncate w-full"
+          className="text-[10px] font-medium text-center leading-tight truncate w-full capitalize"
           style={{ color: "var(--color-green-900)" }}
         >
           {player.first_name}
@@ -993,7 +994,7 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
                   <div className="flex-1 min-w-0 pt-0.5">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p
-                        className="font-sans font-black text-lg leading-tight"
+                        className="font-sans font-black text-lg leading-tight capitalize"
                         style={{ color: "var(--color-green-900)" }}
                       >
                         {displayName}

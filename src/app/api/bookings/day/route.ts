@@ -17,10 +17,14 @@ export interface DayPlayer {
   is_self: boolean
 }
 
-// GET /api/bookings/day?date=YYYY-MM-DD
-// Returns members (home course) who have confirmed bookings on the given
-// date. "date" is always the course's own local calendar date — booking_date
-// is stored as a literal course-local date already, so no timezone
+// GET /api/bookings/day?date=YYYY-MM-DD&courseId=...
+// Returns members who have confirmed bookings on the given date at the
+// given course — "who's playing" is scoped to whichever course the member
+// is currently browsing/booking, not always their home course, now that
+// the app supports multiple courses. Falls back to the member's home
+// course when no courseId is supplied (e.g. before a course is selected).
+// "date" is always the course's own local calendar date — booking_date is
+// stored as a literal course-local date already, so no timezone
 // conversion is needed here.
 export const GET = withAuth(
   async (req: NextRequest, ctx: AuthContext) => {
@@ -31,18 +35,23 @@ export const GET = withAuth(
 
     const admin = createAdminClient()
 
-    const { data: member } = await admin
-      .from('members')
-      .select('home_course_id')
-      .eq('id', ctx.userId)
-      .single()
+    let courseId = req.nextUrl.searchParams.get('courseId')
+    if (!courseId) {
+      const { data: member } = await admin
+        .from('members')
+        .select('home_course_id')
+        .eq('id', ctx.userId)
+        .single()
+      if (!member) return NextResponse.json({ players: [] })
+      courseId = member.home_course_id
+    }
 
-    if (!member) return NextResponse.json({ players: [] })
+    if (!courseId) return NextResponse.json({ players: [] })
 
     const { data: bookings } = await admin
       .from('bookings')
       .select('member_id, booking_date, tee_time, players')
-      .eq('course_id', member.home_course_id)
+      .eq('course_id', courseId)
       .eq('booking_date', date)
       .is('guest_name', null)
       .in('status', ['availability_confirmed', 'payment_confirmed', 'confirmed'])
@@ -71,6 +80,12 @@ export const GET = withAuth(
       }),
     )
 
+    // Dedupe by member + tee time: each row here should already be one
+    // distinct primary booker (guest/additional-player rows are excluded
+    // above), but a retried/duplicate booking submission can otherwise show
+    // the same person twice for the same slot. A member with two genuinely
+    // different tee times the same day still shows once per tee time.
+    const seen = new Set<string>()
     const players: DayPlayer[] = bookings
       .map((b) => {
         const m = memberMap[b.member_id as string]
@@ -87,6 +102,12 @@ export const GET = withAuth(
         }
       })
       .filter((p): p is DayPlayer => p !== null)
+      .filter((p) => {
+        const key = `${p.member_id}:${p.tee_time}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
 
     return NextResponse.json({ players })
   },
