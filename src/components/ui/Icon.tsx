@@ -1,7 +1,7 @@
 import { memo } from 'react'
 import {
-  Home,
-  CalendarPlus,
+  FlagTriangleRight,
+  Calendar,
   Users,
   MessageCircle,
   Menu,
@@ -15,8 +15,8 @@ import {
 } from 'lucide-react'
 
 const ICONS: Record<string, LucideIcon> = {
-  home: Home,
-  book: CalendarPlus,
+  home: FlagTriangleRight,
+  book: Calendar,
   members: Users,
   messages: MessageCircle,
   more: Menu,

@@ -24,7 +24,12 @@ function MessagesIcon({ className, variant = 'light' }: Props) {
       '/api/conversations?counts_only=true'
     )
     if (res.data) {
-      setCount(res.data.unread_messages + res.data.pending_invitations)
+      // Coerce each field independently — if either is missing from the
+      // response, `undefined + n` is NaN, which slips past IconBadge's
+      // `count <= 0` guard and renders a literal "NaN" badge.
+      const unread = Number(res.data.unread_messages) || 0
+      const pending = Number(res.data.pending_invitations) || 0
+      setCount(unread + pending)
     }
   }, [])
 
