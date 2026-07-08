@@ -68,9 +68,9 @@ const DINNER_FILTER_LABELS: Record<DinnerFilter, string> = {
 // who's actually teeing off soon, without scrolling through the full
 // 365-day "Upcoming" window.
 const WHOS_PLAYING_WINDOW_DAYS = 30
-type BookingsView = 'upcoming' | 'past' | 'whos-playing'
+type BookingsView = 'all' | 'upcoming' | 'past' | 'whos-playing'
 const VIEW_LABELS: Record<BookingsView, string> = {
-  upcoming: 'Upcoming', past: 'Past', 'whos-playing': "Who's Playing",
+  all: 'All', upcoming: 'Upcoming', past: 'Past', 'whos-playing': "Who's Playing",
 }
 
 interface CourseListItem {
@@ -520,7 +520,7 @@ export default function AdminBookingsPage() {
 
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState<BookingsView>('upcoming')
+  const [view, setView] = useState<BookingsView>('all')
   const [courseList, setCourseList] = useState<CourseListItem[]>([])
   const [courseFilter, setCourseFilter] = useState<string>(urlCourseId)
   const [search, setSearch] = useState('')
@@ -575,19 +575,29 @@ export default function AdminBookingsPage() {
     const supabase = createClient()
     const today    = format(new Date(), 'yyyy-MM-dd')
 
-    // Upcoming:     today → 365 days ahead (ascending)
-    // Who's Playing: today → 30 days ahead (ascending) — a shorter lookahead
-    //               preset of the same "upcoming" window.
-    // Past:         365 days ago → yesterday (descending — most recent first)
+    // All:          no date bounds — every booking regardless of date (default)
+    // Upcoming:     today → 365 days ahead
+    // Who's Playing: today → 30 days ahead — a shorter lookahead preset of the
+    //               "upcoming" window.
+    // Past:         365 days ago → yesterday
     // A custom From/To range overrides the view-based window when both are set.
+    // The final list is always grouped chronologically by date regardless of
+    // view (see groupByDate), so the query sort direction only affects fetch
+    // order, not what the admin ends up seeing.
     // Payment status (unpaid) is just another status filter — it doesn't
     // override the date window. The "days left" badge (see paymentDaysLeftLabel)
     // is what narrows attention to bookings within PAYMENT_OVERDUE_WINDOW_DAYS.
     const isUpcoming  = view !== 'past'
+    const isAllView   = view === 'all'
     const hasCustomRange = !!customFrom && !!customTo
-    const rangeStart  = hasCustomRange ? customFrom : isUpcoming ? today : format(subDays(new Date(), 365), 'yyyy-MM-dd')
-    const rangeEnd    = hasCustomRange
-      ? customTo
+    // A null bound means "unbounded on that side" — the All view fetches
+    // everything, so it applies no date filter unless a custom range is set.
+    const rangeStart: string | null = hasCustomRange ? customFrom
+      : isAllView ? null
+      : isUpcoming ? today
+      : format(subDays(new Date(), 365), 'yyyy-MM-dd')
+    const rangeEnd: string | null = hasCustomRange ? customTo
+      : isAllView ? null
       : view === 'whos-playing' ? format(addDays(new Date(), WHOS_PLAYING_WINDOW_DAYS), 'yyyy-MM-dd')
       : isUpcoming ? format(addDays(new Date(), 365), 'yyyy-MM-dd')
       : format(subDays(new Date(), 1), 'yyyy-MM-dd')
@@ -626,8 +636,8 @@ export default function AdminBookingsPage() {
         .from('bookings')
         .select(select)
         .in('course_id', matchingCourseIds)
-        .gte('booking_date', rangeStart)
-        .lte('booking_date', rangeEnd)
+      if (rangeStart) q = q.gte('booking_date', rangeStart)
+      if (rangeEnd) q = q.lte('booking_date', rangeEnd)
       if (statusFilter === 'payment_overdue') q = q.eq('status', 'availability_confirmed')
       else if (statusFilter !== 'all') q = q.eq('status', statusFilter)
       if (dinnerFilter !== 'all') {
@@ -1051,7 +1061,7 @@ export default function AdminBookingsPage() {
         />
         {/* Upcoming / Who's Playing / Past toggle — compact on mobile */}
         <div className="flex p-0.5 rounded-xl flex-shrink-0 self-start" style={{ background: 'rgba(0,38,105,0.06)' }}>
-          {(['upcoming', 'whos-playing', 'past'] as const).map(v => (
+          {(['all', 'upcoming', 'whos-playing', 'past'] as const).map(v => (
             <button
               key={v}
               type="button"
