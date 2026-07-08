@@ -157,6 +157,15 @@ export default function BookPage() {
   // list doesn't briefly render as bookable before the check resolves.
   const [pendingBookings, setPendingBookings] = useState<PendingPayment[]>([]);
   const [loadingPendingBookings, setLoadingPendingBookings] = useState(true);
+  // Guards against overlapping pending-payment refetches — the banner is
+  // refreshed from several triggers (mount, tab focus/visibility, a poll while
+  // a payment is outstanding), which can fire near-simultaneously.
+  const pendingRefreshInFlight = useRef(false);
+  // Drives the disabled state of the banner's "Pay →" links while a
+  // pending-payment refetch is in flight: the moment a member returns from the
+  // checkout tab we're re-checking their status, so block a second tap until we
+  // know whether that row has already cleared (guards against a double payment).
+  const [refreshingPending, setRefreshingPending] = useState(false);
 
   const fetchMonthSlots = useCallback(async () => {
     setLoadingMonth(true);
@@ -193,6 +202,37 @@ export default function BookPage() {
   useEffect(() => {
     if (user) loadPendingPayment();
   }, [user]);
+  // Auto-refresh the FIFO payment list so a row drops off the banner/badge as
+  // soon as its payment clears — without a manual reload, guarding against a
+  // member paying twice on a stale banner. Payment happens on an external GHL
+  // form (opened in a new tab via the "Pay →" link), and a GHL automation then
+  // flips the booking's Supabase status availability_confirmed →
+  // payment_confirmed out-of-band. The member returns to this tab afterward, so
+  // refetch whenever it regains visibility/focus. The pending query is scoped
+  // to status availability_confirmed, so a paid row simply stops coming back.
+  useEffect(() => {
+    if (!user) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") loadPendingPayment();
+    };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [user]);
+  // The GHL status update is asynchronous, so it may land shortly AFTER the
+  // member returns to this tab (when the focus refetch above already ran). While
+  // a payment is still outstanding and the tab is visible, poll so the row also
+  // delists on its own once the automation catches up — no tab-switch needed.
+  useEffect(() => {
+    if (!user || pendingBookings.length === 0) return;
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") loadPendingPayment();
+    }, 15000);
+    return () => clearInterval(id);
+  }, [user, pendingBookings.length]);
   useEffect(() => {
     if (!selectedDate || !user) {
       setDayPlayers([]);
@@ -242,6 +282,9 @@ export default function BookPage() {
   }
 
   async function loadPendingPayment() {
+    if (pendingRefreshInFlight.current) return;
+    pendingRefreshInFlight.current = true;
+    setRefreshingPending(true);
     try {
       const res = await fetch("/api/bookings/pending-payment");
       const data = await res.json();
@@ -249,8 +292,13 @@ export default function BookPage() {
         Array.isArray(data.pendingBookings) ? data.pendingBookings : [],
       );
     } catch {
-      setPendingBookings([]);
+      // Keep whatever we last loaded on a transient error — a background
+      // refresh (focus/poll) must not wipe a real "payment due" banner on a
+      // network blip (on the very first load the list is already empty). The
+      // server still enforces the FIFO gate on /api/bookings/create regardless.
     } finally {
+      pendingRefreshInFlight.current = false;
+      setRefreshingPending(false);
       setLoadingPendingBookings(false);
     }
   }
@@ -466,7 +514,7 @@ export default function BookPage() {
               />
             ) : (
               pendingBookings.length > 0 && (
-                <PendingPaymentBanner pending={pendingBookings} />
+                <PendingPaymentBanner pending={pendingBookings} refreshing={refreshingPending} />
               )
             )}
 
@@ -1523,7 +1571,16 @@ function groupPendingPayments(pending: PendingPayment[]): PendingGroup[] {
   return groups;
 }
 
-function PendingPaymentBanner({ pending }: { pending: PendingPayment[] }) {
+function PendingPaymentBanner({
+  pending,
+  refreshing = false,
+}: {
+  pending: PendingPayment[];
+  // True while the parent is re-checking the pending-payment list (e.g. right
+  // after the member returns from the checkout tab). Disables the "Pay →" links
+  // so a member can't fire a second payment before we know a row has cleared.
+  refreshing?: boolean;
+}) {
   const router = useRouter();
   const [index, setIndex] = useState(0);
   // The member id whose "message" request is in flight, so only that button
@@ -1665,7 +1722,13 @@ function PendingPaymentBanner({ pending }: { pending: PendingPayment[] }) {
                     href={row.payment_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg flex-shrink-0"
+                    aria-disabled={refreshing}
+                    onClick={(e) => {
+                      if (refreshing) e.preventDefault();
+                    }}
+                    className={`text-xs font-semibold px-3 py-1.5 rounded-lg flex-shrink-0 ${
+                      refreshing ? "opacity-50 pointer-events-none" : ""
+                    }`}
                     style={{ background: "var(--color-gold)", color: "var(--color-green-900)" }}
                   >
                     Pay →
