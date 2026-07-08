@@ -76,6 +76,8 @@ interface PendingPayment {
   status: string;
   player_name: string;
   target_member_id: string | null;
+  invited: boolean;
+  booker_name: string | null;
 }
 
 const BOOKING_MIN_DAYS = 0;
@@ -291,6 +293,9 @@ export default function BookPage() {
         loadPendingPayment();
       } else {
         setError(data.error ?? "Something went wrong. Please try again.");
+        // A 409 (FIFO gate) returns the bookings that blocked this attempt —
+        // same upcoming-only scope the banner/badge use — so adopt them
+        // directly to reflect the gate without an extra round-trip.
         if (Array.isArray(data.pendingBookings)) {
           setPendingBookings(data.pendingBookings);
         }
@@ -1470,35 +1475,90 @@ function formatPendingDate(dateStr: string): string {
 // (see UNPAID_BOOKING_STATUSES) — the FIFO gate only ever flags rounds that
 // are actually ready to be paid for, never ones still awaiting admin/GHL
 // confirmation.
-// Bookings are paid in the order they're queued (soonest tee time first), so
-// only the next one in line gets a "Pay now" CTA — showing one per row was
-// redundant once the header already says how many are due. Every row still
-// names whose round it is (a group booking's players move through the GHL
-// payment pipeline independently, so a pending row might be a guest's, not
-// the member's own) and links out to that booking's full details.
-// A single-card, paged view rather than a full list: which one gets paid
-// first isn't necessarily the oldest — that's a business/admin call, not
-// something the UI should presume — so every pending booking is fully
-// payable, and prev/next just lets the member browse between them.
+type PendingGroup = {
+  course_name: string;
+  booking_date: string;
+  tee_time: string;
+  // The querying member's own round in this group ("You"), when it's awaiting
+  // payment. Present for both the booker's primary row and an invited player's
+  // own row.
+  self: PendingPayment | null;
+  // Additional players in the same group whose rounds are also awaiting
+  // payment. Only ever populated for the booker — an invited player's pending
+  // list contains only their own row, so their group renders as `self` alone.
+  others: PendingPayment[];
+};
+
+// A group booking is inserted as one row per player, each with its own GHL
+// appointment moving through the payment pipeline independently — so the flat
+// pending-payment list can carry several rows that belong to a single booked
+// slot. Regroup them by course + date + tee time so the banner shows one card
+// per booking: the booker sees their own round plus each additional player
+// (with a "message" shortcut to nudge them), while an invited player sees only
+// their own round.
+function groupPendingPayments(pending: PendingPayment[]): PendingGroup[] {
+  const bySlot = new Map<string, PendingPayment[]>();
+  for (const p of pending) {
+    const key = `${p.course_id}_${p.booking_date}_${p.tee_time}`;
+    const rows = bySlot.get(key) ?? [];
+    rows.push(p);
+    bySlot.set(key, rows);
+  }
+  const groups: PendingGroup[] = [];
+  for (const rows of bySlot.values()) {
+    const first = rows[0];
+    if (!first) continue;
+    // "You" is the sanctioned marker the server sets for the querying member's
+    // own round (booker primary row or invited-player row); everything else is
+    // an additional player they booked.
+    const self = rows.find((r) => r.player_name === "You") ?? null;
+    groups.push({
+      course_name: first.course_name,
+      booking_date: first.booking_date,
+      tee_time: first.tee_time,
+      self,
+      others: rows.filter((r) => r !== self),
+    });
+  }
+  return groups;
+}
+
 function PendingPaymentBanner({ pending }: { pending: PendingPayment[] }) {
   const router = useRouter();
   const [index, setIndex] = useState(0);
-  const [messaging, setMessaging] = useState(false);
+  // The member id whose "message" request is in flight, so only that button
+  // shows a disabled/loading state.
+  const [messagingId, setMessagingId] = useState<string | null>(null);
   const [messageError, setMessageError] = useState("");
-  const current = pending[Math.min(index, pending.length - 1)];
+
+  const groups = groupPendingPayments(pending);
+  const current = groups[Math.min(index, groups.length - 1)];
   if (!current) return null;
 
-  const hasMultiple = pending.length > 1;
-  const whose = current.player_name === "You" ? "your" : `${current.player_name}'s`;
+  const hasMultiple = groups.length > 1;
+  // The member's own round first (when present), then any additional players.
+  const rows = [...(current.self ? [current.self] : []), ...current.others];
+  const soleName =
+    rows.length === 1
+      ? rows[0]?.player_name === "You"
+        ? "your"
+        : `${rows[0]?.player_name}'s`
+      : null;
+  // When the querying member is an invited player (added to someone else's
+  // booking), the banner explains they were invited and owe their share,
+  // instead of the booker-facing wording. An invited player only ever has
+  // their own single row, so this reads off the group's `self` row.
+  const invited = current.self?.invited ?? false;
+  const bookerName = current.self?.booker_name ?? null;
 
   async function messageMember(memberId: string) {
-    setMessaging(true);
+    setMessagingId(memberId);
     setMessageError("");
     const res = await apiClient.post<{ id: string }>("/api/conversations", {
       type: "direct",
       participant_ids: [memberId],
     });
-    setMessaging(false);
+    setMessagingId(null);
     if (res.error || !res.data) {
       setMessageError(res.error?.message ?? "Couldn't open the conversation.");
       return;
@@ -1519,7 +1579,7 @@ function PendingPaymentBanner({ pending }: { pending: PendingPayment[] }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm font-semibold" style={{ color: "#92640a" }}>
-              {hasMultiple ? `Payment due (${index + 1} of ${pending.length})` : "Payment due"}
+              {hasMultiple ? `Payment due (${index + 1} of ${groups.length})` : "Payment due"}
             </p>
             {hasMultiple && (
               <div className="flex items-center gap-1 flex-shrink-0">
@@ -1536,8 +1596,8 @@ function PendingPaymentBanner({ pending }: { pending: PendingPayment[] }) {
                 <button
                   type="button"
                   aria-label="Next payment due"
-                  disabled={index === pending.length - 1}
-                  onClick={() => setIndex((i) => Math.min(pending.length - 1, i + 1))}
+                  disabled={index === groups.length - 1}
+                  onClick={() => setIndex((i) => Math.min(groups.length - 1, i + 1))}
                   className="w-6 h-6 flex items-center justify-center rounded-lg disabled:opacity-30 transition-opacity"
                   style={{ background: "rgba(146,100,10,0.12)", color: "#92640a" }}
                 >
@@ -1550,42 +1610,78 @@ function PendingPaymentBanner({ pending }: { pending: PendingPayment[] }) {
             className="text-xs mt-0.5 leading-relaxed"
             style={{ color: "rgba(0,38,105,0.55)" }}
           >
-            Complete payment for {whose} round at {current.course_name} on{" "}
-            {formatPendingDate(current.booking_date)} at{" "}
-            {formatTeeTime(current.tee_time)} before booking another.
-          </p>
-          <div className="flex items-center gap-2 mt-2">
-            {current.payment_url ? (
-              <a
-                href={current.payment_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs font-semibold px-3 py-1.5 rounded-lg"
-                style={{ background: "var(--color-gold)", color: "var(--color-green-900)" }}
-              >
-                Pay now →
-              </a>
+            {invited ? (
+              <>
+                You&apos;ve been invited
+                {bookerName && (
+                  <>
+                    {" "}by <span className="capitalize font-medium">{bookerName}</span>
+                  </>
+                )}
+                {" "}to play at {current.course_name} on{" "}
+                {formatPendingDate(current.booking_date)} at{" "}
+                {formatTeeTime(current.tee_time)}. Pay your share below to
+                confirm your spot — this round is on hold until you do.
+              </>
+            ) : soleName ? (
+              `Complete payment for ${soleName} round at ${current.course_name} on ${formatPendingDate(current.booking_date)} at ${formatTeeTime(current.tee_time)} before booking another.`
             ) : (
-              <span className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>
-                Payment link unavailable — contact support.
-              </span>
+              `Complete the payments below for your ${current.course_name} round on ${formatPendingDate(current.booking_date)} at ${formatTeeTime(current.tee_time)} before booking another.`
             )}
-            {/* Message the guest whose payment this is — never shown for the
-                member's own rows, and only when the guest is a fellow
-                member (non-member guests have no account to message). */}
-            {current.target_member_id && (
-              <button
-                type="button"
-                aria-label={`Message ${current.player_name}`}
-                disabled={messaging}
-                onClick={() => messageMember(current.target_member_id as string)}
-                className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-lg disabled:opacity-50 transition-opacity"
-                style={{ background: "rgba(0,38,105,0.06)", color: "rgba(0,38,105,0.55)" }}
-              >
-                <MessageCircle className="w-3.5 h-3.5" strokeWidth={2} />
-              </button>
-            )}
+          </p>
+
+          {/* One row per player awaiting payment. When the querying member is
+              the booker, this lists their own round first, then each additional
+              player — with a "message" shortcut to nudge fellow members. An
+              invited player only ever sees their own single row. */}
+          <div className="mt-2 space-y-1.5">
+            {rows.map((row) => (
+              <div key={row.id} className="flex items-center gap-2">
+                <span
+                  className="text-xs font-medium capitalize flex-1 min-w-0 truncate"
+                  style={{ color: "var(--color-green-900)" }}
+                >
+                  {row.player_name}
+                </span>
+                {/* Message the player whose payment this is — never shown for
+                    the member's own row, and only when they're a fellow member
+                    (non-member guests have no account to message). Kept to the
+                    left of the Pay CTA so the Pay button stays the rightmost
+                    element on every row and lines up across rows. */}
+                {row.target_member_id && (
+                  <button
+                    type="button"
+                    aria-label={`Message ${row.player_name}`}
+                    disabled={messagingId === row.target_member_id}
+                    onClick={() => messageMember(row.target_member_id as string)}
+                    className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-lg disabled:opacity-50 transition-opacity"
+                    style={{ background: "rgba(0,38,105,0.06)", color: "rgba(0,38,105,0.55)" }}
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" strokeWidth={2} />
+                  </button>
+                )}
+                {row.payment_url ? (
+                  <a
+                    href={row.payment_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg flex-shrink-0"
+                    style={{ background: "var(--color-gold)", color: "var(--color-green-900)" }}
+                  >
+                    Pay →
+                  </a>
+                ) : (
+                  <span
+                    className="text-xs flex-shrink-0"
+                    style={{ color: "rgba(0,38,105,0.4)" }}
+                  >
+                    Payment link unavailable
+                  </span>
+                )}
+              </div>
+            ))}
           </div>
+
           {messageError && (
             <p className="text-xs mt-1" style={{ color: "#b91c1c" }}>
               {messageError}
@@ -4039,9 +4135,11 @@ function CourseRowInner({
   // pendingBookings only ever contains bookings awaiting payment (status
   // 'availability_confirmed') — see UNPAID_BOOKING_STATUSES — so a match
   // here always means "payment due", never "still awaiting confirmation".
-  const isPendingCourse = Boolean(
-    pendingBookings?.some((p) => p.course_id === course.id),
-  );
+  // Counted per event so the badge can show how many of THIS event's rounds
+  // are due; the banner (PendingPaymentBanner) accumulates them across events.
+  const pendingCount =
+    pendingBookings?.filter((p) => p.course_id === course.id).length ?? 0;
+  const isPendingCourse = pendingCount > 0;
 
   return (
     <>
@@ -4104,7 +4202,7 @@ function CourseRowInner({
                 className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0"
                 style={{ background: "rgba(146,100,10,0.12)", color: "#92640a" }}
               >
-                💳 Payment due
+                💳 {pendingCount} payment{pendingCount === 1 ? "" : "s"} due
               </span>
             )}
             <div className="flex items-center gap-2 flex-shrink-0">

@@ -28,6 +28,14 @@ export interface PendingPaymentBooking {
   // them) — null for the querying member's own rows and for non-member
   // guests, who have no account to message.
   target_member_id: string | null
+  // True when the querying member is an *invited* player on someone else's
+  // booking (they were added by the booker) rather than the booker themselves.
+  // Lets the UI explain that they were invited and owe their share, instead of
+  // the booker-facing "before booking another" wording.
+  invited: boolean
+  // Name of the member who booked this round, shown when `invited` so the
+  // added player can see who invited them. Null otherwise.
+  booker_name: string | null
 }
 
 type AdminClient = ReturnType<typeof createAdminClient>
@@ -46,17 +54,18 @@ function todayStr(): string {
 // and resolved — not just the oldest one — before the member can book
 // again.
 //
-// Scoped to booking_date >= today so a booking whose date has already
-// passed (created before this feature existed, and never explicitly
-// resolved or cancelled by an admin) doesn't permanently lock a member out
-// of booking — only genuinely current/upcoming obligations count.
+// Scoped to booking_date >= today: a payment is only "due" for an upcoming
+// round. Once a tee time has passed there's nothing to pay to confirm, so a
+// past booking never counts toward the badge/banner or the FIFO booking gate
+// (which also keeps a stale, never-resolved booking from permanently locking
+// a member out of booking).
 export async function findPendingPaymentBookings(
   admin: AdminClient,
   memberId: string,
 ): Promise<PendingPaymentBooking[]> {
   const { data } = await admin
     .from('bookings')
-    .select('id, course_id, booking_date, tee_time, status, guest_name, player_member_id, course:courses!bookings_course_id_fkey(name, payment_url)')
+    .select('id, member_id, course_id, booking_date, tee_time, status, guest_name, player_member_id, booker:members!bookings_member_id_fkey(first_name, last_name), course:courses!bookings_course_id_fkey(name, payment_url)')
     .or(`member_id.eq.${memberId},player_member_id.eq.${memberId}`)
     .in('status', UNPAID_BOOKING_STATUSES)
     .gte('booking_date', todayStr())
@@ -68,6 +77,14 @@ export async function findPendingPaymentBookings(
     // name) or one where they were the invited player, regardless of who
     // booked it.
     const isOwnRound = row.player_member_id === memberId || !row.guest_name
+    // Invited: the querying member is the added player on someone else's
+    // booking — they didn't book it (member_id is the booker), they were
+    // invited into it (player_member_id points at them).
+    const invited = row.member_id !== memberId && row.player_member_id === memberId
+    const booker = row.booker as unknown as { first_name: string | null; last_name: string | null } | null
+    const bookerName = booker
+      ? `${booker.first_name ?? ''} ${booker.last_name ?? ''}`.trim() || null
+      : null
     return {
       id: row.id,
       course_id: row.course_id,
@@ -78,6 +95,8 @@ export async function findPendingPaymentBookings(
       status: row.status,
       player_name: isOwnRound ? 'You' : (row.guest_name as string),
       target_member_id: isOwnRound ? null : row.player_member_id,
+      invited,
+      booker_name: invited ? bookerName : null,
     }
   })
 }

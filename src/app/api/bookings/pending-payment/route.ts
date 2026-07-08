@@ -17,6 +17,9 @@ import type { AuthContext } from '@/lib/auth/types'
 export const GET = withAuth(
   async (_req: NextRequest, ctx: AuthContext) => {
     const admin = createAdminClient()
+    // Only upcoming rounds count as "payment due" — findPendingPaymentBookings
+    // scopes to booking_date >= today (a past round has nothing left to pay to
+    // confirm), matching the FIFO gate in /api/bookings/create.
     const pendingBookings = await findPendingPaymentBookings(admin, ctx.userId)
     return NextResponse.json({ pendingBookings })
   },
