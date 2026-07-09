@@ -145,6 +145,10 @@ export default function BookPage() {
 
   // My bookings tab
   const [myBookings, setMyBookings] = useState<Booking[]>([]);
+  // Guards against overlapping My-bookings refetches — like the pending list,
+  // it's refreshed from several triggers (mount, tab focus/visibility) that can
+  // fire near-simultaneously.
+  const myBookingsRefreshInFlight = useRef(false);
   const [activeTab, setActiveTab] = useState<"book" | "myBookings">("book");
   const [viewMode, setViewMode] = useState<"day" | "month">("day");
 
@@ -222,6 +226,22 @@ export default function BookPage() {
       window.removeEventListener("focus", refresh);
     };
   }, [user]);
+  // Mirror the pending-payment refetch for the My-bookings list: a booking's
+  // status changes out-of-band too (payment clears, admin sets up a guest, a
+  // cancellation lands), so refresh the list whenever the tab regains
+  // visibility/focus rather than leaving it stale until a manual reload.
+  useEffect(() => {
+    if (!user) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") loadMyBookings();
+    };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [user]);
   // The GHL status update is asynchronous, so it may land shortly AFTER the
   // member returns to this tab (when the focus refetch above already ran). While
   // a payment is still outstanding and the tab is visible, poll so the row also
@@ -277,8 +297,16 @@ export default function BookPage() {
   }, [loadingMonth, step, activeTab]);
 
   async function loadMyBookings() {
-    const response = await apiClient.get<Booking[]>("/api/bookings");
-    setMyBookings(response.data ?? []);
+    if (myBookingsRefreshInFlight.current) return;
+    myBookingsRefreshInFlight.current = true;
+    try {
+      const response = await apiClient.get<Booking[]>("/api/bookings");
+      // Keep the last-loaded list on a transient error so a background refresh
+      // (focus/visibility) can't wipe the member's bookings on a network blip.
+      if (response.data) setMyBookings(response.data);
+    } finally {
+      myBookingsRefreshInFlight.current = false;
+    }
   }
 
   async function loadPendingPayment() {
@@ -1677,8 +1705,15 @@ function PendingPaymentBanner({
                 )}
                 {" "}to play at {current.course_name} on{" "}
                 {formatPendingDate(current.booking_date)} at{" "}
-                {formatTeeTime(current.tee_time)}. Pay your share below to
-                confirm your spot — this round is on hold until you do.
+                {formatTeeTime(current.tee_time)}. Pay your share below — or
+                {bookerName ? (
+                  <>
+                    {" "}have <span className="capitalize font-medium">{bookerName}</span> pay it
+                  </>
+                ) : (
+                  " have the booker pay it"
+                )}{" "}
+                — to confirm your spot. This round is on hold until it&apos;s paid.
               </>
             ) : soleName ? (
               `Complete payment for ${soleName} round at ${current.course_name} on ${formatPendingDate(current.booking_date)} at ${formatTeeTime(current.tee_time)} before booking another.`
@@ -1744,6 +1779,31 @@ function PendingPaymentBanner({
               </div>
             ))}
           </div>
+
+          {/* When the booker is paying on behalf of additional players, the
+              external GHL payment form defaults to the payer's email. Paying
+              for someone else under your own email records a second payment
+              against you rather than the intended player — flag it so the
+              booker enters that player's email instead. Only relevant to the
+              booker (never an invited player) and only when there's at least
+              one other player to pay for. */}
+          {!invited && current.others.length > 0 && (
+            <p
+              className="text-xs mt-2 pt-2 leading-relaxed flex items-start gap-1.5"
+              style={{
+                color: "#92640a",
+                borderTop: "1px solid rgba(146,100,10,0.15)",
+              }}
+            >
+              <span className="leading-none mt-0.5">⚠️</span>
+              <span>
+                Paying for another player? Enter{" "}
+                <span className="font-semibold">their</span> email in the
+                payment form — not your own — so you&apos;re not charged twice
+                for the same round.
+              </span>
+            </p>
+          )}
 
           {messageError && (
             <p className="text-xs mt-1" style={{ color: "#b91c1c" }}>
