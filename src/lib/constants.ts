@@ -20,6 +20,13 @@ export const GHL_OPPORTUNITY_FIELDS = {
   CANCEL_URL:      'mm1kLkrvLnOTF0VyfS0Q',
 } as const
 
+// ---- Referral partners --------------------------------------
+
+// Membership fee used to compute referral-partner commission
+// (commission = converted members × MEMBERSHIP_FEE_USD × percentage / 100).
+export const MEMBERSHIP_FEE_USD = 100
+export const DEFAULT_REFERRAL_PERCENTAGE = 10
+
 export const GHL_CANCEL_BOOKING_URL = 'https://api.leadconnectorhq.com/widget/cancel-booking'
 export const GHL_CALENDAR_PROVIDER_ID = 'bdd10QRepJvC6EYoy32m'
 

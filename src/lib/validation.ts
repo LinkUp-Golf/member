@@ -140,6 +140,42 @@ export function validateReferralPayload(body: unknown): ValidationResult {
   return { valid: errors.length === 0, errors }
 }
 
+// ---- Referral partner payload -------------------------------
+// Validates the create/edit form for a referral partner. `code` follows the
+// same lowercase-hyphen slug shape as course slugs; `percentage` is 0–100.
+export function validateReferralPartnerPayload(
+  body: unknown,
+  options: { partial?: boolean } = {}
+): ValidationResult {
+  if (typeof body !== 'object' || body === null) {
+    return { valid: false, errors: ['Invalid request body'] }
+  }
+
+  const b = body as Record<string, unknown>
+  const errors: string[] = []
+  const { partial = false } = options
+
+  if (!partial || 'name' in b) {
+    const nameResult = validateString(b.name, 'Partner name', { min: 2, max: 120 })
+    if (!nameResult.valid) errors.push(...nameResult.errors)
+  }
+
+  if (!partial || 'code' in b) {
+    if (typeof b.code !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(b.code.trim())) {
+      errors.push('Code must be lowercase letters, numbers, and hyphens only')
+    }
+  }
+
+  if (!partial || 'percentage' in b) {
+    const pct = Number(b.percentage)
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      errors.push('Percentage must be a number between 0 and 100')
+    }
+  }
+
+  return { valid: errors.length === 0, errors }
+}
+
 // ---- Message payload ----------------------------------------
 export function validateMessagePayload(body: unknown): ValidationResult {
   if (typeof body !== 'object' || body === null) {

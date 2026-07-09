@@ -145,6 +145,31 @@ export async function updateContact(
   }
 }
 
+// Resolve a contact by email, creating one if it doesn't exist. Used to land
+// referred non-members in GHL as leads. Best-effort: returns null (rather than
+// throwing) if GHL is unavailable — referral attribution itself lives in our DB,
+// so a GHL outage must not block linking.
+export async function findOrCreateContactByEmail(params: {
+  email: string
+  firstName?: string | null
+  lastName?: string | null
+}): Promise<string | null> {
+  try {
+    const existing = (await getContactByEmail(params.email))?.id ?? null
+    if (existing) return existing
+    return await createContact({
+      // GHL requires a name; fall back to the email local-part for non-members
+      // linked by email only.
+      firstName: params.firstName?.trim() || params.email.split('@')[0] || 'Referral',
+      lastName: params.lastName?.trim() || '',
+      email: params.email,
+    })
+  } catch (err) {
+    logger.warn('findOrCreateContactByEmail failed', { action: 'ghl_contact_find_or_create', errorMessage: String(err) })
+    return null
+  }
+}
+
 export function contactHasTag(contact: GHLContact, tag: string): boolean {
   return contact.tags?.includes(tag) ?? false
 }

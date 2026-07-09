@@ -254,6 +254,44 @@ export interface Referral {
   updated_at: string
 }
 
+// ---- Referral partners --------------------------------------
+
+export type ReferralPartnerLinkStatus = 'linked' | 'converted'
+
+export interface ReferralPartner {
+  id: string
+  name: string
+  code: string
+  percentage: number
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ReferralPartnerLink {
+  id: string
+  referral_partner_id: string
+  member_id: string | null
+  email: string
+  ghl_contact_id: string | null
+  status: ReferralPartnerLinkStatus
+  converted_at: string | null
+  created_at: string
+  updated_at: string
+  // Enriched (present when joined to the member row in API responses)
+  member?: { first_name: string; last_name: string; email: string; membership_status: string } | null
+}
+
+export interface ReferralPartnerStats {
+  linkedCount: number
+  memberCount: number
+  nonMemberCount: number
+  convertedCount: number
+  commissionOwed: number
+}
+
+export type ReferralPartnerWithStats = ReferralPartner & ReferralPartnerStats
+
 export interface Conversation {
   id: string
   course_id: string
