@@ -1,5 +1,6 @@
 import { format } from 'date-fns'
 import { titleCaseName } from '@/lib/utils'
+import { validateUUID } from '@/lib/validation'
 import type { createAdminClient } from '@/lib/supabase-server'
 
 // Only 'availability_confirmed' — GHL has confirmed the slot and a payment
@@ -153,7 +154,14 @@ export async function findMembersWithPendingPayment(
   admin: AdminClient,
   memberIds: string[],
 ): Promise<Set<string>> {
-  const ids = [...new Set(memberIds)].filter(Boolean)
+  // Only keep well-formed UUIDs. These ids are string-interpolated into the
+  // PostgREST `.or()` filter below, which Supabase does NOT escape — an id
+  // containing PostgREST syntax (commas, `.gte.`, embedded resources) could
+  // otherwise malform or broaden the query. Validating here protects every
+  // caller (the check-guests query param and the booking-create path alike).
+  const ids = [...new Set(memberIds)].filter(
+    (id) => validateUUID(id, 'memberId').valid,
+  )
   const blocked = new Set<string>()
   if (ids.length === 0) return blocked
 
