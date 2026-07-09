@@ -23,8 +23,9 @@ import { getAvailableSlots, createBooking, getContactByEmail } from '@/lib/ghl/c
 import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { sendPushToMembers, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
-import { findPendingPaymentBookings } from '@/lib/bookings/pending-payment'
+import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
 import { format } from 'date-fns'
+import { titleCaseName } from '@/lib/utils'
 import type { AdditionalPlayer } from '@/types'
 
 // Total players per booking is capped at 4 (mirrors validateBookingPayload),
@@ -202,14 +203,11 @@ export async function POST(request: NextRequest) {
   // payment on their account; surface all of them, not just one. Check this
   // before touching GHL so a blocked member fails fast with a clear message.
   const pendingBookings = await findPendingPaymentBookings(adminSupabase, user.id)
-  const [firstPendingBooking] = pendingBookings
-  if (firstPendingBooking) {
-    const pendingDate = format(new Date(`${firstPendingBooking.booking_date}T12:00:00`), 'EEEE, MMMM d')
-    const error =
-      pendingBookings.length === 1
-        ? `You have a payment due for your booking at ${firstPendingBooking.course_name} on ${pendingDate}. Please pay before booking again.`
-        : `You have ${pendingBookings.length} bookings with payment due. Please pay them before booking again.`
-    return NextResponse.json({ error, pendingBookings }, { status: 409 })
+  if (pendingBookings.length) {
+    return NextResponse.json(
+      { error: pendingPaymentBlockMessage(pendingBookings), pendingBookings },
+      { status: 409 },
+    )
   }
 
   // Resolve course calendar settings — use the selected course when provided,
@@ -290,6 +288,31 @@ export async function POST(request: NextRequest) {
           { status: 422 }
         )
       }
+    }
+
+    // The FIFO gate also applies to member guests: a booker can't pull a fellow
+    // member into a group round while that member still owes for one of their
+    // own. Block the whole booking with a name-specific message so the booker
+    // knows exactly who to remove — mirrors the client-side flag, and is the
+    // authoritative check (runs before any GHL work).
+    const guestsWithPending = await findMembersWithPendingPayment(adminSupabase, memberGuestIds)
+    if (guestsWithPending.size) {
+      const names = [...guestsWithPending].map((id) => {
+        const r = memberRowById[id]
+        return r ? titleCaseName(`${r.first_name} ${r.last_name}`.trim()) : 'A selected member'
+      })
+      const list =
+        names.length === 1
+          ? names[0]
+          : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+      const verb = names.length === 1 ? 'has' : 'have'
+      return NextResponse.json(
+        {
+          error: `${list} ${verb} a payment due on an existing booking. Please remove them — they can be added once it's paid.`,
+          blockedMemberIds: [...guestsWithPending],
+        },
+        { status: 409 }
+      )
     }
   }
 
@@ -419,6 +442,39 @@ export async function POST(request: NextRequest) {
     })
 
   if (insertError) {
+    // Atomic FIFO backstop: a payment link came due for the booker or a member
+    // guest between the earlier check and this reservation (e.g. a GHL webhook
+    // fired mid-flight). No GHL appointment has been created yet, so there's
+    // nothing to unwind — just surface who now owes.
+    const pendingRace = /PENDING_PAYMENT:([0-9a-f,\-]+)/i.exec(insertError.message ?? '')
+    if (pendingRace) {
+      const ids = new Set(
+        (pendingRace[1] ?? '').split(',').map(s => s.trim()).filter(Boolean)
+      )
+      const bookerBlocked = ids.has(user.id)
+      const guestNames = [...ids]
+        .filter(id => id !== user.id)
+        .map(id => {
+          const r = memberRowById[id]
+          return r ? titleCaseName(`${r.first_name} ${r.last_name}`.trim()) : 'A player'
+        })
+      let error: string
+      if (guestNames.length === 0) {
+        // Only the booker owes.
+        error = 'A payment just came due on one of your bookings. Please pay it before booking again.'
+      } else {
+        const list =
+          guestNames.length === 1
+            ? guestNames[0]
+            : `${guestNames.slice(0, -1).join(', ')} and ${guestNames[guestNames.length - 1]}`
+        const verb = guestNames.length === 1 ? 'has' : 'have'
+        error = bookerBlocked
+          ? `A payment just came due for you and ${list}. Please resolve it and try again.`
+          : `${list} just ${verb} a payment due on an existing booking. Please remove them and try again.`
+      }
+      return NextResponse.json({ error, blockedMemberIds: [...ids] }, { status: 409 })
+    }
+
     const dayFull = /DAY_FULL:(\d+)/.exec(insertError.message ?? '')
     if (dayFull) {
       const seatsRemaining = parseInt(dayFull[1] ?? '0', 10)

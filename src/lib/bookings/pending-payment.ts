@@ -1,3 +1,5 @@
+import { format } from 'date-fns'
+import { titleCaseName } from '@/lib/utils'
 import type { createAdminClient } from '@/lib/supabase-server'
 
 // Only 'availability_confirmed' — GHL has confirmed the slot and a payment
@@ -39,6 +41,45 @@ export interface PendingPaymentBooking {
 }
 
 type AdminClient = ReturnType<typeof createAdminClient>
+
+function formatBookingDate(dateStr: string): string {
+  return format(new Date(`${dateStr}T12:00:00`), 'EEEE, MMMM d')
+}
+
+// Builds the message shown when a member is blocked from booking because they
+// (or a booking of theirs) still owe payment. `findPendingPaymentBookings`
+// returns a member's own rounds AND rounds where they're the booker for a guest
+// who hasn't paid AND rounds they were invited to — so the copy has to point at
+// whoever actually owes, not blindly say "your booking".
+export function pendingPaymentBlockMessage(
+  bookings: PendingPaymentBooking[],
+): string {
+  const [first] = bookings
+  if (!first) return ''
+
+  if (bookings.length === 1) {
+    const date = formatBookingDate(first.booking_date)
+    // A guest the member added to a prior booking still owes their share.
+    if (first.player_name !== 'You') {
+      return `${titleCaseName(first.player_name)} has a payment due for the booking you made at ${first.course_name} on ${date}. It must be paid before you can book again.`
+    }
+    // The member was added to someone else's round and owes their own share.
+    if (first.invited) {
+      return first.booker_name
+        ? `You have a payment due for the round ${titleCaseName(first.booker_name)} added you to at ${first.course_name} on ${date}. Please pay before booking again.`
+        : `You have a payment due for a round you were added to at ${first.course_name} on ${date}. Please pay before booking again.`
+    }
+    // The member's own booking.
+    return `You have a payment due for your booking at ${first.course_name} on ${date}. Please pay before booking again.`
+  }
+
+  // Multiple due. If any belong to a guest the member added, the payment isn't
+  // necessarily theirs to make, so avoid "pay them" and say "resolve".
+  const anyGuest = bookings.some((b) => b.player_name !== 'You')
+  return anyGuest
+    ? `You have ${bookings.length} payments due — including for players you've added. They must all be resolved before you can book again.`
+    : `You have ${bookings.length} bookings with payment due. Please pay them before booking again.`
+}
 
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10)
@@ -99,4 +140,40 @@ export async function findPendingPaymentBookings(
       booker_name: invited ? bookerName : null,
     }
   })
+}
+
+// Batch variant of the FIFO check, used when a booker adds fellow members to a
+// group booking: returns the subset of `memberIds` that currently have at least
+// one booking awaiting payment. Same rule and scope as
+// findPendingPaymentBookings (status in UNPAID_BOOKING_STATUSES, upcoming rounds
+// only, matched on either member_id or player_member_id), collapsed to a set of
+// blocked ids so the caller can name the offenders without exposing anyone
+// else's booking detail.
+export async function findMembersWithPendingPayment(
+  admin: AdminClient,
+  memberIds: string[],
+): Promise<Set<string>> {
+  const ids = [...new Set(memberIds)].filter(Boolean)
+  const blocked = new Set<string>()
+  if (ids.length === 0) return blocked
+
+  const orClause = ids
+    .map((id) => `member_id.eq.${id},player_member_id.eq.${id}`)
+    .join(',')
+
+  const { data } = await admin
+    .from('bookings')
+    .select('member_id, player_member_id')
+    .or(orClause)
+    .in('status', UNPAID_BOOKING_STATUSES)
+    .gte('booking_date', todayStr())
+
+  const idSet = new Set(ids)
+  for (const row of data ?? []) {
+    if (row.member_id && idSet.has(row.member_id)) blocked.add(row.member_id)
+    if (row.player_member_id && idSet.has(row.player_member_id)) {
+      blocked.add(row.player_member_id)
+    }
+  }
+  return blocked
 }

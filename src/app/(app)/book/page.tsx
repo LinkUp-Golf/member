@@ -1865,6 +1865,13 @@ function ConfirmScreen({
   // name/phone/email and flags the booking for admin review.
   const [playerKinds, setPlayerKinds] = useState<PlayerKind[]>([]);
   const [members, setMembers] = useState<MemberWithProfile[]>([]);
+  // Member ids flagged as having a payment due on an existing booking. The FIFO
+  // rule bars a booker from adding such a member to a group round, so a flagged
+  // selection blocks submit until they're removed. Checked on selection via
+  // /api/bookings/check-guests; POST /api/bookings/create is the real gate.
+  const [pendingGuestIds, setPendingGuestIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const inviteApplied = useRef(false);
 
   useEffect(() => {
@@ -1976,7 +1983,10 @@ function ConfirmScreen({
         validateGuestPhone(p?.mobile) === true
       );
     }
-    return !!playerSelections[i];
+    const selection = playerSelections[i];
+    // A selected member with a payment due can't be booked — block submit until
+    // they're removed (mirrors the server-side FIFO gate).
+    return !!selection && !pendingGuestIds.has(selection.id);
   }
 
   const allRowsValid = fields.every((_, i) => rowValid(i));
@@ -2000,6 +2010,21 @@ function ConfirmScreen({
     setPlayerSelections((prev) =>
       prev.map((s, idx) => (idx === i ? member : s)),
     );
+    // Flag the member if they owe payment on an existing booking — the FIFO gate
+    // rejects the whole group server-side, so surface it the moment they're
+    // picked rather than at submit.
+    fetch(`/api/bookings/check-guests?ids=${encodeURIComponent(member.id)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (
+          d &&
+          Array.isArray(d.blockedMemberIds) &&
+          d.blockedMemberIds.includes(member.id)
+        ) {
+          setPendingGuestIds((prev) => new Set(prev).add(member.id));
+        }
+      })
+      .catch(() => {});
   }
 
   function clearMemberSelection(i: number) {
@@ -2144,9 +2169,23 @@ function ConfirmScreen({
               const kind = playerKinds[i] ?? "member";
               const canCollapse = !!selection;
               const rowErrors = errors.players?.[i];
+              const isPendingBlocked = selection
+                ? pendingGuestIds.has(selection.id)
+                : false;
 
               return (
-                <div key={field.id} className="card mb-2">
+                <div
+                  key={field.id}
+                  className="card mb-2"
+                  style={
+                    isPendingBlocked
+                      ? {
+                          borderColor: "rgba(220,38,38,0.4)",
+                          background: "rgba(239,68,68,0.03)",
+                        }
+                      : undefined
+                  }
+                >
                   {/* Header row */}
                   <div className="flex items-center gap-2 px-4 py-3">
                     <button
@@ -2172,7 +2211,18 @@ function ConfirmScreen({
                       >
                         {playerLabel(i)}
                       </span>
-                      {isCollapsed && selection && (
+                      {isPendingBlocked && (
+                        <span
+                          className="flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                          style={{
+                            color: "#dc2626",
+                            background: "rgba(220,38,38,0.1)",
+                          }}
+                        >
+                          Payment due
+                        </span>
+                      )}
+                      {isCollapsed && selection && !isPendingBlocked && (
                         <svg
                           className="w-3.5 h-3.5 flex-shrink-0"
                           viewBox="0 0 16 16"
@@ -2229,6 +2279,7 @@ function ConfirmScreen({
                     >
                       {selection ? (
                         // Member selected
+                        <>
                         <div className="pt-3 flex items-center gap-3">
                           {selection.profile?.avatar_url ? (
                             <Image
@@ -2278,6 +2329,14 @@ function ConfirmScreen({
                             Change
                           </button>
                         </div>
+                        {isPendingBlocked && (
+                          <p className="text-xs text-red-600 leading-snug">
+                            {selection.first_name} has a payment due on an
+                            existing booking and can&apos;t be added until
+                            it&apos;s paid. Please remove them to continue.
+                          </p>
+                        )}
+                        </>
                       ) : (
                         <div className="pt-3 space-y-3">
                           {/* Member / Non-member segmented toggle */}

@@ -110,6 +110,17 @@ export function truncate(text: string, maxLength: number): string {
   return chars.slice(0, maxLength).join('').trimEnd() + '…'
 }
 
+// Title-cases a person's name for display in copy where CSS `capitalize`
+// isn't available (server-built messages, notifications). Names are often
+// stored lower-case, so "mary jane o'neil" -> "Mary Jane O'neil".
+export function titleCaseName(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
+
 // ---- Industry category short label -------------------------
 export function shortCategory(category: string): string {
   const map: Record<string, string> = {
