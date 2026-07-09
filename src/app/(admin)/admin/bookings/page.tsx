@@ -44,8 +44,13 @@ const STATUS_META: Record<BookingStatus, { label: string; colour: string; dot: s
   waitlist:              { label: 'Waitlist',          colour: 'bg-gray-100 text-gray-400',   dot: 'bg-gray-300'   },
 }
 
-const ALL_STATUSES = Object.keys(STATUS_META) as BookingStatus[]
-const STATUS_FILTERS = ['all', 'tentative', 'awaiting_approval', 'availability_confirmed', 'payment_confirmed', 'confirmed', 'cancelled', 'payment_overdue'] as const
+// Statuses an admin can manually move a booking through — the payment pipeline
+// only. Other values (cancelled, awaiting_approval, and legacy confirmed /
+// pending / waitlist) aren't manual targets. If a row is already in one of
+// those, it's still shown as the current (selected) option so the control
+// renders correctly, but only these three can be chosen.
+const STATUS_ACTIONS: BookingStatus[] = ['tentative', 'availability_confirmed', 'payment_confirmed']
+const STATUS_FILTERS =['all', 'tentative', 'awaiting_approval', 'availability_confirmed', 'payment_confirmed', 'confirmed', 'cancelled', 'payment_overdue'] as const
 type StatusFilter = typeof STATUS_FILTERS[number]
 
 // Payment Overdue isn't a real booking status — it's availability_confirmed
@@ -354,7 +359,7 @@ function SlotCard({
                           onChange={e => onUpdateStatus(b.id, e.target.value as BookingStatus)}
                           className={`text-xs font-semibold rounded-lg px-2 py-1 border border-transparent outline-none cursor-pointer disabled:opacity-50 transition-colors max-w-[140px] sm:max-w-none ${sm.colour}`}
                         >
-                          {ALL_STATUSES.map(s => (
+                          {(STATUS_ACTIONS.includes(b.status) ? STATUS_ACTIONS : [b.status, ...STATUS_ACTIONS]).map(s => (
                             <option key={s} value={s}>{STATUS_META[s].label}</option>
                           ))}
                         </select>
