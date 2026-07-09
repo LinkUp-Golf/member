@@ -366,6 +366,19 @@ export async function cancelBooking(eventId: string, contactId?: string): Promis
   }
 }
 
+// Hard-deletes a GHL appointment/event (as opposed to cancelBooking, which
+// only flips its status to "cancelled"). Used when an admin removes a booking
+// outright. Best-effort: returns false rather than throwing so the caller can
+// still delete the Supabase row and surface a partial-failure warning.
+export async function deleteBooking(eventId: string): Promise<boolean> {
+  try {
+    await ghlFetch(`/calendars/events/${eventId}`, { method: 'DELETE' })
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function getContactBookings(contactId: string): Promise<GHLCalendarEvent[]> {
   try {
     const now = Date.now()

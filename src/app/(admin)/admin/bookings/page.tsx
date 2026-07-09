@@ -193,6 +193,8 @@ function SlotCard({
   remindingPayment,
   remindedPaymentIds,
   onRemindPayment,
+  deletingBookingId,
+  onRequestDelete,
 }: {
   slot: TeeSlot
   showCourseName: boolean
@@ -212,6 +214,8 @@ function SlotCard({
   remindingPayment: string | null
   remindedPaymentIds: Set<string>
   onRemindPayment: (id: string) => void
+  deletingBookingId: string | null
+  onRequestDelete: (b: BookingRow) => void
 }) {
   const isExpanded = expandedSlots.has(slot.key)
   const totalAmount = slot.rows.reduce((sum, b) => sum + Number(b.amount_charged), 0)
@@ -390,10 +394,23 @@ function SlotCard({
                     </div>
                   </div>
                 ) : (
-                  <button onClick={() => onEditNote(b.id)}
-                    className="text-xs text-left text-gray-400 hover:text-gray-600 transition-colors italic">
-                    {b.admin_notes ?? 'Add note…'}
-                  </button>
+                  <div className="flex items-center justify-between gap-2 mt-1">
+                    <button onClick={() => onEditNote(b.id)}
+                      className="min-w-0 flex-1 text-xs text-left text-gray-400 hover:text-gray-600 transition-colors italic truncate">
+                      {b.admin_notes ?? 'Add note…'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onRequestDelete(b)}
+                      disabled={deletingBookingId === b.id}
+                      className="flex-shrink-0 flex items-center gap-1 text-xs font-medium text-red-500 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                      </svg>
+                      {deletingBookingId === b.id ? 'Deleting…' : 'Delete'}
+                    </button>
+                  </div>
                 )}
               </div>
             )
@@ -539,6 +556,8 @@ export default function AdminBookingsPage() {
   const [expandedSlots, setExpandedSlots] = useState<Set<string>>(new Set())
   const [remindingPayment, setRemindingPayment] = useState<string | null>(null)
   const [remindedPaymentIds, setRemindedPaymentIds] = useState<Set<string>>(new Set())
+  const [deletingBookingId, setDeletingBookingId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<BookingRow | null>(null)
   const noteRef = useRef<HTMLTextAreaElement>(null)
 
   const [activeTab, setActiveTab] = useState<'bookings' | 'access'>('bookings')
@@ -911,6 +930,33 @@ export default function AdminBookingsPage() {
     setRemindingPayment(null)
   }
 
+  async function confirmDeleteBooking() {
+    if (!deleteTarget) return
+    const id = deleteTarget.id
+    setDeletingBookingId(id)
+    try {
+      const res = await fetch(`/api/admin/bookings/${id}`, { method: 'DELETE' })
+      const json = await res.json().catch(() => ({}))
+      if (res.ok) {
+        setBookings(prev => prev.filter(b => b.id !== id))
+        setDeleteTarget(null)
+        setRequestToast({
+          msg: json.ghlDeleted === false
+            ? 'Booking deleted, but its GHL booking could not be removed.'
+            : 'Booking deleted from LinkUp and GHL.',
+          ok: json.ghlDeleted !== false,
+        })
+      } else {
+        setRequestToast({ msg: json.error ?? 'Failed to delete booking. Please try again.', ok: false })
+      }
+    } catch {
+      setRequestToast({ msg: 'Network error. Please try again.', ok: false })
+    } finally {
+      setTimeout(() => setRequestToast(null), 3500)
+      setDeletingBookingId(null)
+    }
+  }
+
   function toggleSlot(key: string) {
     setExpandedSlots(prev => {
       const next = new Set(prev)
@@ -949,6 +995,7 @@ export default function AdminBookingsPage() {
     onSaveNote: saveNote, savingNote, noteRef,
     processingBookingRequestId, onDecideRequest: decideBookingRequest,
     remindingPayment, remindedPaymentIds, onRemindPayment: remindPayment,
+    deletingBookingId, onRequestDelete: setDeleteTarget,
   }
 
   // Shared between the desktop inline grid and the mobile drawer — id suffix
@@ -1046,6 +1093,50 @@ export default function AdminBookingsPage() {
           requestToast.ok ? 'bg-green-900 text-white' : 'bg-red-600 text-white'
         }`}>
           {requestToast.msg}
+        </div>
+      )}
+
+      {/* Delete confirmation dialog — deletion removes the row from both
+          LinkUp (Supabase) and GHL and cannot be undone. */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-5">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-50 flex items-center justify-center">
+                <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-sm font-bold text-gray-800">Delete booking?</h2>
+                <p className="text-xs text-gray-500 mt-1">
+                  This permanently removes{' '}
+                  <span className="font-medium text-gray-700">{playerInfo(deleteTarget).name || 'this booking'}</span>
+                  {deleteTarget.course?.name ? ` at ${deleteTarget.course.name}` : ''} on{' '}
+                  {format(new Date(`${deleteTarget.booking_date}T12:00:00`), 'MMM d, yyyy')} at {formatTeeTime(deleteTarget.tee_time)}.
+                  It deletes the booking from both LinkUp and GHL and cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                disabled={deletingBookingId === deleteTarget.id}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteBooking}
+                disabled={deletingBookingId === deleteTarget.id}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition-colors"
+              >
+                {deletingBookingId === deleteTarget.id ? 'Deleting…' : 'Delete booking'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
