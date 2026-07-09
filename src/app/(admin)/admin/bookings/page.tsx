@@ -50,10 +50,8 @@ type StatusFilter = typeof STATUS_FILTERS[number]
 
 // Payment Overdue isn't a real booking status — it's availability_confirmed
 // (member notified, "Payment due" on their side) rows, i.e. still unpaid.
-// The filter itself matches any unpaid row regardless of date; the "days
-// left" badge on each row (see paymentDaysLeftLabel) is what calls out the
-// ones whose tee time is coming up within this window.
-const PAYMENT_OVERDUE_WINDOW_DAYS = 3
+// The filter matches any such unpaid row regardless of date; the "days left"
+// badge on each row (see paymentDaysLeftLabel) shows the countdown to tee time.
 const STATUS_FILTER_LABELS: Partial<Record<StatusFilter, string>> = {
   payment_overdue: '⚠ Unpaid — payment not yet received',
 }
@@ -142,22 +140,22 @@ function playerInfo(b: BookingRow): { name: string; sub: string; badge?: string 
   return { name: `${b.member?.first_name ?? ''} ${b.member?.last_name ?? ''}`.trim(), sub: b.member?.email ?? '' }
 }
 
-// "Days left" badge for a player row that's unpaid (availability_confirmed)
-// and whose tee time falls within the same window the Payment Overdue filter
-// uses, so the badge always matches what that filter would surface.
+// "Days left" badge for any unpaid player row — shown whenever the booking is
+// still tentative or availability_confirmed, regardless of how far out the tee
+// time is (past-due rows read "Overdue").
 function paymentDaysLeftLabel(b: BookingRow): string | null {
-  if (b.status !== 'availability_confirmed') return null
+  if (b.status !== 'tentative' && b.status !== 'availability_confirmed') return null
   const daysLeft = differenceInCalendarDays(new Date(`${b.booking_date}T12:00:00`), new Date())
-  if (daysLeft < 0 || daysLeft > PAYMENT_OVERDUE_WINDOW_DAYS) return null
+  if (daysLeft < 0) return 'Overdue'
   if (daysLeft === 0) return 'Due today'
   if (daysLeft === 1) return '1 day left'
   return `${daysLeft} days left`
 }
 
-// Whether a payment reminder SMS can be sent for this row. Members (booker
-// or invited) always have a GHL contact from signup; a non-member guest's
-// contact is resolved server-side by the email captured at booking time —
-// only missing if that email is somehow absent.
+// Whether a payment reminder can be sent for this row. The GHL webhook matches
+// the contact by email: members (booker or invited) always have one from
+// signup; a non-member guest is only reachable if an email was captured at
+// booking time.
 function canRemindPayment(b: BookingRow): boolean {
   if (b.player_member_id) return true
   if (!b.guest_name) return true
@@ -315,16 +313,6 @@ function SlotCard({
                           ⏳ {daysLeftLabel}
                         </span>
                       )}
-                      {showRemindCta && (
-                        <button
-                          type="button"
-                          onClick={() => onRemindPayment(b.id)}
-                          disabled={remindingPayment === b.id || alreadyReminded}
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:hover:bg-red-600 flex-shrink-0 whitespace-nowrap transition-colors"
-                        >
-                          {remindingPayment === b.id ? 'Sending…' : alreadyReminded ? '✓ Texted' : '📲 Text to pay'}
-                        </button>
-                      )}
                     </div>
                     <p className="text-xs text-gray-400 mt-0.5 truncate">{info.sub}</p>
                   </div>
@@ -349,16 +337,28 @@ function SlotCard({
                         </button>
                       </div>
                     ) : (
-                      <select
-                        value={b.status}
-                        disabled={updatingStatus === b.id}
-                        onChange={e => onUpdateStatus(b.id, e.target.value as BookingStatus)}
-                        className={`text-xs font-semibold rounded-lg px-2 py-1 border border-transparent outline-none cursor-pointer disabled:opacity-50 transition-colors max-w-[140px] sm:max-w-none ${sm.colour}`}
-                      >
-                        {ALL_STATUSES.map(s => (
-                          <option key={s} value={s}>{STATUS_META[s].label}</option>
-                        ))}
-                      </select>
+                      <div className="flex items-center gap-1.5">
+                        {showRemindCta && (
+                          <button
+                            type="button"
+                            onClick={() => onRemindPayment(b.id)}
+                            disabled={remindingPayment === b.id || alreadyReminded}
+                            className="text-xs font-medium px-2.5 py-1 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:hover:bg-red-600 whitespace-nowrap transition-colors"
+                          >
+                            {remindingPayment === b.id ? 'Sending…' : alreadyReminded ? '✓ Sent' : 'Send reminder'}
+                          </button>
+                        )}
+                        <select
+                          value={b.status}
+                          disabled={updatingStatus === b.id}
+                          onChange={e => onUpdateStatus(b.id, e.target.value as BookingStatus)}
+                          className={`text-xs font-semibold rounded-lg px-2 py-1 border border-transparent outline-none cursor-pointer disabled:opacity-50 transition-colors max-w-[140px] sm:max-w-none ${sm.colour}`}
+                        >
+                          {ALL_STATUSES.map(s => (
+                            <option key={s} value={s}>{STATUS_META[s].label}</option>
+                          ))}
+                        </select>
+                      </div>
                     )}
 
                     {b.dinner_rsvp ? (

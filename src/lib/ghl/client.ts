@@ -10,7 +10,7 @@ import { HighLevel } from '@gohighlevel/api-client'
 import type { GHLContact, GHLCalendarEvent, GHLBookingSlot } from '@/types'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
 import { logger } from '@/lib/logger'
-import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GOLF_ROUND_DURATION_MINUTES, GHL_BOOKING_REMINDER_WEBHOOK_PATH } from '@/lib/constants'
+import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GOLF_ROUND_DURATION_MINUTES, GHL_BOOKING_REMINDER_WEBHOOK_PATH, GHL_PAYMENT_REMINDER_WEBHOOK_PATH } from '@/lib/constants'
 
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID ?? ''
 
@@ -223,6 +223,34 @@ export async function triggerBookingReminderWebhook(payload: {
     return true
   } catch (err) {
     logger.warn('triggerBookingReminderWebhook failed', { action: 'ghl_reminder_webhook', errorMessage: String(err) })
+    return false
+  }
+}
+
+// Fires the GHL inbound webhook used for admin-initiated payment reminders on
+// unpaid bookings (tentative / availability_confirmed). Same plain-POST
+// pattern as triggerBookingReminderWebhook — the GHL workflow composes and
+// sends the actual message; `email` lets it match the target contact.
+export async function triggerPaymentReminderWebhook(payload: {
+  firstName: string
+  eventTime: string
+  eventLocation: string
+  paymentLink: string
+  email?: string
+}): Promise<boolean> {
+  try {
+    const res = await fetch(`${GHL_BASE_URL}${GHL_PAYMENT_REMINDER_WEBHOOK_PATH}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      logger.warn('triggerPaymentReminderWebhook failed', { action: 'ghl_payment_reminder_webhook', metadata: { statusCode: res.status } })
+      return false
+    }
+    return true
+  } catch (err) {
+    logger.warn('triggerPaymentReminderWebhook failed', { action: 'ghl_payment_reminder_webhook', errorMessage: String(err) })
     return false
   }
 }

@@ -29,6 +29,13 @@ export const GHL_CALENDAR_PROVIDER_ID = 'bdd10QRepJvC6EYoy32m'
 export const GHL_BOOKING_REMINDER_WEBHOOK_PATH =
   '/hooks/J3tfnLdEv4WmE3XorQYW/webhook-trigger/274c8b8d-551e-4225-9702-6539308d84fb'
 
+// Inbound webhook (GHL workflow trigger) fired when an admin sends a one-off
+// payment reminder for an unpaid booking — see
+// /api/admin/bookings/[id]/remind-payment. Path only; combine with
+// GHL_BASE_URL like every other GHL request.
+export const GHL_PAYMENT_REMINDER_WEBHOOK_PATH =
+  '/hooks/J3tfnLdEv4WmE3XorQYW/webhook-trigger/819a61da-ce63-4dcc-a608-682c3c0524d7'
+
 // ---- Aviara course ------------------------------------------
 
 export const AVIARA_ADDRESS  = 'Aviara Golf Club, 7447 Batiquitos Drive, Carlsbad, CA 92011'
