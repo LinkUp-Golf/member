@@ -113,6 +113,7 @@ export const POST = withAuth(
         booking_url: body.booking_url?.trim() || null,
         payment_url: body.payment_url.trim(),
         required_tags: requiredTags,
+        max_players_per_day: body.max_players_per_day ?? undefined,
         approval_status: 'active',
         reviewed_by: ctx.userId,
       })

@@ -375,6 +375,12 @@ export default function BookPage() {
         if (Array.isArray(data.pendingBookings)) {
           setPendingBookings(data.pendingBookings);
         }
+        // A 409 with seatsRemaining (daily cap reached) surfaces inline on the
+        // confirm screen via `error`. Do NOT refresh the month slots here —
+        // fetchMonthSlots() clears selectedSlot, which would bounce the member
+        // back to date/event selection and lose their group. The daily cap
+        // isn't reflected in per-slot availability anyway, so a refresh would
+        // show nothing new.
       }
     } catch {
       setError("Network error. Check your connection and try again.");

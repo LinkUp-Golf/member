@@ -742,6 +742,7 @@ type CourseFormValues = {
   timezone: string
   ghl_calendar_id: string
   cost_per_player: number | ''
+  max_players_per_day: number | ''
   booking_rules: string
   booking_url: string
   payment_url: string
@@ -775,6 +776,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
       timezone: editingCourse?.timezone ?? 'America/Los_Angeles',
       ghl_calendar_id: editingCourse?.ghl_calendar_id ?? '',
       cost_per_player: editingCourse?.cost_per_player ?? '',
+      max_players_per_day: editingCourse?.max_players_per_day ?? '',
       booking_rules: editingCourse?.booking_rules ?? '',
       booking_url: editingCourse?.booking_url ?? '',
       payment_url: editingCourse?.payment_url ?? '',
@@ -822,6 +824,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
         body: JSON.stringify({
           ...data,
           cost_per_player: data.cost_per_player === '' ? null : Number(data.cost_per_player),
+          max_players_per_day: data.max_players_per_day === '' ? undefined : Number(data.max_players_per_day),
           createCalendar: false,
         }),
       })
@@ -1043,6 +1046,23 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
                   })}
                 />
                 {errors.cost_per_player && <p className={errMsg}>{errors.cost_per_player.message}</p>}
+              </div>
+
+              <div>
+                <label htmlFor="course-max-players-per-day" className={labelCls}>Max players per day</label>
+                <input
+                  id="course-max-players-per-day"
+                  type="number"
+                  min="1"
+                  step="1"
+                  className={field(!!errors.max_players_per_day)}
+                  placeholder="15"
+                  {...register('max_players_per_day', {
+                    min: { value: 1, message: 'Must be at least 1' },
+                  })}
+                />
+                <p className="mt-1 text-xs text-gray-500">Total bookings allowed at this course per date (across all tee times). Defaults to 15.</p>
+                {errors.max_players_per_day && <p className={errMsg}>{errors.max_players_per_day.message}</p>}
               </div>
 
               <div>

@@ -116,6 +116,8 @@ export interface Course {
   pre_buffer_mins: number
   post_buffer_mins: number
   seats_per_class: number | null
+  // Max total bookings allowed at this course per date (across all tee times).
+  max_players_per_day: number
 
   // Optional description shown in the admin and used as the GHL group description
   description: string | null

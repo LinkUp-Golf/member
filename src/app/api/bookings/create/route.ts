@@ -35,6 +35,7 @@ import {
   AVIARA_TIMEZONE,
   AVIARA_ADDRESS,
   GOLF_ROUND_DURATION_MINUTES,
+  DEFAULT_MAX_PLAYERS_PER_DAY,
 } from '@/lib/constants'
 
 const AVIARA_CALENDAR_ID = process.env.GHL_AVIARA_CALENDAR_ID ?? ''
@@ -341,49 +342,21 @@ export async function POST(request: NextRequest) {
     address: eventAddress,
   }
 
-  // Step 1: Create GHL appointment for the primary booker — must succeed
-  let primaryGhlId: string
-  try {
-    primaryGhlId = await createBooking({
-      ...bookingParams,
-      contact: {
-        id: member.ghl_contact_id,
-        email: member.email,
-        phone: member.phone ?? null,
-      },
-    })
-  } catch (err) {
-    console.error('[booking/create] GHL appointment creation failed:', String(err))
-    return NextResponse.json(
-      { error: 'Failed to create appointment in GHL. Please try again.', detail: String(err) },
-      { status: 502 }
-    )
-  }
+  // ---- Daily capacity: max players per course per DATE ---------------------
+  // Read the per-course cap (courses.max_players_per_day). The actual count +
+  // reservation happen atomically in our DB below (create_bookings_for_day),
+  // scoped to this course + date across all tee times.
+  const { data: capRow } = await adminSupabase
+    .from('courses')
+    .select('max_players_per_day')
+    .eq('id', resolvedCourseId)
+    .single()
+  const maxPlayersPerDay = capRow?.max_players_per_day ?? DEFAULT_MAX_PLAYERS_PER_DAY
 
-  console.log('[booking/create] GHL appointment created for primary:', primaryGhlId)
-
-  // Step 1b: Create GHL appointments for each member guest in parallel (non-fatal),
-  // using their validated GHL contact from the database. Non-member guests are
-  // intentionally skipped — they only reach GHL once an admin sets them up.
-  const memberGhlIds = await Promise.all(
-    memberPlayers.map(async (p) => {
-      const row = p.memberId ? memberRowById[p.memberId] : undefined
-      if (!row?.ghl_contact_id) return null
-      try {
-        const ghlId = await createBooking({
-          ...bookingParams,
-          contact: { id: row.ghl_contact_id, email: row.email, phone: row.phone ?? null },
-        })
-        console.log('[booking/create] GHL appointment created for guest:', row.email, ghlId)
-        return ghlId
-      } catch (err) {
-        console.warn('[booking/create] Guest GHL appointment failed (non-fatal):', row.email, String(err))
-        return null
-      }
-    })
-  )
-
-  // Step 2: Supabase insert — one row per player
+  // Step 1: Build one booking row per player. GHL appointments are created
+  // AFTER the DB reserves the seats, so ghl_booking_id starts null and is
+  // backfilled below. Every row consumes a seat: the booker, each member
+  // guest, and each pending non-member (held while awaiting admin approval).
   const rows = [
     {
       member_id: user.id,
@@ -392,13 +365,14 @@ export async function POST(request: NextRequest) {
       tee_time: timeNormalized,
       players: 1,
       guest_name: null as string | null,
+      player_member_id: null as string | null,
       additional_players: [] as typeof extraPlayers,
       status: 'tentative',
       amount_charged: BOOKING_PRICE_USD,
       focus_linkup_id: focusLinkupId ?? null,
-      ghl_booking_id: primaryGhlId,
+      ghl_booking_id: null as string | null,
     },
-    ...memberPlayers.map((p, i) => ({
+    ...memberPlayers.map((p) => ({
       member_id: user.id,
       course_id: resolvedCourseId,
       booking_date: bookingDate,
@@ -410,7 +384,7 @@ export async function POST(request: NextRequest) {
       status: 'tentative',
       amount_charged: BOOKING_PRICE_USD,
       focus_linkup_id: focusLinkupId ?? null,
-      ghl_booking_id: memberGhlIds[i] ?? null,
+      ghl_booking_id: null as string | null,
     })),
     // Non-members are held for admin review: a booking row in 'awaiting_approval'
     // with no GHL appointment. An admin "sets it up" (creates the GHL contact +
@@ -422,34 +396,111 @@ export async function POST(request: NextRequest) {
       tee_time: timeNormalized,
       players: 1,
       guest_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email,
-      player_member_id: null,
+      player_member_id: null as string | null,
       additional_players: [p],
       status: 'awaiting_approval',
       amount_charged: BOOKING_PRICE_USD,
       focus_linkup_id: focusLinkupId ?? null,
-      ghl_booking_id: null,
+      ghl_booking_id: null as string | null,
     })),
   ]
 
-  console.log('[booking/create] Inserting', rows.length, 'booking row(s)')
+  // Step 2: Atomically reserve seats + insert rows. The DB serializes
+  // concurrent bookings for this course+date under an advisory lock and rejects
+  // the WHOLE group if it would exceed the daily cap (raises DAY_FULL:<remaining>).
+  console.log('[booking/create] Reserving', rows.length, 'seat(s); daily cap', maxPlayersPerDay)
 
   const { data: insertedBookings, error: insertError } = await adminSupabase
-    .from('bookings')
-    .insert(rows)
-    .select('*')
+    .rpc('create_bookings_for_day', {
+      p_course_id: resolvedCourseId,
+      p_date: bookingDate,
+      p_capacity: maxPlayersPerDay,
+      p_rows: rows,
+    })
 
-  if (insertError || !insertedBookings?.length) {
-    console.error('[booking/create] Booking insert failed:', insertError)
+  if (insertError) {
+    const dayFull = /DAY_FULL:(\d+)/.exec(insertError.message ?? '')
+    if (dayFull) {
+      const seatsRemaining = parseInt(dayFull[1] ?? '0', 10)
+      return NextResponse.json(
+        {
+          error: seatsRemaining > 0
+            ? `Only ${seatsRemaining} spot${seatsRemaining === 1 ? '' : 's'} left for this date — please reduce your group or pick another day.`
+            : 'This day is fully booked. Please pick another day.',
+          seatsRemaining,
+        },
+        { status: 409 }
+      )
+    }
+    console.error('[booking/create] Slot reservation failed:', insertError)
     return NextResponse.json(
-      { error: 'Failed to create booking records', detail: insertError?.message },
+      { error: 'Failed to create booking records', detail: insertError.message },
       { status: 500 }
     )
   }
 
-  console.log('[booking/create] Bookings created:', insertedBookings.map(b => b.id))
+  if (!insertedBookings?.length) {
+    return NextResponse.json({ error: 'Failed to create booking records' }, { status: 500 })
+  }
 
-  const primaryBookingId =
-    (insertedBookings.find(b => b.guest_name === null) ?? insertedBookings[0])?.id ?? ''
+  type InsertedBooking = { id: string; guest_name: string | null; player_member_id: string | null; ghl_booking_id: string | null }
+  const created = insertedBookings as InsertedBooking[]
+  console.log('[booking/create] Reserved bookings:', created.map(b => b.id))
+
+  // Step 3: Now that the seats are reserved, create GHL appointments and
+  // backfill ghl_booking_id. The primary booker's appointment MUST succeed —
+  // if it fails we release the reservation by deleting the reserved rows.
+  const primaryBooking = created.find(b => b.guest_name === null && b.player_member_id === null) ?? created[0]
+  if (!primaryBooking) {
+    return NextResponse.json({ error: 'Failed to create booking records' }, { status: 500 })
+  }
+
+  let primaryGhlId: string
+  try {
+    primaryGhlId = await createBooking({
+      ...bookingParams,
+      contact: {
+        id: member.ghl_contact_id,
+        email: member.email,
+        phone: member.phone ?? null,
+      },
+    })
+  } catch (err) {
+    console.error('[booking/create] GHL appointment failed, releasing reservation:', String(err))
+    await adminSupabase.from('bookings').delete().in('id', created.map(b => b.id))
+    return NextResponse.json(
+      { error: 'Failed to create appointment in GHL. Please try again.', detail: String(err) },
+      { status: 502 }
+    )
+  }
+
+  await adminSupabase.from('bookings').update({ ghl_booking_id: primaryGhlId }).eq('id', primaryBooking.id)
+  primaryBooking.ghl_booking_id = primaryGhlId
+  console.log('[booking/create] GHL appointment created for primary:', primaryGhlId)
+
+  // Member-guest appointments are non-fatal — a failure just leaves that row
+  // without a GHL appointment. Non-member rows are skipped (awaiting approval).
+  await Promise.all(
+    created
+      .filter(b => b.player_member_id)
+      .map(async (b) => {
+        const row = b.player_member_id ? memberRowById[b.player_member_id] : undefined
+        if (!row?.ghl_contact_id) return
+        try {
+          const ghlId = await createBooking({
+            ...bookingParams,
+            contact: { id: row.ghl_contact_id, email: row.email, phone: row.phone ?? null },
+          })
+          await adminSupabase.from('bookings').update({ ghl_booking_id: ghlId }).eq('id', b.id)
+          b.ghl_booking_id = ghlId // reflect into the response payload (same array ref)
+          console.log('[booking/create] GHL appointment created for guest:', row.email, ghlId)
+        } catch (err) {
+          console.warn('[booking/create] Guest GHL appointment failed (non-fatal):', row.email, String(err))
+        }
+      })
+  )
+
+  const primaryBookingId = primaryBooking.id
 
   const displayDate = format(new Date(`${bookingDate}T12:00:00`), 'EEEE, MMMM d')
 

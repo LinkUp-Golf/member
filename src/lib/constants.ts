@@ -45,6 +45,9 @@ export const AVIARA_TIMEZONE = 'America/Los_Angeles'
 
 export const BOOKING_PRICE_USD           = 160   // per player, USD
 export const GOLF_ROUND_DURATION_MINUTES = 300   // 5 hours
+// Fallback daily booking cap per course when courses.max_players_per_day is
+// unset. Mirrors the column's DB default.
+export const DEFAULT_MAX_PLAYERS_PER_DAY = 15
 
 // ---- Cancellation policy tiers ------------------------------
 
