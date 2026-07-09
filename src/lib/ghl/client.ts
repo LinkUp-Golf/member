@@ -48,7 +48,12 @@ async function ghlFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     throw new GHLError(`GHL API error ${res.status}`, code, { path, statusCode: res.status, body: parsedBody })
   }
 
-  return res.json() as Promise<T>
+  // Some endpoints (e.g. DELETE) return 204 / an empty body — parsing that as
+  // JSON would throw and be mistaken for a request failure.
+  if (res.status === 204) return undefined as T
+  const text = await res.text()
+  if (!text) return undefined as T
+  return JSON.parse(text) as T
 }
 
 // ---- Contacts -----------------------------------------------
@@ -396,13 +401,27 @@ export async function cancelBooking(eventId: string, contactId?: string): Promis
 
 // Hard-deletes a GHL appointment/event (as opposed to cancelBooking, which
 // only flips its status to "cancelled"). Used when an admin removes a booking
-// outright. Best-effort: returns false rather than throwing so the caller can
-// still delete the Supabase row and surface a partial-failure warning.
+// outright. Returns true when the appointment is gone — including when GHL
+// reports it as already deleted (404) — so the caller can proceed to remove
+// the Supabase row. Returns false only on a genuine failure.
 export async function deleteBooking(eventId: string): Promise<boolean> {
   try {
-    await ghlFetch(`/calendars/events/${eventId}`, { method: 'DELETE' })
+    await ghlFetch(`/calendars/events/appointments/${eventId}`, { method: 'DELETE' })
     return true
-  } catch {
+  } catch (err) {
+    // The appointment no longer exists in GHL — treat as already deleted.
+    if (err instanceof GHLError && err.context?.['statusCode'] === 404) {
+      logger.info('deleteBooking: appointment already gone in GHL', {
+        action: 'ghl_booking_delete',
+        metadata: { eventId },
+      })
+      return true
+    }
+    logger.warn('deleteBooking failed', {
+      action: 'ghl_booking_delete',
+      errorMessage: String(err),
+      metadata: { eventId },
+    })
     return false
   }
 }

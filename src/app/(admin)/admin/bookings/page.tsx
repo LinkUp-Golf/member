@@ -939,7 +939,6 @@ export default function AdminBookingsPage() {
       const json = await res.json().catch(() => ({}))
       if (res.ok) {
         setBookings(prev => prev.filter(b => b.id !== id))
-        setDeleteTarget(null)
         setRequestToast({
           msg: json.ghlDeleted === false
             ? 'Booking deleted, but its GHL booking could not be removed.'
@@ -952,6 +951,7 @@ export default function AdminBookingsPage() {
     } catch {
       setRequestToast({ msg: 'Network error. Please try again.', ok: false })
     } finally {
+      setDeleteTarget(null)
       setTimeout(() => setRequestToast(null), 3500)
       setDeletingBookingId(null)
     }

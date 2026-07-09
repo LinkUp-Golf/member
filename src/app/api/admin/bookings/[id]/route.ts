@@ -9,9 +9,9 @@ import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 
 // DELETE /api/admin/bookings/[id]
-// Permanently removes a booking. Deletes the GHL appointment/event first (best
-// effort — a GHL failure still lets the Supabase row be removed so we never
-// strand the admin with a row they can't clear), then deletes the Supabase row.
+// Permanently removes a booking. Deletes the GHL appointment/event first; if that
+// fails we abort and leave the Supabase row intact so LinkUp and GHL never drift
+// out of sync. Only once GHL is cleared do we delete the Supabase row.
 export const DELETE = withAuth(
   async (_req: NextRequest, ctx: AuthContext, routeCtx?: { params: Record<string, string> }) => {
     const id = routeCtx?.params?.['id']
@@ -33,11 +33,15 @@ export const DELETE = withAuth(
     if (booking.ghl_booking_id) {
       ghlDeleted = await deleteBooking(booking.ghl_booking_id)
       if (!ghlDeleted) {
-        logger.warn('Failed to delete GHL booking; deleting Supabase row anyway', {
+        logger.warn('Failed to delete GHL booking; aborting Supabase deletion', {
           action: 'booking.ghl_delete_failed',
           userId: ctx.userId,
           metadata: { booking_id: id, ghl_booking_id: booking.ghl_booking_id },
         })
+        return NextResponse.json(
+          { error: 'Failed to delete the GHL booking. The booking was not deleted.' },
+          { status: 502 }
+        )
       }
     }
 
