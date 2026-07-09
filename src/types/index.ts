@@ -129,6 +129,9 @@ export interface Course {
   // GHL Calendar Group for this course (auto-created on course creation)
   ghl_group_id: string | null
 
+  // Manual display order (admin-controlled); lower sorts first, null sorts last
+  sort_order: number | null
+
   // Approval workflow
   approval_status: CourseApprovalStatus
   requested_by: string | null

@@ -165,6 +165,9 @@ export default function AdminCoursesPage() {
   const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [reordering, setReordering] = useState(false)
+  const [reorderList, setReorderList] = useState<CourseRow[]>([])
+  const [savingOrder, setSavingOrder] = useState(false)
 
   const showToast = (msg: string, ok = true) => {
     setToast({ msg, ok })
@@ -253,6 +256,47 @@ export default function AdminCoursesPage() {
   }
   const filtered = grouped[filter]
 
+  function startReorder() {
+    setReorderList([...grouped.active])
+    setReordering(true)
+  }
+
+  function cancelReorder() {
+    setReordering(false)
+    setReorderList([])
+  }
+
+  function moveCourse(index: number, dir: -1 | 1) {
+    setReorderList(list => {
+      const target = index + dir
+      if (target < 0 || target >= list.length) return list
+      const next = [...list]
+      const [moved] = next.splice(index, 1)
+      if (!moved) return list
+      next.splice(target, 0, moved)
+      return next
+    })
+  }
+
+  async function saveOrder() {
+    setSavingOrder(true)
+    const res = await fetch('/api/admin/courses/reorder', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderedIds: reorderList.map(c => c.id) }),
+    })
+    const json = await res.json().catch(() => ({}))
+    if (res.ok) {
+      showToast('Course order saved.')
+      setReordering(false)
+      setReorderList([])
+      await loadCourses()
+    } else {
+      showToast(json.error ?? 'Failed to save order.', false)
+    }
+    setSavingOrder(false)
+  }
+
   return (
     <div className="p-4 sm:p-8">
       <div className="flex items-start justify-between gap-4 mb-6">
@@ -289,7 +333,7 @@ export default function AdminCoursesPage() {
         {(Object.keys(FILTER_LABELS) as FilterTab[]).map(tab => (
           <button
             key={tab}
-            onClick={() => setFilter(tab)}
+            onClick={() => { setFilter(tab); cancelReorder() }}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
               filter === tab
                 ? 'bg-green-900 text-white'
@@ -308,7 +352,85 @@ export default function AdminCoursesPage() {
         ))}
       </div>
 
-      {loading ? (
+      {/* Reorder controls — Active tab only. The saved order is what members
+          see on the Book ("select an event") screen. */}
+      {filter === 'active' && !loading && grouped.active.length > 1 && (
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <p className="text-xs text-gray-500">
+            {reordering
+              ? 'Use the arrows to reorder, then save. This is the order members see when booking.'
+              : 'Set the order courses appear to members on the booking screen.'}
+          </p>
+          {reordering ? (
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={cancelReorder}
+                disabled={savingOrder}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveOrder}
+                disabled={savingOrder}
+                className="px-3 py-1.5 rounded-lg bg-green-900 text-white text-xs font-semibold hover:bg-green-800 disabled:opacity-50"
+              >
+                {savingOrder ? 'Saving…' : 'Save order'}
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={startReorder}
+              className="flex-shrink-0 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50"
+            >
+              Reorder
+            </button>
+          )}
+        </div>
+      )}
+
+      {reordering ? (
+        <div className="card">
+          {reorderList.map((course, i) => (
+            <div
+              key={course.id}
+              className="flex items-center gap-3 px-4 py-3"
+              style={{ borderBottom: i < reorderList.length - 1 ? '1px solid rgba(0,38,105,0.06)' : 'none' }}
+            >
+              <span className="text-xs font-semibold text-gray-400 w-5 text-center flex-shrink-0">{i + 1}</span>
+              <div
+                className="relative w-10 h-10 rounded-lg overflow-hidden flex-shrink-0"
+                style={{ background: 'rgba(0,38,105,0.03)' }}
+              >
+                <Image src={course.logo_url} alt="" fill unoptimized className="object-contain" />
+              </div>
+              <h3 className="flex-1 min-w-0 font-medium text-sm text-gray-900 truncate">{course.name}</h3>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  onClick={() => moveCourse(i, -1)}
+                  disabled={i === 0 || savingOrder}
+                  aria-label="Move up"
+                  className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => moveCourse(i, 1)}
+                  disabled={i === reorderList.length - 1 || savingOrder}
+                  aria-label="Move down"
+                  className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : loading ? (
         <div className="space-y-4">{[1,2,3].map(i => <div key={i} className="h-32 bg-gray-100 rounded-xl animate-pulse" />)}</div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-20">

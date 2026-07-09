@@ -27,6 +27,7 @@ export const GET = withAuth(
     const { data, error } = await admin
       .from('courses')
       .select('*, requester:members!requested_by(first_name, last_name)')
+      .order('sort_order', { ascending: true, nullsFirst: false })
       .order('name')
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

@@ -36,7 +36,9 @@ export async function GET(req: NextRequest) {
   if (city) query = query.eq('city', city)
   if (state) query = query.eq('state', state)
 
-  const { data: courses, error } = await query.order('name')
+  const { data: courses, error } = await query
+    .order('sort_order', { ascending: true, nullsFirst: false })
+    .order('name')
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
