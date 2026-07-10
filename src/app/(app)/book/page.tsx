@@ -4234,7 +4234,7 @@ function EventLocationFilterDrawer({
     onClose();
   }
 
-  return (
+  const drawer = (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
       <button
         type="button"
@@ -4324,6 +4324,10 @@ function EventLocationFilterDrawer({
       </div>
     </div>
   );
+
+  // Portal to document.body so the fixed sheet is never clipped by the
+  // .screen-content scroll container (iOS Safari) or trapped behind the nav
+  return createPortal(drawer, document.body);
 }
 
 function CourseRowInner({
