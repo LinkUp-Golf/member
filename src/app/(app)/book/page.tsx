@@ -2778,6 +2778,10 @@ function MemberAutocomplete({
 
 // ---- Success screen -----------------------------------------
 
+// The post-golf group dinner is an Aviara-only offering, so the RSVP prompt is
+// shown only when the booking is for the Aviara course/event.
+const isAviaraEvent = (name?: string | null) => !!name && /aviara/i.test(name);
+
 function SuccessScreen({
   booking,
   onDone,
@@ -2798,6 +2802,7 @@ function SuccessScreen({
     null,
   );
   const [submitting, setSubmitting] = useState(false);
+  const showDinner = !!booking.bookingId && isAviaraEvent(booking.eventName);
 
   async function handleDone() {
     if (booking.bookingId && dinnerRsvp) {
@@ -2884,7 +2889,7 @@ function SuccessScreen({
           </p>
         )}
       </div>
-      {booking.bookingId && (
+      {showDinner && (
         <div className="card p-5 w-full max-w-sm mb-8 text-left">
           <p
             className="text-xs uppercase tracking-widest mb-3"
@@ -2897,7 +2902,7 @@ function SuccessScreen({
             drinks/dinner?
           </p>
           <DinnerRsvp
-            bookingId={booking.bookingId}
+            bookingId={booking.bookingId!}
             current={dinnerRsvp}
             layout="horizontal"
             autoSave={false}
@@ -2905,15 +2910,15 @@ function SuccessScreen({
           />
         </div>
       )}
-      {!booking.bookingId && <div className="mb-8" />}
+      {!showDinner && <div className="mb-8" />}
       <button
         onClick={handleDone}
-        disabled={(!!booking.bookingId && dinnerRsvp === null) || submitting}
+        disabled={(showDinner && dinnerRsvp === null) || submitting}
         className="btn btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
       >
         {submitting ? "Saving…" : "Back to booking"}
       </button>
-      {booking.bookingId && dinnerRsvp === null && (
+      {showDinner && dinnerRsvp === null && (
         <p className="text-xs mt-3" style={{ color: "rgba(0,38,105,0.4)" }}>
           Please let us know about dinner first.
         </p>
