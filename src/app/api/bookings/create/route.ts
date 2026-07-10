@@ -218,15 +218,18 @@ export async function POST(request: NextRequest) {
   let eventDurationMinutes = GOLF_ROUND_DURATION_MINUTES
   let eventCourseName = 'Aviara'
   let resolvedCourseId: string = member.home_course_id
+  // Course details echoed back on the created rows so the client can render the
+  // correct course name immediately (the create RPC doesn't join `courses`).
+  let courseForResponse: { name: string; city: string; state: string; payment_url: string | null; timezone: string } | null = null
+
+  const { data: course } = await adminSupabase
+    .from('courses')
+    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, meeting_duration_mins, cost_per_player')
+    .eq('id', courseId || resolvedCourseId)
+    .eq('approval_status', 'active')
+    .single()
 
   if (courseId) {
-    const { data: course } = await adminSupabase
-      .from('courses')
-      .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, meeting_duration_mins, cost_per_player')
-      .eq('id', courseId)
-      .eq('approval_status', 'active')
-      .single()
-
     if (!course?.ghl_calendar_id) {
       return NextResponse.json({ error: 'Course not found or booking not yet configured' }, { status: 404 })
     }
@@ -236,6 +239,16 @@ export async function POST(request: NextRequest) {
     eventDurationMinutes = course.meeting_duration_mins || GOLF_ROUND_DURATION_MINUTES
     eventCourseName = course.name
     resolvedCourseId = course.id
+  }
+
+  if (course) {
+    courseForResponse = {
+      name: course.name,
+      city: course.city,
+      state: course.state,
+      payment_url: course.payment_url ?? null,
+      timezone: course.timezone,
+    }
   }
 
   const localParts = new Intl.DateTimeFormat('en-CA', {
@@ -591,9 +604,15 @@ export async function POST(request: NextRequest) {
     ? `Booking submitted. ${nonMemberPlayers.length} non-member guest${nonMemberPlayers.length !== 1 ? 's' : ''} ${nonMemberPlayers.length !== 1 ? 'are' : 'is'} pending admin approval — we'll confirm availability and send your payment link by email.`
     : 'Booking submitted. We will confirm availability and send your payment link by email.'
 
+  // Echo the resolved course onto each row so the client's optimistic prepend
+  // renders the real course name (the RPC returns raw rows with no join).
+  const bookingsWithCourse = Array.isArray(insertedBookings) && courseForResponse
+    ? insertedBookings.map((b: Record<string, unknown>) => ({ ...b, course: courseForResponse }))
+    : insertedBookings
+
   return NextResponse.json({
     bookingId: primaryBookingId,
-    bookings: insertedBookings,
+    bookings: bookingsWithCourse,
     pendingNonMembers: nonMemberPlayers.length,
     message,
   })

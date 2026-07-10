@@ -18,7 +18,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
   let query = supabase
     .from('bookings')
-    .select('*, course:courses!bookings_course_id_fkey(name, city, state, payment_url, timezone)')
+    .select('*')
     .or(`member_id.eq.${ctx.userId},player_member_id.eq.${ctx.userId}`)
     .order('booking_date', { ascending: true })
 
@@ -63,7 +63,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     await Promise.all(invitedRows.map(async inv => {
       const { data: siblings } = await admin
         .from('bookings')
-        .select('*, course:courses!bookings_course_id_fkey(name, city, state, payment_url, timezone)')
+        .select('*')
         .eq('member_id', inv.member_id)   // same booker
         .eq('booking_date', inv.booking_date)
         .eq('tee_time', inv.tee_time)
@@ -81,5 +81,36 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     rows = [...rows, ...siblingRows]
   }
 
+  // Resolve each booking's course via the admin client. The courses RLS policy
+  // only exposes courses a member *belongs to*, so an embedded join returns null
+  // for guest/away bookings at courses the member isn't a member of. Since these
+  // are the member's own bookings, they're authorized to see the course name.
+  rows = await attachCourses(rows)
+
   return NextResponse.json(rows)
 })
+
+// Batch-fetch the courses referenced by these bookings (admin client, bypasses
+// the belongs-to-only courses RLS) and attach the same limited fields the UI
+// uses onto each row as `course`.
+async function attachCourses(rows: Array<Record<string, unknown>>) {
+  const courseIds = [...new Set(rows.map(r => r.course_id as string).filter(Boolean))]
+  if (courseIds.length === 0) return rows
+
+  const admin = createAdminClient()
+  const { data: courses } = await admin
+    .from('courses')
+    .select('id, name, city, state, payment_url, timezone')
+    .in('id', courseIds)
+
+  const byId = new Map((courses ?? []).map(c => [c.id as string, c]))
+  return rows.map(r => {
+    const c = byId.get(r.course_id as string)
+    return {
+      ...r,
+      course: c
+        ? { name: c.name, city: c.city, state: c.state, payment_url: c.payment_url ?? null, timezone: c.timezone }
+        : null,
+    }
+  })
+}

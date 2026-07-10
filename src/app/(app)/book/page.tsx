@@ -3627,7 +3627,7 @@ function MyBookingsTab({
                 `${group.primary.booking_date}T12:00:00`,
               );
               const displayTime = formatTeeTime(group.primary.tee_time);
-              const courseName = group.primary.course?.name ?? "Aviara";
+              const courseName = group.primary.course?.name ?? "Golf course";
               const isCancelled = group.primary.status === "cancelled";
 
               return (
@@ -3692,7 +3692,7 @@ function BookingCard({
   );
   const bookingDate = new Date(`${group.primary.booking_date}T12:00:00`);
   const bookingTime = formatTeeTime(group.primary.tee_time);
-  const courseName = group.primary.course?.name ?? "Aviara";
+  const courseName = group.primary.course?.name ?? "Golf course";
   const hoursUntil = differenceInHours(localDt, new Date());
   // Cancel is only actionable once a booking has been confirmed/payment-ready —
   // pending (tentative/awaiting_approval) bookings cannot be cancelled yet.
