@@ -60,6 +60,22 @@ function MapPinIcon({ className }: { className?: string }) {
   )
 }
 
+function MapIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.159.69.159 1.006 0z" />
+    </svg>
+  )
+}
+
+function GlobeIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+    </svg>
+  )
+}
+
 function CourseMenuItem({ label, danger, disabled, onClick }: { label: string; danger?: boolean; disabled?: boolean; onClick: () => void }) {
   return (
     <button
@@ -494,9 +510,35 @@ export default function AdminCoursesPage() {
                       </div>
                     </div>
 
-                    {/* Mobile-only 3-dot actions menu — portaled so it can't
-                        be clipped by the .card container's overflow-hidden */}
-                    <CourseActionsMenu>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {course.map_link && (
+                        <a
+                          href={course.map_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          aria-label="View on map"
+                          className="flex items-center justify-center w-6 h-6 text-gray-400 hover:text-blue-600 transition-colors"
+                        >
+                          <MapIcon className="w-4 h-4" />
+                        </a>
+                      )}
+                      {course.booking_url && (
+                        <a
+                          href={course.booking_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          aria-label="Visit website"
+                          className="flex items-center justify-center w-6 h-6 text-gray-400 hover:text-blue-600 transition-colors"
+                        >
+                          <GlobeIcon className="w-4 h-4" />
+                        </a>
+                      )}
+
+                      {/* Mobile-only 3-dot actions menu — portaled so it can't
+                          be clipped by the .card container's overflow-hidden */}
+                      <CourseActionsMenu>
                       {(closeMenu) => (
                         <>
                           {course.approval_status === 'pending' && !isRejecting && (
@@ -516,6 +558,7 @@ export default function AdminCoursesPage() {
                         </>
                       )}
                     </CourseActionsMenu>
+                    </div>
                   </div>
 
                   {(course.city || course.state || course.address) && (
