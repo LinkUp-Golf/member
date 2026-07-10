@@ -4247,8 +4247,10 @@ function EventLocationFilterDrawer({
         }}
         onClick={onClose}
       />
+      {/* transform lives on this element only — no overflow/clip here, to avoid
+          iOS Safari clipping the sheet mid-animation */}
       <div
-        className="relative bg-white rounded-t-2xl px-5 pt-4 pb-8 max-h-[75vh] overflow-y-auto"
+        className="relative"
         style={{
           transform: visible ? "translateY(0)" : "translateY(100%)",
           transition: visible
@@ -4256,57 +4258,68 @@ function EventLocationFilterDrawer({
             : "transform 200ms cubic-bezier(0.4,0,1,1)",
         }}
       >
-        <div className="flex items-center justify-between mb-4">
-          <h2
-            className="text-sm font-bold"
-            style={{ color: "var(--color-green-900)" }}
-          >
-            Filter by location
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="w-8 h-8 rounded-full flex items-center justify-center"
+        {/* inner element owns sizing/clipping; dvh + safe-area keep the last
+            chips reachable above iOS browser chrome and the home indicator */}
+        <div className="bg-white rounded-t-2xl flex flex-col max-h-[75dvh] overflow-hidden">
+          <div className="flex-shrink-0 flex items-center justify-between px-5 pt-4 mb-4">
+            <h2
+              className="text-sm font-bold"
+              style={{ color: "var(--color-green-900)" }}
+            >
+              Filter by location
+            </h2>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="w-8 h-8 rounded-full flex items-center justify-center"
+              style={{
+                background: "rgba(0,38,105,0.06)",
+                color: "rgba(0,38,105,0.5)",
+              }}
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          </div>
+
+          <div
+            className="flex-1 overflow-y-auto px-5"
             style={{
-              background: "rgba(0,38,105,0.06)",
-              color: "rgba(0,38,105,0.5)",
+              paddingBottom: "max(2rem, calc(2rem + env(safe-area-inset-bottom)))",
             }}
           >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => choose("all")}
-            className={`chip ${value === "all" ? "active" : ""}`}
-          >
-            All locations
-          </button>
-          {locations.map((loc) => (
-            <button
-              key={loc}
-              type="button"
-              onClick={() => choose(loc)}
-              className={`chip ${value === loc ? "active" : ""}`}
-            >
-              {loc}
-            </button>
-          ))}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => choose("all")}
+                className={`chip ${value === "all" ? "active" : ""}`}
+              >
+                All locations
+              </button>
+              {locations.map((loc) => (
+                <button
+                  key={loc}
+                  type="button"
+                  onClick={() => choose(loc)}
+                  className={`chip ${value === loc ? "active" : ""}`}
+                >
+                  {loc}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>
