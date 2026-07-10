@@ -1,13 +1,87 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, useCallback, memo, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
+import { motion } from "framer-motion";
+import { Bell, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import Icon from "@/components/ui/Icon";
+import Icon, { type IconName } from "@/components/ui/Icon";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useProfile } from "@/hooks/useProfile";
-import { useLocationTimezone } from "@/hooks/useLocationTimezone";
+import { MORE_ITEMS } from "@/lib/nav/moreItems";
+
+// Extracted + memoized so a pathname change (i.e. every navigation) only
+// re-renders the one or two nav rows whose `active` flag actually flips,
+// instead of every row in the sidebar/bottom nav reconciling on each route change.
+const SidebarNavLink = memo(function SidebarNavLink({
+  href, icon, iconName, label, active, external, small,
+}: {
+  href: string;
+  /** Pre-built icon element — must be a stable reference (e.g. a module-level
+   *  constant like MORE_ITEMS' icons) or it defeats this component's memoization. */
+  icon?: ReactNode;
+  /** Preferred over `icon` for plain named icons — rendered internally so the
+   *  element itself is created fresh only when this row actually re-renders. */
+  iconName?: IconName;
+  label: string;
+  active: boolean;
+  external?: boolean;
+  small?: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      target={external ? "_blank" : undefined}
+      rel={external ? "noopener noreferrer" : undefined}
+      className={cn("sidebar-nav-item focus-ring", small && "text-sm", active && "active")}
+      aria-current={active ? "page" : undefined}
+    >
+      {active && (
+        <motion.div
+          layoutId="sidebar-active-pill"
+          className="absolute inset-0"
+          style={{ background: "rgba(133,187,101,0.1)", borderRight: "2px solid var(--color-gold)" }}
+          transition={{ type: "spring", stiffness: 380, damping: 32 }}
+        />
+      )}
+      <span className="relative z-10 flex items-center gap-3">
+        {iconName ? <Icon name={iconName} /> : icon}
+        <span>{label}</span>
+      </span>
+    </Link>
+  );
+});
+
+const BottomNavLink = memo(function BottomNavLink({
+  href, iconName, label, active,
+}: { href: string; iconName: IconName; label: string; active: boolean }) {
+  return (
+    <Link
+      href={href}
+      className={cn("nav-item focus-ring", active && "active")}
+      aria-label={label}
+      aria-current={active ? "page" : undefined}
+    >
+      <motion.div
+        className="relative flex flex-col items-center gap-1"
+        whileTap={{ scale: 0.88 }}
+        transition={{ type: "spring", stiffness: 400, damping: 17 }}
+      >
+        {active && (
+          <motion.div
+            layoutId="bottom-nav-active-pill"
+            className="absolute -inset-x-3.5 -inset-y-1.5 rounded-2xl -z-10"
+            style={{ background: "rgba(133,187,101,0.16)" }}
+            transition={{ type: "spring", stiffness: 380, damping: 30 }}
+          />
+        )}
+        <Icon name={iconName} className="w-6 h-6" />
+        <span className="nav-label">{label}</span>
+      </motion.div>
+    </Link>
+  );
+});
 
 const NAV_ITEMS = [
   { href: "/home", label: "Home", icon: "home" },
@@ -20,6 +94,11 @@ const NAV_ITEMS = [
 // Messages moves to the top-bar header on mobile; bottom nav shows 4 items
 const BOTTOM_NAV_ITEMS = NAV_ITEMS.filter((i) => i.href !== "/messages");
 
+// The sidebar (tablet+) has room to list every More item directly instead of
+// hiding them behind a click — only the bottom nav (mobile) needs the /more
+// hub page as a single tab.
+const SIDEBAR_TOP_ITEMS = NAV_ITEMS.filter((i) => i.href !== "/more");
+
 const DISMISSED_KEY = "linkup-notif-prompt-dismissed";
 
 // Sidebar (tablet+) and bottom nav (mobile) — both need usePathname for
@@ -27,29 +106,17 @@ const DISMISSED_KEY = "linkup-notif-prompt-dismissed";
 export default function AppNav({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { permission, isSubscribed, subscribe } = usePushNotifications();
-  const { profile, loading, refetch } = useProfile();
-  const { detectFromLocation } = useLocationTimezone(refetch);
+  const { profile, loading } = useProfile();
   const [dismissed, setDismissed] = useState(true); // start hidden, reveal after mount
-  const [fontReady, setFontReady] = useState(false);
 
+  // Applies the member's saved text-size preference once it loads. The shell
+  // (nav/sidebar) renders immediately at the browser default — there's no
+  // need to block the whole layout behind this, it's a one-line style tweak.
   useEffect(() => {
     if (loading) return;
     const px = profile?.profile?.text_size ?? 16;
     document.documentElement.style.fontSize = `${px}px`;
-    setFontReady(true);
   }, [loading, profile]);
-
-  // Ask for location once per member, as soon as the app opens, so the
-  // timezone preference is accurate without requiring a trip to Settings.
-  // Safe to fire unconditionally: browsers don't re-prompt once a choice
-  // (allow/block) has already been made for this origin.
-  const autoDetectRef = useRef(false);
-  useEffect(() => {
-    if (loading || autoDetectRef.current) return;
-    if (!profile || profile.profile?.timezone) return;
-    autoDetectRef.current = true;
-    detectFromLocation();
-  }, [loading, profile, detectFromLocation]);
 
   // Show the in-app prompt banner when permission hasn't been decided yet
   // and the user hasn't dismissed it before. Must be user-gesture driven
@@ -64,7 +131,7 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
 
   const showPrompt = !dismissed && permission === "default" && !isSubscribed;
 
-  async function handleEnable() {
+  const handleEnable = useCallback(async () => {
     setEnabling(true);
     setEnableError("");
     const ok = await subscribe();
@@ -85,31 +152,12 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
       // with an inline error so the user can try again
       setEnableError("Could not enable. Please try again.");
     }
-  }
+  }, [subscribe, permission]);
 
-  function handleDismiss() {
+  const handleDismiss = useCallback(() => {
     localStorage.setItem(DISMISSED_KEY, "1");
     setDismissed(true);
-  }
-
-  if (!fontReady) {
-    return (
-      <div
-        className="fixed inset-0 flex items-center justify-center"
-        style={{ background: "var(--color-cream)" }}
-      >
-        <div className="flex flex-col items-center gap-4">
-          <div
-            className="w-5 h-5 rounded-full border-2 animate-spin"
-            style={{
-              borderColor: "rgba(0,38,105,0.12)",
-              borderTopColor: "var(--color-green-900)",
-            }}
-          />
-        </div>
-      </div>
-    );
-  }
+  }, []);
 
   return (
     <div className="app-shell">
@@ -132,21 +180,40 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        <nav className="flex flex-col gap-px py-4 flex-1">
-          {NAV_ITEMS.map((item) => {
-            const active = pathname.startsWith(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn("sidebar-nav-item", active && "active")}
-                aria-current={active ? "page" : undefined}
+        <nav className="flex flex-col gap-px py-4 flex-1 overflow-y-auto hide-scrollbar">
+          {SIDEBAR_TOP_ITEMS.map((item) => (
+            <SidebarNavLink
+              key={item.href}
+              href={item.href}
+              iconName={item.icon}
+              label={item.label}
+              active={pathname.startsWith(item.href)}
+            />
+          ))}
+
+          {/* More items — expanded permanently in the sidebar (tablet+ has the
+              room); mobile still gets these via the bottom nav's "More" tab. */}
+          {MORE_ITEMS.map((group) => (
+            <div key={group.group} className="mt-4 first:mt-2">
+              <p
+                className="px-5 pb-1.5 text-[10px] font-semibold uppercase tracking-widest"
+                style={{ color: "rgba(255,255,255,0.22)" }}
               >
-                <Icon name={item.icon} />
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
+                {group.group}
+              </p>
+              {group.items.map((item) => (
+                <SidebarNavLink
+                  key={item.href}
+                  href={item.href}
+                  icon={item.icon}
+                  label={item.label}
+                  active={pathname.startsWith(item.href)}
+                  external={item.external}
+                  small
+                />
+              ))}
+            </div>
+          ))}
         </nav>
 
         <div
@@ -163,11 +230,14 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
       <div className="app-content-col">
         {/* Push notification prompt — shown until user enables or dismisses */}
         {showPrompt && (
-          <div
-            className="flex items-center gap-3 px-4 py-3 flex-shrink-0"
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="flex items-center gap-3 px-4 py-3 flex-shrink-0 overflow-hidden"
             style={{ background: "var(--color-green-900)" }}
           >
-            <span className="text-lg flex-shrink-0">🔔</span>
+            <Bell className="w-4 h-4 flex-shrink-0" style={{ color: "var(--color-gold)" }} strokeWidth={1.75} />
             <p
               className="flex-1 text-xs leading-snug"
               style={{
@@ -188,13 +258,13 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
               </button>
               <button
                 onClick={handleDismiss}
-                className="text-xs text-white/40 hover:text-white/70 transition-colors px-1"
+                className="focus-ring text-white/40 hover:text-white/70 transition-colors p-1 rounded-lg"
                 aria-label="Dismiss"
               >
-                ✕
+                <X className="w-3.5 h-3.5" strokeWidth={2} />
               </button>
             </div>
-          </div>
+          </motion.div>
         )}
 
         <main className="screen-content">{children}</main>
@@ -202,21 +272,15 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
         {/* Bottom nav — mobile only */}
         <nav className="bottom-nav">
           <div className="flex">
-            {BOTTOM_NAV_ITEMS.map((item) => {
-              const active = pathname.startsWith(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn("nav-item", active && "active")}
-                  aria-label={item.label}
-                  aria-current={active ? "page" : undefined}
-                >
-                  <Icon name={item.icon} className="w-6 h-6" />
-                  <span className="nav-label">{item.label}</span>
-                </Link>
-              );
-            })}
+            {BOTTOM_NAV_ITEMS.map((item) => (
+              <BottomNavLink
+                key={item.href}
+                href={item.href}
+                iconName={item.icon}
+                label={item.label}
+                active={pathname.startsWith(item.href)}
+              />
+            ))}
           </div>
         </nav>
       </div>

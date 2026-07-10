@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import Image from 'next/image'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Skeleton } from '@/components/ui/Loading'
 
 export interface MemberDetail {
   id: string
@@ -35,44 +37,26 @@ export default function MemberProfileSheet({
   const [hasPlayedWith, setHasPlayedWith] = useState(false)
   const [focusGroups, setFocusGroups] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
-  const [mounted, setMounted] = useState(false)
-  const [visible, setVisible] = useState(false)
 
   useEffect(() => {
-    if (memberId) {
-      let cancelled = false
-      setDetail(null)
-      setHasPlayedWith(false)
-      setFocusGroups([])
-      setMounted(true)
-      setLoading(true)
-      fetch(`/api/members/${memberId}`)
-        .then(r => r.json())
-        .then(d => {
-          if (cancelled) return // a different member was opened before this resolved
-          setDetail(d.member ?? null)
-          setHasPlayedWith(!!d.hasPlayedWith)
-          setFocusGroups(Array.isArray(d.focusLinkupGroups) ? d.focusLinkupGroups : [])
-        })
-        .catch(() => {})
-        .finally(() => { if (!cancelled) setLoading(false) })
-      return () => { cancelled = true }
-    }
-    setVisible(false)
-    const t = setTimeout(() => { setMounted(false); setDetail(null) }, 320)
-    return () => clearTimeout(t)
+    if (!memberId) return
+    let cancelled = false
+    setDetail(null)
+    setHasPlayedWith(false)
+    setFocusGroups([])
+    setLoading(true)
+    fetch(`/api/members/${memberId}`)
+      .then(r => r.json())
+      .then(d => {
+        if (cancelled) return // a different member was opened before this resolved
+        setDetail(d.member ?? null)
+        setHasPlayedWith(!!d.hasPlayedWith)
+        setFocusGroups(Array.isArray(d.focusLinkupGroups) ? d.focusLinkupGroups : [])
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [memberId])
-
-  useEffect(() => {
-    if (!mounted) return
-    const ids: number[] = []
-    ids[0] = requestAnimationFrame(() => {
-      ids[1] = requestAnimationFrame(() => setVisible(true))
-    })
-    return () => ids.forEach(id => cancelAnimationFrame(id))
-  }, [mounted])
-
-  if (!mounted) return null
 
   const prof = detail?.profile
   const displayName = prof?.display_name || (detail ? `${detail.first_name} ${detail.last_name}`.trim() : '')
@@ -80,40 +64,46 @@ export default function MemberProfileSheet({
   const avatarUrl = prof?.avatar_url ?? null
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center md:p-6">
-      <button
-        type="button"
-        aria-label="Close"
-        className="absolute inset-0 w-full h-full"
-        style={{ background: 'rgba(0,0,0,0.45)', opacity: visible ? 1 : 0, transition: 'opacity 200ms ease-out' }}
-        onClick={onClose}
-      />
-      <div
-        className="relative bg-white rounded-t-3xl md:rounded-3xl pt-5 pb-8 w-full md:max-w-md"
-        style={{
-          boxShadow: '0 -4px 32px rgba(0,0,0,0.12)',
-          transform: visible ? 'translateY(0)' : 'translateY(100%)',
-          transition: visible
-            ? 'transform 340ms cubic-bezier(0.32,0.72,0,1)'
-            : 'transform 240ms cubic-bezier(0.4,0,1,1)',
-          willChange: 'transform',
-          maxHeight: '85vh',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        <div className="flex justify-center mb-4 flex-shrink-0">
-          <div className="w-10 h-1 rounded-full" style={{ background: 'rgba(0,38,105,0.12)' }} />
-        </div>
+    <AnimatePresence>
+      {memberId && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center md:p-6">
+          <motion.button
+            type="button"
+            aria-label="Close"
+            className="absolute inset-0 w-full h-full"
+            style={{ background: 'rgba(0,0,0,0.45)' }}
+            onClick={onClose}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          />
+          <motion.div
+            className="relative bg-white rounded-t-3xl md:rounded-3xl pt-5 pb-8 w-full md:max-w-md shadow-float flex flex-col"
+            style={{ maxHeight: '85vh' }}
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '100%' }}
+            transition={{ type: 'spring', stiffness: 380, damping: 38 }}
+            drag="y"
+            dragConstraints={{ top: 0, bottom: 0 }}
+            dragElastic={{ top: 0, bottom: 0.5 }}
+            onDragEnd={(_, info) => {
+              if (info.offset.y > 120 || info.velocity.y > 500) onClose()
+            }}
+          >
+            <div className="flex justify-center mb-4 flex-shrink-0">
+              <div className="w-10 h-1 rounded-full" style={{ background: 'rgba(0,38,105,0.12)' }} />
+            </div>
 
-        {loading ? (
-          <div className="flex flex-col items-center py-10 gap-3 px-5">
-            <div className="w-16 h-16 rounded-2xl animate-pulse" style={{ background: 'rgba(0,38,105,0.08)' }} />
-            <div className="w-36 h-3.5 rounded-full animate-pulse" style={{ background: 'rgba(0,38,105,0.08)' }} />
-            <div className="w-24 h-2.5 rounded-full animate-pulse" style={{ background: 'rgba(0,38,105,0.06)' }} />
-            <div className="w-full h-16 rounded-2xl animate-pulse mt-2" style={{ background: 'rgba(0,38,105,0.05)' }} />
-          </div>
-        ) : (
+            {loading ? (
+              <div className="flex flex-col items-center py-10 gap-3 px-5">
+                <Skeleton className="w-16 h-16 rounded-2xl" />
+                <Skeleton className="w-36 h-3.5 rounded-full" />
+                <Skeleton className="w-24 h-2.5 rounded-full" />
+                <Skeleton className="w-full h-16 rounded-2xl mt-2" />
+              </div>
+            ) : (
           <div className="overflow-y-auto flex-1 px-5 space-y-4">
             {/* Header */}
             <div className="flex items-start gap-4">
@@ -232,7 +222,9 @@ export default function MemberProfileSheet({
             )}
           </div>
         )}
-      </div>
-    </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
   )
 }

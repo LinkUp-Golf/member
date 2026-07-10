@@ -11,14 +11,17 @@
     --color-green-950: #001040;
     --color-green-900: #002669;
     --color-green-800: #003385;
+    --color-green-700: #004099;
     --color-green-600: #1A55AD;
     --color-green-300: #88AADE;
     --color-green-50:  #EEF2FA;
     --color-gold:      #85bb65;
     --color-gold-light: #A0CC85;
+    --color-gold-dark: #639948;
     --color-charcoal:  #333132;
     --color-cream:     #F8F8FC;
     --color-cream-dark: #EEEEF5;
+    --color-danger:    #E5484D;
 
     /* App shell dimensions */
     --nav-height: 72px;
@@ -26,6 +29,10 @@
     --sidebar-width: 208px;
     --sidebar-width-lg: 248px;
     --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+    /* Motion — shared easing vocabulary (member app only) */
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   html {
@@ -48,6 +55,28 @@
   }
   .hide-scrollbar::-webkit-scrollbar {
     display: none;
+  }
+}
+
+@layer utilities {
+  /* Visible keyboard-focus ring — apply explicitly to interactive elements.
+     Scoped as an opt-in utility (not a global *:focus-visible rule) so it
+     never leaks into the admin side, which doesn't use it. */
+  .focus-ring {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    transition: outline-color 0.15s ease;
+  }
+  .focus-ring:focus-visible {
+    outline-color: var(--color-green-600);
+  }
+
+  /* Consistent tap feedback for anything clickable that isn't already a .btn */
+  .pressable {
+    transition: transform 0.15s var(--ease-spring, ease-out);
+  }
+  .pressable:active {
+    transform: scale(0.97);
   }
 }
 
@@ -182,7 +211,7 @@
   }
 
   .sidebar-nav-item {
-    @apply flex items-center gap-3 px-5 py-3.5 text-sm transition-all duration-150 cursor-pointer w-full;
+    @apply relative flex items-center gap-3 px-5 py-3.5 text-sm transition-colors duration-150 cursor-pointer w-full;
     color: rgba(255,255,255,0.42);
     font-family: var(--font-lexend), system-ui, sans-serif;
     letter-spacing: 0.02em;
@@ -198,8 +227,6 @@
 
   .sidebar-nav-item.active {
     color: var(--color-gold);
-    background: rgba(133,187,101,0.1);
-    border-right: 2px solid var(--color-gold);
   }
 
   .sidebar-nav-item svg {
@@ -207,10 +234,15 @@
   }
 
   /* ---- Cards --------------------------------------------- */
+  /* Radius rule for the member app: rounded-2xl = cards, rounded-xl =
+     buttons/inputs/chips, rounded-full = avatars/pills, rounded-3xl = sheets/hero. */
   .card {
-    @apply bg-white rounded-2xl border overflow-hidden;
-    border-color: rgba(0,38,105,0.08);
-    box-shadow: 0 1px 3px rgba(0,38,105,0.06), 0 1px 2px rgba(0,0,0,0.03);
+    @apply bg-white rounded-2xl border overflow-hidden shadow-card transition-shadow duration-200;
+    border-color: rgba(0,38,105,0.07);
+  }
+
+  a.card:hover, button.card:hover {
+    @apply shadow-raised;
   }
 
   .card-pad {
@@ -219,7 +251,7 @@
 
   /* ---- Buttons ------------------------------------------- */
   .btn {
-    @apply inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-medium
+    @apply inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold
            transition-all duration-150 cursor-pointer border font-sans;
   }
 
@@ -272,18 +304,36 @@
 
   /* ---- Section labels ------------------------------------ */
   .section-label {
-    @apply text-xs uppercase tracking-widest mb-3;
-    color: rgba(0,38,105,0.38);
-    letter-spacing: 0.14em;
+    @apply text-xs uppercase tracking-widest mb-3 font-semibold;
+    color: rgba(0,38,105,0.4);
+    letter-spacing: 0.13em;
+  }
+
+  /* ---- Type scale ----------------------------------------- */
+  .text-display {
+    @apply font-sans font-black leading-[1.1];
+    font-size: 2rem;
+    letter-spacing: -0.01em;
+  }
+
+  .text-h1 {
+    @apply font-sans font-extrabold leading-tight;
+    font-size: 1.375rem;
+    letter-spacing: -0.01em;
+  }
+
+  .text-h2 {
+    @apply font-sans font-bold leading-snug;
+    font-size: 1.0625rem;
   }
 
   /* ---- Avatar -------------------------------------------- */
   .avatar {
-    @apply rounded-full flex items-center justify-center flex-shrink-0;
+    @apply rounded-full flex items-center justify-center flex-shrink-0 font-sans;
     background: var(--color-green-800);
     color: var(--color-gold-light);
-    font-family: var(--font-caveat), Georgia, serif;
-    font-weight: 600;
+    font-weight: 700;
+    letter-spacing: 0.01em;
     border: 2px solid rgba(133,187,101,0.2);
   }
 
@@ -294,7 +344,7 @@
 
   /* ---- Member row ---------------------------------------- */
   .member-row {
-    @apply flex items-center gap-3.5 px-5 py-3.5 cursor-pointer transition-colors;
+    @apply flex items-center gap-3.5 px-5 py-3.5 cursor-pointer transition-all duration-150;
     border-bottom: 0.5px solid rgba(0,38,105,0.06);
   }
 
@@ -302,8 +352,13 @@
     border-bottom: none;
   }
 
-  .member-row:hover, .member-row:active {
+  .member-row:hover {
     background: var(--color-green-50);
+  }
+
+  .member-row:active {
+    background: var(--color-green-50);
+    transform: scale(0.99);
   }
 
   /* ---- Tags / chips -------------------------------------- */
@@ -316,12 +371,16 @@
   }
 
   .chip {
-    @apply flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-medium cursor-pointer
+    @apply flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold cursor-pointer
            border transition-all duration-150;
     border-color: rgba(0,38,105,0.1);
     background: white;
     color: rgba(0,38,105,0.5);
     box-shadow: 0 1px 2px rgba(0,38,105,0.04);
+  }
+
+  .chip:active {
+    transform: scale(0.96);
   }
 
   .chip.active {

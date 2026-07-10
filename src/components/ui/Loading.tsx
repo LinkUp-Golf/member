@@ -38,8 +38,16 @@ export function FullScreenLoader() {
 export function Skeleton({ className }: { className?: string }) {
   return (
     <div
-      className={cn('animate-pulse rounded-lg bg-green-50', className)}
-    />
+      className={cn('relative overflow-hidden rounded-lg bg-green-50', className)}
+    >
+      <div
+        className="absolute inset-0 animate-shimmer"
+        style={{
+          backgroundImage: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.7), transparent)',
+          backgroundSize: '200% 100%',
+        }}
+      />
+    </div>
   )
 }
 
@@ -71,7 +79,7 @@ export function CardSkeleton({ lines = 3 }: { lines?: number }) {
 // ---- Promo card skeleton ------------------------------------
 export function PromoCardSkeleton() {
   return (
-    <div className="card card-pad space-y-3 animate-pulse">
+    <div className="card card-pad space-y-3">
       <Skeleton className="h-2.5 w-16 rounded-full" />
       <Skeleton className="h-4 w-3/4" />
       <Skeleton className="h-3 w-full" />

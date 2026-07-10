@@ -13,17 +13,19 @@ export const dynamic = 'force-dynamic'
 // SUPPORTED EVENTS
 //   event: "availability_confirmed"  — opportunity moved to Availability Confirmed stage
 //   event: "payment_confirmed"       — opportunity moved to Payment Confirmed stage
-//   event: "cancelled"               — opportunity cancelled OR appointment deleted
+//   event: "cancelled"               — opportunity cancelled (soft cancel)
+//   event: "deleted"                 — appointment deleted in GHL; removes the Supabase row
 //
 // REQUIRED PAYLOAD (JSON body)
 //   {
-//     "event": "availability_confirmed" | "payment_confirmed" | "cancelled",
+//     "event": "availability_confirmed" | "payment_confirmed" | "cancelled" | "deleted",
 //     "ghlBookingId": "{{appointment.id}}"
 //   }
 //
 // GHL WORKFLOW SETUP (hand this to the workflow developer)
 // ─────────────────────────────────────────────────────────
-//   1. Trigger: "Opportunity Stage Changed" (or "Appointment Cancelled")
+//   1. Trigger: "Opportunity Stage Changed" (or "Appointment Cancelled" /
+//      "Appointment Deleted" for the "cancelled" / "deleted" events)
 //   2. Action: HTTP Request
 //        Method : POST
 //        URL    : https://app.linkup.golf/api/webhooks/ghl/bookings
@@ -48,12 +50,13 @@ import { logger } from '@/lib/logger'
 import { sendPushToMember, NotificationTemplates } from '@/lib/push'
 import { format } from 'date-fns'
 
-type BookingEvent = 'availability_confirmed' | 'payment_confirmed' | 'cancelled'
+type BookingEvent = 'availability_confirmed' | 'payment_confirmed' | 'cancelled' | 'deleted'
 
 const VALID_EVENTS = new Set<BookingEvent>([
   'availability_confirmed',
   'payment_confirmed',
   'cancelled',
+  'deleted',
 ])
 
 export async function POST(request: NextRequest) {
@@ -105,6 +108,29 @@ export async function POST(request: NextRequest) {
     // Unknown appointment — acknowledge so GHL doesn't retry indefinitely
     logger.warn('GHL booking webhook: no booking found', { action: 'ghl_booking_webhook', metadata: { ghlBookingId } })
     return NextResponse.json({ received: true, matched: false })
+  }
+
+  // ── Appointment deleted in GHL — remove the Supabase row ────
+  // GHL is the source of truth: the appointment is already gone on their side
+  // (that deletion is what fired this webhook), so we only delete our row. We
+  // deliberately do NOT call back to GHL — it would 404.
+  if (event === 'deleted') {
+    const { error: deleteError } = await supabase
+      .from('bookings')
+      .delete()
+      .eq('id', primary.id)
+
+    if (deleteError) {
+      logger.error('GHL booking webhook: delete failed', { action: 'ghl_booking_webhook', errorMessage: deleteError.message })
+      return NextResponse.json({ error: deleteError.message }, { status: 500 })
+    }
+
+    logger.info('GHL booking webhook: deleted', {
+      action: 'ghl_booking_webhook',
+      metadata: { bookingId: primary.id, ghlBookingId },
+    })
+
+    return NextResponse.json({ received: true, matched: true, deleted: 1 })
   }
 
   if (primary.status === event) {

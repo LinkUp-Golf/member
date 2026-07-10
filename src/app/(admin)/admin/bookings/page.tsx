@@ -44,16 +44,19 @@ const STATUS_META: Record<BookingStatus, { label: string; colour: string; dot: s
   waitlist:              { label: 'Waitlist',          colour: 'bg-gray-100 text-gray-400',   dot: 'bg-gray-300'   },
 }
 
-const ALL_STATUSES = Object.keys(STATUS_META) as BookingStatus[]
-const STATUS_FILTERS = ['all', 'tentative', 'awaiting_approval', 'availability_confirmed', 'payment_confirmed', 'confirmed', 'cancelled', 'payment_overdue'] as const
+// Statuses an admin can manually move a booking through — the payment pipeline
+// only. Other values (cancelled, awaiting_approval, and legacy confirmed /
+// pending / waitlist) aren't manual targets. If a row is already in one of
+// those, it's still shown as the current (selected) option so the control
+// renders correctly, but only these three can be chosen.
+const STATUS_ACTIONS: BookingStatus[] = ['tentative', 'availability_confirmed', 'payment_confirmed']
+const STATUS_FILTERS =['all', 'tentative', 'awaiting_approval', 'availability_confirmed', 'payment_confirmed', 'confirmed', 'cancelled', 'payment_overdue'] as const
 type StatusFilter = typeof STATUS_FILTERS[number]
 
 // Payment Overdue isn't a real booking status — it's availability_confirmed
 // (member notified, "Payment due" on their side) rows, i.e. still unpaid.
-// The filter itself matches any unpaid row regardless of date; the "days
-// left" badge on each row (see paymentDaysLeftLabel) is what calls out the
-// ones whose tee time is coming up within this window.
-const PAYMENT_OVERDUE_WINDOW_DAYS = 3
+// The filter matches any such unpaid row regardless of date; the "days left"
+// badge on each row (see paymentDaysLeftLabel) shows the countdown to tee time.
 const STATUS_FILTER_LABELS: Partial<Record<StatusFilter, string>> = {
   payment_overdue: '⚠ Unpaid — payment not yet received',
 }
@@ -68,9 +71,9 @@ const DINNER_FILTER_LABELS: Record<DinnerFilter, string> = {
 // who's actually teeing off soon, without scrolling through the full
 // 365-day "Upcoming" window.
 const WHOS_PLAYING_WINDOW_DAYS = 30
-type BookingsView = 'upcoming' | 'past' | 'whos-playing'
+type BookingsView = 'all' | 'upcoming' | 'past' | 'whos-playing'
 const VIEW_LABELS: Record<BookingsView, string> = {
-  upcoming: 'Upcoming', past: 'Past', 'whos-playing': "Who's Playing",
+  all: 'All', upcoming: 'Upcoming', past: 'Past', 'whos-playing': "Who's Playing",
 }
 
 interface CourseListItem {
@@ -142,22 +145,22 @@ function playerInfo(b: BookingRow): { name: string; sub: string; badge?: string 
   return { name: `${b.member?.first_name ?? ''} ${b.member?.last_name ?? ''}`.trim(), sub: b.member?.email ?? '' }
 }
 
-// "Days left" badge for a player row that's unpaid (availability_confirmed)
-// and whose tee time falls within the same window the Payment Overdue filter
-// uses, so the badge always matches what that filter would surface.
+// "Days left" badge for any unpaid player row — shown whenever the booking is
+// still tentative or availability_confirmed, regardless of how far out the tee
+// time is (past-due rows read "Overdue").
 function paymentDaysLeftLabel(b: BookingRow): string | null {
-  if (b.status !== 'availability_confirmed') return null
+  if (b.status !== 'tentative' && b.status !== 'availability_confirmed') return null
   const daysLeft = differenceInCalendarDays(new Date(`${b.booking_date}T12:00:00`), new Date())
-  if (daysLeft < 0 || daysLeft > PAYMENT_OVERDUE_WINDOW_DAYS) return null
+  if (daysLeft < 0) return 'Overdue'
   if (daysLeft === 0) return 'Due today'
   if (daysLeft === 1) return '1 day left'
   return `${daysLeft} days left`
 }
 
-// Whether a payment reminder SMS can be sent for this row. Members (booker
-// or invited) always have a GHL contact from signup; a non-member guest's
-// contact is resolved server-side by the email captured at booking time —
-// only missing if that email is somehow absent.
+// Whether a payment reminder can be sent for this row. The GHL webhook matches
+// the contact by email: members (booker or invited) always have one from
+// signup; a non-member guest is only reachable if an email was captured at
+// booking time.
 function canRemindPayment(b: BookingRow): boolean {
   if (b.player_member_id) return true
   if (!b.guest_name) return true
@@ -193,6 +196,8 @@ function SlotCard({
   remindingPayment,
   remindedPaymentIds,
   onRemindPayment,
+  deletingBookingId,
+  onRequestDelete,
 }: {
   slot: TeeSlot
   showCourseName: boolean
@@ -212,10 +217,14 @@ function SlotCard({
   remindingPayment: string | null
   remindedPaymentIds: Set<string>
   onRemindPayment: (id: string) => void
+  deletingBookingId: string | null
+  onRequestDelete: (b: BookingRow) => void
 }) {
   const isExpanded = expandedSlots.has(slot.key)
   const totalAmount = slot.rows.reduce((sum, b) => sum + Number(b.amount_charged), 0)
-  const unpaidCount = slot.rows.filter(b => b.status === 'availability_confirmed').length
+  const activeRows = slot.rows.filter(b => b.status !== 'cancelled')
+  const paidCount = activeRows.filter(b => ['payment_confirmed', 'confirmed'].includes(b.status)).length
+  const allPaid = activeRows.length > 0 && paidCount === activeRows.length
 
   // Status breakdown for the slot header
   const statusBreakdown = slot.rows.reduce<Record<string, number>>((acc, b) => {
@@ -273,9 +282,11 @@ function SlotCard({
         <div className="flex-shrink-0 text-right">
           <p className="text-xs font-semibold text-green-700">${totalAmount.toFixed(0)}</p>
           <p className="text-[10px] text-gray-400">{slot.rows.length}p</p>
-          {unpaidCount > 0 && (
-            <span className="inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 whitespace-nowrap">
-              ⚠ {unpaidCount} unpaid
+          {activeRows.length > 0 && (
+            <span className={`inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${
+              allPaid ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'
+            }`}>
+              {allPaid ? '✓' : '⚠'} {paidCount}/{activeRows.length} members paid
             </span>
           )}
         </div>
@@ -307,16 +318,6 @@ function SlotCard({
                           ⏳ {daysLeftLabel}
                         </span>
                       )}
-                      {showRemindCta && (
-                        <button
-                          type="button"
-                          onClick={() => onRemindPayment(b.id)}
-                          disabled={remindingPayment === b.id || alreadyReminded}
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:hover:bg-red-600 flex-shrink-0 whitespace-nowrap transition-colors"
-                        >
-                          {remindingPayment === b.id ? 'Sending…' : alreadyReminded ? '✓ Texted' : '📲 Text to pay'}
-                        </button>
-                      )}
                     </div>
                     <p className="text-xs text-gray-400 mt-0.5 truncate">{info.sub}</p>
                   </div>
@@ -341,16 +342,28 @@ function SlotCard({
                         </button>
                       </div>
                     ) : (
-                      <select
-                        value={b.status}
-                        disabled={updatingStatus === b.id}
-                        onChange={e => onUpdateStatus(b.id, e.target.value as BookingStatus)}
-                        className={`text-xs font-semibold rounded-lg px-2 py-1 border border-transparent outline-none cursor-pointer disabled:opacity-50 transition-colors max-w-[140px] sm:max-w-none ${sm.colour}`}
-                      >
-                        {ALL_STATUSES.map(s => (
-                          <option key={s} value={s}>{STATUS_META[s].label}</option>
-                        ))}
-                      </select>
+                      <div className="flex items-center gap-1.5">
+                        {showRemindCta && (
+                          <button
+                            type="button"
+                            onClick={() => onRemindPayment(b.id)}
+                            disabled={remindingPayment === b.id || alreadyReminded}
+                            className="text-xs font-medium px-2.5 py-1 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:hover:bg-red-600 whitespace-nowrap transition-colors"
+                          >
+                            {remindingPayment === b.id ? 'Sending…' : alreadyReminded ? '✓ Sent' : 'Send reminder'}
+                          </button>
+                        )}
+                        <select
+                          value={b.status}
+                          disabled={updatingStatus === b.id}
+                          onChange={e => onUpdateStatus(b.id, e.target.value as BookingStatus)}
+                          className={`text-xs font-semibold rounded-lg px-2 py-1 border border-transparent outline-none cursor-pointer disabled:opacity-50 transition-colors max-w-[140px] sm:max-w-none ${sm.colour}`}
+                        >
+                          {(STATUS_ACTIONS.includes(b.status) ? STATUS_ACTIONS : [b.status, ...STATUS_ACTIONS]).map(s => (
+                            <option key={s} value={s}>{STATUS_META[s].label}</option>
+                          ))}
+                        </select>
+                      </div>
                     )}
 
                     {b.dinner_rsvp ? (
@@ -386,10 +399,23 @@ function SlotCard({
                     </div>
                   </div>
                 ) : (
-                  <button onClick={() => onEditNote(b.id)}
-                    className="text-xs text-left text-gray-400 hover:text-gray-600 transition-colors italic">
-                    {b.admin_notes ?? 'Add note…'}
-                  </button>
+                  <div className="flex items-center justify-between gap-2 mt-1">
+                    <button onClick={() => onEditNote(b.id)}
+                      className="min-w-0 flex-1 text-xs text-left text-gray-400 hover:text-gray-600 transition-colors italic truncate">
+                      {b.admin_notes ?? 'Add note…'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onRequestDelete(b)}
+                      disabled={deletingBookingId === b.id}
+                      className="flex-shrink-0 flex items-center gap-1 text-xs font-medium text-red-500 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                      </svg>
+                      {deletingBookingId === b.id ? 'Deleting…' : 'Delete'}
+                    </button>
+                  </div>
                 )}
               </div>
             )
@@ -516,7 +542,7 @@ export default function AdminBookingsPage() {
 
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState<BookingsView>('upcoming')
+  const [view, setView] = useState<BookingsView>('all')
   const [courseList, setCourseList] = useState<CourseListItem[]>([])
   const [courseFilter, setCourseFilter] = useState<string>(urlCourseId)
   const [search, setSearch] = useState('')
@@ -535,6 +561,8 @@ export default function AdminBookingsPage() {
   const [expandedSlots, setExpandedSlots] = useState<Set<string>>(new Set())
   const [remindingPayment, setRemindingPayment] = useState<string | null>(null)
   const [remindedPaymentIds, setRemindedPaymentIds] = useState<Set<string>>(new Set())
+  const [deletingBookingId, setDeletingBookingId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<BookingRow | null>(null)
   const noteRef = useRef<HTMLTextAreaElement>(null)
 
   const [activeTab, setActiveTab] = useState<'bookings' | 'access'>('bookings')
@@ -571,19 +599,29 @@ export default function AdminBookingsPage() {
     const supabase = createClient()
     const today    = format(new Date(), 'yyyy-MM-dd')
 
-    // Upcoming:     today → 365 days ahead (ascending)
-    // Who's Playing: today → 30 days ahead (ascending) — a shorter lookahead
-    //               preset of the same "upcoming" window.
-    // Past:         365 days ago → yesterday (descending — most recent first)
+    // All:          no date bounds — every booking regardless of date (default)
+    // Upcoming:     today → 365 days ahead
+    // Who's Playing: today → 30 days ahead — a shorter lookahead preset of the
+    //               "upcoming" window.
+    // Past:         365 days ago → yesterday
     // A custom From/To range overrides the view-based window when both are set.
+    // The final list is always grouped chronologically by date regardless of
+    // view (see groupByDate), so the query sort direction only affects fetch
+    // order, not what the admin ends up seeing.
     // Payment status (unpaid) is just another status filter — it doesn't
     // override the date window. The "days left" badge (see paymentDaysLeftLabel)
     // is what narrows attention to bookings within PAYMENT_OVERDUE_WINDOW_DAYS.
     const isUpcoming  = view !== 'past'
+    const isAllView   = view === 'all'
     const hasCustomRange = !!customFrom && !!customTo
-    const rangeStart  = hasCustomRange ? customFrom : isUpcoming ? today : format(subDays(new Date(), 365), 'yyyy-MM-dd')
-    const rangeEnd    = hasCustomRange
-      ? customTo
+    // A null bound means "unbounded on that side" — the All view fetches
+    // everything, so it applies no date filter unless a custom range is set.
+    const rangeStart: string | null = hasCustomRange ? customFrom
+      : isAllView ? null
+      : isUpcoming ? today
+      : format(subDays(new Date(), 365), 'yyyy-MM-dd')
+    const rangeEnd: string | null = hasCustomRange ? customTo
+      : isAllView ? null
       : view === 'whos-playing' ? format(addDays(new Date(), WHOS_PLAYING_WINDOW_DAYS), 'yyyy-MM-dd')
       : isUpcoming ? format(addDays(new Date(), 365), 'yyyy-MM-dd')
       : format(subDays(new Date(), 1), 'yyyy-MM-dd')
@@ -622,8 +660,8 @@ export default function AdminBookingsPage() {
         .from('bookings')
         .select(select)
         .in('course_id', matchingCourseIds)
-        .gte('booking_date', rangeStart)
-        .lte('booking_date', rangeEnd)
+      if (rangeStart) q = q.gte('booking_date', rangeStart)
+      if (rangeEnd) q = q.lte('booking_date', rangeEnd)
       if (statusFilter === 'payment_overdue') q = q.eq('status', 'availability_confirmed')
       else if (statusFilter !== 'all') q = q.eq('status', statusFilter)
       if (dinnerFilter !== 'all') {
@@ -897,6 +935,33 @@ export default function AdminBookingsPage() {
     setRemindingPayment(null)
   }
 
+  async function confirmDeleteBooking() {
+    if (!deleteTarget) return
+    const id = deleteTarget.id
+    setDeletingBookingId(id)
+    try {
+      const res = await fetch(`/api/admin/bookings/${id}`, { method: 'DELETE' })
+      const json = await res.json().catch(() => ({}))
+      if (res.ok) {
+        setBookings(prev => prev.filter(b => b.id !== id))
+        setRequestToast({
+          msg: json.ghlDeleted === false
+            ? 'Booking deleted, but its GHL booking could not be removed.'
+            : 'Booking deleted from LinkUp and GHL.',
+          ok: json.ghlDeleted !== false,
+        })
+      } else {
+        setRequestToast({ msg: json.error ?? 'Failed to delete booking. Please try again.', ok: false })
+      }
+    } catch {
+      setRequestToast({ msg: 'Network error. Please try again.', ok: false })
+    } finally {
+      setDeleteTarget(null)
+      setTimeout(() => setRequestToast(null), 3500)
+      setDeletingBookingId(null)
+    }
+  }
+
   function toggleSlot(key: string) {
     setExpandedSlots(prev => {
       const next = new Set(prev)
@@ -935,6 +1000,7 @@ export default function AdminBookingsPage() {
     onSaveNote: saveNote, savingNote, noteRef,
     processingBookingRequestId, onDecideRequest: decideBookingRequest,
     remindingPayment, remindedPaymentIds, onRemindPayment: remindPayment,
+    deletingBookingId, onRequestDelete: setDeleteTarget,
   }
 
   // Shared between the desktop inline grid and the mobile drawer — id suffix
@@ -1035,6 +1101,50 @@ export default function AdminBookingsPage() {
         </div>
       )}
 
+      {/* Delete confirmation dialog — deletion removes the row from both
+          LinkUp (Supabase) and GHL and cannot be undone. */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-5">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-50 flex items-center justify-center">
+                <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-sm font-bold text-gray-800">Delete booking?</h2>
+                <p className="text-xs text-gray-500 mt-1">
+                  This permanently removes{' '}
+                  <span className="font-medium text-gray-700">{playerInfo(deleteTarget).name || 'this booking'}</span>
+                  {deleteTarget.course?.name ? ` at ${deleteTarget.course.name}` : ''} on{' '}
+                  {format(new Date(`${deleteTarget.booking_date}T12:00:00`), 'MMM d, yyyy')} at {formatTeeTime(deleteTarget.tee_time)}.
+                  It deletes the booking from both LinkUp and GHL and cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                disabled={deletingBookingId === deleteTarget.id}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteBooking}
+                disabled={deletingBookingId === deleteTarget.id}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition-colors"
+              >
+                {deletingBookingId === deleteTarget.id ? 'Deleting…' : 'Delete booking'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header row: title + view toggle */}
       <div className="flex items-start justify-between gap-3 mb-5">
         <AdminPageHeader
@@ -1047,7 +1157,7 @@ export default function AdminBookingsPage() {
         />
         {/* Upcoming / Who's Playing / Past toggle — compact on mobile */}
         <div className="flex p-0.5 rounded-xl flex-shrink-0 self-start" style={{ background: 'rgba(0,38,105,0.06)' }}>
-          {(['upcoming', 'whos-playing', 'past'] as const).map(v => (
+          {(['all', 'upcoming', 'whos-playing', 'past'] as const).map(v => (
             <button
               key={v}
               type="button"

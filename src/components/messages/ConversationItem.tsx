@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import Link from 'next/link'
 import Avatar from '@/components/ui/Avatar'
 import { PresenceIndicator } from './PresenceIndicator'
@@ -8,12 +9,9 @@ interface Props {
   conversation: ConversationWithDetails
   currentUserId: string
   isOnline?: boolean
-  /** Viewer's saved timezone preference (member_profiles.timezone) — falls
-   *  back to the browser's own zone when not set. */
-  timezone?: string | null
 }
 
-export function ConversationItem({ conversation: conv, currentUserId, isOnline, timezone }: Props) {
+export const ConversationItem = memo(function ConversationItem({ conversation: conv, currentUserId, isOnline }: Props) {
   const others = conv.participants
     .filter(p => p.member?.id !== currentUserId)
     .map(p => p.member)
@@ -32,14 +30,14 @@ export function ConversationItem({ conversation: conv, currentUserId, isOnline, 
   return (
     <Link
       href={`/messages/${conv.id}`}
-      className="flex items-center gap-3.5 px-5 py-4 bg-white hover:bg-green-50 transition-colors"
+      className="focus-ring flex items-center gap-3.5 px-5 py-4 bg-white hover:bg-green-50 active:bg-green-50 transition-colors"
       style={{ borderBottom: '1px solid rgba(0,38,105,0.06)' }}
     >
       {/* Avatar */}
       <div className="relative flex-shrink-0">
         {conv.type === 'group' ? (
           <div
-            className="w-11 h-11 rounded-full flex items-center justify-center text-lg font-serif"
+            className="w-11 h-11 rounded-full flex items-center justify-center text-lg font-sans font-bold"
             style={{ background: 'var(--color-green-800)', color: 'var(--color-gold)', border: '2px solid rgba(133,187,101,0.2)' }}
           >
             #
@@ -74,7 +72,7 @@ export function ConversationItem({ conversation: conv, currentUserId, isOnline, 
             {displayName}
           </span>
           <span className="text-[10px] flex-shrink-0 ml-2" style={{ color: 'rgba(0,38,105,0.32)' }}>
-            {lastMsg ? formatMessageTime(lastMsg.created_at, timezone) : ''}
+            {lastMsg ? formatMessageTime(lastMsg.created_at) : ''}
           </span>
         </div>
         <p
@@ -99,4 +97,4 @@ export function ConversationItem({ conversation: conv, currentUserId, isOnline, 
       )}
     </Link>
   )
-}
+})

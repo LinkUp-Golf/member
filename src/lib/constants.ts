@@ -20,6 +20,13 @@ export const GHL_OPPORTUNITY_FIELDS = {
   CANCEL_URL:      'mm1kLkrvLnOTF0VyfS0Q',
 } as const
 
+// ---- Referral partners --------------------------------------
+
+// Membership fee used to compute referral-partner commission
+// (commission = converted members × MEMBERSHIP_FEE_USD × percentage / 100).
+export const MEMBERSHIP_FEE_USD = 100
+export const DEFAULT_REFERRAL_PERCENTAGE = 10
+
 export const GHL_CANCEL_BOOKING_URL = 'https://api.leadconnectorhq.com/widget/cancel-booking'
 export const GHL_CALENDAR_PROVIDER_ID = 'bdd10QRepJvC6EYoy32m'
 
@@ -28,6 +35,13 @@ export const GHL_CALENDAR_PROVIDER_ID = 'bdd10QRepJvC6EYoy32m'
 // combine with GHL_BASE_URL like every other GHL request (see ghlFetch).
 export const GHL_BOOKING_REMINDER_WEBHOOK_PATH =
   '/hooks/J3tfnLdEv4WmE3XorQYW/webhook-trigger/274c8b8d-551e-4225-9702-6539308d84fb'
+
+// Inbound webhook (GHL workflow trigger) fired when an admin sends a one-off
+// payment reminder for an unpaid booking — see
+// /api/admin/bookings/[id]/remind-payment. Path only; combine with
+// GHL_BASE_URL like every other GHL request.
+export const GHL_PAYMENT_REMINDER_WEBHOOK_PATH =
+  '/hooks/J3tfnLdEv4WmE3XorQYW/webhook-trigger/819a61da-ce63-4dcc-a608-682c3c0524d7'
 
 // ---- Aviara course ------------------------------------------
 
@@ -38,6 +52,9 @@ export const AVIARA_TIMEZONE = 'America/Los_Angeles'
 
 export const BOOKING_PRICE_USD           = 160   // per player, USD
 export const GOLF_ROUND_DURATION_MINUTES = 300   // 5 hours
+// Fallback daily booking cap per course when courses.max_players_per_day is
+// unset. Mirrors the column's DB default.
+export const DEFAULT_MAX_PLAYERS_PER_DAY = 15
 
 // ---- Cancellation policy tiers ------------------------------
 

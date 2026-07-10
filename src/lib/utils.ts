@@ -43,14 +43,12 @@ function dayKey(date: Date, timezone: string): string {
 }
 
 // Personal/viewer-perspective timestamp (messages, notifications, admin
-// views) — pass the *viewer's* saved timezone preference (member_profiles.timezone)
-// so "Today"/"Yesterday" and the rendered clock time match what they actually
-// set. Omit `timezone` (or pass null/undefined, e.g. no preference saved yet)
-// to fall back to the runtime's own zone.
+// views) — always uses the viewer's own browser-detected timezone, since
+// there's no per-member timezone preference to defer to.
 // Do NOT use this for booking tee times — those are anchored to the course's
 // own timezone regardless of viewer (see formatTeeTime / bookingToLocalDate).
-export function formatMessageTime(dateString: string, timezone?: string | null): string {
-  const tz = timezone || getBrowserTimezone()
+export function formatMessageTime(dateString: string): string {
+  const tz = getBrowserTimezone()
   const date = new Date(dateString)
   const now = new Date()
   if (dayKey(date, tz) === dayKey(now, tz)) {
@@ -110,6 +108,17 @@ export function truncate(text: string, maxLength: number): string {
   const chars = [...text]
   if (chars.length <= maxLength) return text
   return chars.slice(0, maxLength).join('').trimEnd() + '…'
+}
+
+// Title-cases a person's name for display in copy where CSS `capitalize`
+// isn't available (server-built messages, notifications). Names are often
+// stored lower-case, so "mary jane o'neil" -> "Mary Jane O'neil".
+export function titleCaseName(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
 }
 
 // ---- Industry category short label -------------------------

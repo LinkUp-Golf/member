@@ -27,6 +27,7 @@ export const GET = withAuth(
     const { data, error } = await admin
       .from('courses')
       .select('*, requester:members!requested_by(first_name, last_name)')
+      .order('sort_order', { ascending: true, nullsFirst: false })
       .order('name')
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -112,6 +113,7 @@ export const POST = withAuth(
         booking_url: body.booking_url?.trim() || null,
         payment_url: body.payment_url.trim(),
         required_tags: requiredTags,
+        max_players_per_day: body.max_players_per_day ?? undefined,
         approval_status: 'active',
         reviewed_by: ctx.userId,
       })

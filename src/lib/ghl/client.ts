@@ -10,7 +10,7 @@ import { HighLevel } from '@gohighlevel/api-client'
 import type { GHLContact, GHLCalendarEvent, GHLBookingSlot } from '@/types'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
 import { logger } from '@/lib/logger'
-import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GOLF_ROUND_DURATION_MINUTES, GHL_BOOKING_REMINDER_WEBHOOK_PATH } from '@/lib/constants'
+import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GOLF_ROUND_DURATION_MINUTES, GHL_BOOKING_REMINDER_WEBHOOK_PATH, GHL_PAYMENT_REMINDER_WEBHOOK_PATH } from '@/lib/constants'
 
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID ?? ''
 
@@ -48,7 +48,12 @@ async function ghlFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     throw new GHLError(`GHL API error ${res.status}`, code, { path, statusCode: res.status, body: parsedBody })
   }
 
-  return res.json() as Promise<T>
+  // Some endpoints (e.g. DELETE) return 204 / an empty body — parsing that as
+  // JSON would throw and be mistaken for a request failure.
+  if (res.status === 204) return undefined as T
+  const text = await res.text()
+  if (!text) return undefined as T
+  return JSON.parse(text) as T
 }
 
 // ---- Contacts -----------------------------------------------
@@ -140,6 +145,31 @@ export async function updateContact(
   }
 }
 
+// Resolve a contact by email, creating one if it doesn't exist. Used to land
+// referred non-members in GHL as leads. Best-effort: returns null (rather than
+// throwing) if GHL is unavailable — referral attribution itself lives in our DB,
+// so a GHL outage must not block linking.
+export async function findOrCreateContactByEmail(params: {
+  email: string
+  firstName?: string | null
+  lastName?: string | null
+}): Promise<string | null> {
+  try {
+    const existing = (await getContactByEmail(params.email))?.id ?? null
+    if (existing) return existing
+    return await createContact({
+      // GHL requires a name; fall back to the email local-part for non-members
+      // linked by email only.
+      firstName: params.firstName?.trim() || params.email.split('@')[0] || 'Referral',
+      lastName: params.lastName?.trim() || '',
+      email: params.email,
+    })
+  } catch (err) {
+    logger.warn('findOrCreateContactByEmail failed', { action: 'ghl_contact_find_or_create', errorMessage: String(err) })
+    return null
+  }
+}
+
 export function contactHasTag(contact: GHLContact, tag: string): boolean {
   return contact.tags?.includes(tag) ?? false
 }
@@ -223,6 +253,34 @@ export async function triggerBookingReminderWebhook(payload: {
     return true
   } catch (err) {
     logger.warn('triggerBookingReminderWebhook failed', { action: 'ghl_reminder_webhook', errorMessage: String(err) })
+    return false
+  }
+}
+
+// Fires the GHL inbound webhook used for admin-initiated payment reminders on
+// unpaid bookings (tentative / availability_confirmed). Same plain-POST
+// pattern as triggerBookingReminderWebhook — the GHL workflow composes and
+// sends the actual message; `email` lets it match the target contact.
+export async function triggerPaymentReminderWebhook(payload: {
+  firstName: string
+  eventTime: string
+  eventLocation: string
+  paymentLink: string
+  email?: string
+}): Promise<boolean> {
+  try {
+    const res = await fetch(`${GHL_BASE_URL}${GHL_PAYMENT_REMINDER_WEBHOOK_PATH}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      logger.warn('triggerPaymentReminderWebhook failed', { action: 'ghl_payment_reminder_webhook', metadata: { statusCode: res.status } })
+      return false
+    }
+    return true
+  } catch (err) {
+    logger.warn('triggerPaymentReminderWebhook failed', { action: 'ghl_payment_reminder_webhook', errorMessage: String(err) })
     return false
   }
 }
@@ -362,6 +420,33 @@ export async function cancelBooking(eventId: string, contactId?: string): Promis
     })
     return true
   } catch {
+    return false
+  }
+}
+
+// Hard-deletes a GHL appointment/event (as opposed to cancelBooking, which
+// only flips its status to "cancelled"). Used when an admin removes a booking
+// outright. Returns true when the appointment is gone — including when GHL
+// reports it as already deleted (404) — so the caller can proceed to remove
+// the Supabase row. Returns false only on a genuine failure.
+export async function deleteBooking(eventId: string): Promise<boolean> {
+  try {
+    await ghlFetch(`/calendars/events/appointments/${eventId}`, { method: 'DELETE' })
+    return true
+  } catch (err) {
+    // The appointment no longer exists in GHL — treat as already deleted.
+    if (err instanceof GHLError && err.context?.['statusCode'] === 404) {
+      logger.info('deleteBooking: appointment already gone in GHL', {
+        action: 'ghl_booking_delete',
+        metadata: { eventId },
+      })
+      return true
+    }
+    logger.warn('deleteBooking failed', {
+      action: 'ghl_booking_delete',
+      errorMessage: String(err),
+      metadata: { eventId },
+    })
     return false
   }
 }

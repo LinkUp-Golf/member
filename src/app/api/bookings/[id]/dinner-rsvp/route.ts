@@ -52,14 +52,26 @@ export const PATCH = withAuth(async (
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // Notify admins when response is "maybe" so they can follow up
-  if (body.rsvp === 'maybe') {
+  // Notify admins on "yes" (headcount for dinner) and "maybe" (needs follow-up).
+  // Push-only — this must never surface in the member announcement feed.
+  if (body.rsvp === 'yes' || body.rsvp === 'maybe') {
     // booking_date is a plain calendar date, not an instant — format in UTC
     // explicitly rather than relying on the server runtime's own timezone.
     const dateStr = formatInTimeZone(new Date(booking.booking_date), 'UTC', 'EEE, MMM d')
+    const isYes = body.rsvp === 'yes'
+
+    const { data: responder } = await admin
+      .from('members')
+      .select('first_name, last_name')
+      .eq('id', ctx.userId)
+      .single()
+    const memberName = responder ? `${responder.first_name} ${responder.last_name}` : 'A member'
+
     sendPushToAdmins({
-      title: 'Dinner RSVP — maybe',
-      body: `A member on the ${dateStr} booking is unsure about staying for dinner.`,
+      title: isYes ? 'Dinner RSVP — yes' : 'Dinner RSVP — maybe',
+      body: isYes
+        ? `${memberName} confirmed they're staying for dinner on ${dateStr}.`
+        : `${memberName} on the ${dateStr} booking is unsure about staying for dinner.`,
       url: '/admin/bookings',
       tag: `dinner-rsvp-${bookingId}`,
     }).catch(() => {})

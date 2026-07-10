@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, memo } from "react";
 import Link from "next/link";
+import { Search, X, ChevronRight, Users } from "lucide-react";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
 import { shortCategory } from "@/lib/utils";
@@ -22,7 +23,16 @@ export default function MembersPage() {
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState(FILTER_ALL);
 
-  const filters = [FILTER_ALL, ...INDUSTRY_CATEGORIES.map(shortCategory)];
+  const filters = useMemo(() => [FILTER_ALL, ...INDUSTRY_CATEGORIES.map(shortCategory)], []);
+
+  const loadMembers = useCallback(async () => {
+    const response = await apiClient.get<MemberWithProfile[]>("/api/members");
+    if (!response.error && response.data) {
+      setMembers(response.data);
+      setFiltered(response.data);
+    }
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -31,7 +41,7 @@ export default function MembersPage() {
     } else {
       setLoading(false);
     }
-  }, [user, authLoading]);
+  }, [user, authLoading, loadMembers]);
 
   const applyFilters = useCallback(() => {
     let result = members;
@@ -63,28 +73,15 @@ export default function MembersPage() {
     applyFilters();
   }, [applyFilters]);
 
-  async function loadMembers() {
-    const response = await apiClient.get<MemberWithProfile[]>("/api/members");
-    if (!response.error && response.data) {
-      setMembers(response.data);
-      setFiltered(response.data);
-    }
-    setLoading(false);
-  }
-
   return (
     <AppShell title="Members" description={`${members.length} active members`}>
       <div className="max-w-6xl mx-auto w-full">
       {/* Search */}
       <div className="px-5 pt-4">
-        <div
-          className="flex items-center gap-2.5 bg-white rounded-xl px-4 py-3 border"
-          style={{
-            borderColor: "rgba(0,38,105,0.1)",
-            boxShadow: "0 1px 3px rgba(0,38,105,0.05)",
-          }}
+        <div className="flex items-center gap-2.5 bg-white rounded-xl px-4 py-3 border shadow-card transition-shadow focus-within:shadow-raised"
+          style={{ borderColor: "rgba(0,38,105,0.1)" }}
         >
-          <SearchIcon />
+          <Search className="w-4 h-4 flex-shrink-0" style={{ color: "rgba(0,38,105,0.32)" }} strokeWidth={2} />
           <input
             type="search"
             placeholder="Search by name, industry, goals…"
@@ -96,13 +93,14 @@ export default function MembersPage() {
           {search && (
             <button
               onClick={() => setSearch("")}
-              className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0 transition-colors"
+              className="focus-ring w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-colors"
               style={{
                 color: "rgba(0,38,105,0.4)",
                 background: "rgba(0,38,105,0.06)",
               }}
+              aria-label="Clear search"
             >
-              ×
+              <X className="w-3 h-3" strokeWidth={2.5} />
             </button>
           )}
         </div>
@@ -141,7 +139,7 @@ export default function MembersPage() {
       ) : filtered.length === 0 ? (
         <div className="px-5 py-6">
           <EmptyState
-            icon={search ? "🔍" : "👥"}
+            icon={search ? <Search className="w-5 h-5" strokeWidth={1.75} /> : <Users className="w-5 h-5" strokeWidth={1.75} />}
             title={search ? "No members match your search" : "No members yet"}
             description={search ? "Try a different name or keyword." : "Members will appear here once they join."}
           />
@@ -160,7 +158,7 @@ export default function MembersPage() {
 
 // ---- Member row component -----------------------------------
 
-function MemberRow({
+const MemberRow = memo(function MemberRow({
   member: m,
   currentUserId,
 }: {
@@ -172,7 +170,7 @@ function MemberRow({
   return (
     <Link
       href={isMe ? "/more/profile" : `/members/${m.id}`}
-      className="member-row"
+      className="member-row focus-ring"
     >
       <Avatar
         firstName={m.first_name}
@@ -206,41 +204,11 @@ function MemberRow({
             .join(" · ")}
         </p>
       </div>
-      <svg
+      <ChevronRight
         className="w-4 h-4 flex-shrink-0"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        strokeWidth={1.5}
         style={{ color: "rgba(0,38,105,0.2)" }}
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M8.25 4.5l7.5 7.5-7.5 7.5"
-        />
-      </svg>
+        strokeWidth={1.75}
+      />
     </Link>
   );
-}
-
-// ---- Icons --------------------------------------------------
-
-function SearchIcon() {
-  return (
-    <svg
-      className="w-4 h-4 flex-shrink-0"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      style={{ color: "rgba(0,38,105,0.32)" }}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
-      />
-    </svg>
-  );
-}
+});

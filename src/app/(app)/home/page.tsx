@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo, memo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
+import { ChevronRight, Pin, Gift, Megaphone } from "lucide-react";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
 import { formatBookingDate, formatTeeTime, formatRelativeTime } from "@/lib/utils";
@@ -30,22 +32,20 @@ export default function HomePage() {
   const [greeting, setGreeting] = useState('');
   const firstName = profile?.first_name ?? "";
 
+  const pinnedAnnouncements = useMemo(
+    () => announcements.filter(a => a.is_pinned),
+    [announcements]
+  );
+  const regularAnnouncements = useMemo(
+    () => announcements.filter(a => !a.is_pinned).slice(0, 3),
+    [announcements]
+  );
+
   useEffect(() => {
     setGreeting(getGreeting());
   }, []);
 
-  useEffect(() => {
-    if (authLoading) return;
-    if (!user) {
-      // Auth resolved but no session — retry profile fetch once in case of race
-      refetch();
-      setLoading(false);
-      return;
-    }
-    loadHomeData();
-  }, [user, authLoading, refetch]);
-
-  async function loadHomeData() {
+  const loadHomeData = useCallback(async () => {
     const [bookingRes, announcementRes, promoRes] =
       await Promise.all([
         apiClient.get<Booking[]>("/api/bookings?upcoming=true&limit=1"),
@@ -57,28 +57,41 @@ export default function HomePage() {
     setAnnouncements(announcementRes.data ?? []);
     setPromotions(promoRes.data ?? []);
     setLoading(false);
-  }
+  }, []);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      // Auth resolved but no session — retry profile fetch once in case of race
+      refetch();
+      setLoading(false);
+      return;
+    }
+    loadHomeData();
+  }, [user, authLoading, refetch, loadHomeData]);
 
   return (
     <AppShell>
 
       {/* Hero banner */}
-      <div className="hero-banner relative">
+      <div className="hero-banner relative rounded-b-[28px] shadow-float">
         {/* Messages + notification bell — top right */}
         <div className="absolute top-3 right-4 flex items-center gap-0.5">
           <MessagesIcon />
           <NotificationBell variant="light" />
         </div>
-        <p className="text-[10px] uppercase tracking-[0.16em] mb-2.5" style={{ color: 'rgba(255,255,255,0.32)' }}>
-          {greeting}
-        </p>
-        <h1 className="font-sans font-black leading-tight mb-5" style={{ fontSize: '2.1rem', color: 'white' }}>
-          Welcome back,{' '}
-          <br />
-          <em className="capitalize" style={{ color: 'var(--color-gold)', fontStyle: 'normal' }}>
-            {firstName || "Guest"}.
-          </em>
-        </h1>
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}>
+          <p className="text-[10px] uppercase tracking-[0.16em] mb-2.5" style={{ color: 'rgba(255,255,255,0.32)' }}>
+            {greeting}
+          </p>
+          <h1 className="text-display mb-5" style={{ color: 'white' }}>
+            Welcome back,{' '}
+            <br />
+            <em className="capitalize" style={{ color: 'var(--color-gold)', fontStyle: 'normal' }}>
+              {firstName || "Guest"}.
+            </em>
+          </h1>
+        </motion.div>
 
         {/* Next booking card */}
         {loading ? (
@@ -87,7 +100,7 @@ export default function HomePage() {
         ) : nextBooking ? (
           <Link
             href="/book"
-            className="flex items-center gap-4 rounded-2xl p-4 border transition-all"
+            className="focus-ring flex items-center gap-4 rounded-2xl p-4 border transition-all hover:bg-white/[0.09] active:scale-[0.98]"
             style={{ background: 'rgba(255,255,255,0.07)', borderColor: 'rgba(133,187,101,0.22)' }}
           >
             <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -106,15 +119,12 @@ export default function HomePage() {
                 {nextBooking.guest_name ? ` · With ${nextBooking.guest_name}` : ""}
               </p>
             </div>
-            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-              strokeWidth={1.5} style={{ color: 'rgba(133,187,101,0.5)' }}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-            </svg>
+            <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: 'rgba(133,187,101,0.5)' }} strokeWidth={2} />
           </Link>
         ) : (
           <Link
             href="/book"
-            className="flex items-center gap-4 rounded-2xl p-4 border transition-all"
+            className="focus-ring flex items-center gap-4 rounded-2xl p-4 border transition-all hover:bg-white/[0.07] active:scale-[0.98]"
             style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.08)' }}
           >
             <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -123,7 +133,9 @@ export default function HomePage() {
             </div>
             <div>
               <p className="text-sm" style={{ color: 'rgba(255,255,255,0.55)' }}>No upcoming rounds</p>
-              <p className="text-xs mt-0.5" style={{ color: 'var(--color-gold)' }}>Book a tee time →</p>
+              <p className="text-xs mt-0.5 flex items-center gap-0.5" style={{ color: 'var(--color-gold)' }}>
+                Book a tee time <ChevronRight className="w-3 h-3" strokeWidth={2.5} />
+              </p>
             </div>
           </Link>
         )}
@@ -136,10 +148,10 @@ export default function HomePage() {
 
         {/* Member Offers */}
         {(loading || promotions.length > 0) && (
-          <section>
+          <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.05, ease: [0.16, 1, 0.3, 1] }}>
             <div className="flex items-center justify-between mb-3.5">
               <p className="section-label !mb-0">Member Offers</p>
-              <Link href="/more/promotions" className="text-xs font-medium" style={{ color: 'var(--color-green-600)' }}>
+              <Link href="/more/promotions" className="focus-ring text-xs font-semibold rounded-lg" style={{ color: 'var(--color-green-600)' }}>
                 View all →
               </Link>
             </div>
@@ -153,14 +165,14 @@ export default function HomePage() {
                 {promotions.map((p) => <PromoCard key={p.id} promo={p} />)}
               </div>
             )}
-          </section>
+          </motion.section>
         )}
 
-        {/* Who's Playing (Community Announcements) */}
-        <section>
+        {/* Community Announcements */}
+        <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}>
           <div className="flex items-center justify-between mb-3.5">
             <p className="section-label !mb-0">Announcements</p>
-            <Link href="/more/announcements" className="text-xs font-medium" style={{ color: 'var(--color-green-600)' }}>
+            <Link href="/more/announcements" className="focus-ring text-xs font-semibold rounded-lg" style={{ color: 'var(--color-green-600)' }}>
               See all →
             </Link>
           </div>
@@ -169,19 +181,15 @@ export default function HomePage() {
               <CardSkeleton lines={2} />
               <CardSkeleton lines={2} />
             </div>
-          ) : announcements.length > 0 ? (() => {
-              const pinned  = announcements.filter(a => a.is_pinned)
-              const regular = announcements.filter(a => !a.is_pinned).slice(0, 3)
-              return (
-                <div className="space-y-2.5">
-                  {pinned.length > 0 && <PinnedCarousel announcements={pinned} />}
-                  {regular.map(a => <AnnouncementCard key={a.id} announcement={a} />)}
-                </div>
-              )
-            })() : (
-            <EmptyState compact icon="📢" title="No announcements yet" description="Course news and community highlights will appear here." />
+          ) : announcements.length > 0 ? (
+              <div className="space-y-2.5">
+                {pinnedAnnouncements.length > 0 && <PinnedCarousel announcements={pinnedAnnouncements} />}
+                {regularAnnouncements.map(a => <AnnouncementCard key={a.id} announcement={a} />)}
+              </div>
+            ) : (
+            <EmptyState compact icon={<Megaphone className="w-5 h-5" strokeWidth={1.75} />} title="No announcements yet" description="Course news and community highlights will appear here." />
           )}
-        </section>
+        </motion.section>
       </div>
     </AppShell>
   );
@@ -196,7 +204,7 @@ function announcementFirstMedia(a: Announcement): { url: string; isVideo: boolea
   return { url, isVideo: ['mp4', 'webm', 'mov', 'quicktime'].includes(ext) }
 }
 
-function AnnouncementThumbnail({ announcement }: { announcement: Announcement }) {
+const AnnouncementThumbnail = memo(function AnnouncementThumbnail({ announcement }: { announcement: Announcement }) {
   const first = announcementFirstMedia(announcement)
   if (!first) return null
   const count = announcement.media_urls?.length
@@ -217,9 +225,9 @@ function AnnouncementThumbnail({ announcement }: { announcement: Announcement })
       )}
     </div>
   )
-}
+})
 
-function StackIcon() {
+const StackIcon = memo(function StackIcon() {
   return (
     <svg className="w-2.5 h-2.5" viewBox="0 0 16 16" fill="currentColor">
       <rect x="3" y="6" width="10" height="8" rx="1.5" opacity="0.6" />
@@ -227,7 +235,7 @@ function StackIcon() {
       <rect x="5" y="2" width="10" height="8" rx="1.5" />
     </svg>
   )
-}
+})
 
 const ANNOUNCEMENT_TYPES: Record<string, { icon: IconName; color: string; iconColor: string }> = {
   member_event:    { icon: 'next-round',        color: 'rgba(0,38,105,0.07)',    iconColor: 'rgba(0,38,105,0.5)' },
@@ -236,12 +244,11 @@ const ANNOUNCEMENT_TYPES: Record<string, { icon: IconName; color: string; iconCo
   promotion:       { icon: 'announcement',      color: 'rgba(200,160,40,0.14)',  iconColor: 'var(--color-gold)' },
 }
 
-function PinnedCarousel({ announcements }: { announcements: Announcement[] }) {
+const PinnedCarousel = memo(function PinnedCarousel({ announcements }: { announcements: Announcement[] }) {
   const router = useRouter()
   const [current, setCurrent] = useState(0)
   const [timerKey, setTimerKey] = useState(0)
-  const touchStartX = useRef<number | null>(null)
-  const didSwipe = useRef(false)
+  const didDrag = useRef(false)
   const multi = announcements.length > 1
 
   // Auto-advance every 7 s; resets whenever the user manually navigates
@@ -253,26 +260,10 @@ function PinnedCarousel({ announcements }: { announcements: Announcement[] }) {
     return () => clearInterval(id)
   }, [multi, announcements.length, timerKey])
 
-  function navigate(idx: number) {
+  const navigate = useCallback((idx: number) => {
     setCurrent(idx)
     setTimerKey(k => k + 1) // restart the 7-s timer
-  }
-
-  function onTouchStart(e: React.TouchEvent) {
-    touchStartX.current = e.touches[0]?.clientX ?? null
-    didSwipe.current = false
-  }
-
-  function onTouchEnd(e: React.TouchEvent) {
-    if (touchStartX.current === null) return
-    const delta = touchStartX.current - (e.changedTouches[0]?.clientX ?? touchStartX.current)
-    if (Math.abs(delta) > 48) {
-      didSwipe.current = true
-      if (delta > 0) navigate(Math.min(current + 1, announcements.length - 1))
-      else navigate(Math.max(current - 1, 0))
-    }
-    touchStartX.current = null
-  }
+  }, [])
 
   if (announcements.length === 0) return null
 
@@ -288,15 +279,12 @@ function PinnedCarousel({ announcements }: { announcements: Announcement[] }) {
       <div
         role="button"
         tabIndex={0}
-        className="card overflow-hidden relative cursor-pointer"
+        className="focus-ring card overflow-hidden relative cursor-pointer"
         style={{ zIndex: 2 }}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
         onClick={() => {
-          if (!didSwipe.current) {
-            const ann = announcements[current]
-            if (ann) router.push(`/more/announcements/${ann.id}`)
-          }
+          if (didDrag.current) return
+          const ann = announcements[current]
+          if (ann) router.push(`/more/announcements/${ann.id}`)
         }}
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -310,18 +298,29 @@ function PinnedCarousel({ announcements }: { announcements: Announcement[] }) {
         {/* Gold accent bar */}
         <div className="h-1" style={{ background: 'var(--color-gold)' }} />
 
-        {/* Slide track */}
-        <div
-          className="flex"
-          style={{ transform: `translateX(-${current * 100}%)`, transition: 'transform 400ms cubic-bezier(0.4,0,0.2,1)' }}
+        {/* Slide track — draggable when there's more than one pinned item */}
+        <motion.div
+          className={`flex ${multi ? 'cursor-grab active:cursor-grabbing' : ''}`}
+          drag={multi ? 'x' : false}
+          dragConstraints={{ left: 0, right: 0 }}
+          dragElastic={0.15}
+          onDragStart={() => { didDrag.current = false }}
+          onDrag={(_, info) => { if (Math.abs(info.offset.x) > 6) didDrag.current = true }}
+          onDragEnd={(_, info) => {
+            if (info.offset.x < -60) navigate(Math.min(current + 1, announcements.length - 1))
+            else if (info.offset.x > 60) navigate(Math.max(current - 1, 0))
+          }}
+          animate={{ x: `-${current * 100}%` }}
+          transition={{ type: 'spring', stiffness: 340, damping: 34 }}
         >
           {announcements.map((ann) => {
             const m = ANNOUNCEMENT_TYPES[ann.type] ?? { icon: 'announcement' as IconName, color: 'rgba(0,38,105,0.07)', iconColor: 'rgba(0,38,105,0.5)' }
             return (
               <div key={ann.id} className="flex-shrink-0 w-full p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-gold)' }}>
-                    📌 Pinned
+                  <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-gold)' }}>
+                    <Pin className="w-3 h-3" strokeWidth={2.5} fill="currentColor" />
+                    Pinned
                   </span>
                   {multi && (
                     <span className="text-[10px]" style={{ color: 'rgba(0,38,105,0.3)' }}>
@@ -350,7 +349,7 @@ function PinnedCarousel({ announcements }: { announcements: Announcement[] }) {
               </div>
             )
           })}
-        </div>
+        </motion.div>
 
         {/* Dot indicators */}
         {multi && (
@@ -359,7 +358,8 @@ function PinnedCarousel({ announcements }: { announcements: Announcement[] }) {
               <button
                 key={i}
                 onClick={e => { e.stopPropagation(); navigate(i) }}
-                className="rounded-full"
+                className="focus-ring rounded-full"
+                aria-label={`Go to pinned announcement ${i + 1}`}
                 style={{
                   width: i === current ? 16 : 6,
                   height: 6,
@@ -373,13 +373,13 @@ function PinnedCarousel({ announcements }: { announcements: Announcement[] }) {
       </div>
     </div>
   )
-}
+})
 
-function AnnouncementCard({ announcement }: { announcement: Announcement }) {
+const AnnouncementCard = memo(function AnnouncementCard({ announcement }: { announcement: Announcement }) {
   const meta = ANNOUNCEMENT_TYPES[announcement.type] ?? { icon: 'announcement' as IconName, color: 'rgba(0,38,105,0.07)', iconColor: 'rgba(0,38,105,0.5)' }
 
   return (
-    <Link href={`/more/announcements/${announcement.id}`} className="card p-4 flex gap-3 items-start overflow-hidden">
+    <Link href={`/more/announcements/${announcement.id}`} className="focus-ring card pressable p-4 flex gap-3 items-start overflow-hidden">
       <div
         className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
         style={{ background: meta.color, color: meta.iconColor }}
@@ -400,9 +400,9 @@ function AnnouncementCard({ announcement }: { announcement: Announcement }) {
       <AnnouncementThumbnail announcement={announcement} />
     </Link>
   )
-}
+})
 
-function PromoCard({ promo }: { promo: Promotion }) {
+const PromoCard = memo(function PromoCard({ promo }: { promo: Promotion }) {
   const mediaUrl = promo.media_urls?.[0] ?? promo.image_url ?? promo.video_url ?? null
   const mediaCount = promo.media_urls?.length ?? ((promo.image_url ? 1 : 0) + (promo.video_url ? 1 : 0))
   const isVideo = mediaUrl
@@ -410,14 +410,14 @@ function PromoCard({ promo }: { promo: Promotion }) {
     : false
 
   return (
-    <Link href={`/more/promotions/${promo.id}`} className="card flex flex-col overflow-hidden">
+    <Link href={`/more/promotions/${promo.id}`} className="focus-ring card pressable flex flex-col overflow-hidden">
       <div className="promo-accent" />
       <div className="p-4 flex gap-3 items-start">
         <div
-          className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0 mt-0.5"
-          style={{ background: 'rgba(133,187,101,0.12)' }}
+          className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
+          style={{ background: 'rgba(133,187,101,0.12)', color: 'var(--color-green-700)' }}
         >
-          🎁
+          <Gift className="w-5 h-5" strokeWidth={1.9} />
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-[10px] uppercase tracking-[0.12em] mb-0.5" style={{ color: 'var(--color-gold)' }}>
@@ -454,7 +454,7 @@ function PromoCard({ promo }: { promo: Promotion }) {
       </div>
     </Link>
   )
-}
+})
 
 
 function getGreeting(): string {

@@ -9,7 +9,8 @@ import AppShell from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/Loading";
 import EmptyState from "@/components/ui/EmptyState";
 import Image from "next/image";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { MessageCircle } from "lucide-react";
 import { formatTeeTime, cn, bookingToLocalDate } from "@/lib/utils";
 import { formatInTimeZone } from "date-fns-tz";
 import {
@@ -34,9 +35,9 @@ import {
   POLICY_TIERS,
   GOLF_ROUND_DURATION_MINUTES,
   GHL_CANCEL_BOOKING_URL,
+  AVIARA_TIMEZONE,
 } from "@/lib/constants";
 import { validateEmail } from "@/lib/validation";
-import { getBrowserTimezone } from "@/lib/timezone";
 
 type PlayerKind = "member" | "non_member";
 
@@ -59,6 +60,26 @@ interface DayPlayer {
   is_self: boolean;
 }
 
+// FIFO payment gate: a member must resolve ALL unresolved (unpaid) bookings
+// before creating another, at any course. A member can already have more
+// than one — LinkUp is adding this rule to an app already in production, so
+// existing accounts may carry several unresolved bookings from before the
+// rule existed. Mirrors PendingPaymentBooking returned by
+// GET /api/bookings/pending-payment and POST /api/bookings/create's 409.
+interface PendingPayment {
+  id: string;
+  course_id: string;
+  course_name: string;
+  booking_date: string;
+  tee_time: string;
+  payment_url: string | null;
+  status: string;
+  player_name: string;
+  target_member_id: string | null;
+  invited: boolean;
+  booker_name: string | null;
+}
+
 const BOOKING_MIN_DAYS = 0;
 
 function formatSlotTime(isoString: string): string {
@@ -77,26 +98,11 @@ function slotEndTime(startIso: string): string {
 }
 
 export default function BookPage() {
-  const { user, profile } = useProfile();
+  const { user } = useProfile();
   const searchParams = useSearchParams();
   const inviteMemberId = searchParams?.get("invite") ?? null;
 
   const today = useMemo(() => new Date(), []);
-
-  // Timezone — default to the member's saved preference (set via Settings),
-  // falling back to the browser-detected zone until a preference exists.
-  // Slot times are always displayed converted into *this* zone, not the
-  // selected course's — a member in Asia/Manila browsing a course in
-  // America/Chicago should see e.g. 4:35am, not the venue's 1:35pm. GHL
-  // buckets/labels slot dates and times for whichever timezone we request,
-  // so this is the single source of truth for every fetch and on-screen
-  // label in this file. (Storage is unaffected: booking_date/tee_time are
-  // still derived server-side from the course's own timezone — see
-  // bookings/create/route.ts.)
-  const [timezone, setTimezone] = useState<string>(getBrowserTimezone);
-  useEffect(() => {
-    if (profile?.profile?.timezone) setTimezone(profile.profile.timezone);
-  }, [profile?.profile?.timezone]);
 
   // Month navigation — start at the month containing the first bookable date
   const [currentMonth, setCurrentMonth] = useState<Date>(() =>
@@ -118,6 +124,12 @@ export default function BookPage() {
   // Selected course (null = no course chosen yet)
   const [selectedEvent, setSelectedEvent] = useState<Course | null>(null);
 
+  // Tee times always display in the *selected course's* own timezone — a tee
+  // time is an appointment at that venue's local wall-clock time, regardless
+  // of where the browsing member happens to be. Falls back to the legacy
+  // single-venue default before a course has been chosen.
+  const timezone = selectedEvent?.timezone ?? AVIARA_TIMEZONE;
+
   // Booking flow
   const [step, setStep] = useState<Step>("select");
   const [submitting, setSubmitting] = useState(false);
@@ -133,12 +145,31 @@ export default function BookPage() {
 
   // My bookings tab
   const [myBookings, setMyBookings] = useState<Booking[]>([]);
+  // Guards against overlapping My-bookings refetches — like the pending list,
+  // it's refreshed from several triggers (mount, tab focus/visibility) that can
+  // fire near-simultaneously.
+  const myBookingsRefreshInFlight = useRef(false);
   const [activeTab, setActiveTab] = useState<"book" | "myBookings">("book");
   const [viewMode, setViewMode] = useState<"day" | "month">("day");
 
   // Who's playing on the selected date
   const [dayPlayers, setDayPlayers] = useState<DayPlayer[]>([]);
   const [loadingDayPlayers, setLoadingDayPlayers] = useState(false);
+
+  // FIFO payment gate — every one of the member's bookings awaiting payment.
+  // Starts loading=true (rather than assuming none) so the tee-time slot
+  // list doesn't briefly render as bookable before the check resolves.
+  const [pendingBookings, setPendingBookings] = useState<PendingPayment[]>([]);
+  const [loadingPendingBookings, setLoadingPendingBookings] = useState(true);
+  // Guards against overlapping pending-payment refetches — the banner is
+  // refreshed from several triggers (mount, tab focus/visibility, a poll while
+  // a payment is outstanding), which can fire near-simultaneously.
+  const pendingRefreshInFlight = useRef(false);
+  // Drives the disabled state of the banner's "Pay →" links while a
+  // pending-payment refetch is in flight: the moment a member returns from the
+  // checkout tab we're re-checking their status, so block a second tap until we
+  // know whether that row has already cleared (guards against a double payment).
+  const [refreshingPending, setRefreshingPending] = useState(false);
 
   const fetchMonthSlots = useCallback(async () => {
     setLoadingMonth(true);
@@ -156,7 +187,7 @@ export default function BookPage() {
     try {
       const eventParam = selectedEvent ? `&courseId=${selectedEvent.id}` : "";
       const res = await fetch(
-        `/api/bookings/create?month=${monthStr}&timezone=${encodeURIComponent(timezone)}${eventParam}`,
+        `/api/bookings/create?month=${monthStr}${eventParam}`,
       );
       const data = await res.json();
       setMonthSlots(data.slots ?? {});
@@ -164,7 +195,7 @@ export default function BookPage() {
       setMonthSlots({});
     }
     setLoadingMonth(false);
-  }, [currentMonth, timezone, selectedEvent]);
+  }, [currentMonth, selectedEvent]);
 
   useEffect(() => {
     fetchMonthSlots();
@@ -173,19 +204,68 @@ export default function BookPage() {
     if (user) loadMyBookings();
   }, [user]);
   useEffect(() => {
+    if (user) loadPendingPayment();
+  }, [user]);
+  // Auto-refresh the FIFO payment list so a row drops off the banner/badge as
+  // soon as its payment clears — without a manual reload, guarding against a
+  // member paying twice on a stale banner. Payment happens on an external GHL
+  // form (opened in a new tab via the "Pay →" link), and a GHL automation then
+  // flips the booking's Supabase status availability_confirmed →
+  // payment_confirmed out-of-band. The member returns to this tab afterward, so
+  // refetch whenever it regains visibility/focus. The pending query is scoped
+  // to status availability_confirmed, so a paid row simply stops coming back.
+  useEffect(() => {
+    if (!user) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") loadPendingPayment();
+    };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [user]);
+  // Mirror the pending-payment refetch for the My-bookings list: a booking's
+  // status changes out-of-band too (payment clears, admin sets up a guest, a
+  // cancellation lands), so refresh the list whenever the tab regains
+  // visibility/focus rather than leaving it stale until a manual reload.
+  useEffect(() => {
+    if (!user) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") loadMyBookings();
+    };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [user]);
+  // The GHL status update is asynchronous, so it may land shortly AFTER the
+  // member returns to this tab (when the focus refetch above already ran). While
+  // a payment is still outstanding and the tab is visible, poll so the row also
+  // delists on its own once the automation catches up — no tab-switch needed.
+  useEffect(() => {
+    if (!user || pendingBookings.length === 0) return;
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") loadPendingPayment();
+    }, 15000);
+    return () => clearInterval(id);
+  }, [user, pendingBookings.length]);
+  useEffect(() => {
     if (!selectedDate || !user) {
       setDayPlayers([]);
       return;
     }
     setLoadingDayPlayers(true);
-    fetch(
-      `/api/bookings/day?date=${selectedDate}&timezone=${encodeURIComponent(timezone)}`,
-    )
+    const courseParam = selectedEvent ? `&courseId=${selectedEvent.id}` : "";
+    fetch(`/api/bookings/day?date=${selectedDate}${courseParam}`)
       .then((r) => r.json())
       .then((d) => setDayPlayers(Array.isArray(d.players) ? d.players : []))
       .catch(() => setDayPlayers([]))
       .finally(() => setLoadingDayPlayers(false));
-  }, [selectedDate, user, timezone]);
+  }, [selectedDate, user, selectedEvent]);
 
   // These must stay above the early returns to satisfy the rules of hooks
   const todayStr = useMemo(
@@ -217,8 +297,38 @@ export default function BookPage() {
   }, [loadingMonth, step, activeTab]);
 
   async function loadMyBookings() {
-    const response = await apiClient.get<Booking[]>("/api/bookings");
-    setMyBookings(response.data ?? []);
+    if (myBookingsRefreshInFlight.current) return;
+    myBookingsRefreshInFlight.current = true;
+    try {
+      const response = await apiClient.get<Booking[]>("/api/bookings");
+      // Keep the last-loaded list on a transient error so a background refresh
+      // (focus/visibility) can't wipe the member's bookings on a network blip.
+      if (response.data) setMyBookings(response.data);
+    } finally {
+      myBookingsRefreshInFlight.current = false;
+    }
+  }
+
+  async function loadPendingPayment() {
+    if (pendingRefreshInFlight.current) return;
+    pendingRefreshInFlight.current = true;
+    setRefreshingPending(true);
+    try {
+      const res = await fetch("/api/bookings/pending-payment");
+      const data = await res.json();
+      setPendingBookings(
+        Array.isArray(data.pendingBookings) ? data.pendingBookings : [],
+      );
+    } catch {
+      // Keep whatever we last loaded on a transient error — a background
+      // refresh (focus/poll) must not wipe a real "payment due" banner on a
+      // network blip (on the very first load the list is already empty). The
+      // server still enforces the FIFO gate on /api/bookings/create regardless.
+    } finally {
+      pendingRefreshInFlight.current = false;
+      setRefreshingPending(false);
+      setLoadingPendingBookings(false);
+    }
   }
 
   async function submitBooking(additionalPlayers: AdditionalPlayer[]) {
@@ -256,8 +366,21 @@ export default function BookPage() {
         }
         setStep("success");
         fetchMonthSlots();
+        loadPendingPayment();
       } else {
         setError(data.error ?? "Something went wrong. Please try again.");
+        // A 409 (FIFO gate) returns the bookings that blocked this attempt —
+        // same upcoming-only scope the banner/badge use — so adopt them
+        // directly to reflect the gate without an extra round-trip.
+        if (Array.isArray(data.pendingBookings)) {
+          setPendingBookings(data.pendingBookings);
+        }
+        // A 409 with seatsRemaining (daily cap reached) surfaces inline on the
+        // confirm screen via `error`. Do NOT refresh the month slots here —
+        // fetchMonthSlots() clears selectedSlot, which would bounce the member
+        // back to date/event selection and lose their group. The daily cap
+        // isn't reflected in per-slot availability anyway, so a refresh would
+        // show nothing new.
       }
     } catch {
       setError("Network error. Check your connection and try again.");
@@ -333,6 +456,8 @@ export default function BookPage() {
   const selectedDateSlots = selectedDate
     ? (monthSlots[selectedDate] ?? [])
     : [];
+  const singlePendingBooking =
+    pendingBookings.length === 1 ? pendingBookings[0] : undefined;
 
   return (
     <AppShell
@@ -372,6 +497,7 @@ export default function BookPage() {
               setSelectedSlot(null);
               setMonthSlots({});
             }}
+            pendingBookings={pendingBookings}
           />
         ) : (
           <div className="pb-8 md:max-w-2xl md:mx-auto">
@@ -398,22 +524,84 @@ export default function BookPage() {
                   </p>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedEvent(null);
-                  setMonthSlots({});
-                  setSelectedSlot(null);
-                }}
-                className="text-xs px-3 py-1.5 rounded-lg font-medium"
-                style={{
-                  background: "rgba(0,38,105,0.06)",
-                  color: "rgba(0,38,105,0.55)",
-                }}
-              >
-                Change
-              </button>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {selectedEvent.map_link && (
+                  <a
+                    href={selectedEvent.map_link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="View on map"
+                    className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
+                    style={{ color: "rgba(0,38,105,0.35)" }}
+                  >
+                    <svg
+                      className="w-4 h-4 flex-shrink-0"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={1.75}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.159.69.159 1.006 0z"
+                      />
+                    </svg>
+                  </a>
+                )}
+                {selectedEvent.booking_url && (
+                  <a
+                    href={selectedEvent.booking_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Visit website"
+                    className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
+                    style={{ color: "rgba(0,38,105,0.35)" }}
+                  >
+                    <svg
+                      className="w-4 h-4 flex-shrink-0"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={1.75}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"
+                      />
+                    </svg>
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedEvent(null);
+                    setMonthSlots({});
+                    setSelectedSlot(null);
+                  }}
+                  className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                  style={{
+                    background: "rgba(0,38,105,0.06)",
+                    color: "rgba(0,38,105,0.55)",
+                  }}
+                >
+                  Change
+                </button>
+              </div>
             </div>
+
+            {loadingPendingBookings ? (
+              <div
+                className="mx-5 md:mx-8 mt-3 h-16 rounded-2xl animate-pulse"
+                style={{ background: "rgba(0,38,105,0.04)" }}
+              />
+            ) : (
+              pendingBookings.length > 0 && (
+                <PendingPaymentBanner pending={pendingBookings} refreshing={refreshingPending} />
+              )
+            )}
+
             {/* Month navigation + view toggle */}
             <div className="px-5 md:px-8 pt-4 pb-2 flex items-center justify-between">
               <div className="flex-1 flex items-center justify-between mr-3">
@@ -649,7 +837,32 @@ export default function BookPage() {
                   {format(new Date(selectedDate + "T12:00:00"), "EEE, MMM d")}
                 </p>
 
-                {selectedDateSlots.length === 0 ? (
+                {loadingPendingBookings ? (
+                  <div className="space-y-2">
+                    {[1, 2, 3].map((i) => (
+                      <div
+                        key={i}
+                        className="h-[68px] rounded-2xl animate-pulse"
+                        style={{ background: "rgba(0,38,105,0.05)" }}
+                      />
+                    ))}
+                  </div>
+                ) : singlePendingBooking || pendingBookings.length > 1 ? (
+                  <EmptyState
+                    compact
+                    icon="💳"
+                    title={
+                      singlePendingBooking
+                        ? "Payment due first"
+                        : `${pendingBookings.length} bookings need resolving`
+                    }
+                    description={
+                      singlePendingBooking
+                        ? `Resolve your round at ${singlePendingBooking.course_name} on ${formatPendingDate(singlePendingBooking.booking_date)} before booking another.`
+                        : "Resolve all of your pending bookings above before booking another round."
+                    }
+                  />
+                ) : selectedDateSlots.length === 0 ? (
                   <EmptyState
                     icon="⛳"
                     title="No tee times"
@@ -908,7 +1121,7 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
           </div>
         )}
         <span
-          className="text-[10px] font-medium text-center leading-tight truncate w-full"
+          className="text-[10px] font-medium text-center leading-tight truncate w-full capitalize"
           style={{ color: "var(--color-green-900)" }}
         >
           {player.first_name}
@@ -1004,7 +1217,7 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
                   <div className="flex-1 min-w-0 pt-0.5">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p
-                        className="font-sans font-black text-lg leading-tight"
+                        className="font-sans font-black text-lg leading-tight capitalize"
                         style={{ color: "var(--color-green-900)" }}
                       >
                         {displayName}
@@ -1384,6 +1597,281 @@ function SlotRow({
   );
 }
 
+// ---- FIFO payment gate banner ---------------------------------
+
+function formatPendingDate(dateStr: string): string {
+  return format(new Date(`${dateStr}T12:00:00`), "EEEE, MMMM d");
+}
+
+// Every entry here is, by construction, status === 'availability_confirmed'
+// (see UNPAID_BOOKING_STATUSES) — the FIFO gate only ever flags rounds that
+// are actually ready to be paid for, never ones still awaiting admin/GHL
+// confirmation.
+type PendingGroup = {
+  course_name: string;
+  booking_date: string;
+  tee_time: string;
+  // The querying member's own round in this group ("You"), when it's awaiting
+  // payment. Present for both the booker's primary row and an invited player's
+  // own row.
+  self: PendingPayment | null;
+  // Additional players in the same group whose rounds are also awaiting
+  // payment. Only ever populated for the booker — an invited player's pending
+  // list contains only their own row, so their group renders as `self` alone.
+  others: PendingPayment[];
+};
+
+// A group booking is inserted as one row per player, each with its own GHL
+// appointment moving through the payment pipeline independently — so the flat
+// pending-payment list can carry several rows that belong to a single booked
+// slot. Regroup them by course + date + tee time so the banner shows one card
+// per booking: the booker sees their own round plus each additional player
+// (with a "message" shortcut to nudge them), while an invited player sees only
+// their own round.
+function groupPendingPayments(pending: PendingPayment[]): PendingGroup[] {
+  const bySlot = new Map<string, PendingPayment[]>();
+  for (const p of pending) {
+    const key = `${p.course_id}_${p.booking_date}_${p.tee_time}`;
+    const rows = bySlot.get(key) ?? [];
+    rows.push(p);
+    bySlot.set(key, rows);
+  }
+  const groups: PendingGroup[] = [];
+  for (const rows of bySlot.values()) {
+    const first = rows[0];
+    if (!first) continue;
+    // "You" is the sanctioned marker the server sets for the querying member's
+    // own round (booker primary row or invited-player row); everything else is
+    // an additional player they booked.
+    const self = rows.find((r) => r.player_name === "You") ?? null;
+    groups.push({
+      course_name: first.course_name,
+      booking_date: first.booking_date,
+      tee_time: first.tee_time,
+      self,
+      others: rows.filter((r) => r !== self),
+    });
+  }
+  return groups;
+}
+
+function PendingPaymentBanner({
+  pending,
+  refreshing = false,
+}: {
+  pending: PendingPayment[];
+  // True while the parent is re-checking the pending-payment list (e.g. right
+  // after the member returns from the checkout tab). Disables the "Pay →" links
+  // so a member can't fire a second payment before we know a row has cleared.
+  refreshing?: boolean;
+}) {
+  const router = useRouter();
+  const [index, setIndex] = useState(0);
+  // The member id whose "message" request is in flight, so only that button
+  // shows a disabled/loading state.
+  const [messagingId, setMessagingId] = useState<string | null>(null);
+  const [messageError, setMessageError] = useState("");
+
+  const groups = groupPendingPayments(pending);
+  const current = groups[Math.min(index, groups.length - 1)];
+  if (!current) return null;
+
+  const hasMultiple = groups.length > 1;
+  // The member's own round first (when present), then any additional players.
+  const rows = [...(current.self ? [current.self] : []), ...current.others];
+  const soleName =
+    rows.length === 1
+      ? rows[0]?.player_name === "You"
+        ? "your"
+        : `${rows[0]?.player_name}'s`
+      : null;
+  // When the querying member is an invited player (added to someone else's
+  // booking), the banner explains they were invited and owe their share,
+  // instead of the booker-facing wording. An invited player only ever has
+  // their own single row, so this reads off the group's `self` row.
+  const invited = current.self?.invited ?? false;
+  const bookerName = current.self?.booker_name ?? null;
+
+  async function messageMember(memberId: string) {
+    setMessagingId(memberId);
+    setMessageError("");
+    const res = await apiClient.post<{ id: string }>("/api/conversations", {
+      type: "direct",
+      participant_ids: [memberId],
+    });
+    setMessagingId(null);
+    if (res.error || !res.data) {
+      setMessageError(res.error?.message ?? "Couldn't open the conversation.");
+      return;
+    }
+    router.push(`/messages/${res.data.id}`);
+  }
+
+  return (
+    <div
+      className="mx-5 md:mx-8 mt-3 px-4 py-3 rounded-2xl border"
+      style={{
+        background: "rgba(146,100,10,0.06)",
+        borderColor: "rgba(146,100,10,0.25)",
+      }}
+    >
+      <div className="flex items-start gap-3">
+        <span className="text-lg leading-none mt-0.5">💳</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold" style={{ color: "#92640a" }}>
+              {hasMultiple ? `Payment due (${index + 1} of ${groups.length})` : "Payment due"}
+            </p>
+            {hasMultiple && (
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  type="button"
+                  aria-label="Previous payment due"
+                  disabled={index === 0}
+                  onClick={() => setIndex((i) => Math.max(0, i - 1))}
+                  className="w-6 h-6 flex items-center justify-center rounded-lg disabled:opacity-30 transition-opacity"
+                  style={{ background: "rgba(146,100,10,0.12)", color: "#92640a" }}
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  aria-label="Next payment due"
+                  disabled={index === groups.length - 1}
+                  onClick={() => setIndex((i) => Math.min(groups.length - 1, i + 1))}
+                  className="w-6 h-6 flex items-center justify-center rounded-lg disabled:opacity-30 transition-opacity"
+                  style={{ background: "rgba(146,100,10,0.12)", color: "#92640a" }}
+                >
+                  ›
+                </button>
+              </div>
+            )}
+          </div>
+          <p
+            className="text-xs mt-0.5 leading-relaxed"
+            style={{ color: "rgba(0,38,105,0.55)" }}
+          >
+            {invited ? (
+              <>
+                You&apos;ve been invited
+                {bookerName && (
+                  <>
+                    {" "}by <span className="capitalize font-medium">{bookerName}</span>
+                  </>
+                )}
+                {" "}to play at {current.course_name} on{" "}
+                {formatPendingDate(current.booking_date)} at{" "}
+                {formatTeeTime(current.tee_time)}. Pay your share below — or
+                {bookerName ? (
+                  <>
+                    {" "}have <span className="capitalize font-medium">{bookerName}</span> pay it
+                  </>
+                ) : (
+                  " have the booker pay it"
+                )}{" "}
+                — to confirm your spot. This round is on hold until it&apos;s paid.
+              </>
+            ) : soleName ? (
+              `Complete payment for ${soleName} round at ${current.course_name} on ${formatPendingDate(current.booking_date)} at ${formatTeeTime(current.tee_time)} before booking another.`
+            ) : (
+              `Complete the payments below for your ${current.course_name} round on ${formatPendingDate(current.booking_date)} at ${formatTeeTime(current.tee_time)} before booking another.`
+            )}
+          </p>
+
+          {/* One row per player awaiting payment. When the querying member is
+              the booker, this lists their own round first, then each additional
+              player — with a "message" shortcut to nudge fellow members. An
+              invited player only ever sees their own single row. */}
+          <div className="mt-2 space-y-1.5">
+            {rows.map((row) => (
+              <div key={row.id} className="flex items-center gap-2">
+                <span
+                  className="text-xs font-medium capitalize flex-1 min-w-0 truncate"
+                  style={{ color: "var(--color-green-900)" }}
+                >
+                  {row.player_name}
+                </span>
+                {/* Message the player whose payment this is — never shown for
+                    the member's own row, and only when they're a fellow member
+                    (non-member guests have no account to message). Kept to the
+                    left of the Pay CTA so the Pay button stays the rightmost
+                    element on every row and lines up across rows. */}
+                {row.target_member_id && (
+                  <button
+                    type="button"
+                    aria-label={`Message ${row.player_name}`}
+                    disabled={messagingId === row.target_member_id}
+                    onClick={() => messageMember(row.target_member_id as string)}
+                    className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-lg disabled:opacity-50 transition-opacity"
+                    style={{ background: "rgba(0,38,105,0.06)", color: "rgba(0,38,105,0.55)" }}
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" strokeWidth={2} />
+                  </button>
+                )}
+                {row.payment_url ? (
+                  <a
+                    href={row.payment_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-disabled={refreshing}
+                    onClick={(e) => {
+                      if (refreshing) e.preventDefault();
+                    }}
+                    className={`text-xs font-semibold px-3 py-1.5 rounded-lg flex-shrink-0 ${
+                      refreshing ? "opacity-50 pointer-events-none" : ""
+                    }`}
+                    style={{ background: "var(--color-gold)", color: "var(--color-green-900)" }}
+                  >
+                    Pay →
+                  </a>
+                ) : (
+                  <span
+                    className="text-xs flex-shrink-0"
+                    style={{ color: "rgba(0,38,105,0.4)" }}
+                  >
+                    Payment link unavailable
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* When the booker is paying on behalf of additional players, the
+              external GHL payment form defaults to the payer's email. Paying
+              for someone else under your own email records a second payment
+              against you rather than the intended player — flag it so the
+              booker enters that player's email instead. Only relevant to the
+              booker (never an invited player) and only when there's at least
+              one other player to pay for. */}
+          {!invited && current.others.length > 0 && (
+            <p
+              className="text-xs mt-2 pt-2 leading-relaxed flex items-start gap-1.5"
+              style={{
+                color: "#92640a",
+                borderTop: "1px solid rgba(146,100,10,0.15)",
+              }}
+            >
+              <span className="leading-none mt-0.5">⚠️</span>
+              <span>
+                Paying for another player? Enter{" "}
+                <span className="font-semibold">their</span> email in the
+                payment form — not your own — so you&apos;re not charged twice
+                for the same round.
+              </span>
+            </p>
+          )}
+
+          {messageError && (
+            <p className="text-xs mt-1" style={{ color: "#b91c1c" }}>
+              {messageError}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---- Confirmation screen ------------------------------------
 
 type PlayersForm = { players: AdditionalPlayer[] };
@@ -1427,6 +1915,13 @@ function ConfirmScreen({
   // name/phone/email and flags the booking for admin review.
   const [playerKinds, setPlayerKinds] = useState<PlayerKind[]>([]);
   const [members, setMembers] = useState<MemberWithProfile[]>([]);
+  // Member ids flagged as having a payment due on an existing booking. The FIFO
+  // rule bars a booker from adding such a member to a group round, so a flagged
+  // selection blocks submit until they're removed. Checked on selection via
+  // /api/bookings/check-guests; POST /api/bookings/create is the real gate.
+  const [pendingGuestIds, setPendingGuestIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const inviteApplied = useRef(false);
 
   useEffect(() => {
@@ -1538,7 +2033,10 @@ function ConfirmScreen({
         validateGuestPhone(p?.mobile) === true
       );
     }
-    return !!playerSelections[i];
+    const selection = playerSelections[i];
+    // A selected member with a payment due can't be booked — block submit until
+    // they're removed (mirrors the server-side FIFO gate).
+    return !!selection && !pendingGuestIds.has(selection.id);
   }
 
   const allRowsValid = fields.every((_, i) => rowValid(i));
@@ -1562,6 +2060,21 @@ function ConfirmScreen({
     setPlayerSelections((prev) =>
       prev.map((s, idx) => (idx === i ? member : s)),
     );
+    // Flag the member if they owe payment on an existing booking — the FIFO gate
+    // rejects the whole group server-side, so surface it the moment they're
+    // picked rather than at submit.
+    fetch(`/api/bookings/check-guests?ids=${encodeURIComponent(member.id)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (
+          d &&
+          Array.isArray(d.blockedMemberIds) &&
+          d.blockedMemberIds.includes(member.id)
+        ) {
+          setPendingGuestIds((prev) => new Set(prev).add(member.id));
+        }
+      })
+      .catch(() => {});
   }
 
   function clearMemberSelection(i: number) {
@@ -1706,9 +2219,23 @@ function ConfirmScreen({
               const kind = playerKinds[i] ?? "member";
               const canCollapse = !!selection;
               const rowErrors = errors.players?.[i];
+              const isPendingBlocked = selection
+                ? pendingGuestIds.has(selection.id)
+                : false;
 
               return (
-                <div key={field.id} className="card mb-2">
+                <div
+                  key={field.id}
+                  className="card mb-2"
+                  style={
+                    isPendingBlocked
+                      ? {
+                          borderColor: "rgba(220,38,38,0.4)",
+                          background: "rgba(239,68,68,0.03)",
+                        }
+                      : undefined
+                  }
+                >
                   {/* Header row */}
                   <div className="flex items-center gap-2 px-4 py-3">
                     <button
@@ -1734,9 +2261,20 @@ function ConfirmScreen({
                       >
                         {playerLabel(i)}
                       </span>
-                      {isCollapsed && selection && (
+                      {isPendingBlocked && (
+                        <span
+                          className="flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                          style={{
+                            color: "#dc2626",
+                            background: "rgba(220,38,38,0.1)",
+                          }}
+                        >
+                          Payment due
+                        </span>
+                      )}
+                      {isCollapsed && selection && !isPendingBlocked && (
                         <svg
-                          className="w-3.5 h-3.5 flex-shrink-0"
+                          className="w-4 h-4 flex-shrink-0"
                           viewBox="0 0 16 16"
                           fill="none"
                           style={{ color: "var(--color-green-700)" }}
@@ -1791,6 +2329,7 @@ function ConfirmScreen({
                     >
                       {selection ? (
                         // Member selected
+                        <>
                         <div className="pt-3 flex items-center gap-3">
                           {selection.profile?.avatar_url ? (
                             <Image
@@ -1840,6 +2379,14 @@ function ConfirmScreen({
                             Change
                           </button>
                         </div>
+                        {isPendingBlocked && (
+                          <p className="text-xs text-red-600 leading-snug">
+                            {selection.first_name} has a payment due on an
+                            existing booking and can&apos;t be added until
+                            it&apos;s paid. Please remove them to continue.
+                          </p>
+                        )}
+                        </>
                       ) : (
                         <div className="pt-3 space-y-3">
                           {/* Member / Non-member segmented toggle */}
@@ -2231,6 +2778,10 @@ function MemberAutocomplete({
 
 // ---- Success screen -----------------------------------------
 
+// The post-golf group dinner is an Aviara-only offering, so the RSVP prompt is
+// shown only when the booking is for the Aviara course/event.
+const isAviaraEvent = (name?: string | null) => !!name && /aviara/i.test(name);
+
 function SuccessScreen({
   booking,
   onDone,
@@ -2251,6 +2802,7 @@ function SuccessScreen({
     null,
   );
   const [submitting, setSubmitting] = useState(false);
+  const showDinner = !!booking.bookingId && isAviaraEvent(booking.eventName);
 
   async function handleDone() {
     if (booking.bookingId && dinnerRsvp) {
@@ -2337,7 +2889,7 @@ function SuccessScreen({
           </p>
         )}
       </div>
-      {booking.bookingId && (
+      {showDinner && (
         <div className="card p-5 w-full max-w-sm mb-8 text-left">
           <p
             className="text-xs uppercase tracking-widest mb-3"
@@ -2350,7 +2902,7 @@ function SuccessScreen({
             drinks/dinner?
           </p>
           <DinnerRsvp
-            bookingId={booking.bookingId}
+            bookingId={booking.bookingId!}
             current={dinnerRsvp}
             layout="horizontal"
             autoSave={false}
@@ -2358,15 +2910,15 @@ function SuccessScreen({
           />
         </div>
       )}
-      {!booking.bookingId && <div className="mb-8" />}
+      {!showDinner && <div className="mb-8" />}
       <button
         onClick={handleDone}
-        disabled={(!!booking.bookingId && dinnerRsvp === null) || submitting}
+        disabled={(showDinner && dinnerRsvp === null) || submitting}
         className="btn btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
       >
         {submitting ? "Saving…" : "Back to booking"}
       </button>
-      {booking.bookingId && dinnerRsvp === null && (
+      {showDinner && dinnerRsvp === null && (
         <p className="text-xs mt-3" style={{ color: "rgba(0,38,105,0.4)" }}>
           Please let us know about dinner first.
         </p>
@@ -2633,7 +3185,11 @@ function EditGuestModal({
 }: {
   target: EditGuestTarget | null;
   onDismiss: () => void;
-  onSaved: (bookingId: string, guestName: string, player: AdditionalPlayer) => void;
+  onSaved: (
+    bookingId: string,
+    guestName: string,
+    player: AdditionalPlayer,
+  ) => void;
 }) {
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
@@ -2671,7 +3227,10 @@ function EditGuestModal({
 
   const inputCls =
     "w-full px-3 py-2 text-sm rounded-xl border bg-white outline-none transition-colors focus:border-green-700";
-  const inputStyle = { borderColor: "rgba(0,38,105,0.12)", color: "var(--color-green-900)" };
+  const inputStyle = {
+    borderColor: "rgba(0,38,105,0.12)",
+    color: "var(--color-green-900)",
+  };
 
   async function handleSave() {
     if (!target) return;
@@ -2989,14 +3548,20 @@ function MyBookingsTab({
   const allGroups = groupBookings(bookings);
   const upcoming = allGroups.filter(
     (g) =>
-      bookingToLocalDate(g.primary.booking_date, g.primary.tee_time, g.primary.course?.timezone) >= now &&
-      g.primary.status !== "cancelled",
+      bookingToLocalDate(
+        g.primary.booking_date,
+        g.primary.tee_time,
+        g.primary.course?.timezone,
+      ) >= now && g.primary.status !== "cancelled",
   );
   const cancelledAndPast = allGroups
     .filter(
       (g) =>
-        bookingToLocalDate(g.primary.booking_date, g.primary.tee_time, g.primary.course?.timezone) < now ||
-        g.primary.status === "cancelled",
+        bookingToLocalDate(
+          g.primary.booking_date,
+          g.primary.tee_time,
+          g.primary.course?.timezone,
+        ) < now || g.primary.status === "cancelled",
     )
     .sort(
       (a, b) =>
@@ -3067,7 +3632,7 @@ function MyBookingsTab({
                 `${group.primary.booking_date}T12:00:00`,
               );
               const displayTime = formatTeeTime(group.primary.tee_time);
-              const courseName = group.primary.course?.name ?? "Aviara";
+              const courseName = group.primary.course?.name ?? "Golf course";
               const isCancelled = group.primary.status === "cancelled";
 
               return (
@@ -3132,7 +3697,7 @@ function BookingCard({
   );
   const bookingDate = new Date(`${group.primary.booking_date}T12:00:00`);
   const bookingTime = formatTeeTime(group.primary.tee_time);
-  const courseName = group.primary.course?.name ?? "Aviara";
+  const courseName = group.primary.course?.name ?? "Golf course";
   const hoursUntil = differenceInHours(localDt, new Date());
   // Cancel is only actionable once a booking has been confirmed/payment-ready —
   // pending (tentative/awaiting_approval) bookings cannot be cancelled yet.
@@ -3176,7 +3741,9 @@ function BookingCard({
           // admin has set them up (or the row is cancelled/confirmed), GHL is
           // already involved and editing here would silently drift out of sync.
           editablePlayer:
-            p.status === "awaiting_approval" ? (p.additional_players?.[0] ?? null) : null,
+            p.status === "awaiting_approval"
+              ? (p.additional_players?.[0] ?? null)
+              : null,
         })),
       ]
     : (() => {
@@ -3330,14 +3897,20 @@ function BookingCard({
                       <span
                         title={row.adminNotes}
                         className="flex items-center justify-center w-4 h-4 rounded-full text-[10px] leading-none cursor-help flex-shrink-0"
-                        style={{ background: "rgba(234,179,8,0.15)", color: "#92640a" }}
+                        style={{
+                          background: "rgba(234,179,8,0.15)",
+                          color: "#92640a",
+                        }}
                         aria-label={`Admin note: ${row.adminNotes}`}
                       >
                         ⚠
                       </span>
                       <div
                         className="absolute left-0 bottom-full mb-1.5 hidden group-hover:block w-56 max-w-[70vw] rounded-lg px-3 py-2 text-[11px] leading-snug shadow-lg z-20"
-                        style={{ background: "var(--color-green-900)", color: "white" }}
+                        style={{
+                          background: "var(--color-green-900)",
+                          color: "white",
+                        }}
                       >
                         {row.adminNotes}
                       </div>
@@ -3347,8 +3920,8 @@ function BookingCard({
 
                 {/* Status badge or Pay CTA */}
                 {!canPay && <BookingStatusBadge status={row.status} />}
-                {canPay && (
-                  group.primary.course?.payment_url ? (
+                {canPay &&
+                  (group.primary.course?.payment_url ? (
                     <a
                       href={group.primary.course.payment_url}
                       target="_blank"
@@ -3365,8 +3938,7 @@ function BookingCard({
                     <span className="text-[11px] text-gray-400 flex-shrink-0">
                       Payment link pending
                     </span>
-                  )
-                )}
+                  ))}
 
                 {/* Edit — booker only, while the guest is still awaiting approval */}
                 {editablePlayer && (
@@ -3423,13 +3995,25 @@ function BookingCard({
 
 function EventSelectionScreen({
   onSelect,
+  pendingBookings,
 }: {
   onSelect: (course: Course) => void;
+  pendingBookings: PendingPayment[];
 }) {
+  // `events` is the full, unfiltered list — fetched once, used only to
+  // build the location filter's options so they don't shrink as filters
+  // are applied. `filteredEvents` is what's actually displayed, and comes
+  // straight from the server (search/location are applied server-side).
   const [events, setEvents] = useState<Course[]>([]);
+  const [filteredEvents, setFilteredEvents] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filtering, setFiltering] = useState(false);
   const [error, setError] = useState("");
   const [showCreateFeed, setShowCreateFeed] = useState(false);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [locationFilter, setLocationFilter] = useState("all");
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/courses")
@@ -3438,11 +4022,65 @@ function EventSelectionScreen({
         return r.json();
       })
       .then((d) => {
-        setEvents(Array.isArray(d.courses) ? d.courses : []);
+        const list = Array.isArray(d.courses) ? d.courses : [];
+        setEvents(list);
+        setFilteredEvents(list);
       })
       .catch(() => setError("Failed to load courses."))
       .finally(() => setLoading(false));
   }, []);
+
+  // Debounce the search box so it doesn't hit the server on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const eventLocation = (e: Course) =>
+    [e.city, e.state].filter(Boolean).join(", ");
+
+  const locationOptions = useMemo(() => {
+    const map = new Map<
+      string,
+      { city: string | null; state: string | null }
+    >();
+    events.forEach((e) => {
+      if (!e.city && !e.state) return;
+      const label = eventLocation(e);
+      if (!map.has(label)) map.set(label, { city: e.city, state: e.state });
+    });
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [events]);
+  const locations = useMemo(
+    () => locationOptions.map(([label]) => label),
+    [locationOptions],
+  );
+
+  // Server-side filtering — refetch whenever the debounced search or the
+  // selected location changes. Skipped when neither is active, since the
+  // unfiltered list from the initial load above already covers that case.
+  useEffect(() => {
+    if (loading) return;
+    if (!debouncedSearch && locationFilter === "all") {
+      setFilteredEvents(events);
+      return;
+    }
+    const params = new URLSearchParams();
+    if (debouncedSearch) params.set("search", debouncedSearch);
+    if (locationFilter !== "all") {
+      const parts = locationOptions.find(
+        ([label]) => label === locationFilter,
+      )?.[1];
+      if (parts?.city) params.set("city", parts.city);
+      if (parts?.state) params.set("state", parts.state);
+    }
+    setFiltering(true);
+    fetch(`/api/courses?${params.toString()}`)
+      .then((r) => r.json())
+      .then((d) => setFilteredEvents(Array.isArray(d.courses) ? d.courses : []))
+      .catch(() => setFilteredEvents([]))
+      .finally(() => setFiltering(false));
+  }, [debouncedSearch, locationFilter, loading, locationOptions, events]);
 
   if (loading) {
     return (
@@ -3490,39 +4128,279 @@ function EventSelectionScreen({
 
   return (
     <div className="pb-8 md:max-w-2xl md:mx-auto">
-      <div className="px-5 md:px-8 pt-5 pb-2">
-        <p className="section-label mb-1">Select an event to book</p>
-        <p className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>
-          Choose an event below to see available times.
-        </p>
-      </div>
+      {events.length > 1 && (
+        <div className="px-5 md:px-8 pt-5 pb-1 flex items-center gap-2">
+          <div
+            className="flex items-center gap-2 flex-1 min-w-0 bg-white rounded-xl px-3 py-2.5 border"
+            style={{ borderColor: "rgba(0,38,105,0.1)" }}
+          >
+            <svg
+              className="w-4 h-4 flex-shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              style={{ color: "rgba(0,38,105,0.32)" }}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+              />
+            </svg>
+            <input
+              type="search"
+              placeholder="Search by event name…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="flex-1 min-w-0 bg-transparent text-sm outline-none"
+              style={{ color: "var(--color-green-900)" }}
+            />
+          </div>
+          {locations.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setFiltersOpen(true)}
+              aria-label="Filter by location"
+              className="relative flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-xl border transition-colors hover:bg-green-50/60 active:opacity-70"
+              style={{
+                borderColor: "rgba(0,38,105,0.1)",
+                background: "white",
+                color: "rgba(0,38,105,0.5)",
+              }}
+            >
+              <FunnelIcon />
+              {locationFilter !== "all" && (
+                <span
+                  className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 border-white"
+                  style={{ background: "var(--color-gold)" }}
+                />
+              )}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="px-5 md:px-8 pt-3">
-        <div className="card">
-          {events.map((course, i) => {
-            const borderStyle = {
-              borderBottom: i < events.length - 1 ? "1px solid rgba(0,38,105,0.06)" : "none",
-            };
+        {filtering ? (
+          <div className="flex justify-center py-10">
+            <Spinner className="text-green-700 w-5 h-5" />
+          </div>
+        ) : filteredEvents.length === 0 ? (
+          <EmptyState
+            compact
+            icon="🔍"
+            title="No events match your search"
+            description="Try a different name or location."
+          />
+        ) : (
+          <div className="card">
+            {filteredEvents.map((course, i) => {
+              const borderStyle = {
+                borderBottom:
+                  i < filteredEvents.length - 1
+                    ? "1px solid rgba(0,38,105,0.06)"
+                    : "none",
+              };
 
-            return (
-              <button
-                key={course.id}
-                type="button"
-                onClick={() => onSelect(course)}
-                className="w-full text-left flex items-start gap-3 px-4 py-4 transition-colors hover:bg-green-50/40 active:opacity-70"
-                style={borderStyle}
-              >
-                <CourseRowInner course={course} />
-              </button>
-            );
-          })}
-        </div>
+              return (
+                <button
+                  key={course.id}
+                  type="button"
+                  onClick={() => onSelect(course)}
+                  className="w-full text-left flex items-stretch gap-3 px-4 py-4 transition-colors hover:bg-green-50/40 active:opacity-70"
+                  style={borderStyle}
+                >
+                  <CourseRowInner
+                    course={course}
+                    pendingBookings={pendingBookings}
+                  />
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
+
+      <EventLocationFilterDrawer
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        locations={locations}
+        value={locationFilter}
+        onChange={setLocationFilter}
+      />
     </div>
   );
 }
 
-function CourseRowInner({ course }: { course: Course }) {
+function FunnelIcon() {
+  return (
+    <svg
+      className="w-3.5 h-3.5 flex-shrink-0"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3 4.5h18M6 9h12M9.75 13.5h4.5M11.25 18h1.5"
+      />
+    </svg>
+  );
+}
+
+function EventLocationFilterDrawer({
+  open,
+  onClose,
+  locations,
+  value,
+  onChange,
+}: {
+  open: boolean;
+  onClose: () => void;
+  locations: string[];
+  value: string;
+  onChange: (location: string) => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      const ids: number[] = [];
+      ids[0] = requestAnimationFrame(() => {
+        ids[1] = requestAnimationFrame(() => setVisible(true));
+      });
+      return () => ids.forEach((id) => cancelAnimationFrame(id));
+    } else {
+      setVisible(false);
+      const t = setTimeout(() => setMounted(false), 250);
+      return () => clearTimeout(t);
+    }
+  }, [open]);
+
+  if (!mounted) return null;
+
+  function choose(loc: string) {
+    onChange(loc);
+    onClose();
+  }
+
+  const drawer = (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end">
+      <button
+        type="button"
+        aria-label="Close filters"
+        className="absolute inset-0 w-full h-full"
+        style={{
+          background: "rgba(0,0,0,0.4)",
+          opacity: visible ? 1 : 0,
+          transition: "opacity 200ms ease-out",
+        }}
+        onClick={onClose}
+      />
+      {/* transform lives on this element only — no overflow/clip here, to avoid
+          iOS Safari clipping the sheet mid-animation */}
+      <div
+        className="relative"
+        style={{
+          transform: visible ? "translateY(0)" : "translateY(100%)",
+          transition: visible
+            ? "transform 280ms cubic-bezier(0.32,0.72,0,1)"
+            : "transform 200ms cubic-bezier(0.4,0,1,1)",
+        }}
+      >
+        {/* inner element owns sizing/clipping; dvh + safe-area keep the last
+            chips reachable above iOS browser chrome and the home indicator */}
+        <div className="bg-white rounded-t-2xl flex flex-col max-h-[75dvh] overflow-hidden">
+          <div className="flex-shrink-0 flex items-center justify-between px-5 pt-4 mb-4">
+            <h2
+              className="text-sm font-bold"
+              style={{ color: "var(--color-green-900)" }}
+            >
+              Filter by location
+            </h2>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="w-8 h-8 rounded-full flex items-center justify-center"
+              style={{
+                background: "rgba(0,38,105,0.06)",
+                color: "rgba(0,38,105,0.5)",
+              }}
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          </div>
+
+          <div
+            className="flex-1 overflow-y-auto px-5"
+            style={{
+              paddingBottom: "max(2rem, calc(2rem + env(safe-area-inset-bottom)))",
+            }}
+          >
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => choose("all")}
+                className={`chip ${value === "all" ? "active" : ""}`}
+              >
+                All locations
+              </button>
+              {locations.map((loc) => (
+                <button
+                  key={loc}
+                  type="button"
+                  onClick={() => choose(loc)}
+                  className={`chip ${value === loc ? "active" : ""}`}
+                >
+                  {loc}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Portal to document.body so the fixed sheet is never clipped by the
+  // .screen-content scroll container (iOS Safari) or trapped behind the nav
+  return createPortal(drawer, document.body);
+}
+
+function CourseRowInner({
+  course,
+  pendingBookings,
+}: {
+  course: Course;
+  pendingBookings?: PendingPayment[];
+}) {
+  // pendingBookings only ever contains bookings awaiting payment (status
+  // 'availability_confirmed') — see UNPAID_BOOKING_STATUSES — so a match
+  // here always means "payment due", never "still awaiting confirmation".
+  // Counted per event so the badge can show how many of THIS event's rounds
+  // are due; the banner (PendingPaymentBanner) accumulates them across events.
+  const pendingCount =
+    pendingBookings?.filter((p) => p.course_id === course.id).length ?? 0;
+  const isPendingCourse = pendingCount > 0;
+
   return (
     <>
       {/* Venue logo — fixed square, pinned to the top so it never
@@ -3541,7 +4419,10 @@ function CourseRowInner({ course }: { course: Course }) {
         />
       </div>
 
-      {/* Row stack: name / location - address / price / access CTA / website icon */}
+      {/* Row stack: name / location - address / price / access CTA / website icon.
+          Stretched to the full row height (button uses items-stretch) so the
+          icon row can be pinned to the bottom with mt-auto regardless of how
+          little text sits above it. */}
       <div className="flex-1 min-w-0 flex flex-col gap-1">
         <p
           className="font-sans font-black text-base leading-tight truncate"
@@ -3569,31 +4450,73 @@ function CourseRowInner({ course }: { course: Course }) {
           </span>
         )}
 
-        {course.booking_url && (
-          <div className="flex justify-end -mb-1">
-            <a
-              href={course.booking_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              aria-label="Visit website"
-              className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
-              style={{ color: "rgba(0,38,105,0.35)" }}
-            >
-              <svg
-                className="w-3.5 h-3.5 flex-shrink-0"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
+        {(isPendingCourse || course.map_link || course.booking_url) && (
+          <div
+            className={cn(
+              "flex items-center gap-2 mt-auto -mb-1",
+              isPendingCourse ? "justify-between" : "justify-end",
+            )}
+          >
+            {isPendingCourse && (
+              <span
+                className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0"
+                style={{ background: "rgba(146,100,10,0.12)", color: "#92640a" }}
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
-                />
-              </svg>
-            </a>
+                💳 {pendingCount} payment{pendingCount === 1 ? "" : "s"} due
+              </span>
+            )}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {course.map_link && (
+                <a
+                  href={course.map_link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="View on map"
+                  className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
+                  style={{ color: "rgba(0,38,105,0.35)" }}
+                >
+                  <svg
+                    className="w-4 h-4 flex-shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={1.75}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.159.69.159 1.006 0z"
+                    />
+                  </svg>
+                </a>
+              )}
+              {course.booking_url && (
+                <a
+                  href={course.booking_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Visit website"
+                  className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
+                  style={{ color: "rgba(0,38,105,0.35)" }}
+                >
+                  <svg
+                    className="w-4 h-4 flex-shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={1.75}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"
+                    />
+                  </svg>
+                </a>
+              )}
+            </div>
           </div>
         )}
       </div>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { Search } from 'lucide-react'
 import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import Avatar from '@/components/ui/Avatar'
@@ -153,7 +154,7 @@ export default function NewConversationPage() {
           <div className="flex justify-center py-8"><Spinner className="text-green-700" /></div>
         ) : filtered.length === 0 ? (
           <div className="px-4 py-4">
-            <EmptyState icon="🔍" title="No members found" description="Try a different name or business." />
+            <EmptyState icon={<Search className="w-5 h-5" strokeWidth={1.75} />} title="No members found" description="Try a different name or business." />
           </div>
         ) : (
           <div className="space-y-px bg-green-50/30">

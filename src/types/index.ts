@@ -116,6 +116,8 @@ export interface Course {
   pre_buffer_mins: number
   post_buffer_mins: number
   seats_per_class: number | null
+  // Max total bookings allowed at this course per date (across all tee times).
+  max_players_per_day: number
 
   // Optional description shown in the admin and used as the GHL group description
   description: string | null
@@ -128,6 +130,9 @@ export interface Course {
 
   // GHL Calendar Group for this course (auto-created on course creation)
   ghl_group_id: string | null
+
+  // Manual display order (admin-controlled); lower sorts first, null sorts last
+  sort_order: number | null
 
   // Approval workflow
   approval_status: CourseApprovalStatus
@@ -178,10 +183,6 @@ export interface MemberProfile {
   profile_visible: boolean
   show_handicap: boolean
   text_size: number
-  timezone: string | null
-  latitude: number | null
-  longitude: number | null
-  location_updated_at: string | null
   updated_at: string
 }
 
@@ -252,6 +253,44 @@ export interface Referral {
   created_at: string
   updated_at: string
 }
+
+// ---- Referral partners --------------------------------------
+
+export type ReferralPartnerLinkStatus = 'linked' | 'converted'
+
+export interface ReferralPartner {
+  id: string
+  name: string
+  code: string
+  percentage: number
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ReferralPartnerLink {
+  id: string
+  referral_partner_id: string
+  member_id: string | null
+  email: string
+  ghl_contact_id: string | null
+  status: ReferralPartnerLinkStatus
+  converted_at: string | null
+  created_at: string
+  updated_at: string
+  // Enriched (present when joined to the member row in API responses)
+  member?: { first_name: string; last_name: string; email: string; membership_status: string } | null
+}
+
+export interface ReferralPartnerStats {
+  linkedCount: number
+  memberCount: number
+  nonMemberCount: number
+  convertedCount: number
+  commissionOwed: number
+}
+
+export type ReferralPartnerWithStats = ReferralPartner & ReferralPartnerStats
 
 export interface Conversation {
   id: string

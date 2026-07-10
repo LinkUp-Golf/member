@@ -51,6 +51,31 @@ function DotsVertical() {
   )
 }
 
+function MapPinIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+    </svg>
+  )
+}
+
+function MapIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.159.69.159 1.006 0z" />
+    </svg>
+  )
+}
+
+function GlobeIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+    </svg>
+  )
+}
+
 function CourseMenuItem({ label, danger, disabled, onClick }: { label: string; danger?: boolean; disabled?: boolean; onClick: () => void }) {
   return (
     <button
@@ -156,6 +181,9 @@ export default function AdminCoursesPage() {
   const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [reordering, setReordering] = useState(false)
+  const [reorderList, setReorderList] = useState<CourseRow[]>([])
+  const [savingOrder, setSavingOrder] = useState(false)
 
   const showToast = (msg: string, ok = true) => {
     setToast({ msg, ok })
@@ -244,6 +272,47 @@ export default function AdminCoursesPage() {
   }
   const filtered = grouped[filter]
 
+  function startReorder() {
+    setReorderList([...grouped.active])
+    setReordering(true)
+  }
+
+  function cancelReorder() {
+    setReordering(false)
+    setReorderList([])
+  }
+
+  function moveCourse(index: number, dir: -1 | 1) {
+    setReorderList(list => {
+      const target = index + dir
+      if (target < 0 || target >= list.length) return list
+      const next = [...list]
+      const [moved] = next.splice(index, 1)
+      if (!moved) return list
+      next.splice(target, 0, moved)
+      return next
+    })
+  }
+
+  async function saveOrder() {
+    setSavingOrder(true)
+    const res = await fetch('/api/admin/courses/reorder', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderedIds: reorderList.map(c => c.id) }),
+    })
+    const json = await res.json().catch(() => ({}))
+    if (res.ok) {
+      showToast('Course order saved.')
+      setReordering(false)
+      setReorderList([])
+      await loadCourses()
+    } else {
+      showToast(json.error ?? 'Failed to save order.', false)
+    }
+    setSavingOrder(false)
+  }
+
   return (
     <div className="p-4 sm:p-8">
       <div className="flex items-start justify-between gap-4 mb-6">
@@ -280,7 +349,7 @@ export default function AdminCoursesPage() {
         {(Object.keys(FILTER_LABELS) as FilterTab[]).map(tab => (
           <button
             key={tab}
-            onClick={() => setFilter(tab)}
+            onClick={() => { setFilter(tab); cancelReorder() }}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
               filter === tab
                 ? 'bg-green-900 text-white'
@@ -299,7 +368,85 @@ export default function AdminCoursesPage() {
         ))}
       </div>
 
-      {loading ? (
+      {/* Reorder controls — Active tab only. The saved order is what members
+          see on the Book ("select an event") screen. */}
+      {filter === 'active' && !loading && grouped.active.length > 1 && (
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <p className="text-xs text-gray-500">
+            {reordering
+              ? 'Use the arrows to reorder, then save. This is the order members see when booking.'
+              : 'Set the order courses appear to members on the booking screen.'}
+          </p>
+          {reordering ? (
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={cancelReorder}
+                disabled={savingOrder}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveOrder}
+                disabled={savingOrder}
+                className="px-3 py-1.5 rounded-lg bg-green-900 text-white text-xs font-semibold hover:bg-green-800 disabled:opacity-50"
+              >
+                {savingOrder ? 'Saving…' : 'Save order'}
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={startReorder}
+              className="flex-shrink-0 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50"
+            >
+              Reorder
+            </button>
+          )}
+        </div>
+      )}
+
+      {reordering ? (
+        <div className="card">
+          {reorderList.map((course, i) => (
+            <div
+              key={course.id}
+              className="flex items-center gap-3 px-4 py-3"
+              style={{ borderBottom: i < reorderList.length - 1 ? '1px solid rgba(0,38,105,0.06)' : 'none' }}
+            >
+              <span className="text-xs font-semibold text-gray-400 w-5 text-center flex-shrink-0">{i + 1}</span>
+              <div
+                className="relative w-10 h-10 rounded-lg overflow-hidden flex-shrink-0"
+                style={{ background: 'rgba(0,38,105,0.03)' }}
+              >
+                <Image src={course.logo_url} alt="" fill unoptimized className="object-contain" />
+              </div>
+              <h3 className="flex-1 min-w-0 font-medium text-sm text-gray-900 truncate">{course.name}</h3>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  onClick={() => moveCourse(i, -1)}
+                  disabled={i === 0 || savingOrder}
+                  aria-label="Move up"
+                  className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => moveCourse(i, 1)}
+                  disabled={i === reorderList.length - 1 || savingOrder}
+                  aria-label="Move down"
+                  className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : loading ? (
         <div className="space-y-4">{[1,2,3].map(i => <div key={i} className="h-32 bg-gray-100 rounded-xl animate-pulse" />)}</div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-20">
@@ -337,7 +484,19 @@ export default function AdminCoursesPage() {
                 <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
-                      <h3 className="font-semibold text-gray-900 truncate min-w-0">{course.name}</h3>
+                      <h3 className="font-semibold text-gray-900 truncate min-w-0">
+                        {course.booking_url ? (
+                          <a
+                            href={course.booking_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="hover:text-blue-700 hover:underline"
+                          >
+                            {course.name}
+                          </a>
+                        ) : course.name}
+                      </h3>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
                         {course.approval_status !== 'active' && (
                           <Badge label={sm.label} colour={sm.colour} />
@@ -351,9 +510,35 @@ export default function AdminCoursesPage() {
                       </div>
                     </div>
 
-                    {/* Mobile-only 3-dot actions menu — portaled so it can't
-                        be clipped by the .card container's overflow-hidden */}
-                    <CourseActionsMenu>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {course.map_link && (
+                        <a
+                          href={course.map_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          aria-label="View on map"
+                          className="flex items-center justify-center w-6 h-6 text-gray-400 hover:text-blue-600 transition-colors"
+                        >
+                          <MapIcon className="w-4 h-4" />
+                        </a>
+                      )}
+                      {course.booking_url && (
+                        <a
+                          href={course.booking_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          aria-label="Visit website"
+                          className="flex items-center justify-center w-6 h-6 text-gray-400 hover:text-blue-600 transition-colors"
+                        >
+                          <GlobeIcon className="w-4 h-4" />
+                        </a>
+                      )}
+
+                      {/* Mobile-only 3-dot actions menu — portaled so it can't
+                          be clipped by the .card container's overflow-hidden */}
+                      <CourseActionsMenu>
                       {(closeMenu) => (
                         <>
                           {course.approval_status === 'pending' && !isRejecting && (
@@ -373,12 +558,29 @@ export default function AdminCoursesPage() {
                         </>
                       )}
                     </CourseActionsMenu>
+                    </div>
                   </div>
 
                   {(course.city || course.state || course.address) && (
-                    <p className="text-xs text-gray-500">
-                      📍 {[course.city, course.state].filter(Boolean).join(', ')}
-                      {course.address ? ` - ${course.address}` : ''}
+                    <p className="text-xs text-gray-500 flex items-center gap-1">
+                      {course.map_link ? (
+                        <a
+                          href={course.map_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          aria-label="View on map"
+                          className="flex-shrink-0 text-gray-400 hover:text-blue-600 transition-colors"
+                        >
+                          <MapPinIcon className="w-3.5 h-3.5" />
+                        </a>
+                      ) : (
+                        <MapPinIcon className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                      )}
+                      <span>
+                        {[course.city, course.state].filter(Boolean).join(', ')}
+                        {course.address ? ` - ${course.address}` : ''}
+                      </span>
                     </p>
                   )}
 
@@ -583,6 +785,7 @@ type CourseFormValues = {
   timezone: string
   ghl_calendar_id: string
   cost_per_player: number | ''
+  max_players_per_day: number | ''
   booking_rules: string
   booking_url: string
   payment_url: string
@@ -616,6 +819,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
       timezone: editingCourse?.timezone ?? 'America/Los_Angeles',
       ghl_calendar_id: editingCourse?.ghl_calendar_id ?? '',
       cost_per_player: editingCourse?.cost_per_player ?? '',
+      max_players_per_day: editingCourse?.max_players_per_day ?? '',
       booking_rules: editingCourse?.booking_rules ?? '',
       booking_url: editingCourse?.booking_url ?? '',
       payment_url: editingCourse?.payment_url ?? '',
@@ -663,6 +867,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
         body: JSON.stringify({
           ...data,
           cost_per_player: data.cost_per_player === '' ? null : Number(data.cost_per_player),
+          max_players_per_day: data.max_players_per_day === '' ? undefined : Number(data.max_players_per_day),
           createCalendar: false,
         }),
       })
@@ -884,6 +1089,23 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
                   })}
                 />
                 {errors.cost_per_player && <p className={errMsg}>{errors.cost_per_player.message}</p>}
+              </div>
+
+              <div>
+                <label htmlFor="course-max-players-per-day" className={labelCls}>Max players per day</label>
+                <input
+                  id="course-max-players-per-day"
+                  type="number"
+                  min="1"
+                  step="1"
+                  className={field(!!errors.max_players_per_day)}
+                  placeholder="15"
+                  {...register('max_players_per_day', {
+                    min: { value: 1, message: 'Must be at least 1' },
+                  })}
+                />
+                <p className="mt-1 text-xs text-gray-500">Total bookings allowed at this course per date (across all tee times). Defaults to 15.</p>
+                {errors.max_players_per_day && <p className={errMsg}>{errors.max_players_per_day.message}</p>}
               </div>
 
               <div>

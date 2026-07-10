@@ -2,10 +2,8 @@ export const dynamic = 'force-dynamic'
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
-import { formatInTimeZone, getTimezoneOffset } from 'date-fns-tz'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { AVIARA_TIMEZONE } from '@/lib/constants'
 import type { AuthContext } from '@/lib/auth/types'
 
 export interface DayPlayer {
@@ -19,20 +17,15 @@ export interface DayPlayer {
   is_self: boolean
 }
 
-// Returns the course-local date ("YYYY-MM-DD") and time ("HH:MM:SS") for a
-// given UTC timestamp, in the given course's own timezone.
-function courseParts(utcMs: number, timezone: string): { date: string; time: string } {
-  const d = new Date(utcMs)
-  return {
-    date: formatInTimeZone(d, timezone, 'yyyy-MM-dd'),
-    time: formatInTimeZone(d, timezone, 'HH:mm:ss'),
-  }
-}
-
-// GET /api/bookings/day?date=YYYY-MM-DD&timezone=IANA_TZ
-// Returns members (same home course) who have confirmed bookings on the given LOCAL date.
-// The timezone param converts the user's local day to the correct date range
-// in the member's home course's own timezone (not necessarily Aviara).
+// GET /api/bookings/day?date=YYYY-MM-DD&courseId=...
+// Returns members who have confirmed bookings on the given date at the
+// given course — "who's playing" is scoped to whichever course the member
+// is currently browsing/booking, not always their home course, now that
+// the app supports multiple courses. Falls back to the member's home
+// course when no courseId is supplied (e.g. before a course is selected).
+// "date" is always the course's own local calendar date — booking_date is
+// stored as a literal course-local date already, so no timezone
+// conversion is needed here.
 export const GET = withAuth(
   async (req: NextRequest, ctx: AuthContext) => {
     const date = req.nextUrl.searchParams.get('date')
@@ -42,58 +35,26 @@ export const GET = withAuth(
 
     const admin = createAdminClient()
 
-    const { data: member } = await admin
-      .from('members')
-      .select('home_course_id, home_course:courses!members_home_course_id_fkey(timezone)')
-      .eq('id', ctx.userId)
-      .single()
-
-    if (!member) return NextResponse.json({ players: [] })
-
-    const homeCourseTimezone = (member.home_course as unknown as { timezone: string } | null)?.timezone ?? AVIARA_TIMEZONE
-
-    const clientTz = req.nextUrl.searchParams.get('timezone') ?? homeCourseTimezone
-    let timezone = homeCourseTimezone
-    try {
-      new Intl.DateTimeFormat('en-US', { timeZone: clientTz })
-      timezone = clientTz
-    } catch {
-      // invalid timezone string — fall back to the home course's own timezone
+    let courseId = req.nextUrl.searchParams.get('courseId')
+    if (!courseId) {
+      const { data: member } = await admin
+        .from('members')
+        .select('home_course_id')
+        .eq('id', ctx.userId)
+        .single()
+      if (!member) return NextResponse.json({ players: [] })
+      courseId = member.home_course_id
     }
 
-    // Convert user's local day (00:00 – 23:59) to UTC using their offset.
-    // Noon UTC of the date is used as a stable DST-safe reference point.
-    const offsetMs = getTimezoneOffset(timezone, new Date(`${date}T12:00:00Z`))
-    const dayStartUtc = new Date(`${date}T00:00:00Z`).getTime() - offsetMs
-    const dayEndUtc = new Date(`${date}T23:59:59Z`).getTime() - offsetMs
+    if (!courseId) return NextResponse.json({ players: [] })
 
-    // Map those UTC boundaries to the home course's own date + time.
-    const courseStart = courseParts(dayStartUtc, homeCourseTimezone)
-    const courseEnd = courseParts(dayEndUtc, homeCourseTimezone)
-
-    // Base query — apply course / status / guest filters.
-    let bookingsQuery = admin
+    const { data: bookings } = await admin
       .from('bookings')
       .select('member_id, booking_date, tee_time, players')
-      .eq('course_id', member.home_course_id)
+      .eq('course_id', courseId)
+      .eq('booking_date', date)
       .is('guest_name', null)
       .in('status', ['availability_confirmed', 'payment_confirmed', 'confirmed'])
-
-    if (courseStart.date === courseEnd.date) {
-      // User's local day falls entirely within one home-course calendar date.
-      bookingsQuery = bookingsQuery
-        .eq('booking_date', courseStart.date)
-        .gte('tee_time', courseStart.time)
-        .lte('tee_time', courseEnd.time)
-    } else {
-      // User's local day spans two home-course calendar dates (e.g. UTC+8 users).
-      bookingsQuery = bookingsQuery.or(
-        `and(booking_date.eq.${courseStart.date},tee_time.gte.${courseStart.time}),` +
-          `and(booking_date.eq.${courseEnd.date},tee_time.lte.${courseEnd.time})`,
-      )
-    }
-
-    const { data: bookings } = await bookingsQuery
 
     if (!bookings?.length) return NextResponse.json({ players: [] })
 
@@ -119,6 +80,12 @@ export const GET = withAuth(
       }),
     )
 
+    // Dedupe by member + tee time: each row here should already be one
+    // distinct primary booker (guest/additional-player rows are excluded
+    // above), but a retried/duplicate booking submission can otherwise show
+    // the same person twice for the same slot. A member with two genuinely
+    // different tee times the same day still shows once per tee time.
+    const seen = new Set<string>()
     const players: DayPlayer[] = bookings
       .map((b) => {
         const m = memberMap[b.member_id as string]
@@ -135,6 +102,12 @@ export const GET = withAuth(
         }
       })
       .filter((p): p is DayPlayer => p !== null)
+      .filter((p) => {
+        const key = `${p.member_id}:${p.tee_time}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
 
     return NextResponse.json({ players })
   },

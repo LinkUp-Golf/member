@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { Handshake } from 'lucide-react'
 import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
 import { Spinner } from '@/components/ui/Loading'
@@ -120,7 +121,7 @@ export default function ReferralsPage() {
 
         {!loading && referrals.length === 0 && !showForm && (
           <EmptyState
-            icon="🤝"
+            icon={<Handshake className="w-5 h-5" strokeWidth={1.75} />}
             title="No referrals yet"
             description="Invite someone you believe would be a great fit. Your referrals will track here."
           />

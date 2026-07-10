@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
 //   2. Create GHL calendar appointment
 //   3. Write one booking row per player to Supabase (status = 'tentative')
 //
-// GET /api/bookings/create?month=YYYY-MM&timezone=...
+// GET /api/bookings/create?month=YYYY-MM&courseId=...
 //   Returns available tee-time slots from the GHL Aviara calendar.
 // ============================================================
 
@@ -23,7 +23,9 @@ import { getAvailableSlots, createBooking, getContactByEmail } from '@/lib/ghl/c
 import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { sendPushToMembers, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
+import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
 import { format } from 'date-fns'
+import { titleCaseName } from '@/lib/utils'
 import type { AdditionalPlayer } from '@/types'
 
 // Total players per booking is capped at 4 (mirrors validateBookingPayload),
@@ -34,13 +36,14 @@ import {
   AVIARA_TIMEZONE,
   AVIARA_ADDRESS,
   GOLF_ROUND_DURATION_MINUTES,
+  DEFAULT_MAX_PLAYERS_PER_DAY,
 } from '@/lib/constants'
 
 const AVIARA_CALENDAR_ID = process.env.GHL_AVIARA_CALENDAR_ID ?? ''
 const AVIARA_CALENDAR_USER_ID = process.env.GHL_AVIARA_CALENDAR_USER_ID ?? ''
 
 // ============================================================
-// GET /api/bookings/create?month=YYYY-MM&timezone=...
+// GET /api/bookings/create?month=YYYY-MM&courseId=...
 // Returns all available slots for the month, keyed by date.
 // ============================================================
 export async function GET(request: NextRequest) {
@@ -65,14 +68,10 @@ export async function GET(request: NextRequest) {
   const endDate = format(new Date(year, monthIdx + 1, 0), 'yyyy-MM-dd')
 
   let calendarId = AVIARA_CALENDAR_ID
-  // Slot listing is displayed in the *browsing member's* timezone, not the
-  // course's — GHL buckets/labels each returned slot's date+time for
-  // whichever timezone we ask for, so a member in Asia/Manila browsing a
-  // course in America/Chicago should see (and pick) times converted to
-  // their own zone (e.g. 4:35am, not the venue's 1:35pm). The venue's own
-  // timezone is still what the POST step below uses to derive booking_date/
-  // tee_time for storage — that's a separate, correct concern from display.
-  const timezone = searchParams.get('timezone') || AVIARA_TIMEZONE
+  // Slot listing is always displayed in the *course's own* timezone — a tee
+  // time is an appointment at that venue's local wall-clock time, regardless
+  // of where the browsing member happens to be.
+  let timezone = AVIARA_TIMEZONE
   let calendarUserId: string | undefined = AVIARA_CALENDAR_USER_ID || undefined
 
   if (courseId) {
@@ -89,6 +88,7 @@ export async function GET(request: NextRequest) {
     }
     calendarId = course.ghl_calendar_id
     calendarUserId = course.ghl_calendar_user_id || undefined
+    timezone = course.timezone || AVIARA_TIMEZONE
   }
 
   const slots = await getAvailableSlots({
@@ -195,6 +195,21 @@ export async function POST(request: NextRequest) {
 
   const adminSupabase = createAdminClient()
 
+  // First-in-first-out: a member may only hold bookings awaiting payment
+  // (status 'availability_confirmed' — a payment link has been sent) — every
+  // one of them must be paid before another booking can be created, across
+  // any course. Since this rule is being added to an app already in
+  // production, a member may already have more than one booking awaiting
+  // payment on their account; surface all of them, not just one. Check this
+  // before touching GHL so a blocked member fails fast with a clear message.
+  const pendingBookings = await findPendingPaymentBookings(adminSupabase, user.id)
+  if (pendingBookings.length) {
+    return NextResponse.json(
+      { error: pendingPaymentBlockMessage(pendingBookings), pendingBookings },
+      { status: 409 },
+    )
+  }
+
   // Resolve course calendar settings — use the selected course when provided,
   // fall back to the Aviara env-var constants for backward compatibility.
   let eventCalendarId = AVIARA_CALENDAR_ID
@@ -203,15 +218,18 @@ export async function POST(request: NextRequest) {
   let eventDurationMinutes = GOLF_ROUND_DURATION_MINUTES
   let eventCourseName = 'Aviara'
   let resolvedCourseId: string = member.home_course_id
+  // Course details echoed back on the created rows so the client can render the
+  // correct course name immediately (the create RPC doesn't join `courses`).
+  let courseForResponse: { name: string; city: string; state: string; payment_url: string | null; timezone: string } | null = null
+
+  const { data: course } = await adminSupabase
+    .from('courses')
+    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, meeting_duration_mins, cost_per_player')
+    .eq('id', courseId || resolvedCourseId)
+    .eq('approval_status', 'active')
+    .single()
 
   if (courseId) {
-    const { data: course } = await adminSupabase
-      .from('courses')
-      .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, meeting_duration_mins, cost_per_player')
-      .eq('id', courseId)
-      .eq('approval_status', 'active')
-      .single()
-
     if (!course?.ghl_calendar_id) {
       return NextResponse.json({ error: 'Course not found or booking not yet configured' }, { status: 404 })
     }
@@ -221,6 +239,16 @@ export async function POST(request: NextRequest) {
     eventDurationMinutes = course.meeting_duration_mins || GOLF_ROUND_DURATION_MINUTES
     eventCourseName = course.name
     resolvedCourseId = course.id
+  }
+
+  if (course) {
+    courseForResponse = {
+      name: course.name,
+      city: course.city,
+      state: course.state,
+      payment_url: course.payment_url ?? null,
+      timezone: course.timezone,
+    }
   }
 
   const localParts = new Intl.DateTimeFormat('en-CA', {
@@ -274,6 +302,31 @@ export async function POST(request: NextRequest) {
         )
       }
     }
+
+    // The FIFO gate also applies to member guests: a booker can't pull a fellow
+    // member into a group round while that member still owes for one of their
+    // own. Block the whole booking with a name-specific message so the booker
+    // knows exactly who to remove — mirrors the client-side flag, and is the
+    // authoritative check (runs before any GHL work).
+    const guestsWithPending = await findMembersWithPendingPayment(adminSupabase, memberGuestIds)
+    if (guestsWithPending.size) {
+      const names = [...guestsWithPending].map((id) => {
+        const r = memberRowById[id]
+        return r ? titleCaseName(`${r.first_name} ${r.last_name}`.trim()) : 'A selected member'
+      })
+      const list =
+        names.length === 1
+          ? names[0]
+          : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+      const verb = names.length === 1 ? 'has' : 'have'
+      return NextResponse.json(
+        {
+          error: `${list} ${verb} a payment due on an existing booking. Please remove them — they can be added once it's paid.`,
+          blockedMemberIds: [...guestsWithPending],
+        },
+        { status: 409 }
+      )
+    }
   }
 
   // 3. A non-member must be genuinely new. Reject any whose email already belongs to
@@ -325,49 +378,21 @@ export async function POST(request: NextRequest) {
     address: eventAddress,
   }
 
-  // Step 1: Create GHL appointment for the primary booker — must succeed
-  let primaryGhlId: string
-  try {
-    primaryGhlId = await createBooking({
-      ...bookingParams,
-      contact: {
-        id: member.ghl_contact_id,
-        email: member.email,
-        phone: member.phone ?? null,
-      },
-    })
-  } catch (err) {
-    console.error('[booking/create] GHL appointment creation failed:', String(err))
-    return NextResponse.json(
-      { error: 'Failed to create appointment in GHL. Please try again.', detail: String(err) },
-      { status: 502 }
-    )
-  }
+  // ---- Daily capacity: max players per course per DATE ---------------------
+  // Read the per-course cap (courses.max_players_per_day). The actual count +
+  // reservation happen atomically in our DB below (create_bookings_for_day),
+  // scoped to this course + date across all tee times.
+  const { data: capRow } = await adminSupabase
+    .from('courses')
+    .select('max_players_per_day')
+    .eq('id', resolvedCourseId)
+    .single()
+  const maxPlayersPerDay = capRow?.max_players_per_day ?? DEFAULT_MAX_PLAYERS_PER_DAY
 
-  console.log('[booking/create] GHL appointment created for primary:', primaryGhlId)
-
-  // Step 1b: Create GHL appointments for each member guest in parallel (non-fatal),
-  // using their validated GHL contact from the database. Non-member guests are
-  // intentionally skipped — they only reach GHL once an admin sets them up.
-  const memberGhlIds = await Promise.all(
-    memberPlayers.map(async (p) => {
-      const row = p.memberId ? memberRowById[p.memberId] : undefined
-      if (!row?.ghl_contact_id) return null
-      try {
-        const ghlId = await createBooking({
-          ...bookingParams,
-          contact: { id: row.ghl_contact_id, email: row.email, phone: row.phone ?? null },
-        })
-        console.log('[booking/create] GHL appointment created for guest:', row.email, ghlId)
-        return ghlId
-      } catch (err) {
-        console.warn('[booking/create] Guest GHL appointment failed (non-fatal):', row.email, String(err))
-        return null
-      }
-    })
-  )
-
-  // Step 2: Supabase insert — one row per player
+  // Step 1: Build one booking row per player. GHL appointments are created
+  // AFTER the DB reserves the seats, so ghl_booking_id starts null and is
+  // backfilled below. Every row consumes a seat: the booker, each member
+  // guest, and each pending non-member (held while awaiting admin approval).
   const rows = [
     {
       member_id: user.id,
@@ -376,13 +401,14 @@ export async function POST(request: NextRequest) {
       tee_time: timeNormalized,
       players: 1,
       guest_name: null as string | null,
+      player_member_id: null as string | null,
       additional_players: [] as typeof extraPlayers,
       status: 'tentative',
       amount_charged: BOOKING_PRICE_USD,
       focus_linkup_id: focusLinkupId ?? null,
-      ghl_booking_id: primaryGhlId,
+      ghl_booking_id: null as string | null,
     },
-    ...memberPlayers.map((p, i) => ({
+    ...memberPlayers.map((p) => ({
       member_id: user.id,
       course_id: resolvedCourseId,
       booking_date: bookingDate,
@@ -394,7 +420,7 @@ export async function POST(request: NextRequest) {
       status: 'tentative',
       amount_charged: BOOKING_PRICE_USD,
       focus_linkup_id: focusLinkupId ?? null,
-      ghl_booking_id: memberGhlIds[i] ?? null,
+      ghl_booking_id: null as string | null,
     })),
     // Non-members are held for admin review: a booking row in 'awaiting_approval'
     // with no GHL appointment. An admin "sets it up" (creates the GHL contact +
@@ -406,34 +432,144 @@ export async function POST(request: NextRequest) {
       tee_time: timeNormalized,
       players: 1,
       guest_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email,
-      player_member_id: null,
+      player_member_id: null as string | null,
       additional_players: [p],
       status: 'awaiting_approval',
       amount_charged: BOOKING_PRICE_USD,
       focus_linkup_id: focusLinkupId ?? null,
-      ghl_booking_id: null,
+      ghl_booking_id: null as string | null,
     })),
   ]
 
-  console.log('[booking/create] Inserting', rows.length, 'booking row(s)')
+  // Step 2: Atomically reserve seats + insert rows. The DB serializes
+  // concurrent bookings for this course+date under an advisory lock and rejects
+  // the WHOLE group if it would exceed the daily cap (raises DAY_FULL:<remaining>).
+  console.log('[booking/create] Reserving', rows.length, 'seat(s); daily cap', maxPlayersPerDay)
 
   const { data: insertedBookings, error: insertError } = await adminSupabase
-    .from('bookings')
-    .insert(rows)
-    .select('*')
+    .rpc('create_bookings_for_day', {
+      p_course_id: resolvedCourseId,
+      p_date: bookingDate,
+      p_capacity: maxPlayersPerDay,
+      p_rows: rows,
+    })
 
-  if (insertError || !insertedBookings?.length) {
-    console.error('[booking/create] Booking insert failed:', insertError)
+  if (insertError) {
+    // Atomic FIFO backstop: a payment link came due for the booker or a member
+    // guest between the earlier check and this reservation (e.g. a GHL webhook
+    // fired mid-flight). No GHL appointment has been created yet, so there's
+    // nothing to unwind — just surface who now owes.
+    const pendingRace = /PENDING_PAYMENT:([0-9a-f,\-]+)/i.exec(insertError.message ?? '')
+    if (pendingRace) {
+      const ids = new Set(
+        (pendingRace[1] ?? '').split(',').map(s => s.trim()).filter(Boolean)
+      )
+      const bookerBlocked = ids.has(user.id)
+      const guestNames = [...ids]
+        .filter(id => id !== user.id)
+        .map(id => {
+          const r = memberRowById[id]
+          return r ? titleCaseName(`${r.first_name} ${r.last_name}`.trim()) : 'A player'
+        })
+      let error: string
+      if (guestNames.length === 0) {
+        // Only the booker owes.
+        error = 'A payment just came due on one of your bookings. Please pay it before booking again.'
+      } else {
+        const list =
+          guestNames.length === 1
+            ? guestNames[0]
+            : `${guestNames.slice(0, -1).join(', ')} and ${guestNames[guestNames.length - 1]}`
+        const verb = guestNames.length === 1 ? 'has' : 'have'
+        error = bookerBlocked
+          ? `A payment just came due for you and ${list}. Please resolve it and try again.`
+          : `${list} just ${verb} a payment due on an existing booking. Please remove them and try again.`
+      }
+      return NextResponse.json({ error, blockedMemberIds: [...ids] }, { status: 409 })
+    }
+
+    const dayFull = /DAY_FULL:(\d+)/.exec(insertError.message ?? '')
+    if (dayFull) {
+      const seatsRemaining = parseInt(dayFull[1] ?? '0', 10)
+      return NextResponse.json(
+        {
+          error: seatsRemaining > 0
+            ? `Only ${seatsRemaining} spot${seatsRemaining === 1 ? '' : 's'} left for this date — please reduce your group or pick another day.`
+            : 'This day is fully booked. Please pick another day.',
+          seatsRemaining,
+        },
+        { status: 409 }
+      )
+    }
+    console.error('[booking/create] Slot reservation failed:', insertError)
     return NextResponse.json(
-      { error: 'Failed to create booking records', detail: insertError?.message },
+      { error: 'Failed to create booking records', detail: insertError.message },
       { status: 500 }
     )
   }
 
-  console.log('[booking/create] Bookings created:', insertedBookings.map(b => b.id))
+  if (!insertedBookings?.length) {
+    return NextResponse.json({ error: 'Failed to create booking records' }, { status: 500 })
+  }
 
-  const primaryBookingId =
-    (insertedBookings.find(b => b.guest_name === null) ?? insertedBookings[0])?.id ?? ''
+  type InsertedBooking = { id: string; guest_name: string | null; player_member_id: string | null; ghl_booking_id: string | null }
+  const created = insertedBookings as InsertedBooking[]
+  console.log('[booking/create] Reserved bookings:', created.map(b => b.id))
+
+  // Step 3: Now that the seats are reserved, create GHL appointments and
+  // backfill ghl_booking_id. The primary booker's appointment MUST succeed —
+  // if it fails we release the reservation by deleting the reserved rows.
+  const primaryBooking = created.find(b => b.guest_name === null && b.player_member_id === null) ?? created[0]
+  if (!primaryBooking) {
+    return NextResponse.json({ error: 'Failed to create booking records' }, { status: 500 })
+  }
+
+  let primaryGhlId: string
+  try {
+    primaryGhlId = await createBooking({
+      ...bookingParams,
+      contact: {
+        id: member.ghl_contact_id,
+        email: member.email,
+        phone: member.phone ?? null,
+      },
+    })
+  } catch (err) {
+    console.error('[booking/create] GHL appointment failed, releasing reservation:', String(err))
+    await adminSupabase.from('bookings').delete().in('id', created.map(b => b.id))
+    return NextResponse.json(
+      { error: 'Failed to create appointment in GHL. Please try again.', detail: String(err) },
+      { status: 502 }
+    )
+  }
+
+  await adminSupabase.from('bookings').update({ ghl_booking_id: primaryGhlId }).eq('id', primaryBooking.id)
+  primaryBooking.ghl_booking_id = primaryGhlId
+  console.log('[booking/create] GHL appointment created for primary:', primaryGhlId)
+
+  // Member-guest appointments are non-fatal — a failure just leaves that row
+  // without a GHL appointment. Non-member rows are skipped (awaiting approval).
+  await Promise.all(
+    created
+      .filter(b => b.player_member_id)
+      .map(async (b) => {
+        const row = b.player_member_id ? memberRowById[b.player_member_id] : undefined
+        if (!row?.ghl_contact_id) return
+        try {
+          const ghlId = await createBooking({
+            ...bookingParams,
+            contact: { id: row.ghl_contact_id, email: row.email, phone: row.phone ?? null },
+          })
+          await adminSupabase.from('bookings').update({ ghl_booking_id: ghlId }).eq('id', b.id)
+          b.ghl_booking_id = ghlId // reflect into the response payload (same array ref)
+          console.log('[booking/create] GHL appointment created for guest:', row.email, ghlId)
+        } catch (err) {
+          console.warn('[booking/create] Guest GHL appointment failed (non-fatal):', row.email, String(err))
+        }
+      })
+  )
+
+  const primaryBookingId = primaryBooking.id
 
   const displayDate = format(new Date(`${bookingDate}T12:00:00`), 'EEEE, MMMM d')
 
@@ -468,9 +604,15 @@ export async function POST(request: NextRequest) {
     ? `Booking submitted. ${nonMemberPlayers.length} non-member guest${nonMemberPlayers.length !== 1 ? 's' : ''} ${nonMemberPlayers.length !== 1 ? 'are' : 'is'} pending admin approval — we'll confirm availability and send your payment link by email.`
     : 'Booking submitted. We will confirm availability and send your payment link by email.'
 
+  // Echo the resolved course onto each row so the client's optimistic prepend
+  // renders the real course name (the RPC returns raw rows with no join).
+  const bookingsWithCourse = Array.isArray(insertedBookings) && courseForResponse
+    ? insertedBookings.map((b: Record<string, unknown>) => ({ ...b, course: courseForResponse }))
+    : insertedBookings
+
   return NextResponse.json({
     bookingId: primaryBookingId,
-    bookings: insertedBookings,
+    bookings: bookingsWithCourse,
     pendingNonMembers: nonMemberPlayers.length,
     message,
   })
