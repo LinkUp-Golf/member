@@ -94,7 +94,7 @@ interface AccessMemberRow {
 }
 
 type TeeSlot = { key: string; booking_date: string; tee_time: string; created_at: string; rows: BookingRow[] }
-type DateGroup = { date: string; label: string; isToday: boolean; slots: TeeSlot[] }
+type DateGroup = { date: string; label: string; isToday: boolean; slots: TeeSlot[]; newestCreatedAt: string }
 
 // Grouped by (booker + tee time + created_at) rather than just date/time —
 // two separate booking groups can land on the same tee time by coincidence
@@ -114,9 +114,14 @@ function groupBySlot(bookings: BookingRow[]): TeeSlot[] {
       const first = rows[0]!
       return { key, booking_date: first.booking_date, tee_time: first.tee_time, created_at: first.created_at, rows }
     })
-    .sort((a, b) => a.tee_time.localeCompare(b.tee_time) || a.created_at.localeCompare(b.created_at))
+    // Most recently booked first — an admin works the list from the newest
+    // request down, not from whichever tee time happens to be earliest.
+    .sort((a, b) => b.created_at.localeCompare(a.created_at) || a.tee_time.localeCompare(b.tee_time))
 }
 
+// Slots stay grouped under their tee date, but the groups themselves are ordered
+// by when their bookings came in — a date group ranks by its newest booking — so
+// the whole list reads newest-booked first.
 function groupByDate(slots: TeeSlot[]): DateGroup[] {
   const map = new Map<string, TeeSlot[]>()
   for (const slot of slots) {
@@ -130,8 +135,9 @@ function groupByDate(slots: TeeSlot[]): DateGroup[] {
       label: format(new Date(`${date}T12:00:00`), 'EEEE, MMMM d, yyyy'),
       isToday: isToday(new Date(`${date}T12:00:00`)),
       slots: s,
+      newestCreatedAt: s.reduce((max, sl) => (sl.created_at > max ? sl.created_at : max), ''),
     }))
-    .sort((a, b) => a.date.localeCompare(b.date))
+    .sort((a, b) => b.newestCreatedAt.localeCompare(a.newestCreatedAt))
 }
 
 function playerInfo(b: BookingRow): { name: string; sub: string; badge?: string } {
@@ -610,9 +616,8 @@ export default function AdminBookingsPage() {
     //               "upcoming" window.
     // Past:         365 days ago → yesterday
     // A custom From/To range overrides the view-based window when both are set.
-    // The final list is always grouped chronologically by date regardless of
-    // view (see groupByDate), so the query sort direction only affects fetch
-    // order, not what the admin ends up seeing.
+    // The window decides *which* bookings are fetched; the order they're shown in
+    // is always newest-booked first (see groupByDate), never by tee date.
     // Payment status (unpaid) is just another status filter — it doesn't
     // override the date window. The "days left" badge (see paymentDaysLeftLabel)
     // is what narrows attention to bookings within PAYMENT_OVERDUE_WINDOW_DAYS.
@@ -673,8 +678,7 @@ export default function AdminBookingsPage() {
         q = dinnerFilter === 'none' ? q.is('dinner_rsvp', null) : q.eq('dinner_rsvp', dinnerFilter)
       }
       return q
-        .order('booking_date', { ascending: isUpcoming })
-        .order('tee_time',     { ascending: isUpcoming })
+        .order('created_at', { ascending: false })
     }
 
     let { data, error } = await buildQuery(SELECT)
