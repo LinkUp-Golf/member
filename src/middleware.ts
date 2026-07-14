@@ -20,6 +20,7 @@ const PUBLIC_ROUTES = [
   '/join',
   '/install',
   '/auth/error',
+  '/auth/confirm',                // admin-generated copy-paste magic links (token_hash verify)
   '/membership-required',
   '/api/auth/magic-link',         // unauthenticated users request magic links
   '/api/auth/callback',           // Supabase redirects here after magic link click

@@ -12,6 +12,7 @@ import {
 } from "@/components/admin/AdminUI";
 import { format, formatDistanceToNow } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
+import { validateEmail } from "@/lib/validation";
 import type { MemberWithProfile } from "@/types";
 
 type FilterStatus =
@@ -35,6 +36,14 @@ export default function AdminMembersPage() {
   const [panelVisible, setPanelVisible] = useState(false);
   const [panelData, setPanelData] = useState<MemberWithProfile | null>(null);
   const [saving, setSaving] = useState(false);
+  const [customEmail, setCustomEmail] = useState("");
+  const [customResult, setCustomResult] = useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
+  const [generatingLink, setGeneratingLink] = useState(false);
+  const [generatedLink, setGeneratedLink] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<{
     total: number;
@@ -126,6 +135,50 @@ export default function AdminMembersPage() {
     setSaving(false);
   }
 
+  async function generateCustomMagicLink() {
+    const email = customEmail.trim();
+    if (!email) return;
+    setGeneratingLink(true);
+    setCustomResult(null);
+    setGeneratedLink(null);
+    setCopied(false);
+    try {
+      const res = await fetch("/api/admin/magic-link/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && (data as { link?: string }).link) {
+        setGeneratedLink((data as { link: string }).link);
+      } else {
+        setCustomResult({
+          ok: false,
+          message:
+            (data as { error?: string }).error ??
+            "Failed to generate login link.",
+        });
+      }
+    } catch {
+      setCustomResult({
+        ok: false,
+        message: "Something went wrong. Please try again.",
+      });
+    }
+    setGeneratingLink(false);
+  }
+
+  async function copyGeneratedLink() {
+    if (!generatedLink) return;
+    try {
+      await navigator.clipboard.writeText(generatedLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard unavailable — the field is selectable as a fallback */
+    }
+  }
+
   async function bulkSyncFromGHL() {
     setSyncing(true);
     setSyncResult(null);
@@ -211,6 +264,79 @@ export default function AdminMembersPage() {
           )}
         </div>
       )}
+
+      {/* Generate a copy-paste login link for any email (people not yet in the list) */}
+      <div className="mb-4 p-3 sm:p-4 rounded-xl border border-gray-200 bg-gray-50">
+        <p className="text-sm font-medium text-gray-900">
+          Generate a login link
+        </p>
+        <p className="text-xs text-gray-500 mt-0.5 mb-2.5">
+          For people who aren&apos;t in the members list yet. Generate a link to
+          copy and share directly. They still need an active GHL membership to
+          finish signing in.
+        </p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            generateCustomMagicLink();
+          }}
+          className="flex flex-col sm:flex-row gap-2"
+        >
+          <input
+            type="email"
+            required
+            value={customEmail}
+            onChange={(e) => {
+              setCustomEmail(e.target.value);
+              setGeneratedLink(null);
+              setCopied(false);
+            }}
+            placeholder="name@example.com"
+            className="w-full sm:flex-1 px-4 py-2 text-sm border border-gray-200 rounded-xl outline-none focus:border-green-500"
+          />
+          <button
+            type="submit"
+            disabled={generatingLink || !validateEmail(customEmail).valid}
+            className="flex-shrink-0 px-3 py-2 text-sm font-medium rounded-xl bg-green-900 text-white hover:bg-green-800 disabled:opacity-60 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+          >
+            {generatingLink ? "Generating…" : "Generate link"}
+          </button>
+        </form>
+
+        {generatedLink && (
+          <div className="mt-2.5">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                readOnly
+                value={generatedLink}
+                onFocus={(e) => e.currentTarget.select()}
+                className="w-full sm:flex-1 px-3 py-2 text-xs font-mono text-gray-700 border border-gray-200 rounded-xl bg-white outline-none"
+              />
+              <button
+                type="button"
+                onClick={copyGeneratedLink}
+                className="flex-shrink-0 px-3 py-2 text-sm font-medium rounded-xl bg-gray-900 text-white hover:bg-gray-800 transition-colors whitespace-nowrap"
+              >
+                {copied ? "Copied!" : "Copy"}
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              Single-use link — share it directly with the member.
+            </p>
+          </div>
+        )}
+
+        {customResult && (
+          <div
+            className={`mt-2.5 text-xs ${
+              customResult.ok ? "text-green-700" : "text-red-600"
+            }`}
+          >
+            {customResult.message}
+          </div>
+        )}
+      </div>
 
       <div className="flex gap-6">
         {/* Main list */}
