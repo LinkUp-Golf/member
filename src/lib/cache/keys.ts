@@ -19,6 +19,7 @@ export const COURSE_PROMO_NS    = 'course:promo'
 export const COURSE_LINKUPS_NS  = 'course:linkups'
 export const COURSE_MEMBERS_NS  = 'course:members'
 export const GHL_SLOTS_NS       = 'ghl:slots'
+export const GHL_CAL_RULES_NS   = 'ghl:cal:rules'
 
 // ---- TTLs --------------------------------------------------
 
@@ -29,6 +30,7 @@ export const COURSE_PROMO_TTL_MS   = 30 * 60_000   // 30 min — admin-managed, 
 export const COURSE_LINKUPS_TTL_MS = 60 * 60_000   // 1 hour — changes once per day at most
 export const COURSE_MEMBERS_TTL_MS = 15 * 60_000   // 15 min — status changes are admin-driven
 export const GHL_SLOTS_TTL_MS      = 30 * 60_000   // 30 min — availability shifts slowly
+export const GHL_CAL_RULES_TTL_MS  = 30 * 60_000   // 30 min — only changes when an admin edits the calendar in GHL
 
 // ---- Key builders ------------------------------------------
 
@@ -73,3 +75,7 @@ export const ghlSlotsKey = (calendarId: string, date: string) =>
   `${GHL_SLOTS_NS}:${calendarId}:${date}`
 export const ghlSlotsPrefix = (calendarId: string, date: string) =>
   `${GHL_SLOTS_NS}:${calendarId}:${date}`
+
+// Booking rules (slot duration, interval, notice, seats) for a GHL calendar.
+export const ghlCalendarRulesKey = (calendarId: string) =>
+  `${GHL_CAL_RULES_NS}:${calendarId}`

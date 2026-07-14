@@ -7,7 +7,6 @@ import { AdminPageHeader, StatCard } from '@/components/admin/AdminUI'
 import Select from '@/components/ui/Select'
 import { format, addDays, subDays, isToday, differenceInCalendarDays } from 'date-fns'
 import { formatTeeTime } from '@/lib/utils'
-import { GOLF_ROUND_DURATION_MINUTES } from '@/lib/constants'
 import type { AdditionalPlayer } from '@/types'
 
 type BookingStatus = 'tentative' | 'availability_confirmed' | 'payment_confirmed' | 'confirmed' | 'pending' | 'cancelled' | 'waitlist' | 'awaiting_approval'
@@ -29,7 +28,7 @@ interface BookingRow {
   ghl_opportunity_id: string | null
   member: { first_name: string; last_name: string; email: string } | null
   player?: { id: string; first_name: string; last_name: string; email: string } | null
-  course?: { name: string; id?: string } | null
+  course?: { name: string; id?: string; meeting_duration_mins?: number | null } | null
   course_id?: string
 }
 
@@ -95,7 +94,7 @@ interface AccessMemberRow {
 }
 
 type TeeSlot = { key: string; booking_date: string; tee_time: string; created_at: string; rows: BookingRow[] }
-type DateGroup = { date: string; label: string; isToday: boolean; slots: TeeSlot[] }
+type DateGroup = { date: string; label: string; isToday: boolean; slots: TeeSlot[]; newestCreatedAt: string }
 
 // Grouped by (booker + tee time + created_at) rather than just date/time —
 // two separate booking groups can land on the same tee time by coincidence
@@ -115,9 +114,14 @@ function groupBySlot(bookings: BookingRow[]): TeeSlot[] {
       const first = rows[0]!
       return { key, booking_date: first.booking_date, tee_time: first.tee_time, created_at: first.created_at, rows }
     })
-    .sort((a, b) => a.tee_time.localeCompare(b.tee_time) || a.created_at.localeCompare(b.created_at))
+    // Most recently booked first — an admin works the list from the newest
+    // request down, not from whichever tee time happens to be earliest.
+    .sort((a, b) => b.created_at.localeCompare(a.created_at) || a.tee_time.localeCompare(b.tee_time))
 }
 
+// Slots stay grouped under their tee date, but the groups themselves are ordered
+// by when their bookings came in — a date group ranks by its newest booking — so
+// the whole list reads newest-booked first.
 function groupByDate(slots: TeeSlot[]): DateGroup[] {
   const map = new Map<string, TeeSlot[]>()
   for (const slot of slots) {
@@ -131,8 +135,9 @@ function groupByDate(slots: TeeSlot[]): DateGroup[] {
       label: format(new Date(`${date}T12:00:00`), 'EEEE, MMMM d, yyyy'),
       isToday: isToday(new Date(`${date}T12:00:00`)),
       slots: s,
+      newestCreatedAt: s.reduce((max, sl) => (sl.created_at > max ? sl.created_at : max), ''),
     }))
-    .sort((a, b) => a.date.localeCompare(b.date))
+    .sort((a, b) => b.newestCreatedAt.localeCompare(a.newestCreatedAt))
 }
 
 function playerInfo(b: BookingRow): { name: string; sub: string; badge?: string } {
@@ -167,11 +172,15 @@ function canRemindPayment(b: BookingRow): boolean {
   return !!b.additional_players?.[0]?.email
 }
 
-function slotEndTime(teeTime: string): string {
+// A round's length is a per-course setting held on that course's GHL calendar and
+// mirrored onto courses.meeting_duration_mins. Returns null when the course (and
+// so its duration) isn't known, in which case the caller shows only the tee time.
+function slotEndTime(teeTime: string, durationMins: number | null | undefined): string | null {
+  if (!durationMins) return null
   const [th = 0, tm = 0] = teeTime.split(':').map(Number)
   // Wrap into a 24h clock for display — a late tee time + round duration can
   // cross midnight (e.g. hour 25), which formatTeeTime can't render correctly.
-  const endMins = (th * 60 + tm + GOLF_ROUND_DURATION_MINUTES) % 1440
+  const endMins = (th * 60 + tm + durationMins) % 1440
   return formatTeeTime(`${String(Math.floor(endMins / 60)).padStart(2, '0')}:${String(endMins % 60).padStart(2, '0')}:00`)
 }
 
@@ -232,6 +241,7 @@ function SlotCard({
     return acc
   }, {})
   const hasAttention = slot.rows.some(b => ['awaiting_approval', 'tentative'].includes(b.status))
+  const slotEnd = slotEndTime(slot.tee_time, slot.rows[0]?.course?.meeting_duration_mins)
 
   return (
     <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
@@ -252,7 +262,8 @@ function SlotCard({
             {/* Time + course + attention — first line */}
             <div className="flex items-center gap-2 flex-wrap">
               <p className="text-sm font-semibold text-gray-800 whitespace-nowrap">
-                {formatTeeTime(slot.tee_time)} – {slotEndTime(slot.tee_time)}
+                {formatTeeTime(slot.tee_time)}
+                {slotEnd && ` – ${slotEnd}`}
               </p>
               {showCourseName && slot.rows[0]?.course?.name && (
                 <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 whitespace-nowrap">
@@ -605,9 +616,8 @@ export default function AdminBookingsPage() {
     //               "upcoming" window.
     // Past:         365 days ago → yesterday
     // A custom From/To range overrides the view-based window when both are set.
-    // The final list is always grouped chronologically by date regardless of
-    // view (see groupByDate), so the query sort direction only affects fetch
-    // order, not what the admin ends up seeing.
+    // The window decides *which* bookings are fetched; the order they're shown in
+    // is always newest-booked first (see groupByDate), never by tee date.
     // Payment status (unpaid) is just another status filter — it doesn't
     // override the date window. The "days left" badge (see paymentDaysLeftLabel)
     // is what narrows attention to bookings within PAYMENT_OVERDUE_WINDOW_DAYS.
@@ -652,7 +662,7 @@ export default function AdminBookingsPage() {
 
     if (matchingCourseIds.length === 0) { setBookings([]); setLoading(false); return }
 
-    const SELECT = 'id, member_id, created_at, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name)'
+    const SELECT = 'id, member_id, created_at, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name, meeting_duration_mins)'
     const SELECT_NO_DINNER = SELECT.replace('dinner_rsvp, ', '')
 
     function buildQuery(select: string) {
@@ -668,8 +678,7 @@ export default function AdminBookingsPage() {
         q = dinnerFilter === 'none' ? q.is('dinner_rsvp', null) : q.eq('dinner_rsvp', dinnerFilter)
       }
       return q
-        .order('booking_date', { ascending: isUpcoming })
-        .order('tee_time',     { ascending: isUpcoming })
+        .order('created_at', { ascending: false })
     }
 
     let { data, error } = await buildQuery(SELECT)

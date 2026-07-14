@@ -33,7 +33,6 @@ import type {
 import {
   BOOKING_PRICE_USD,
   POLICY_TIERS,
-  GOLF_ROUND_DURATION_MINUTES,
   GHL_CANCEL_BOOKING_URL,
   AVIARA_TIMEZONE,
 } from "@/lib/constants";
@@ -86,13 +85,12 @@ function formatSlotTime(isoString: string): string {
   return formatTeeTime(isoString.split("T")[1]?.slice(0, 8) ?? "");
 }
 
-function slotEndTime(startIso: string): string {
+// How long a round runs is set on the course's GHL calendar, so the duration is
+// handed to us with the slots rather than assumed here.
+function slotEndTime(startIso: string, durationMins: number): string {
   const timeStr = startIso.split("T")[1]?.slice(0, 8) ?? "00:00:00";
   return format(
-    addMinutes(
-      parse(timeStr, "HH:mm:ss", new Date()),
-      GOLF_ROUND_DURATION_MINUTES,
-    ),
+    addMinutes(parse(timeStr, "HH:mm:ss", new Date()), durationMins),
     "h:mm a",
   );
 }
@@ -114,6 +112,9 @@ export default function BookPage() {
     Record<string, GHLBookingSlot[]>
   >({});
   const [loadingMonth, setLoadingMonth] = useState(false);
+  // Round length for the selected course, as configured on its GHL calendar.
+  // Returned alongside the slots; null until the first month load answers.
+  const [roundDurationMins, setRoundDurationMins] = useState<number | null>(null);
 
   // Selection — preselect today on load
   const [selectedDate, setSelectedDate] = useState<string>(() =>
@@ -191,6 +192,9 @@ export default function BookPage() {
       );
       const data = await res.json();
       setMonthSlots(data.slots ?? {});
+      setRoundDurationMins(
+        typeof data.durationMins === "number" ? data.durationMins : null,
+      );
     } catch {
       setMonthSlots({});
     }
@@ -875,6 +879,7 @@ export default function BookPage() {
                         key={slot.startTime}
                         slot={slot}
                         selected={selectedSlot?.startTime === slot.startTime}
+                        durationMins={roundDurationMins}
                         onSelect={() => setSelectedSlot(slot)}
                         onContinue={() => setStep("confirm")}
                       />
@@ -1487,11 +1492,13 @@ function DayPlayerBubble({ player }: { player: DayPlayer }) {
 function SlotRow({
   slot,
   selected,
+  durationMins,
   onSelect,
   onContinue,
 }: {
   slot: GHLBookingSlot;
   selected: boolean;
+  durationMins: number | null;
   onSelect: () => void;
   onContinue: () => void;
 }) {
@@ -1532,7 +1539,9 @@ function SlotRow({
           {formatSlotTime(slot.startTime)}
         </span>
         <p className="text-xs mt-0.5" style={{ color: "rgba(0,38,105,0.42)" }}>
-          Until ~{slotEndTime(slot.startTime)}
+          {durationMins !== null && (
+            <>Until ~{slotEndTime(slot.startTime, durationMins)}</>
+          )}
           {!full && (
             <span
               style={{

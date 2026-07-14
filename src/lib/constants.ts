@@ -51,7 +51,12 @@ export const AVIARA_TIMEZONE = 'America/Los_Angeles'
 // ---- Booking ------------------------------------------------
 
 export const BOOKING_PRICE_USD           = 160   // per player, USD
-export const GOLF_ROUND_DURATION_MINUTES = 300   // 5 hours
+// How long a round runs is a per-course setting owned by that course's GHL
+// calendar (its slotDuration). Read it with getCalendarBookingRules() — never
+// assume a duration. This is only the last-resort fallback for when GHL can't
+// be reached and the course row has nothing stored; it mirrors the DB default
+// of courses.meeting_duration_mins.
+export const FALLBACK_ROUND_DURATION_MINUTES = 300
 // Fallback daily booking cap per course when courses.max_players_per_day is
 // unset. Mirrors the column's DB default.
 export const DEFAULT_MAX_PLAYERS_PER_DAY = 15

@@ -759,19 +759,17 @@ function DeleteCourseModal({
 }
 
 // ---- Booking rule display helpers ---------------------------
-function formatMins(mins: number | null): string {
-  if (!mins) return '—'
-  if (mins % (60 * 24 * 30) === 0) return `${mins / (60 * 24 * 30)} month${mins / (60 * 24 * 30) !== 1 ? 's' : ''}`
-  if (mins % (60 * 24 * 7) === 0)  return `${mins / (60 * 24 * 7)} week${mins / (60 * 24 * 7) !== 1 ? 's' : ''}`
-  if (mins % (60 * 24) === 0)      return `${mins / (60 * 24)} day${mins / (60 * 24) !== 1 ? 's' : ''}`
-  if (mins % 60 === 0)             return `${mins / 60} hr${mins / 60 !== 1 ? 's' : ''}`
-  return `${mins} min${mins !== 1 ? 's' : ''}`
+// GHL sends each booking rule as a value plus its own unit field (slotDuration: 4,
+// slotDurationUnit: 'hours'). Render the pair as GHL stores it — reading the number
+// on its own silently reports hours and days as minutes.
+const UNIT_LABELS: Record<string, string> = {
+  mins: 'min', hours: 'hr', days: 'day', weeks: 'week', months: 'month',
 }
-function formatDays(days: number | null): string {
-  if (!days) return '—'
-  if (days % 30 === 0) return `${days / 30} month${days / 30 !== 1 ? 's' : ''}`
-  if (days % 7 === 0)  return `${days / 7} week${days / 7 !== 1 ? 's' : ''}`
-  return `${days} day${days !== 1 ? 's' : ''}`
+function formatRule(value: number | null, unit: string | null, fallbackUnit = 'mins'): string {
+  if (!value) return '—'
+  const resolved = unit ?? fallbackUnit
+  const label = UNIT_LABELS[resolved] ?? resolved
+  return `${value} ${label}${value !== 1 ? 's' : ''}`.trim()
 }
 
 type CourseFormValues = {
@@ -836,7 +834,16 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
   }, [watchedName, isEdit, setValue])
 
   // GHL data
-  type GHLCal = { id: string; name: string; calendarType: string; slotInterval: number | null; slotDuration: number | null; preBuffer: number | null; slotBuffer: number | null; appoinmentPerSlot: number | null; allowBookingAfter: number | null; allowBookingFor: number | null }
+  type GHLCal = {
+    id: string; name: string; calendarType: string
+    slotInterval: number | null;      slotIntervalUnit: string | null
+    slotDuration: number | null;      slotDurationUnit: string | null
+    preBuffer: number | null;         preBufferUnit: string | null
+    slotBuffer: number | null;        slotBufferUnit: string | null
+    appoinmentPerSlot: number | null
+    allowBookingAfter: number | null; allowBookingAfterUnit: string | null
+    allowBookingFor: number | null;   allowBookingForUnit: string | null
+  }
   const [ghlTags, setGhlTags] = useState<{ id: string; name: string }[]>([])
   const [ghlCalendars, setGhlCalendars] = useState<GHLCal[]>([])
   const [tagsLoading, setTagsLoading] = useState(true)
@@ -1222,12 +1229,12 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
                 </p>
                 <div className="grid grid-cols-2 divide-x divide-y divide-gray-100">
                   {[
-                    { label: 'Meeting interval',      value: formatMins(selectedCalendar.slotInterval) },
-                    { label: 'Meeting duration',      value: formatMins(selectedCalendar.slotDuration) },
-                    { label: 'Min scheduling notice', value: formatMins(selectedCalendar.allowBookingAfter) },
-                    { label: 'Date range',            value: formatDays(selectedCalendar.allowBookingFor) },
-                    { label: 'Pre-buffer',            value: formatMins(selectedCalendar.preBuffer) },
-                    { label: 'Post-buffer',           value: formatMins(selectedCalendar.slotBuffer) },
+                    { label: 'Meeting interval',      value: formatRule(selectedCalendar.slotInterval, selectedCalendar.slotIntervalUnit) },
+                    { label: 'Meeting duration',      value: formatRule(selectedCalendar.slotDuration, selectedCalendar.slotDurationUnit) },
+                    { label: 'Min scheduling notice', value: formatRule(selectedCalendar.allowBookingAfter, selectedCalendar.allowBookingAfterUnit) },
+                    { label: 'Date range',            value: formatRule(selectedCalendar.allowBookingFor, selectedCalendar.allowBookingForUnit, 'days') },
+                    { label: 'Pre-buffer',            value: formatRule(selectedCalendar.preBuffer, selectedCalendar.preBufferUnit) },
+                    { label: 'Post-buffer',           value: formatRule(selectedCalendar.slotBuffer, selectedCalendar.slotBufferUnit) },
                     { label: 'Seats per class',       value: selectedCalendar.appoinmentPerSlot ? `${selectedCalendar.appoinmentPerSlot}` : 'Unlimited' },
                   ].map(({ label, value }) => (
                     <div key={label} className="px-4 py-2.5">

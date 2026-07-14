@@ -14,14 +14,14 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { createBooking, getContactByEmail, createContact, addTagToContact } from '@/lib/ghl/client'
+import { createBooking, getContactByEmail, createContact, addTagToContact, resolveMeetingDurationMins } from '@/lib/ghl/client'
 import { ALL_ACCESS_TAGS } from '@/lib/ghl/tags'
 import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { syncMember } from '@/lib/sync'
 import { sendPushToMember, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
 import { format } from 'date-fns'
-import { AVIARA_TIMEZONE, AVIARA_ADDRESS, GOLF_ROUND_DURATION_MINUTES } from '@/lib/constants'
+import { AVIARA_TIMEZONE, AVIARA_ADDRESS, FALLBACK_ROUND_DURATION_MINUTES } from '@/lib/constants'
 import type { AuthContext } from '@/lib/auth/types'
 import type { AdditionalPlayer, GHLContact } from '@/types'
 
@@ -113,7 +113,7 @@ export const PATCH = withAuth(
     let eventCalendarId = AVIARA_CALENDAR_ID
     let eventTimezone = AVIARA_TIMEZONE
     let eventAddress = AVIARA_ADDRESS
-    let eventDurationMinutes = GOLF_ROUND_DURATION_MINUTES
+    let eventDurationMinutes = FALLBACK_ROUND_DURATION_MINUTES
     let courseName = 'Aviara'
     if (booking.course_id) {
       const { data: course } = await admin
@@ -125,10 +125,14 @@ export const PATCH = withAuth(
         eventCalendarId = course.ghl_calendar_id
         eventTimezone = course.timezone || AVIARA_TIMEZONE
         eventAddress = course.address || AVIARA_ADDRESS
-        eventDurationMinutes = course.meeting_duration_mins || GOLF_ROUND_DURATION_MINUTES
+        eventDurationMinutes = course.meeting_duration_mins || FALLBACK_ROUND_DURATION_MINUTES
         courseName = course.name
       }
     }
+
+    // Same rule as member-created bookings: the round's length is the GHL
+    // calendar's slot duration, with the course row only as an offline fallback.
+    eventDurationMinutes = await resolveMeetingDurationMins(eventCalendarId, eventDurationMinutes)
 
     // Create the GHL contact + appointment first. If GHL fails, leave the booking
     // 'awaiting_approval' so the admin can retry instead of losing the guest.
