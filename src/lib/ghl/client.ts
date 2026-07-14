@@ -7,10 +7,13 @@
 // ============================================================
 
 import { HighLevel } from '@gohighlevel/api-client'
+import { formatInTimeZone } from 'date-fns-tz'
 import type { GHLContact, GHLCalendarEvent, GHLBookingSlot } from '@/types'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
 import { logger } from '@/lib/logger'
-import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GOLF_ROUND_DURATION_MINUTES, GHL_BOOKING_REMINDER_WEBHOOK_PATH, GHL_PAYMENT_REMINDER_WEBHOOK_PATH } from '@/lib/constants'
+import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GHL_BOOKING_REMINDER_WEBHOOK_PATH, GHL_PAYMENT_REMINDER_WEBHOOK_PATH } from '@/lib/constants'
+import { getCache, withCache } from '@/lib/cache'
+import { GHL_CAL_RULES_NS, GHL_CAL_RULES_TTL_MS, ghlCalendarRulesKey } from '@/lib/cache/keys'
 
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID ?? ''
 
@@ -320,10 +323,15 @@ export async function getAvailableSlots(params: {
   timezone: string
   userId?: string
   sendSeatsPerSlot?: boolean
+  // Used only if GHL can't tell us the calendar's slot duration.
+  fallbackDurationMins: number
 }): Promise<Record<string, GHLBookingSlot[]>> {
   try {
     const startMs = new Date(params.startDate).getTime()
     const endMs = new Date(params.endDate + 'T23:59:59').getTime()
+
+    // A slot's end is start + the calendar's own meeting duration.
+    const durationMins = await resolveMeetingDurationMins(params.calendarId, params.fallbackDurationMins)
 
     const qs = new URLSearchParams({
       startDate: String(startMs),
@@ -342,10 +350,12 @@ export async function getAvailableSlots(params: {
       if (dateKey === 'traceId' || typeof value !== 'object' || !value.slots) continue
       result[dateKey] = []
       for (const [startTime, spotsOpen] of Object.entries(value.slots)) {
-        const slotEndMs = new Date(startTime).getTime() + GOLF_ROUND_DURATION_MINUTES * 60 * 1000
+        const slotEndMs = new Date(startTime).getTime() + durationMins * 60 * 1000
         result[dateKey].push({
           startTime,
-          endTime: new Date(slotEndMs).toISOString(),
+          // Same offset-bearing shape GHL uses for startTime, so callers can read
+          // the wall-clock time straight off the string.
+          endTime: formatInTimeZone(slotEndMs, params.timezone, "yyyy-MM-dd'T'HH:mm:ssxxx"),
           available: spotsOpen > 0,
           spotsOpen,
         })
@@ -670,6 +680,79 @@ export interface GHLCalendarSummary {
   allowBookingAfterUnit: GHLDurationUnit | null
   allowBookingFor: number | null
   allowBookingForUnit: GHLDurationUnit | null
+}
+
+// ---- Calendar booking rules ---------------------------------
+// The GHL calendar is the source of truth for how long a round runs. Each rule
+// is stored as a value plus its own unit, so both must be read together.
+
+const UNIT_TO_MINUTES: Record<string, number> = {
+  mins: 1,
+  minutes: 1,
+  hours: 60,
+  days: 60 * 24,
+  weeks: 60 * 24 * 7,
+  months: 60 * 24 * 30,
+}
+
+export function ghlRuleToMinutes(
+  value: number | null | undefined,
+  unit: string | null | undefined,
+): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null
+  const factor = UNIT_TO_MINUTES[(unit ?? 'mins').toLowerCase()]
+  return factor ? value * factor : null
+}
+
+export interface CalendarBookingRules {
+  slotDurationMins: number | null
+  slotIntervalMins: number | null
+  minSchedulingNoticeMins: number | null
+  dateRangeDays: number | null
+  seatsPerSlot: number | null
+}
+
+// Reads one calendar's booking rules, normalised to minutes. Cached — a
+// calendar's rules change only when an admin edits them in GHL. Returns null
+// if GHL is unreachable or the calendar is gone, so callers can fall back.
+export async function getCalendarBookingRules(calendarId: string): Promise<CalendarBookingRules | null> {
+  if (!calendarId) return null
+
+  return withCache(
+    getCache(GHL_CAL_RULES_NS),
+    ghlCalendarRulesKey(calendarId),
+    async (): Promise<CalendarBookingRules | null> => {
+      try {
+        const data = await ghlFetch<{ calendar?: GHLCalendarSummary }>(`/calendars/${calendarId}`)
+        const cal = data.calendar
+        if (!cal) return null
+
+        const dateRangeMins = ghlRuleToMinutes(cal.allowBookingFor, cal.allowBookingForUnit ?? 'days')
+
+        return {
+          slotDurationMins:        ghlRuleToMinutes(cal.slotDuration, cal.slotDurationUnit),
+          slotIntervalMins:        ghlRuleToMinutes(cal.slotInterval, cal.slotIntervalUnit),
+          minSchedulingNoticeMins: ghlRuleToMinutes(cal.allowBookingAfter, cal.allowBookingAfterUnit),
+          dateRangeDays:           dateRangeMins === null ? null : Math.round(dateRangeMins / (60 * 24)),
+          seatsPerSlot:            cal.appoinmentPerSlot ?? null,
+        }
+      } catch {
+        return null
+      }
+    },
+    GHL_CAL_RULES_TTL_MS,
+  )
+}
+
+// The round duration to use for a course, in minutes. Prefers the live GHL
+// calendar; falls back to the duration last synced onto the course row when
+// GHL is unreachable.
+export async function resolveMeetingDurationMins(
+  calendarId: string,
+  fallbackMins: number,
+): Promise<number> {
+  const rules = await getCalendarBookingRules(calendarId)
+  return rules?.slotDurationMins ?? fallbackMins
 }
 
 export async function listCalendars(): Promise<GHLCalendarSummary[]> {

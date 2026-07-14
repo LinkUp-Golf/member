@@ -4,7 +4,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { createGHLCalendar, deleteGHLCalendar } from '@/lib/ghl/client'
+import { createGHLCalendar, deleteGHLCalendar, getCalendarBookingRules } from '@/lib/ghl/client'
 import { validateTimezone } from '@/lib/validation'
 import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
 import type { AuthContext } from '@/lib/auth/types'
@@ -167,6 +167,14 @@ export const PATCH = withAuth(
       if (key in updates) updates[key] = (updates[key] as string)?.trim() || null
     }
     if (!Object.keys(updates).length) return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
+
+    // The GHL calendar owns the round length, so pointing a course at a calendar
+    // adopts that calendar's slot duration. Mirroring it here keeps the member and
+    // admin screens showing the right end time without either of them calling GHL.
+    if (typeof updates.ghl_calendar_id === 'string' && updates.ghl_calendar_id) {
+      const rules = await getCalendarBookingRules(updates.ghl_calendar_id)
+      if (rules?.slotDurationMins) updates.meeting_duration_mins = rules.slotDurationMins
+    }
 
     const { data, error } = await admin.from('courses').update(updates).eq('id', id).select().single()
     if (error) {

@@ -19,7 +19,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
-import { getAvailableSlots, createBooking, getContactByEmail } from '@/lib/ghl/client'
+import { getAvailableSlots, createBooking, getContactByEmail, resolveMeetingDurationMins } from '@/lib/ghl/client'
 import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { sendPushToMembers, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
@@ -35,7 +35,7 @@ import {
   BOOKING_PRICE_USD,
   AVIARA_TIMEZONE,
   AVIARA_ADDRESS,
-  GOLF_ROUND_DURATION_MINUTES,
+  FALLBACK_ROUND_DURATION_MINUTES,
   DEFAULT_MAX_PLAYERS_PER_DAY,
 } from '@/lib/constants'
 
@@ -74,11 +74,15 @@ export async function GET(request: NextRequest) {
   let timezone = AVIARA_TIMEZONE
   let calendarUserId: string | undefined = AVIARA_CALENDAR_USER_ID || undefined
 
+  // Only used if GHL can't tell us the calendar's own slot duration.
+  let fallbackDurationMins = FALLBACK_ROUND_DURATION_MINUTES
+  let storedDurationMins: number | null = null
+
   if (courseId) {
     const adminSupabase = createAdminClient()
     const { data: course } = await adminSupabase
       .from('courses')
-      .select('ghl_calendar_id, ghl_calendar_user_id, timezone')
+      .select('ghl_calendar_id, ghl_calendar_user_id, timezone, meeting_duration_mins')
       .eq('id', courseId)
       .eq('approval_status', 'active')
       .single()
@@ -89,6 +93,23 @@ export async function GET(request: NextRequest) {
     calendarId = course.ghl_calendar_id
     calendarUserId = course.ghl_calendar_user_id || undefined
     timezone = course.timezone || AVIARA_TIMEZONE
+    storedDurationMins = course.meeting_duration_mins ?? null
+    fallbackDurationMins = course.meeting_duration_mins || FALLBACK_ROUND_DURATION_MINUTES
+  }
+
+  // The round length comes from this course's GHL calendar, so the client can
+  // render "until ~X" without assuming any duration of its own.
+  const durationMins = await resolveMeetingDurationMins(calendarId, fallbackDurationMins)
+
+  // Browsing tee times is the most frequent read of a calendar's rules, so use it
+  // to keep the course row's mirror of the duration current. Screens that can't
+  // reach GHL themselves (the admin bookings list) read that mirror.
+  if (courseId && storedDurationMins !== durationMins) {
+    void createAdminClient()
+      .from('courses')
+      .update({ meeting_duration_mins: durationMins })
+      .eq('id', courseId)
+      .then(() => {}, () => {})
   }
 
   const slots = await getAvailableSlots({
@@ -98,9 +119,10 @@ export async function GET(request: NextRequest) {
     timezone,
     userId: calendarUserId,
     sendSeatsPerSlot: true,
+    fallbackDurationMins,
   })
 
-  return NextResponse.json({ slots, timezone })
+  return NextResponse.json({ slots, timezone, durationMins })
 }
 
 // ============================================================
@@ -215,7 +237,7 @@ export async function POST(request: NextRequest) {
   let eventCalendarId = AVIARA_CALENDAR_ID
   let eventTimezone = AVIARA_TIMEZONE
   let eventAddress = AVIARA_ADDRESS
-  let eventDurationMinutes = GOLF_ROUND_DURATION_MINUTES
+  let eventDurationMinutes = FALLBACK_ROUND_DURATION_MINUTES
   let eventCourseName = 'Aviara'
   let resolvedCourseId: string = member.home_course_id
   // Course details echoed back on the created rows so the client can render the
@@ -236,9 +258,23 @@ export async function POST(request: NextRequest) {
     eventCalendarId = course.ghl_calendar_id
     eventTimezone = course.timezone || AVIARA_TIMEZONE
     eventAddress = course.address || course.city || AVIARA_ADDRESS
-    eventDurationMinutes = course.meeting_duration_mins || GOLF_ROUND_DURATION_MINUTES
+    eventDurationMinutes = course.meeting_duration_mins || FALLBACK_ROUND_DURATION_MINUTES
     eventCourseName = course.name
     resolvedCourseId = course.id
+  }
+
+  // The appointment's length is whatever this course's GHL calendar says a round
+  // is. The course row only supplies the fallback for when GHL is unreachable.
+  eventDurationMinutes = await resolveMeetingDurationMins(eventCalendarId, eventDurationMinutes)
+
+  // Keep the course row in step with GHL so the member and admin screens can show
+  // the right end time without each of them calling GHL. Best-effort.
+  if (course && course.meeting_duration_mins !== eventDurationMinutes) {
+    void adminSupabase
+      .from('courses')
+      .update({ meeting_duration_mins: eventDurationMinutes })
+      .eq('id', course.id)
+      .then(() => {}, () => {})
   }
 
   if (course) {

@@ -1,6 +1,5 @@
 import { addMinutes } from 'date-fns'
 import { fromZonedTime, formatInTimeZone } from 'date-fns-tz'
-import { AVIARA_TIMEZONE, GOLF_ROUND_DURATION_MINUTES } from '@/lib/constants'
 
 // GHL expects "YYYY-MM-DDTHH:MM:SS±HHMM" (the 'xx' token — always a numeric
 // offset, never 'Z', no colon).
@@ -25,12 +24,4 @@ export function resolveAppointmentIso(
     startIso: formatInTimeZone(startUtc, timezone, GHL_ISO_FORMAT),
     endIso: formatInTimeZone(endUtc, timezone, GHL_ISO_FORMAT),
   }
-}
-
-// Backward-compatible alias for existing Aviara bookings
-export function resolveAviaraAppointmentIso(
-  bookingDate: string,
-  teeTime: string,
-): { startIso: string; endIso: string } {
-  return resolveAppointmentIso(bookingDate, teeTime, AVIARA_TIMEZONE, GOLF_ROUND_DURATION_MINUTES)
 }
