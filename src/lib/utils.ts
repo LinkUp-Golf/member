@@ -19,6 +19,21 @@ export function getInitials(firstName: string, lastName: string): string {
   return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase()
 }
 
+// ---- Safe internal redirect target --------------------------
+// Guards post-login redirects (`next`/`redirectTo`) against open-redirect:
+// only a same-origin absolute path (single leading slash) is allowed.
+// Rejects absolute URLs ("https://evil.com") and protocol-relative
+// ("//evil.com"), both of which escape the origin via `new URL(next, base)`.
+export function safeRedirectPath(
+  next: string | null | undefined,
+  fallback = '/home'
+): string {
+  if (typeof next !== 'string' || !next.startsWith('/') || next.startsWith('//')) {
+    return fallback
+  }
+  return next
+}
+
 // ---- Date formatting ----------------------------------------
 
 // Returns a JS Date (UTC) for past/future comparisons and hour-difference logic.

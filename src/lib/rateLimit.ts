@@ -94,3 +94,10 @@ export function inviteRateLimit(memberId: string): RateLimitResult {
   // 10 invitations per hour per member
   return rateLimit(`invite:${memberId}`, { windowMs: 60 * 60_000, max: 10 })
 }
+
+export function magicLinkSendRateLimit(email: string): RateLimitResult {
+  // 5 admin-triggered login-link operations per 15 min per TARGET email.
+  // Keyed by recipient (not admin) to blunt email-bombing / auth-user
+  // flooding of a single address regardless of who triggers it.
+  return rateLimit(`admin-magic-link:${email.toLowerCase()}`, { windowMs: 15 * 60_000, max: 5 })
+}
