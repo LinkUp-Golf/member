@@ -646,6 +646,10 @@ export async function listLocationTags(): Promise<{ id: string; name: string }[]
 
 // ---- Calendar list (for admin UI calendar selector) ---------
 
+// GHL stores every booking-rule value alongside its own unit (e.g. slotDuration: 4
+// with slotDurationUnit: 'hours'). Reading the number without its unit is wrong.
+export type GHLDurationUnit = 'mins' | 'hours' | 'days' | 'weeks' | 'months'
+
 export interface GHLCalendarSummary {
   id: string
   name: string
@@ -654,12 +658,18 @@ export interface GHLCalendarSummary {
   groupId: string | null
   // Booking settings returned by GHL on the calendar object
   slotInterval: number | null
+  slotIntervalUnit: GHLDurationUnit | null
   slotDuration: number | null
+  slotDurationUnit: GHLDurationUnit | null
   preBuffer: number | null
+  preBufferUnit: GHLDurationUnit | null
   slotBuffer: number | null
+  slotBufferUnit: GHLDurationUnit | null
   appoinmentPerSlot: number | null
   allowBookingAfter: number | null
+  allowBookingAfterUnit: GHLDurationUnit | null
   allowBookingFor: number | null
+  allowBookingForUnit: GHLDurationUnit | null
 }
 
 export async function listCalendars(): Promise<GHLCalendarSummary[]> {
