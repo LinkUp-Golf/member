@@ -112,6 +112,14 @@ export default function BookPage() {
     Record<string, GHLBookingSlot[]>
   >({});
   const [loadingMonth, setLoadingMonth] = useState(false);
+  // Which (month, course) the current monthSlots were actually fetched for. Used
+  // to treat slots as "not ready" until they match the selected course+month, so
+  // a previous fetch's data (e.g. the no-course mount fetch, which falls back to
+  // the Aviara GHL calendar) never flashes on screen before the right data lands.
+  const [slotsMeta, setSlotsMeta] = useState<{ month: string; courseId: string | null }>({
+    month: "",
+    courseId: null,
+  });
   // Round length for the selected course, as configured on its GHL calendar.
   // Returned alongside the slots; null until the first month load answers.
   const [roundDurationMins, setRoundDurationMins] = useState<number | null>(null);
@@ -185,18 +193,28 @@ export default function BookPage() {
       );
       return todayInThisMonth ? format(new Date(), "yyyy-MM-dd") : "";
     });
+    // No course chosen yet: the calendar isn't shown, and a course-less fetch
+    // would resolve to the Aviara GHL calendar — exactly the stale data we don't
+    // want to flash later. Skip it and keep slots empty until a course is picked.
+    if (!selectedEvent) {
+      setMonthSlots({});
+      setSlotsMeta({ month: monthStr, courseId: null });
+      setLoadingMonth(false);
+      return;
+    }
     try {
-      const eventParam = selectedEvent ? `&courseId=${selectedEvent.id}` : "";
       const res = await fetch(
-        `/api/bookings/create?month=${monthStr}${eventParam}`,
+        `/api/bookings/create?month=${monthStr}&courseId=${selectedEvent.id}`,
       );
       const data = await res.json();
       setMonthSlots(data.slots ?? {});
       setRoundDurationMins(
         typeof data.durationMins === "number" ? data.durationMins : null,
       );
+      setSlotsMeta({ month: monthStr, courseId: selectedEvent.id });
     } catch {
       setMonthSlots({});
+      setSlotsMeta({ month: monthStr, courseId: selectedEvent.id });
     }
     setLoadingMonth(false);
   }, [currentMonth, selectedEvent]);
@@ -288,8 +306,17 @@ export default function BookPage() {
     }
     return null;
   }, [currentMonth, today]);
+  // Slots are "ready" only once they've been fetched for the currently selected
+  // course + month. Until then (in-flight fetch, or a stale set from a previous
+  // course/month) we render loading UI, never the mismatched data — this is what
+  // stops the brief flash of GHL availability before the custom slots arrive.
+  const monthLoading =
+    loadingMonth ||
+    slotsMeta.month !== format(currentMonth, "yyyy-MM") ||
+    slotsMeta.courseId !== (selectedEvent?.id ?? null);
+
   useEffect(() => {
-    if (loadingMonth || step !== "select" || activeTab !== "book") return;
+    if (monthLoading || step !== "select" || activeTab !== "book") return;
     // Prefer scrolling to the selected date; fall back to first bookable date
     const target = selectedDateRef.current ?? firstInWindowRef.current;
     target?.scrollIntoView({
@@ -298,7 +325,7 @@ export default function BookPage() {
       inline: "start",
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingMonth, step, activeTab]);
+  }, [monthLoading, step, activeTab]);
 
   async function loadMyBookings() {
     if (myBookingsRefreshInFlight.current) return;
@@ -690,7 +717,7 @@ export default function BookPage() {
             {/* Date picker — day strip or month grid */}
             <div className="px-5 md:px-8 pb-3">
               {viewMode === "day" ? (
-                loadingMonth ? (
+                monthLoading ? (
                   <div className="flex justify-center py-10">
                     <Spinner className="text-green-700" />
                   </div>
@@ -780,7 +807,7 @@ export default function BookPage() {
                   firstInWindowDateStr={firstInWindowDateStr}
                   hasDaySlots={hasDaySlots}
                   getDateStr={getDateStr}
-                  loadingMonth={loadingMonth}
+                  loadingMonth={monthLoading}
                   onSelectDate={(dateStr) => {
                     setSelectedDate(dateStr);
                     setSelectedSlot(null);
@@ -793,7 +820,7 @@ export default function BookPage() {
 
             {/* Who's playing on selected date */}
             {selectedDate &&
-              !loadingMonth &&
+              !monthLoading &&
               (dayPlayers.length > 0 || loadingDayPlayers) && (
                 <div className="px-5 md:px-8 pb-1">
                   <p className="section-label mb-2">
@@ -834,7 +861,7 @@ export default function BookPage() {
               )}
 
             {/* Tee time slots for selected date */}
-            {selectedDate && !loadingMonth && (
+            {selectedDate && !monthLoading && (
               <div className="px-5 md:px-8 pt-5">
                 <p className="section-label mb-3">
                   Tee times —{" "}

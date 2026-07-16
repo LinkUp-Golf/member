@@ -328,6 +328,22 @@ export const POST = withAuth(async (
         { status: 409 },
       )
     }
+
+    // A curated (custom) tee time filled up or had its seats lowered before this
+    // add landed — surface the slot's live remaining seats.
+    const slotFull = /SLOT_FULL:(\d{2}:\d{2}):(\d+)/.exec(insertError.message ?? '')
+    if (slotFull) {
+      const seatsRemaining = parseInt(slotFull[2] ?? '0', 10)
+      return NextResponse.json(
+        {
+          error: seatsRemaining > 0
+            ? `Only ${seatsRemaining} spot${seatsRemaining === 1 ? '' : 's'} left for this tee time — please add fewer players.`
+            : 'This tee time is full. No more players can be added to it.',
+          seatsRemaining,
+        },
+        { status: 409 },
+      )
+    }
     console.error('[booking/players] Insert failed:', insertError)
     return NextResponse.json({ error: 'Failed to add player. Please try again.' }, { status: 500 })
   }

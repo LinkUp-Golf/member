@@ -152,6 +152,7 @@ export const PATCH = withAuth(
       'booking_rules', 'booking_url', 'payment_url', 'required_tags', 'meeting_interval_mins',
       'meeting_duration_mins', 'min_scheduling_notice_mins', 'date_range_days',
       'pre_buffer_mins', 'post_buffer_mins', 'seats_per_class', 'max_players_per_day',
+      'custom_slots_enabled',
     ]
     const updates: Record<string, unknown> = {}
     for (const key of allowed) {

@@ -181,6 +181,7 @@ export default function AdminCoursesPage() {
   const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [managingSlots, setManagingSlots] = useState<CourseRow | null>(null)
   const [reordering, setReordering] = useState(false)
   const [reorderList, setReorderList] = useState<CourseRow[]>([])
   const [savingOrder, setSavingOrder] = useState(false)
@@ -507,6 +508,9 @@ export default function AdminCoursesPage() {
                         {course.ghl_group_id && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 font-medium">Group ✓</span>
                         )}
+                        {course.custom_slots_enabled && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-medium">Custom slots</span>
+                        )}
                       </div>
                     </div>
 
@@ -552,6 +556,9 @@ export default function AdminCoursesPage() {
                           )}
                           {course.approval_status === 'archived' && (
                             <CourseMenuItem label={isProcessing ? '…' : 'Reactivate'} disabled={isProcessing} onClick={() => { toggleActive(course, false); closeMenu() }} />
+                          )}
+                          {course.approval_status === 'active' && course.custom_slots_enabled && (
+                            <CourseMenuItem label="Manage slots" disabled={isProcessing} onClick={() => { setManagingSlots(course); closeMenu() }} />
                           )}
                           <CourseMenuItem label="Edit" disabled={isProcessing} onClick={() => { setEditingCourse(course); setShowCreate(true); closeMenu() }} />
                           <CourseMenuItem label="Delete" danger disabled={isProcessing} onClick={() => { setDeletingId(course.id); closeMenu() }} />
@@ -652,6 +659,9 @@ export default function AdminCoursesPage() {
                     {course.approval_status === 'archived' && (
                       <AdminButton label={isProcessing ? '…' : 'Reactivate'} onClick={() => toggleActive(course, false)} variant="ghost" size="sm" disabled={isProcessing} />
                     )}
+                    {course.approval_status === 'active' && course.custom_slots_enabled && (
+                      <AdminButton label="Manage slots" onClick={() => setManagingSlots(course)} variant="ghost" size="sm" disabled={isProcessing} />
+                    )}
                     <AdminButton label="Edit" onClick={() => { setEditingCourse(course); setShowCreate(true) }} variant="ghost" size="sm" disabled={isProcessing} />
                     <AdminButton label="Delete" onClick={() => setDeletingId(course.id)} variant="danger" size="sm" disabled={isProcessing} />
                   </div>
@@ -668,6 +678,7 @@ export default function AdminCoursesPage() {
           onClose={() => { setShowCreate(false); setEditingCourse(null) }}
           onCreated={() => { setShowCreate(false); setEditingCourse(null); loadCourses(); showToast(editingCourse ? 'Course updated successfully.' : 'Course added successfully.') }}
           onError={(msg) => showToast(msg, false)}
+          onManageSlots={(course) => { setShowCreate(false); setEditingCourse(null); setManagingSlots(course) }}
         />
       )}
 
@@ -680,6 +691,14 @@ export default function AdminCoursesPage() {
             if (course) deleteCourse(course)
           }}
           onClose={() => setDeletingId(null)}
+        />
+      )}
+
+      {managingSlots && (
+        <ManageSlotsDrawer
+          course={managingSlots}
+          onClose={() => setManagingSlots(null)}
+          onToast={showToast}
         />
       )}
     </div>
@@ -788,13 +807,15 @@ type CourseFormValues = {
   booking_url: string
   payment_url: string
   required_tags: string[]
+  custom_slots_enabled: boolean
 }
 
-function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
-  editingCourse?: Course | null
+function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onManageSlots }: {
+  editingCourse?: CourseRow | null
   onClose: () => void
   onCreated: () => void
   onError: (msg: string) => void
+  onManageSlots?: (course: CourseRow) => void
 }) {
   const isEdit = !!editingCourse
 
@@ -822,11 +843,13 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
       booking_url: editingCourse?.booking_url ?? '',
       payment_url: editingCourse?.payment_url ?? '',
       required_tags: editingCourse?.required_tags ?? [],
+      custom_slots_enabled: editingCourse?.custom_slots_enabled ?? false,
     },
   })
 
   const watchedName = watch('name')
   const watchedCalendarId = watch('ghl_calendar_id')
+  const watchCustomSlots = watch('custom_slots_enabled')
 
   // Auto-generate slug from course name in create mode
   useEffect(() => {
@@ -1245,12 +1268,370 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError }: {
                 </div>
               </div>
             )}
+
+            {/* Custom (admin-curated) tee times. When on, members see only the
+                slots the admin curates per date (in the "Manage dates & slots"
+                editor) instead of the full GHL calendar. */}
+            <label className="mt-4 flex items-start gap-3 rounded-xl border border-gray-100 px-4 py-3 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-green-700 focus:ring-green-600"
+                {...register('custom_slots_enabled')}
+              />
+              <span>
+                <span className="block text-sm font-medium text-gray-700">Curate tee times manually</span>
+                <span className={infoText}>
+                  On the specific dates you curate, members see your tee times instead of GHL&rsquo;s.
+                  All other dates keep their normal GHL availability.
+                </span>
+              </span>
+            </label>
+
+            {/* Bridge to the per-date slot editor. It needs the toggle saved
+                first (the API only curates custom-enabled courses), so show a
+                live button once saved, otherwise a "save first" hint. */}
+            {isEdit && watchCustomSlots && (
+              editingCourse?.custom_slots_enabled ? (
+                <button
+                  type="button"
+                  onClick={() => onManageSlots?.(editingCourse)}
+                  className="mt-3 w-full py-2.5 rounded-xl border border-green-700 text-green-800 text-sm font-semibold hover:bg-green-50 transition-colors"
+                >
+                  Manage dates &amp; slots →
+                </button>
+              ) : (
+                <p className="mt-3 text-[11px] text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
+                  Save changes to enable the date &amp; slot editor for this course.
+                </p>
+              )
+            )}
           </section>
 
           <button type="submit" disabled={isSubmitting} className="w-full py-3 rounded-xl bg-green-900 text-white font-semibold hover:bg-green-800 disabled:opacity-50 transition-colors">
             {isSubmitting ? (isEdit ? 'Saving…' : 'Adding course…') : (isEdit ? 'Save Changes' : 'Add Course')}
           </button>
         </form>
+      </div>
+    </div>
+  )
+}
+
+// ---- Manage custom slots drawer -----------------------------
+// Per-specific-date curation for a custom course. Picks a date, shows that
+// date's live GHL tee times (the source of truth) plus any already-saved
+// curation, lets the admin choose which to offer + set seats, and add extra
+// custom times. Saving replaces the whole day's curation.
+
+function localDateStr(d = new Date()): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+// Wall-clock 'HH:mm' straight off the offset-bearing ISO GHL returns.
+function isoToHHmm(iso: string): string {
+  return iso.slice(11, 16)
+}
+
+function hhmmLabel(hhmm: string): string {
+  const [hStr, mStr] = hhmm.split(':')
+  const h = Number(hStr)
+  const period = h >= 12 ? 'PM' : 'AM'
+  const hr = h % 12 === 0 ? 12 : h % 12
+  return `${hr}:${(mStr ?? '00').padStart(2, '0')} ${period}`
+}
+
+type GhlRow = { teeTime: string; seats: number; offered: boolean }
+type CustomRow = { key: string; teeTime: string; seats: number }
+type SavedSlot = { id: string; slot_date: string; tee_time: string; seats: number; source: 'ghl' | 'custom' }
+
+// A slot's seats must sit within [floor, ceil]: ceil = calendar capacity (never
+// oversell beyond what GHL allows; Infinity when unlimited), floor = players
+// already booked + 1 (never lower a slot into "already full"), capped at ceil.
+function seatBounds(bookedHere: number, calendarSeats: number | null): { floor: number; ceil: number } {
+  const ceil = calendarSeats ?? Number.MAX_SAFE_INTEGER
+  const floor = Math.min(bookedHere + 1, ceil)
+  return { floor, ceil }
+}
+function clampSeats(seats: number, bookedHere: number, calendarSeats: number | null): number {
+  const { floor, ceil } = seatBounds(bookedHere, calendarSeats)
+  if (!Number.isFinite(seats)) return floor
+  return Math.max(floor, Math.min(seats, ceil))
+}
+
+function ManageSlotsDrawer({ course, onClose, onToast }: {
+  course: Course
+  onClose: () => void
+  onToast: (msg: string, ok?: boolean) => void
+}) {
+  const [date, setDate] = useState(localDateStr())
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [ghlRows, setGhlRows] = useState<GhlRow[]>([])
+  const [customRows, setCustomRows] = useState<CustomRow[]>([])
+  // Players already booked per 'HH:mm' on the selected date (active rows only).
+  const [booked, setBooked] = useState<Record<string, number>>({})
+  // The GHL calendar's per-slot capacity — the seat ceiling. null = unlimited.
+  const [calendarSeats, setCalendarSeats] = useState<number | null>(null)
+
+  const loadDate = useCallback(async (d: string) => {
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/admin/courses/${course.id}/slots?date=${d}`)
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) { onToast(json.error ?? 'Failed to load slots.', false); setGhlRows([]); setCustomRows([]); setBooked({}); return }
+
+      const bookedMap = (json.booked ?? {}) as Record<string, number>
+      const calSeats = (typeof json.calendarSeats === 'number' ? json.calendarSeats : null) as number | null
+      setBooked(bookedMap)
+      setCalendarSeats(calSeats)
+
+      const ghlSlots = (json.ghlSlots ?? []) as Array<{ startTime: string; spotsOpen?: number }>
+      const saved = (json.savedSlots ?? []) as SavedSlot[]
+      // Saved rows keyed by 'HH:mm' for matching against GHL times.
+      const savedByTime = new Map<string, number>()
+      for (const s of saved) savedByTime.set(s.tee_time.slice(0, 5), s.seats)
+
+      const rows: GhlRow[] = ghlSlots.map(s => {
+        const t = isoToHHmm(s.startTime)
+        const savedSeats = savedByTime.get(t)
+        const want = savedSeats ?? s.spotsOpen ?? course.seats_per_class ?? 4
+        return {
+          teeTime: t,
+          seats: clampSeats(want, bookedMap[t] ?? 0, calSeats),
+          offered: savedSeats !== undefined,
+        }
+      })
+      const ghlTimes = new Set(rows.map(r => r.teeTime))
+      // Saved rows with no matching GHL slot are admin-added custom times.
+      const customs: CustomRow[] = saved
+        .filter(s => !ghlTimes.has(s.tee_time.slice(0, 5)))
+        .map((s, i) => {
+          const t = s.tee_time.slice(0, 5)
+          return { key: `saved-${i}-${s.tee_time}`, teeTime: t, seats: clampSeats(s.seats, bookedMap[t] ?? 0, calSeats) }
+        })
+
+      setGhlRows(rows)
+      setCustomRows(customs)
+    } finally {
+      setLoading(false)
+    }
+  }, [course.id, course.seats_per_class, onToast])
+
+  useEffect(() => { loadDate(date) }, [date, loadDate])
+
+  function updateGhlRow(i: number, patch: Partial<GhlRow>) {
+    setGhlRows(rows => rows.map((r, idx) => idx === i ? { ...r, ...patch } : r))
+  }
+  function updateCustomRow(key: string, patch: Partial<CustomRow>) {
+    setCustomRows(rows => rows.map(r => r.key === key ? { ...r, ...patch } : r))
+  }
+  function addCustomRow() {
+    setCustomRows(rows => [...rows, { key: `new-${Date.now()}-${rows.length}`, teeTime: '', seats: course.seats_per_class ?? 4 }])
+  }
+  function removeCustomRow(key: string) {
+    setCustomRows(rows => rows.filter(r => r.key !== key))
+  }
+
+  async function save() {
+    const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/
+    const slots: Array<{ tee_time: string; seats: number; source: 'ghl' | 'custom' }> = []
+
+    const checkSeats = (teeTime: string, seats: number): string | null => {
+      if (!Number.isInteger(seats) || seats < 1) return `Seats for ${hhmmLabel(teeTime)} must be a whole number ≥ 1.`
+      const { floor, ceil } = seatBounds(booked[teeTime] ?? 0, calendarSeats)
+      if (seats > ceil) return `Seats for ${hhmmLabel(teeTime)} can't exceed the calendar capacity of ${ceil}.`
+      if (seats < floor) return `${booked[teeTime] ?? 0} already booked at ${hhmmLabel(teeTime)} — seats must be at least ${floor}.`
+      return null
+    }
+
+    for (const r of ghlRows) {
+      if (!r.offered) continue
+      const err = checkSeats(r.teeTime, r.seats)
+      if (err) { onToast(err, false); return }
+      slots.push({ tee_time: r.teeTime, seats: r.seats, source: 'ghl' })
+    }
+    for (const r of customRows) {
+      if (!timeRe.test(r.teeTime)) { onToast('Every custom slot needs a valid time (HH:mm).', false); return }
+      const err = checkSeats(r.teeTime, r.seats)
+      if (err) { onToast(err, false); return }
+      slots.push({ tee_time: r.teeTime, seats: r.seats, source: 'custom' })
+    }
+
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/admin/courses/${course.id}/slots?date=${date}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slots }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (res.ok) {
+        onToast(slots.length ? `Saved ${slots.length} slot${slots.length !== 1 ? 's' : ''} for ${date}.` : `Cleared your custom slots for ${date} — it now uses normal GHL availability.`)
+        await loadDate(date)
+      } else {
+        onToast(json.error ?? 'Failed to save slots.', false)
+      }
+    } catch {
+      onToast('Network error. Check your connection and try again.', false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const offeredCount = ghlRows.filter(r => r.offered).length + customRows.length
+  const seatInput = "w-16 px-2 py-1 text-sm rounded-lg border border-gray-200 outline-none focus:border-green-700"
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <button type="button" aria-label="Close" className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-white w-full max-w-lg h-full overflow-y-auto shadow-2xl flex flex-col">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 flex-shrink-0">
+          <div className="min-w-0">
+            <h2 className="text-lg font-bold text-gray-900 truncate">Manage slots</h2>
+            <p className="text-xs text-gray-500 truncate">{course.name}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+          <div>
+            <label htmlFor="slot-date" className="block text-xs font-medium text-gray-600 mb-1">Date</label>
+            <input
+              id="slot-date"
+              type="date"
+              min={localDateStr()}
+              value={date}
+              onChange={e => setDate(e.target.value)}
+              className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 outline-none focus:border-green-700 bg-white"
+            />
+            <p className="text-[11px] text-gray-400 mt-1">Only the dates you curate here are overridden. Every other date keeps its normal GHL availability.</p>
+          </div>
+
+          {loading ? (
+            <div className="space-y-2">
+              {[0, 1, 2].map(i => <div key={i} className="h-10 bg-gray-100 rounded-xl animate-pulse" />)}
+            </div>
+          ) : (
+            <>
+              <section>
+                <h3 className="text-sm font-semibold text-gray-700 mb-3 pb-2 border-b border-gray-100">
+                  GHL tee times {ghlRows.length > 0 && <span className="text-gray-400 font-normal">({ghlRows.length})</span>}
+                  {calendarSeats != null && <span className="ml-2 text-[11px] font-normal text-gray-400">calendar capacity: {calendarSeats}/slot</span>}
+                </h3>
+                {ghlRows.length === 0 ? (
+                  <p className="text-xs text-gray-400 italic">No GHL tee times for this date. Add custom slots below.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {ghlRows.map((r, i) => {
+                      const b = booked[r.teeTime] ?? 0
+                      const { floor, ceil } = seatBounds(b, calendarSeats)
+                      const bad = r.offered && (r.seats < floor || r.seats > ceil)
+                      return (
+                        <div key={r.teeTime} className={`rounded-xl border px-3 py-2 ${bad ? 'border-amber-300 bg-amber-50/60' : 'border-gray-100'}`}>
+                          <label className="flex items-center gap-3 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={r.offered}
+                              onChange={e => updateGhlRow(i, { offered: e.target.checked })}
+                              className="h-4 w-4 rounded border-gray-300 text-green-700 focus:ring-green-600"
+                            />
+                            <span className="flex-1 text-sm font-medium text-gray-700">
+                              {hhmmLabel(r.teeTime)}
+                              {b > 0 && <span className="ml-2 text-[11px] font-normal text-gray-400">{b} booked</span>}
+                            </span>
+                            <span className="flex items-center gap-1.5">
+                              <input
+                                type="number"
+                                min={floor}
+                                max={calendarSeats ?? undefined}
+                                step={1}
+                                value={r.seats}
+                                disabled={!r.offered}
+                                onChange={e => updateGhlRow(i, { seats: Number(e.target.value) })}
+                                className={`${seatInput} disabled:opacity-40`}
+                              />
+                              <span className="text-[11px] text-gray-400">seats</span>
+                            </span>
+                          </label>
+                          {bad && (
+                            <p className="mt-1.5 text-[11px] text-amber-700">
+                              {r.seats > ceil
+                                ? `Max ${ceil} (calendar capacity).`
+                                : `At least ${floor} required${b > 0 ? ` — ${b} already booked` : ''}.`}
+                            </p>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-700">Custom slots</h3>
+                  <button type="button" onClick={addCustomRow} className="text-xs font-semibold text-green-800 hover:text-green-700">+ Add custom slot</button>
+                </div>
+                {customRows.length === 0 ? (
+                  <p className="text-xs text-gray-400 italic">No custom slots. Add times GHL doesn&apos;t offer.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {customRows.map(r => {
+                      const b = booked[r.teeTime] ?? 0
+                      const { floor, ceil } = seatBounds(b, calendarSeats)
+                      const bad = r.seats < floor || r.seats > ceil
+                      return (
+                        <div key={r.key} className={`rounded-xl border px-3 py-2 ${bad ? 'border-amber-300 bg-amber-50/70' : 'border-amber-100 bg-amber-50/40'}`}>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="time"
+                              value={r.teeTime}
+                              onChange={e => updateCustomRow(r.key, { teeTime: e.target.value })}
+                              className="px-2 py-1 text-sm rounded-lg border border-gray-200 outline-none focus:border-green-700 bg-white"
+                            />
+                            {b > 0 && <span className="text-[11px] text-gray-400">{b} booked</span>}
+                            <span className="flex-1" />
+                            <input
+                              type="number"
+                              min={floor}
+                              max={calendarSeats ?? undefined}
+                              step={1}
+                              value={r.seats}
+                              onChange={e => updateCustomRow(r.key, { seats: Number(e.target.value) })}
+                              className={seatInput}
+                            />
+                            <span className="text-[11px] text-gray-400">seats</span>
+                            <button type="button" onClick={() => removeCustomRow(r.key)} aria-label="Remove slot" className="text-gray-400 hover:text-red-500 text-lg leading-none px-1">✕</button>
+                          </div>
+                          {bad && (
+                            <p className="mt-1.5 text-[11px] text-amber-700">
+                              {r.seats > ceil
+                                ? `Max ${ceil} (calendar capacity).`
+                                : `At least ${floor} required${b > 0 ? ` — ${b} already booked` : ''}.`}
+                            </p>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </section>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-gray-100 flex-shrink-0">
+          <p className="text-xs text-gray-500">{offeredCount} slot{offeredCount !== 1 ? 's' : ''} offered on {date}</p>
+          <button
+            onClick={save}
+            disabled={saving || loading}
+            className="px-5 py-2.5 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 disabled:opacity-50 transition-colors"
+          >
+            {saving ? 'Saving…' : 'Save slots'}
+          </button>
+        </div>
       </div>
     </div>
   )
