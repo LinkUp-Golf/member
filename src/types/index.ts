@@ -118,6 +118,9 @@ export interface Course {
   seats_per_class: number | null
   // Max total bookings allowed at this course per date (across all tee times).
   max_players_per_day: number
+  // When true, this course's bookable tee times are admin-curated per date
+  // (see CustomSlot / course_custom_slots) instead of coming live from GHL.
+  custom_slots_enabled: boolean
 
   // Optional description shown in the admin and used as the GHL group description
   description: string | null
@@ -140,6 +143,20 @@ export interface Course {
   reviewed_by: string | null
   rejection_reason: string | null
   requester?: { first_name: string; last_name: string } | null
+}
+
+// One admin-curated tee time on a specific date for a course whose
+// custom_slots_enabled is true. `source` records whether the time was
+// selected from the GHL calendar or added by hand.
+export interface CustomSlot {
+  id: string
+  course_id: string
+  slot_date: string   // YYYY-MM-DD
+  tee_time: string    // HH:mm[:ss]
+  seats: number
+  source: 'ghl' | 'custom'
+  created_at: string
+  updated_at: string
 }
 
 export interface Member {
