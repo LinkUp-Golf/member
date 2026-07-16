@@ -910,6 +910,9 @@ export default function BookPage() {
               prev.map((b) => (b.id === id ? { ...b, ...updates } : b)),
             )
           }
+          onPlayersAdded={(rows) =>
+            setMyBookings((prev) => [...rows, ...prev])
+          }
         />
       )}
     </AppShell>
@@ -2646,24 +2649,51 @@ function MemberAutocomplete({
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [dropdownRect, setDropdownRect] = useState<{
-    top: number;
     left: number;
     width: number;
+    placeAbove: boolean;
+    // Exactly one of top/bottom is set, depending on placement.
+    top?: number;
+    bottom?: number;
+    maxHeight: number;
   } | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  const VISIBLE_ROWS = 4;
+  const ROW_HEIGHT = 52; // px — matches py-2.5 + content height
+
   function measureInput() {
-    if (inputRef.current) {
-      const r = inputRef.current.getBoundingClientRect();
-      setDropdownRect({ top: r.bottom + 4, left: r.left, width: r.width });
-    }
+    const el = inputRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const desired = VISIBLE_ROWS * ROW_HEIGHT;
+    const spaceBelow = window.innerHeight - r.bottom;
+    const spaceAbove = r.top;
+    // Flip the list above the input when there isn't room below (e.g. the input
+    // sits low inside a bottom sheet) and there's more room above. Anchoring by
+    // `bottom` then grows the list upward from just above the input.
+    const placeAbove = spaceBelow < desired && spaceAbove > spaceBelow;
+    const avail = (placeAbove ? spaceAbove : spaceBelow) - 8;
+    setDropdownRect({
+      left: r.left,
+      width: r.width,
+      placeAbove,
+      top: placeAbove ? undefined : r.bottom + 4,
+      bottom: placeAbove ? window.innerHeight - r.top + 4 : undefined,
+      maxHeight: Math.max(0, Math.min(desired, avail)),
+    });
   }
 
   useEffect(() => {
     function handleOutside(e: MouseEvent) {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node))
+      const target = e.target as Node;
+      // The results list is portaled to <body>, so it's outside wrapperRef in
+      // the DOM — exempt it explicitly, or clicking a result would be treated
+      // as an outside click and close the list before the selection registers.
+      if (dropdownRef.current?.contains(target)) return;
+      if (wrapperRef.current && !wrapperRef.current.contains(target))
         setOpen(false);
     }
     function handleScroll(e: Event) {
@@ -2678,9 +2708,6 @@ function MemberAutocomplete({
       document.removeEventListener("scroll", handleScroll, true);
     };
   }, []);
-
-  const VISIBLE_ROWS = 4;
-  const ROW_HEIGHT = 52; // px — matches py-2.5 + content height
 
   const filtered =
     query.trim().length >= 1
@@ -2716,19 +2743,25 @@ function MemberAutocomplete({
           measureInput();
         }}
       />
-      {open && filtered.length > 0 && dropdownRect && (
+      {open &&
+        filtered.length > 0 &&
+        dropdownRect &&
+        typeof document !== "undefined" &&
+        createPortal(
         <div
           ref={dropdownRef}
           className="bg-white rounded-xl border shadow-lg"
           style={{
             position: "fixed",
-            top: dropdownRect.top,
+            ...(dropdownRect.placeAbove
+              ? { bottom: dropdownRect.bottom }
+              : { top: dropdownRect.top }),
             left: dropdownRect.left,
             width: dropdownRect.width,
             zIndex: 9999,
             borderColor: "rgba(0,38,105,0.12)",
-            maxHeight: VISIBLE_ROWS * ROW_HEIGHT,
-            overflowY: filtered.length > VISIBLE_ROWS ? "auto" : "hidden",
+            maxHeight: dropdownRect.maxHeight,
+            overflowY: "auto",
           }}
         >
           {filtered.map((m) => (
@@ -2779,7 +2812,8 @@ function MemberAutocomplete({
               </div>
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -3543,15 +3577,18 @@ function MyBookingsTab({
   onRefresh: _onRefresh,
   onSwitchToBook: _onSwitchToBook,
   onUpdateBooking,
+  onPlayersAdded,
 }: {
   bookings: Booking[];
   onRefresh: () => void;
   onSwitchToBook: () => void;
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
+  onPlayersAdded: (rows: Booking[]) => void;
 }) {
   const { user } = useProfile();
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
   const [editTarget, setEditTarget] = useState<EditGuestTarget | null>(null);
+  const [addTarget, setAddTarget] = useState<AddPlayerTarget | null>(null);
 
   const now = new Date();
   const allGroups = groupBookings(bookings);
@@ -3607,6 +3644,15 @@ function MyBookingsTab({
         }
       />
 
+      <AddPlayerModal
+        target={addTarget}
+        onDismiss={() => setAddTarget(null)}
+        onAdded={(rows) => {
+          onPlayersAdded(rows);
+          setAddTarget(null);
+        }}
+      />
+
       {upcoming.length === 0 && cancelledAndPast.length === 0 && (
         <EmptyState
           icon="🗓️"
@@ -3626,6 +3672,7 @@ function MyBookingsTab({
                 userId={user?.id}
                 onCancel={setCancelTarget}
                 onEditGuest={setEditTarget}
+                onAddPlayer={setAddTarget}
               />
             ))}
           </div>
@@ -3685,11 +3732,13 @@ function BookingCard({
   userId,
   onCancel,
   onEditGuest,
+  onAddPlayer,
 }: {
   group: BookingGroup;
   userId: string | undefined;
   onCancel: (target: CancelTarget) => void;
   onEditGuest: (target: EditGuestTarget) => void;
+  onAddPlayer: (target: AddPlayerTarget) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -3717,6 +3766,15 @@ function BookingCard({
   ];
   const canCancelPrimary =
     hoursUntil > 0 && CANCELLABLE.includes(group.primary.status);
+  // Only the booker can add players, and only to an upcoming, not-yet-full
+  // round. This is independent of the booker's payment-due status — the FIFO
+  // gate blocks new bookings, not expanding one you've already made.
+  const MAX_GROUP_PLAYERS = 4;
+  const canAddPlayers =
+    iAmBooker &&
+    hoursUntil > 0 &&
+    group.primary.status !== "cancelled" &&
+    totalPlayers < MAX_GROUP_PLAYERS;
   // All bookings (booker and invited) use the same collapsible card style.
   const canExpand = true;
 
@@ -3994,8 +4052,453 @@ function BookingCard({
               </div>
             );
           })}
+
+          {/* Add player — booker only, upcoming & not full */}
+          {canAddPlayers && (
+            <button
+              type="button"
+              onClick={() =>
+                onAddPlayer({
+                  bookingId: group.primary.id,
+                  courseName,
+                  dateLabel: format(bookingDate, "EEE, MMM d"),
+                  timeLabel: bookingTime,
+                  excludeMemberIds: [
+                    group.primary.member_id,
+                    ...activePlayers
+                      .map((p) => p.player_member_id)
+                      .filter((mid): mid is string => Boolean(mid)),
+                  ],
+                })
+              }
+              className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-semibold transition-colors border-t hover:bg-green-50"
+              style={{
+                borderColor: "rgba(0,38,105,0.06)",
+                color: "var(--color-green-700)",
+              }}
+            >
+              <svg
+                className="w-3.5 h-3.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2.5}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 4.5v15m7.5-7.5h-15"
+                />
+              </svg>
+              Add player
+            </button>
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ---- Add player to an existing booking ----------------------
+
+interface AddPlayerTarget {
+  bookingId: string;
+  courseName: string;
+  dateLabel: string;
+  timeLabel: string;
+  excludeMemberIds: string[];
+}
+
+type AddPlayerForm = {
+  firstName: string;
+  lastName: string;
+  mobile: string;
+  email: string;
+};
+
+function AddPlayerModal({
+  target,
+  onDismiss,
+  onAdded,
+}: {
+  target: AddPlayerTarget | null;
+  onDismiss: () => void;
+  onAdded: (rows: Booking[]) => void;
+}) {
+  const { user } = useProfile();
+  const [mounted, setMounted] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const [members, setMembers] = useState<MemberWithProfile[]>([]);
+  const [kind, setKind] = useState<PlayerKind>("member");
+  const [selected, setSelected] = useState<MemberWithProfile | null>(null);
+  // Selecting a member isn't a react-hook-form field, so its "required" error
+  // is tracked separately; `submitError` holds server/network failures.
+  const [memberError, setMemberError] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    clearErrors,
+    formState: { errors },
+  } = useForm<AddPlayerForm>({
+    defaultValues: { firstName: "", lastName: "", mobile: "", email: "" },
+    // Validate on submit only; per-field errors then surface under each input
+    // and re-validate as the user edits (RHF's default reValidateMode).
+    mode: "onSubmit",
+    // Non-member fields unmount when the Member tab is active — drop their
+    // values/validation so a hidden field never blocks a member submit.
+    shouldUnregister: true,
+  });
+
+  const open = !!target;
+
+  const bookerEmail = (user?.email ?? "").trim().toLowerCase();
+
+  // Per-field validators for the non-member inputs (return a string to surface
+  // it as that field's error). Mirrors the create-booking flow's guest checks.
+  function validateGuestEmail(v?: string): true | string {
+    const val = (v ?? "").trim();
+    if (!validateEmail(val).valid) return "Enter a valid email address";
+    if (bookerEmail && val.toLowerCase() === bookerEmail)
+      return "That's your email — you're already on this booking";
+    return true;
+  }
+  function validateGuestPhone(v?: string): true | string {
+    return isValidGuestPhone(v) ? true : "Enter a valid phone number";
+  }
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      setKind("member");
+      setSelected(null);
+      setMemberError("");
+      setSubmitError("");
+      reset({ firstName: "", lastName: "", mobile: "", email: "" });
+      const ids: number[] = [];
+      ids[0] = requestAnimationFrame(() => {
+        ids[1] = requestAnimationFrame(() => setVisible(true));
+      });
+      return () => ids.forEach((id) => cancelAnimationFrame(id));
+    } else {
+      setVisible(false);
+      const t = setTimeout(() => setMounted(false), 320);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, target?.bookingId]);
+
+  useEffect(() => {
+    if (!open || members.length) return;
+    fetch("/api/members?exclude_self=true")
+      .then((r) => r.json())
+      .then((d) => setMembers(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, [open, members.length]);
+
+  if (!mounted || !target) return null;
+
+  const bookingId = target.bookingId;
+
+  const inputCls =
+    "w-full px-3 py-2 text-sm rounded-xl border bg-white outline-none transition-colors focus:border-green-700";
+  const fieldStyle = {
+    borderColor: "rgba(0,38,105,0.12)",
+    color: "var(--color-green-900)",
+  };
+  const errFieldStyle = { ...fieldStyle, borderColor: "#dc2626" };
+
+  function switchKind(k: PlayerKind) {
+    if (k === kind) return;
+    setKind(k);
+    setSelected(null);
+    setMemberError("");
+    setSubmitError("");
+    clearErrors();
+    reset({ firstName: "", lastName: "", mobile: "", email: "" });
+  }
+
+  const onValid = async (values: AddPlayerForm) => {
+    let player: AdditionalPlayer;
+    if (kind === "member") {
+      if (!selected) {
+        setMemberError("Select a member to add.");
+        return;
+      }
+      player = {
+        firstName: selected.first_name,
+        lastName: selected.last_name,
+        email: selected.email,
+        mobile: selected.phone ?? "",
+        memberId: selected.id,
+        isNonMember: false,
+      };
+    } else {
+      player = {
+        firstName: values.firstName,
+        lastName: values.lastName,
+        email: values.email,
+        mobile: values.mobile,
+        isNonMember: true,
+      };
+    }
+
+    setSubmitError("");
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/bookings/${bookingId}/players`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ additionalPlayers: [player] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSubmitError(data.error ?? "Failed to add player. Please try again.");
+        return;
+      }
+      onAdded(Array.isArray(data.bookings) ? (data.bookings as Booking[]) : []);
+    } catch {
+      setSubmitError("Network error. Check your connection and try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center md:p-6">
+      <button
+        type="button"
+        aria-label="Close"
+        className={[
+          "absolute inset-0 w-full h-full",
+          visible ? "opacity-100" : "opacity-0",
+        ].join(" ")}
+        style={{
+          background: "rgba(0,0,0,0.45)",
+          transition: "opacity 200ms ease-out",
+          willChange: "opacity",
+        }}
+        onClick={onDismiss}
+      />
+      <div
+        className={[
+          "relative bg-white rounded-t-3xl md:rounded-3xl px-5 pt-5 pb-8 space-y-4 w-full md:max-w-md max-h-[90dvh] overflow-y-auto overscroll-contain",
+          visible ? "translate-y-0" : "translate-y-full",
+        ].join(" ")}
+        style={{
+          boxShadow: "0 -4px 32px rgba(0,0,0,0.12)",
+          transition: visible
+            ? "transform 340ms cubic-bezier(0.32,0.72,0,1)"
+            : "transform 240ms cubic-bezier(0.4,0,1,1)",
+          willChange: "transform",
+        }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <p
+            className="font-sans font-black text-lg"
+            style={{ color: "var(--color-green-900)" }}
+          >
+            Add player
+          </p>
+          <button
+            onClick={onDismiss}
+            className="w-8 h-8 rounded-full flex items-center justify-center"
+            style={{
+              background: "rgba(0,38,105,0.06)",
+              color: "rgba(0,38,105,0.5)",
+            }}
+          >
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        </div>
+
+        <p className="text-xs" style={{ color: "rgba(0,38,105,0.45)" }}>
+          {target.courseName} · {target.dateLabel} · {target.timeLabel}
+        </p>
+
+        <form
+          onSubmit={handleSubmit(onValid)}
+          noValidate
+          className="space-y-4"
+        >
+          {/* Member / Non-member toggle */}
+          <div
+            className="flex gap-1 p-1 rounded-xl"
+            style={{ background: "rgba(0,38,105,0.05)" }}
+          >
+            {(
+              [
+                ["member", "Member"],
+                ["non_member", "Non-member"],
+              ] as [PlayerKind, string][]
+            ).map(([k, label]) => {
+              const active = kind === k;
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => switchKind(k)}
+                  className="flex-1 py-2 text-xs font-semibold rounded-lg transition-all"
+                  style={
+                    active
+                      ? {
+                          background: "white",
+                          color: "var(--color-green-900)",
+                          boxShadow: "0 1px 3px rgba(0,38,105,0.12)",
+                        }
+                      : { color: "rgba(0,38,105,0.5)" }
+                  }
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          {kind === "member" ? (
+            selected ? (
+              <div
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
+                style={{ background: "rgba(0,38,105,0.04)" }}
+              >
+                <div className="min-w-0 flex-1">
+                  <p
+                    className="text-sm font-medium truncate capitalize"
+                    style={{ color: "var(--color-green-900)" }}
+                  >
+                    {selected.first_name} {selected.last_name}
+                  </p>
+                  <p
+                    className="text-xs truncate"
+                    style={{ color: "rgba(0,38,105,0.45)" }}
+                  >
+                    {selected.email}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelected(null)}
+                  className="text-xs px-2 py-1 rounded-lg flex-shrink-0"
+                  style={{
+                    color: "rgba(0,38,105,0.45)",
+                    background: "rgba(0,38,105,0.05)",
+                  }}
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <div>
+                <MemberAutocomplete
+                  members={members}
+                  excludeIds={target.excludeMemberIds}
+                  onSelect={(m) => {
+                    setSelected(m);
+                    setMemberError("");
+                  }}
+                />
+                {memberError && (
+                  <p className="text-xs mt-1 text-red-600">{memberError}</p>
+                )}
+              </div>
+            )
+          ) : (
+            <div className="space-y-2.5">
+              <div className="grid grid-cols-2 gap-2.5">
+                <input
+                  {...register("firstName", {
+                    maxLength: { value: 100, message: "Max 100 characters" },
+                  })}
+                  className={inputCls}
+                  style={errors.firstName ? errFieldStyle : fieldStyle}
+                  placeholder="First name (optional)"
+                  autoComplete="off"
+                />
+                <input
+                  {...register("lastName", {
+                    maxLength: { value: 100, message: "Max 100 characters" },
+                  })}
+                  className={inputCls}
+                  style={errors.lastName ? errFieldStyle : fieldStyle}
+                  placeholder="Last name (optional)"
+                  autoComplete="off"
+                />
+              </div>
+              {(errors.firstName || errors.lastName) && (
+                <p className="text-xs text-red-600">
+                  {(errors.firstName || errors.lastName)?.message}
+                </p>
+              )}
+              <div>
+                <input
+                  {...register("mobile", { validate: validateGuestPhone })}
+                  type="tel"
+                  inputMode="tel"
+                  className={inputCls}
+                  style={errors.mobile ? errFieldStyle : fieldStyle}
+                  placeholder="Phone number (required)"
+                  autoComplete="off"
+                />
+                {errors.mobile && (
+                  <p className="text-xs mt-1 text-red-600">
+                    {errors.mobile.message}
+                  </p>
+                )}
+              </div>
+              <div>
+                <input
+                  {...register("email", { validate: validateGuestEmail })}
+                  type="email"
+                  inputMode="email"
+                  className={inputCls}
+                  style={errors.email ? errFieldStyle : fieldStyle}
+                  placeholder="Email (required)"
+                  autoComplete="off"
+                />
+                {errors.email && (
+                  <p className="text-xs mt-1 text-red-600">
+                    {errors.email.message}
+                  </p>
+                )}
+              </div>
+              <p className="text-[11px]" style={{ color: "rgba(0,38,105,0.4)" }}>
+                Non-member guests are confirmed by an admin.
+              </p>
+            </div>
+          )}
+
+          {submitError && (
+            <p className="text-xs" style={{ color: "rgba(220,38,38,0.85)" }}>
+              {submitError}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="w-full py-3.5 rounded-2xl text-sm font-semibold text-center disabled:opacity-60"
+            style={{ background: "var(--color-green-900)", color: "white" }}
+          >
+            {saving ? "Adding…" : "Add player"}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
