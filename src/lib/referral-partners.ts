@@ -12,10 +12,10 @@ import type { ReferralPartnerStats } from '@/types'
 type AdminClient = SupabaseClient
 
 export const emptyStats = (): ReferralPartnerStats => ({
-  linkedCount: 0,
+  referredCount: 0,
   memberCount: 0,
   nonMemberCount: 0,
-  convertedCount: 0,
+  activeCount: 0,
   commissionOwed: 0,
 })
 
@@ -52,15 +52,15 @@ export async function computeStatsForPartners(
   for (const l of rows) {
     const s = byPartner.get(l.referral_partner_id)
     if (!s) continue
-    s.linkedCount++
+    s.referredCount++
     if (l.member_id) s.memberCount++
     else s.nonMemberCount++
-    if (activeEmails.has(l.email.toLowerCase())) s.convertedCount++
+    if (activeEmails.has(l.email.toLowerCase())) s.activeCount++
   }
 
   for (const p of partners) {
     const s = byPartner.get(p.id)
-    if (s) s.commissionOwed = s.convertedCount * MEMBERSHIP_FEE_USD * (Number(p.percentage) / 100)
+    if (s) s.commissionOwed = s.activeCount * MEMBERSHIP_FEE_USD * (Number(p.percentage) / 100)
   }
 
   return byPartner

@@ -24,7 +24,7 @@ export const GET = withAuth(
 
     const p = partner as ReferralPartner
     const stats = (await computeStatsForPartners(admin, [p])).get(id) ?? emptyStats()
-    const conversionRate = stats.linkedCount ? stats.convertedCount / stats.linkedCount : 0
+    const conversionRate = stats.referredCount ? stats.activeCount / stats.referredCount : 0
 
     return NextResponse.json({
       partner: p,

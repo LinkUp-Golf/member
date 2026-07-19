@@ -299,11 +299,15 @@ export interface ReferralPartnerLink {
   member?: { first_name: string; last_name: string; email: string; membership_status: string } | null
 }
 
+// Naming note: a "referred" contact is anyone attributed to the partner; an
+// "active" one has since become a paying member. The link row's DB status
+// values ('linked' / 'converted') are the historical spelling of the same two
+// states — the UI and these counters use the member-facing wording.
 export interface ReferralPartnerStats {
-  linkedCount: number
+  referredCount: number
   memberCount: number
   nonMemberCount: number
-  convertedCount: number
+  activeCount: number
   commissionOwed: number
 }
 

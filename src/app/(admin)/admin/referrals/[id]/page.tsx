@@ -65,11 +65,11 @@ export default function ReferralPartnerDetailPage() {
     })
     const json = await res.json().catch(() => ({}))
     if (!res.ok) {
-      showToast(json.error ?? 'Linking failed.', false)
+      showToast(json.error ?? 'Referring failed.', false)
     } else {
       setResult({ succeeded: json.succeeded ?? 0, failed: json.failed ?? [] })
       setSelection({ memberIds: [], emails: [] })
-      showToast(`Linked ${json.succeeded} contact${json.succeeded !== 1 ? 's' : ''}.`)
+      showToast(`Referred ${json.succeeded} contact${json.succeeded !== 1 ? 's' : ''}.`)
       await loadAll()
     }
     setAssigning(false)
@@ -100,7 +100,7 @@ export default function ReferralPartnerDetailPage() {
       )}
 
       <Link href="/admin/referrals" className="text-sm text-gray-400 hover:text-gray-600 mb-4 inline-block">
-        ← Back to Referral Pipeline
+        ← Back to Referral Partners
       </Link>
 
       <AdminPageHeader
@@ -109,17 +109,17 @@ export default function ReferralPartnerDetailPage() {
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
-        <StatCard label="Linked"       value={stats.linkedCount} colour="blue" />
+        <StatCard label="Referred"     value={stats.referredCount} colour="blue" />
         <StatCard label="Members"      value={stats.memberCount} colour="green" />
         <StatCard label="Non-members"  value={stats.nonMemberCount} colour="gray" />
-        <StatCard label="Converted"    value={stats.convertedCount} sub="Paying members" colour="green" />
+        <StatCard label="Active"       value={stats.activeCount} sub="Paying members" colour="green" />
         <StatCard label="Conversion"   value={`${Math.round(conversionRate * 100)}%`} colour="gold" />
         <StatCard label="Commission"   value={fmtMoney(stats.commissionOwed)} sub="Owed to date" colour="gold" />
       </div>
 
       {/* Link contacts */}
       <div className="mb-8">
-        <AdminCard title="Link Members & Non-members">
+        <AdminCard title="Refer Members & Non-members">
           <div className="space-y-5">
             <ReferralContactPicker value={selection} onChange={setSelection} linkedEmails={linkedEmails} />
 
@@ -130,13 +130,13 @@ export default function ReferralPartnerDetailPage() {
               className="w-full py-2.5 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 disabled:opacity-40 transition-colors"
             >
               {assigning
-                ? 'Linking…'
-                : `Link ${selection.memberIds.length + selection.emails.length} contact${selection.memberIds.length + selection.emails.length !== 1 ? 's' : ''}`}
+                ? 'Referring…'
+                : `Refer ${selection.memberIds.length + selection.emails.length} contact${selection.memberIds.length + selection.emails.length !== 1 ? 's' : ''}`}
             </button>
 
             {result && (
               <div className="text-xs rounded-xl px-4 py-3 bg-gray-50 border border-gray-100">
-                <p className="text-gray-700 font-medium">Linked {result.succeeded} contact{result.succeeded !== 1 ? 's' : ''}.</p>
+                <p className="text-gray-700 font-medium">Referred {result.succeeded} contact{result.succeeded !== 1 ? 's' : ''}.</p>
                 {result.failed.length > 0 && (
                   <p className="text-red-500 mt-1">Failed: {result.failed.join(', ')}</p>
                 )}
@@ -147,14 +147,14 @@ export default function ReferralPartnerDetailPage() {
       </div>
 
       {/* Linked list */}
-      <AdminCard title={`Linked Contacts (${links.length})`}>
+      <AdminCard title={`Referred Contacts (${links.length})`}>
         {links.length === 0 ? (
-          <p className="text-sm text-gray-400 italic py-4 text-center">No contacts linked yet.</p>
+          <p className="text-sm text-gray-400 italic py-4 text-center">No contacts referred yet.</p>
         ) : (
           <div className="divide-y divide-gray-50">
             {links.map(link => {
               const isMember = !!link.member_id
-              const isConverted = link.member?.membership_status === 'active'
+              const isActive = link.member?.membership_status === 'active'
               return (
                 <div key={link.id} className="flex items-center justify-between gap-3 py-3">
                   <div className="min-w-0">
@@ -165,7 +165,7 @@ export default function ReferralPartnerDetailPage() {
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <Badge label={isMember ? 'Member' : 'Non-member'} colour={isMember ? 'green' : 'gray'} />
-                    {isConverted && <Badge label="Converted" colour="green" />}
+                    {isActive && <Badge label="Active" colour="green" />}
                     <button
                       onClick={() => removeLink(link.id)}
                       disabled={removingId === link.id}
