@@ -50,7 +50,7 @@ export const emptyStats = (): ReferralPartnerStats => ({
   commissionOwed: 0,
 })
 
-interface LinkRow {
+export interface LinkRow {
   id: string
   referral_partner_id: string
   member_id: string | null
@@ -157,16 +157,18 @@ export async function loadPartnerConversions(
   return { links, conversions }
 }
 
-/** Compute stats for a set of partners in one pass. */
-export async function computeStatsForPartners(
-  admin: AdminClient,
-  partners: PartnerRate[]
-): Promise<Map<string, ReferralPartnerStats>> {
+/**
+ * Derive stats from an already-loaded set of links and conversions. Split out
+ * so a caller that needs both the stats and the conversion detail (the partner
+ * overview endpoint) can load once instead of querying twice.
+ */
+export function statsFromLoaded(
+  partners: PartnerRate[],
+  links: Map<string, LinkRow[]>,
+  conversions: Map<string, ReferralConversion[]>
+): Map<string, ReferralPartnerStats> {
   const byPartner = new Map<string, ReferralPartnerStats>()
   for (const p of partners) byPartner.set(p.id, emptyStats())
-  if (!partners.length) return byPartner
-
-  const { links, conversions } = await loadPartnerConversions(admin, partners)
 
   for (const p of partners) {
     const s = byPartner.get(p.id)
@@ -184,4 +186,14 @@ export async function computeStatsForPartners(
   }
 
   return byPartner
+}
+
+/** Compute stats for a set of partners in one pass. */
+export async function computeStatsForPartners(
+  admin: AdminClient,
+  partners: PartnerRate[]
+): Promise<Map<string, ReferralPartnerStats>> {
+  if (!partners.length) return new Map()
+  const { links, conversions } = await loadPartnerConversions(admin, partners)
+  return statsFromLoaded(partners, links, conversions)
 }

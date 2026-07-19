@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils";
 import Icon, { type IconName } from "@/components/ui/Icon";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useProfile } from "@/hooks/useProfile";
-import { MORE_ITEMS } from "@/lib/nav/moreItems";
+import { getMoreItems } from "@/lib/nav/moreItems";
+import { useMemberRoles } from "@/hooks/useMemberRoles";
 
 // Extracted + memoized so a pathname change (i.e. every navigation) only
 // re-renders the one or two nav rows whose `active` flag actually flips,
@@ -107,6 +108,8 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { permission, isSubscribed, subscribe } = usePushNotifications();
   const { profile, loading } = useProfile();
+  const roles = useMemberRoles();
+  const moreGroups = getMoreItems(roles);
   const [dismissed, setDismissed] = useState(true); // start hidden, reveal after mount
 
   // Applies the member's saved text-size preference once it loads. The shell
@@ -193,7 +196,7 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
 
           {/* More items — expanded permanently in the sidebar (tablet+ has the
               room); mobile still gets these via the bottom nav's "More" tab. */}
-          {MORE_ITEMS.map((group) => (
+          {moreGroups.map((group) => (
             <div key={group.group} className="mt-4 first:mt-2">
               <p
                 className="px-5 pb-1.5 text-[10px] font-semibold uppercase tracking-widest"
