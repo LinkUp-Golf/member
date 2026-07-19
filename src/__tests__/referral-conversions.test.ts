@@ -17,20 +17,24 @@ interface FakeLink {
   converted_at?: string | null
   created_at?: string
 }
-interface FakeMember { id: string; email: string; first_name?: string; last_name?: string }
-interface FakeBooking { member_id: string; status: string; created_at: string }
+interface FakeMember {
+  id: string
+  email: string
+  first_name?: string
+  last_name?: string
+  ghl_tags: string[]
+  membership_start_date?: string | null
+}
 
 /**
- * Stand-in Supabase client for loadPartnerConversions. Covers its three reads
- * (links, members, bookings) and the best-effort snapshot update. The builder
- * is thenable so `await from(...).select().in()...` resolves to the right rows;
- * bookings are status-filtered and date-sorted to mirror the real query.
+ * Stand-in Supabase client for loadPartnerConversions. Covers its reads (links,
+ * members-by-email, members-by-id) and the best-effort snapshot update. The
+ * builder is thenable so `await from(...).select().in()` resolves to rows.
  */
 function fakeAdmin({
   links = [],
   members = [],
-  bookings = [],
-}: { links?: FakeLink[]; members?: FakeMember[]; bookings?: FakeBooking[] }) {
+}: { links?: FakeLink[]; members?: FakeMember[] }) {
   const snapshots: Array<{ id: string | null; patch: Record<string, unknown> }> = []
 
   function from(table: string) {
@@ -38,16 +42,17 @@ function fakeAdmin({
       table: string
       isUpdate: boolean
       patch: Record<string, unknown> | null
-      statusFilter: string[] | null
+      inCol: string | null
+      inVals: string[] | null
       eqId: string | null
-    } = { table, isUpdate: false, patch: null, statusFilter: null, eqId: null }
+    } = { table, isUpdate: false, patch: null, inCol: null, inVals: null, eqId: null }
 
     const builder: Record<string, unknown> = {
       select: () => builder,
       update: (patch: Record<string, unknown>) => { state.isUpdate = true; state.patch = patch; return builder },
       eq: (col: string, val: string) => { if (col === 'id') state.eqId = val; return builder },
       is: () => builder,
-      in: (col: string, vals: string[]) => { if (col === 'status') state.statusFilter = vals; return builder },
+      in: (col: string, vals: string[]) => { state.inCol = col; state.inVals = vals; return builder },
       order: () => builder,
       then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
         Promise.resolve(result()).then(resolve, reject),
@@ -59,14 +64,12 @@ function fakeAdmin({
         return { data: null, error: null }
       }
       if (state.table === 'referral_partner_links') return { data: links, error: null }
-      if (state.table === 'members') return { data: members, error: null }
-      if (state.table === 'bookings') {
-        const statusFilter = state.statusFilter
-        const rows = statusFilter
-          ? bookings.filter(b => statusFilter.includes(b.status))
-          : bookings
-        // Mirror .order('created_at', { ascending: true }).
-        return { data: [...rows].sort((a, b) => a.created_at.localeCompare(b.created_at)), error: null }
+      if (state.table === 'members') {
+        const vals = state.inVals ?? []
+        const rows = state.inCol === 'id'
+          ? members.filter(m => vals.includes(m.id))
+          : members.filter(m => vals.includes(m.email))
+        return { data: rows, error: null }
       }
       return { data: [], error: null }
     }
@@ -88,12 +91,17 @@ const link = (over: Partial<FakeLink> & { email: string }): FakeLink => ({
   ...over,
 })
 
-describe('loadPartnerConversions — conversion is a paid booking', () => {
-  it('counts a referral whose member has a payment_confirmed booking', async () => {
+const member = (over: Partial<FakeMember> & { id: string; email: string }): FakeMember => ({
+  ghl_tags: ['avi member'],
+  membership_start_date: '2026-03-10',
+  ...over,
+})
+
+describe('loadPartnerConversions — conversion is membership', () => {
+  it('counts a referral whose person is an active member', async () => {
     const { client } = fakeAdmin({
       links: [link({ email: 'jane@x.com' })],
-      members: [{ id: 'm1', email: 'jane@x.com', first_name: 'Jane', last_name: 'Doe' }],
-      bookings: [{ member_id: 'm1', status: 'payment_confirmed', created_at: '2026-03-10T09:00:00Z' }],
+      members: [member({ id: 'm1', email: 'jane@x.com', first_name: 'Jane', last_name: 'Doe' })],
     })
 
     const { conversions } = await loadPartnerConversions(client as never, [PARTNER])
@@ -109,65 +117,53 @@ describe('loadPartnerConversions — conversion is a paid booking', () => {
     })
   })
 
-  it('also counts a finalized (confirmed) booking as paid', async () => {
-    const { client } = fakeAdmin({
-      links: [link({ email: 'jane@x.com' })],
-      members: [{ id: 'm1', email: 'jane@x.com' }],
-      bookings: [{ member_id: 'm1', status: 'confirmed', created_at: '2026-03-10T09:00:00Z' }],
-    })
-    const { conversions } = await loadPartnerConversions(client as never, [PARTNER])
-    expect(conversions.get('p1')).toHaveLength(1)
-  })
-
-  it('does NOT count a booking that is only availability_confirmed (payment link sent, unpaid)', async () => {
-    const { client } = fakeAdmin({
-      links: [link({ email: 'jane@x.com' })],
-      members: [{ id: 'm1', email: 'jane@x.com' }],
-      bookings: [{ member_id: 'm1', status: 'availability_confirmed', created_at: '2026-03-10T09:00:00Z' }],
-    })
-    const { conversions } = await loadPartnerConversions(client as never, [PARTNER])
-    expect(conversions.get('p1')).toHaveLength(0)
-  })
-
   it('does not count a referral whose person never became a member', async () => {
     const { client } = fakeAdmin({
       links: [link({ email: 'lead@x.com' })],
       members: [],
-      bookings: [],
     })
     const { conversions } = await loadPartnerConversions(client as never, [PARTNER])
     expect(conversions.get('p1')).toHaveLength(0)
   })
 
-  it('does not count a member who has no paid booking', async () => {
-    const { client } = fakeAdmin({
-      links: [link({ email: 'jane@x.com' })],
-      members: [{ id: 'm1', email: 'jane@x.com' }],
-      bookings: [],
-    })
-    const { conversions } = await loadPartnerConversions(client as never, [PARTNER])
-    expect(conversions.get('p1')).toHaveLength(0)
+  it('does not count a member without a membership tag', async () => {
+    // A GHL contact that exists but carries no membership tag (a lead, a
+    // non-member, or someone whose membership tag was removed).
+    for (const tags of [[], ['some-other-tag'], ['nbd client']]) {
+      const { client } = fakeAdmin({
+        links: [link({ email: 'jane@x.com' })],
+        members: [member({ id: 'm1', email: 'jane@x.com', ghl_tags: tags })],
+      })
+      const { conversions } = await loadPartnerConversions(client as never, [PARTNER])
+      expect(conversions.get('p1'), JSON.stringify(tags)).toHaveLength(0)
+    }
   })
 
-  it('dates the conversion to the earliest paid booking', async () => {
+  it('counts either membership tag variant', async () => {
+    for (const tag of ['avi member', 'avi member - active']) {
+      const { client } = fakeAdmin({
+        links: [link({ email: 'jane@x.com' })],
+        members: [member({ id: 'm1', email: 'jane@x.com', ghl_tags: [tag] })],
+      })
+      const { conversions } = await loadPartnerConversions(client as never, [PARTNER])
+      expect(conversions.get('p1'), tag).toHaveLength(1)
+    }
+  })
+
+  it('dates the conversion to membership_start_date, not the referral date', async () => {
     const { client } = fakeAdmin({
-      links: [link({ email: 'jane@x.com' })],
-      members: [{ id: 'm1', email: 'jane@x.com' }],
-      bookings: [
-        { member_id: 'm1', status: 'confirmed', created_at: '2026-05-01T09:00:00Z' },
-        { member_id: 'm1', status: 'payment_confirmed', created_at: '2026-03-10T09:00:00Z' },
-      ],
+      links: [link({ email: 'jane@x.com', created_at: '2026-05-01T00:00:00Z' })],
+      members: [member({ id: 'm1', email: 'jane@x.com', membership_start_date: '2026-03-10' })],
     })
     const { conversions } = await loadPartnerConversions(client as never, [PARTNER])
     expect(conversions.get('p1')?.[0]?.convertedAt).toBe('2026-03-10')
   })
 
-  it('earns no commission when the first paid booking is after the rate term', async () => {
+  it('earns no commission when membership started after the rate term', async () => {
     const expiredRate: PartnerRate = { id: 'p1', percentage: 10, ends_at: '2026-02-28' }
     const { client } = fakeAdmin({
       links: [link({ email: 'jane@x.com' })],
-      members: [{ id: 'm1', email: 'jane@x.com' }],
-      bookings: [{ member_id: 'm1', status: 'payment_confirmed', created_at: '2026-03-10T09:00:00Z' }],
+      members: [member({ id: 'm1', email: 'jane@x.com', membership_start_date: '2026-03-10' })],
     })
     const { conversions } = await loadPartnerConversions(client as never, [expiredRate])
     expect(conversions.get('p1')?.[0]).toMatchObject({ commission: 0, withinRateWindow: false })
@@ -175,10 +171,8 @@ describe('loadPartnerConversions — conversion is a paid booking', () => {
 
   it('matches by a backfilled member_id even when the link email differs', async () => {
     const { client } = fakeAdmin({
-      // Link email is the old address; member_id was backfilled to the real member.
       links: [link({ email: 'old@x.com', member_id: 'm1' })],
-      members: [{ id: 'm1', email: 'new@x.com', first_name: 'Jane', last_name: 'Doe' }],
-      bookings: [{ member_id: 'm1', status: 'payment_confirmed', created_at: '2026-03-10T09:00:00Z' }],
+      members: [member({ id: 'm1', email: 'new@x.com', first_name: 'Jane', last_name: 'Doe' })],
     })
     const { conversions } = await loadPartnerConversions(client as never, [PARTNER])
     expect(conversions.get('p1')).toHaveLength(1)
@@ -187,37 +181,34 @@ describe('loadPartnerConversions — conversion is a paid booking', () => {
   it('snapshots the resolved conversion date onto the link', async () => {
     const { client, snapshots } = fakeAdmin({
       links: [link({ id: 'L1', email: 'jane@x.com', converted_at: null })],
-      members: [{ id: 'm1', email: 'jane@x.com' }],
-      bookings: [{ member_id: 'm1', status: 'payment_confirmed', created_at: '2026-03-10T09:00:00Z' }],
+      members: [member({ id: 'm1', email: 'jane@x.com', membership_start_date: '2026-03-10' })],
     })
     await loadPartnerConversions(client as never, [PARTNER])
-    // Snapshot is fire-and-forget; let the microtask flush.
-    await new Promise(r => setTimeout(r, 0))
+    await new Promise(r => setTimeout(r, 0)) // let the fire-and-forget snapshot flush
     expect(snapshots).toContainEqual(
       expect.objectContaining({ id: 'L1', patch: expect.objectContaining({ converted_at: '2026-03-10' }) })
     )
   })
 })
 
-describe('statsFromLoaded — paying = converted', () => {
-  it('counts commission on paid referrals only', async () => {
+describe('statsFromLoaded — paying = converted member', () => {
+  it('counts commission on referrals who became members only', async () => {
     const { client } = fakeAdmin({
       links: [
-        link({ email: 'paid@x.com' }),
-        link({ email: 'unpaid@x.com' }),
+        link({ email: 'member@x.com' }),
+        link({ email: 'pending@x.com' }),
         link({ email: 'lead@x.com' }),
       ],
       members: [
-        { id: 'm1', email: 'paid@x.com' },
-        { id: 'm2', email: 'unpaid@x.com' },
+        member({ id: 'm1', email: 'member@x.com', ghl_tags: ['avi member'] }),
+        member({ id: 'm2', email: 'pending@x.com', ghl_tags: [] }),
       ],
-      bookings: [{ member_id: 'm1', status: 'payment_confirmed', created_at: '2026-03-10T09:00:00Z' }],
     })
     const { links, conversions } = await loadPartnerConversions(client as never, [PARTNER])
     const stats = statsFromLoaded([PARTNER], links, conversions).get('p1')
 
     expect(stats?.referredCount).toBe(3)   // everyone attributed
-    expect(stats?.activeCount).toBe(1)     // only the one who paid
+    expect(stats?.activeCount).toBe(1)     // only the active member
     expect(stats?.commissionOwed).toBe(FEE_10)
   })
 })

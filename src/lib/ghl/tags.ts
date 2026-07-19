@@ -37,3 +37,14 @@ export function courseSlugForTag(tag: string): CourseSlug | null {
 export function hasAnyAccessTag(tags: string[]): boolean {
   return ALL_ACCESS_TAGS.some(tag => tags.includes(tag))
 }
+
+// ---- Membership tags ----------------------------------------
+// The tags that mean "this person holds a membership" — the signal referral
+// commission is paid on. Narrower than ALL_ACCESS_TAGS on purpose: an access
+// tag like 'nbd client' grants course access without being a membership.
+export const MEMBERSHIP_TAGS = ['avi member', 'avi member - active'] as const
+
+/** Returns true if a tag array marks the person as a member. */
+export function hasMembershipTag(tags: string[]): boolean {
+  return MEMBERSHIP_TAGS.some(tag => tags.includes(tag))
+}
