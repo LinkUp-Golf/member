@@ -162,6 +162,20 @@ export const NotificationTemplates = {
     tag:   'guest-access',
   }),
 
+  referralPartnerApproved: (percentage: number): PushPayload => ({
+    title: 'You\'re now a referral partner',
+    body:  `Your application was approved — you'll earn ${percentage}% commission on every referral who joins.`,
+    url:   '/partner',
+    tag:   'referral-partner-approved',
+  }),
+
+  referralPartnerRejected: (reason: string): PushPayload => ({
+    title: 'Referral partner application',
+    body:  `Your application wasn't approved this time. ${reason}`,
+    url:   '/more/referral-partner',
+    tag:   'referral-partner-rejected',
+  }),
+
   referralJoined: (referredName: string): PushPayload => ({
     title: `${referredName} has joined!`,
     body:  `Your referral ${referredName} is now a member. Book your introductory round together.`,

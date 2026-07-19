@@ -282,9 +282,28 @@ export interface ReferralPartner {
   percentage: number
   /** Last day the commission percentage is honoured (YYYY-MM-DD). Null = no expiry. */
   ends_at: string | null
+  /** Owning member, when the partner is a member rather than an external affiliate. */
+  member_id: string | null
   created_by: string | null
   created_at: string
   updated_at: string
+}
+
+export type ReferralPartnerApplicationStatus = 'pending' | 'approved' | 'rejected'
+
+export interface ReferralPartnerApplication {
+  id: string
+  member_id: string
+  motivation: string
+  status: ReferralPartnerApplicationStatus
+  partner_id: string | null
+  rejection_reason: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  created_at: string
+  updated_at: string
+  // Enriched (present when joined to the member row in API responses)
+  member?: { first_name: string; last_name: string; email: string } | null
 }
 
 export interface ReferralPartnerLink {

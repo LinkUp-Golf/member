@@ -1,4 +1,4 @@
-import { Gift, Bell, Smartphone, FileText, Settings } from 'lucide-react'
+import { Gift, Bell, Smartphone, FileText, Settings, BadgeDollarSign } from 'lucide-react'
 import Icon, { type IconName } from '@/components/ui/Icon'
 import { FEATURES } from '@/lib/features'
 
@@ -24,6 +24,7 @@ export const MORE_ITEMS: { group: string; items: MoreItem[] }[] = [
       { href: '/more/profile', label: 'My Profile', icon: svgIcon('members'), desc: 'Edit your details and golf life' },
       ...(FEATURES.FOCUS_LINKUPS ? [{ href: '/more/focus-linkups', label: 'Focus LinkUps', icon: svgIcon('focus-linkup'), desc: 'Manage your category subscriptions' }] : []),
       { href: '/more/referrals', label: 'Refer a Member', icon: svgIcon('new-member'), desc: 'Invite someone to the community' },
+      { href: '/more/referral-partner', label: 'Referral Partner', icon: <BadgeDollarSign className="w-5 h-5" strokeWidth={1.9} />, desc: 'Apply to earn commission on referrals' },
       { href: '/more/guest-access', label: 'Guest Access', icon: svgIcon('visiting-member'), desc: 'Request access to another city' },
     ],
   },
