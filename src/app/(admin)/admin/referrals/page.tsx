@@ -9,7 +9,6 @@ import {
 import { DEFAULT_REFERRAL_PERCENTAGE } from '@/lib/constants'
 import { isRateExpired } from '@/lib/referral-rate'
 import ReferralApplications from '@/components/admin/ReferralApplications'
-import ReferralSubmissions from '@/components/admin/ReferralSubmissions'
 import ReferralContactPicker, { type ReferralSelection } from '@/components/admin/ReferralContactPicker'
 import type { ReferralPartnerWithStats } from '@/types'
 
@@ -23,12 +22,15 @@ const fmtMoney = (n: number) =>
 const fmtDate = (d: string) =>
   new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
-type Tab = 'partners' | 'applications' | 'submissions'
+type Tab = 'partners' | 'applications'
 
 export default function AdminReferralPartnersPage() {
   const [tab, setTab] = useState<Tab>('partners')
   const [pendingCount, setPendingCount] = useState(0)
-  const [pendingSubmissions, setPendingSubmissions] = useState(0)
+  // Partner ids with a referral list awaiting review. Reviewing happens on the
+  // partner's own page (the import applies their rate), so this is just a
+  // pointer to which partners need attention.
+  const [partnersWithLists, setPartnersWithLists] = useState<Set<string>>(new Set())
   const [partners, setPartners] = useState<ReferralPartnerWithStats[]>([])
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
@@ -61,7 +63,10 @@ export default function AdminReferralPartnersPage() {
     const apps = await appsRes.json().catch(() => ({}))
     const subs = await subsRes.json().catch(() => ({}))
     setPendingCount(Array.isArray(apps.applications) ? apps.applications.length : 0)
-    setPendingSubmissions(Array.isArray(subs.submissions) ? subs.submissions.length : 0)
+    setPartnersWithLists(new Set(
+      (Array.isArray(subs.submissions) ? subs.submissions : [])
+        .map((s: { referral_partner_id: string }) => s.referral_partner_id)
+    ))
   }, [])
 
   useEffect(() => { loadPartners(); loadPendingCount() }, [loadPartners, loadPendingCount])
@@ -106,9 +111,8 @@ export default function AdminReferralPartnersPage() {
           live on this page rather than in separate destinations. */}
       <div className="flex gap-1 mb-6 border-b border-gray-100">
         {([
-          { id: 'partners' as const,     label: 'Partners',     badge: 0 },
+          { id: 'partners' as const,     label: 'Partners',     badge: partnersWithLists.size },
           { id: 'applications' as const, label: 'Applications', badge: pendingCount },
-          { id: 'submissions' as const,  label: 'Referral Lists', badge: pendingSubmissions },
         ]).map(t => (
           <button
             key={t.id}
@@ -148,13 +152,6 @@ export default function AdminReferralPartnersPage() {
         />
       )}
 
-      {tab === 'submissions' && (
-        <ReferralSubmissions
-          onToast={showToast}
-          onImported={() => { loadPartners(); loadPendingCount() }}
-        />
-      )}
-
       {tab === 'partners' && !loading && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <StatCard label="Partners"    value={partners.length}    sub="Active affiliates"    colour="green" />
@@ -177,6 +174,15 @@ export default function AdminReferralPartnersPage() {
                 <Link href={`/admin/referrals/${p.id}`} className="hover:text-green-800 hover:underline">
                   {p.name}
                 </Link>
+                {partnersWithLists.has(p.id) && (
+                  <Link
+                    href={`/admin/referrals/${p.id}`}
+                    className="ml-2 text-[11px] font-medium px-1.5 py-0.5 rounded-full bg-yellow-50 text-yellow-700 hover:bg-yellow-100 whitespace-nowrap"
+                    title="This partner submitted a referral list awaiting review"
+                  >
+                    List to review
+                  </Link>
+                )}
               </AdminTd>
               <AdminTd><code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{p.code}</code></AdminTd>
               <AdminTd>

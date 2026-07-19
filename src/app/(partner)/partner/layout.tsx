@@ -1,27 +1,39 @@
 'use client'
 
-// The referral-partner workspace shell. Deliberately mirrors the admin
-// sidebar's look so the two workspaces feel like one system, but stays a
-// separate, much smaller component — a partner only ever sees their own data,
-// so none of the admin layout's course/queue plumbing applies.
+// The referral-partner workspace shell.
 //
-// Middleware is the real gate (see PARTNER_ROUTES in src/middleware.ts); the
-// check here only avoids flashing the shell to someone mid-redirect.
+// Desktop mirrors the admin sidebar so the two workspaces feel like one
+// system. Mobile deliberately follows the *member* app instead — a fixed
+// bottom tab bar (the shared .bottom-nav / .nav-item styles, safe-area
+// insets included) rather than a row of pills at the top. Partners reach this
+// from the member app on a phone, so thumb-reachable tabs are the familiar
+// shape; the previous horizontal strip scrolled, gave no active state worth
+// the name, and sat at the far end of the screen from the thumb.
+//
+// Middleware is the real gate (PARTNER_ROUTES in src/middleware.ts); the check
+// here only avoids flashing the shell to someone mid-redirect.
 
 import { useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
+import { motion } from 'framer-motion'
+import { LayoutDashboard, Users, Upload, Wallet, ChevronLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FullScreenLoader } from '@/components/ui/Loading'
 import { useMemberRoles } from '@/hooks/useMemberRoles'
 
 const NAV_ITEMS = [
-  { href: '/partner',           label: 'Overview' },
-  { href: '/partner/referrals', label: 'My Referrals' },
-  { href: '/partner/submissions', label: 'Submit Referrals' },
-  { href: '/partner/payments',  label: 'Payments' },
+  { href: '/partner',             label: 'Overview',  short: 'Overview', icon: LayoutDashboard },
+  { href: '/partner/referrals',   label: 'My Referrals', short: 'Referrals', icon: Users },
+  { href: '/partner/submissions', label: 'Submit Referrals', short: 'Submit', icon: Upload },
+  { href: '/partner/payments',    label: 'Payments',  short: 'Payments', icon: Wallet },
 ]
+
+// '/partner' is a prefix of every other route, so it only matches exactly.
+function isActive(pathname: string, href: string) {
+  return href === '/partner' ? pathname === '/partner' : pathname.startsWith(href)
+}
 
 export default function PartnerLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -35,8 +47,11 @@ export default function PartnerLayout({ children }: { children: React.ReactNode 
   if (loading) return <FullScreenLoader />
   if (!isPartner) return null
 
+  const current = NAV_ITEMS.find(i => isActive(pathname, i.href))
+
   return (
     <div className="flex min-h-screen bg-gray-50">
+      {/* ---- Desktop sidebar ---------------------------------- */}
       <aside className="hidden md:flex md:w-56 lg:w-60 bg-green-950 flex-col flex-shrink-0 h-screen overflow-hidden sticky top-0">
         <div className="px-5 py-5 border-b border-white/[0.08] flex items-center gap-3">
           <Image
@@ -59,20 +74,20 @@ export default function PartnerLayout({ children }: { children: React.ReactNode 
 
         <nav className="flex-1 px-3 py-4 overflow-y-auto">
           {NAV_ITEMS.map(item => {
-            const active = item.href === '/partner'
-              ? pathname === '/partner'
-              : pathname.startsWith(item.href)
+            const active = isActive(pathname, item.href)
+            const ItemIcon = item.icon
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  'flex items-center px-3 py-2.5 rounded-lg text-sm mb-0.5 transition-colors',
+                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm mb-0.5 transition-colors',
                   active
                     ? 'bg-white/10 text-white font-medium'
                     : 'text-white/55 hover:text-white hover:bg-white/[0.06]'
                 )}
               >
+                <ItemIcon className="w-4 h-4 flex-shrink-0" strokeWidth={1.9} />
                 {item.label}
               </Link>
             )
@@ -87,28 +102,67 @@ export default function PartnerLayout({ children }: { children: React.ReactNode 
       </aside>
 
       <div className="flex-1 min-w-0">
-        {/* Mobile nav — the sidebar is hidden below md */}
-        <div className="md:hidden bg-green-950 px-4 py-3 flex items-center gap-1 overflow-x-auto">
-          {NAV_ITEMS.map(item => {
-            const active = item.href === '/partner'
-              ? pathname === '/partner'
-              : pathname.startsWith(item.href)
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  'px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition-colors',
-                  active ? 'bg-white/10 text-white font-medium' : 'text-white/55'
-                )}
-              >
-                {item.label}
-              </Link>
-            )
-          })}
+        {/* ---- Mobile header ---------------------------------- */}
+        <header
+          className="md:hidden sticky top-0 z-30 bg-green-950 px-4 py-3 flex items-center gap-3"
+          style={{ paddingTop: 'calc(0.75rem + var(--safe-top, 0px))' }}
+        >
+          <Link
+            href="/home"
+            aria-label="Back to LinkUp"
+            className="focus-ring -ml-1 p-1 rounded-lg text-white/50 hover:text-white transition-colors"
+          >
+            <ChevronLeft className="w-5 h-5" strokeWidth={2} />
+          </Link>
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-widest text-white/35 leading-none">
+              Referral Partner
+            </p>
+            <p className="text-sm font-semibold text-white leading-tight mt-1 truncate">
+              {current?.label ?? 'Overview'}
+            </p>
+          </div>
+        </header>
+
+        {/* Bottom padding on mobile so content clears the fixed tab bar. */}
+        <div className="pb-[calc(var(--safe-bottom,0px)+72px)] md:pb-0">
+          {children}
         </div>
 
-        {children}
+        {/* ---- Mobile bottom tabs ----------------------------- */}
+        <nav className="bottom-nav" aria-label="Referral partner sections">
+          <div className="flex">
+            {NAV_ITEMS.map(item => {
+              const active = isActive(pathname, item.href)
+              const ItemIcon = item.icon
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn('nav-item focus-ring', active && 'active')}
+                  aria-label={item.label}
+                  aria-current={active ? 'page' : undefined}
+                >
+                  <motion.div
+                    className="relative flex flex-col items-center gap-1"
+                    whileTap={{ scale: 0.88 }}
+                  >
+                    {active && (
+                      <motion.div
+                        layoutId="partner-bottom-nav-pill"
+                        className="absolute -inset-x-3.5 -inset-y-1.5 rounded-2xl -z-10"
+                        style={{ background: 'rgba(133,187,101,0.16)' }}
+                        transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                      />
+                    )}
+                    <ItemIcon className="w-5 h-5" strokeWidth={1.9} />
+                    <span className="nav-label">{item.short}</span>
+                  </motion.div>
+                </Link>
+              )
+            })}
+          </div>
+        </nav>
       </div>
     </div>
   )

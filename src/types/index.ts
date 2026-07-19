@@ -300,6 +300,10 @@ export interface ReferralPartnerSubmission {
   note: string | null
   entry_count: number
   imported_count: number | null
+  /** Original filename of the uploaded CSV. */
+  csv_filename: string | null
+  /** Commission rate at import time — an audit record, not the commission source. */
+  applied_percentage: number | null
   rejection_reason: string | null
   reviewed_by: string | null
   reviewed_at: string | null

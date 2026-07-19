@@ -46,7 +46,7 @@ export const PATCH = withAuth(
 
     const { data: partner } = await admin
       .from('referral_partners')
-      .select('id, member_id')
+      .select('id, member_id, percentage, ends_at')
       .eq('id', submission.referral_partner_id)
       .single()
 
@@ -126,6 +126,11 @@ export const PATCH = withAuth(
       .update({
         status: 'imported',
         imported_count: importedCount,
+        // The rate these referrals were taken on. Commission is still derived
+        // from the partner's current percentage; this is the audit record of
+        // what was configured on the day, and makes an import under an expired
+        // rate traceable after the fact.
+        applied_percentage: partner?.percentage ?? null,
         reviewed_by: ctx.userId,
         reviewed_at: reviewedAt,
         updated_at: reviewedAt,

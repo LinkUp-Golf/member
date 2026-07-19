@@ -8,22 +8,28 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withPartnerAuth, type PartnerAuthContext } from '@/lib/auth/with-partner-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { validateEmail, sanitiseText } from '@/lib/validation'
+import { sanitiseText } from '@/lib/validation'
+import { parseReferralCsv } from '@/lib/csv'
 import { logger } from '@/lib/logger'
 
 const MAX_ENTRIES = 200
-
-interface SubmittedEntry {
-  email?: string
-  name?: string
-}
+// Generous for a 200-row [name][email] export, small enough that a wrong file
+// (a spreadsheet, an image) is rejected before we try to parse it as text.
+const MAX_CSV_BYTES = 512 * 1024
 
 export const GET = withPartnerAuth(async (_req: NextRequest, ctx: PartnerAuthContext) => {
   const admin = createAdminClient()
 
+  // csv_content is deliberately excluded — it's the whole uploaded file, and
+  // shipping it with every row of a list view would bloat the response.
   const { data, error } = await admin
     .from('referral_partner_submissions')
-    .select('*, entries:referral_partner_submission_entries(*)')
+    .select(`
+      id, referral_partner_id, status, note, entry_count, imported_count,
+      csv_filename, applied_percentage, rejection_reason, reviewed_at,
+      created_at, updated_at,
+      entries:referral_partner_submission_entries(*)
+    `)
     .eq('referral_partner_id', ctx.partner.id)
     .order('created_at', { ascending: false })
 
@@ -33,44 +39,44 @@ export const GET = withPartnerAuth(async (_req: NextRequest, ctx: PartnerAuthCon
 
 export const POST = withPartnerAuth(async (req: NextRequest, ctx: PartnerAuthContext) => {
   const body = await req.json().catch(() => ({})) as {
-    entries?: SubmittedEntry[]
+    csv?: string
+    filename?: string
     note?: string
   }
 
-  const rawEntries = Array.isArray(body.entries) ? body.entries : []
-  if (!rawEntries.length) {
-    return NextResponse.json({ error: 'Add at least one referral to submit.' }, { status: 400 })
+  const csv = typeof body.csv === 'string' ? body.csv : ''
+  if (!csv.trim()) {
+    return NextResponse.json({ error: 'Attach a CSV file to submit.' }, { status: 400 })
   }
-  if (rawEntries.length > MAX_ENTRIES) {
+  if (Buffer.byteLength(csv, 'utf8') > MAX_CSV_BYTES) {
+    return NextResponse.json({ error: 'That file is too large.' }, { status: 400 })
+  }
+
+  // Re-validated here even though the browser already checked: client-side
+  // validation is a convenience, not a guarantee.
+  const parsed = parseReferralCsv(csv)
+  if (!parsed.valid) {
+    return NextResponse.json(
+      {
+        error: parsed.errors[0] ?? 'That CSV could not be read.',
+        // The full list so the client can show every row that needs fixing,
+        // not just the first.
+        errors: parsed.errors,
+      },
+      { status: 400 }
+    )
+  }
+  if (parsed.rows.length > MAX_ENTRIES) {
     return NextResponse.json(
       { error: `Please submit ${MAX_ENTRIES} referrals or fewer at a time.` },
       { status: 400 }
     )
   }
 
-  // Normalise and dedupe before validating, so a list pasted with duplicates
-  // isn't rejected outright — the extras just collapse.
-  const byEmail = new Map<string, { email: string; name: string | null }>()
-  const invalid: string[] = []
-
-  for (const entry of rawEntries) {
-    const email = (entry.email ?? '').trim().toLowerCase()
-    if (!email) continue
-    if (!validateEmail(email).valid) { invalid.push(email); continue }
-    if (byEmail.has(email)) continue
-    const name = (entry.name ?? '').trim()
-    byEmail.set(email, { email, name: name ? sanitiseText(name).slice(0, 120) : null })
-  }
-
-  if (invalid.length) {
-    return NextResponse.json(
-      { error: `These aren't valid email addresses: ${invalid.slice(0, 5).join(', ')}` },
-      { status: 400 }
-    )
-  }
-  if (!byEmail.size) {
-    return NextResponse.json({ error: 'Add at least one referral to submit.' }, { status: 400 })
-  }
+  const entries = parsed.rows.map(r => ({
+    email: r.email,
+    name: r.name ? sanitiseText(r.name).slice(0, 120) : null,
+  }))
 
   const admin = createAdminClient()
 
@@ -89,14 +95,16 @@ export const POST = withPartnerAuth(async (req: NextRequest, ctx: PartnerAuthCon
     )
   }
 
-  const entries = [...byEmail.values()]
-
   const { data: submission, error } = await admin
     .from('referral_partner_submissions')
     .insert({
       referral_partner_id: ctx.partner.id,
       note: body.note?.trim() ? sanitiseText(body.note.trim()).slice(0, 500) : null,
       entry_count: entries.length,
+      // Stored verbatim so the admin downloads what was actually uploaded,
+      // not a re-rendering of our parse of it.
+      csv_content: csv,
+      csv_filename: body.filename?.trim().slice(0, 200) || 'referrals.csv',
     })
     .select()
     .single()
@@ -125,5 +133,6 @@ export const POST = withPartnerAuth(async (req: NextRequest, ctx: PartnerAuthCon
     metadata: { partner_id: ctx.partner.id, submission_id: submission.id, entries: entries.length },
   })
 
+  // Every row validated, so what's stored is exactly what was uploaded.
   return NextResponse.json({ submission: { ...submission, entries } }, { status: 201 })
 })

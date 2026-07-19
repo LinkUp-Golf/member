@@ -7,6 +7,7 @@ import { AdminPageHeader, StatCard, Badge, AdminCard } from '@/components/admin/
 import ReferralContactPicker, { type ReferralSelection } from '@/components/admin/ReferralContactPicker'
 import { isRateExpired } from '@/lib/referral-rate'
 import ReferralPayouts from '@/components/admin/ReferralPayouts'
+import ReferralSubmissions from '@/components/admin/ReferralSubmissions'
 import type { ReferralPartner, ReferralPartnerLink, ReferralPartnerStats } from '@/types'
 
 const fmtMoney = (n: number) =>
@@ -134,6 +135,17 @@ export default function ReferralPartnerDetailPage() {
         <StatCard label="Active"       value={stats.activeCount} sub="Paying members" colour="green" />
         <StatCard label="Conversion"   value={`${Math.round(conversionRate * 100)}%`} colour="gold" />
         <StatCard label="Commission"   value={fmtMoney(stats.commissionOwed)} sub="Owed to date" colour="gold" />
+      </div>
+
+      {/* Referral lists this partner submitted, imported at their rate */}
+      <div className="mb-8">
+        <ReferralSubmissions
+          partnerId={id}
+          percentage={partner.percentage}
+          endsAt={partner.ends_at}
+          onToast={showToast}
+          onImported={loadAll}
+        />
       </div>
 
       {/* Monthly commission payouts */}

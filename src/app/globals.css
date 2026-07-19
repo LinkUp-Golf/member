@@ -29,6 +29,7 @@
     --sidebar-width: 208px;
     --sidebar-width-lg: 248px;
     --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-top: env(safe-area-inset-top, 0px);
 
     /* Motion — shared easing vocabulary (member app only) */
     --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
