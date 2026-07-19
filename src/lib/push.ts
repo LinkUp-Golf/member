@@ -169,6 +169,13 @@ export const NotificationTemplates = {
     tag:   'referral-partner-approved',
   }),
 
+  referralCommissionPaid: (amount: number, period: string): PushPayload => ({
+    title: 'Commission paid',
+    body:  `Your ${period} referral commission of ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} has been paid.`,
+    url:   '/partner/payments',
+    tag:   'referral-commission-paid',
+  }),
+
   referralPartnerRejected: (reason: string): PushPayload => ({
     title: 'Referral partner application',
     body:  `Your application wasn't approved this time. ${reason}`,

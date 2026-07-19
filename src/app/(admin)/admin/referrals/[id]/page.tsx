@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { AdminPageHeader, StatCard, Badge, AdminCard } from '@/components/admin/AdminUI'
 import ReferralContactPicker, { type ReferralSelection } from '@/components/admin/ReferralContactPicker'
 import { isRateExpired } from '@/lib/referral-rate'
+import ReferralPayouts from '@/components/admin/ReferralPayouts'
 import type { ReferralPartner, ReferralPartnerLink, ReferralPartnerStats } from '@/types'
 
 const fmtMoney = (n: number) =>
@@ -135,7 +136,12 @@ export default function ReferralPartnerDetailPage() {
         <StatCard label="Commission"   value={fmtMoney(stats.commissionOwed)} sub="Owed to date" colour="gold" />
       </div>
 
-      {/* Link contacts */}
+      {/* Monthly commission payouts */}
+      <div className="mb-8">
+        <ReferralPayouts partnerId={id} onToast={showToast} />
+      </div>
+
+      {/* Refer contacts */}
       <div className="mb-8">
         <AdminCard title="Refer Members & Non-members">
           <div className="space-y-5">

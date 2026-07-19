@@ -1,12 +1,13 @@
 // ============================================================
-// LinkUp Golf — Referral commission rate helpers
-// Pure, isomorphic date/rate maths shared by the server-side analytics module
-// (src/lib/referral-partners.ts) and the admin/partner client pages. Kept
-// separate so client bundles don't pull in the server-only analytics code.
+// LinkUp Golf — Referral rate & payout-period helpers
+// Pure, isomorphic maths shared by the server-side modules
+// (referral-partners.ts, referral-payouts.ts) and the admin/partner client
+// pages. Kept separate so client bundles don't pull in the server-only code.
 //
-// A partner's percentage is negotiated for a term ending on `ends_at`. Dates
-// are compared as YYYY-MM-DD strings so a result never shifts with the
-// server's or the browser's timezone.
+// A partner's percentage is negotiated for a term ending on `ends_at`, and
+// commission is settled per calendar month. Dates are compared and sliced as
+// YYYY-MM-DD strings so a result never shifts with the server's or the
+// browser's timezone.
 // ============================================================
 
 import { MEMBERSHIP_FEE_USD } from '@/lib/constants'
@@ -29,4 +30,19 @@ export function isWithinRateWindow(date: string, endsAt?: string | null): boolea
 export function isRateExpired(endsAt: string | null | undefined, today = new Date()): boolean {
   if (!endsAt) return false
   return endsAt.slice(0, 10) < today.toISOString().slice(0, 10)
+}
+
+// ---- Payout periods -----------------------------------------
+
+/** The first day of the month a date falls in, as YYYY-MM-DD. */
+export function monthOf(date: string): string {
+  return `${date.slice(0, 7)}-01`
+}
+
+/** Human label for a payout period, e.g. "July 2026". */
+export function formatPeriod(periodMonth: string): string {
+  return new Date(`${periodMonth.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric',
+  })
 }
