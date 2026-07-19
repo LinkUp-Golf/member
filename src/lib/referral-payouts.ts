@@ -3,11 +3,11 @@
 // Server-side only. Groups a partner's conversions into calendar months and
 // works out which months are still owed.
 //
-// Commission is paid monthly and by hand. A conversion belongs to the month it
-// converted in (members.membership_start_date), so a referral recorded today
-// for someone who joined in March lands in March's payout — not this month's.
-// Conversions outside the partner's rate window carry commission 0 and are
-// excluded entirely rather than shown as $0 line items.
+// Commission is paid monthly and by hand. A conversion belongs to the month of
+// the referral's first paid booking, so someone who paid in March lands in
+// March's payout even if the link was recorded later. Conversions outside the
+// partner's rate window carry commission 0 and are excluded entirely rather
+// than shown as $0 line items.
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'

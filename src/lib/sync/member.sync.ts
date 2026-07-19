@@ -48,6 +48,24 @@ export async function upsertMember({
     return { success: false, userId, action: 'updated', error: error.message }
   }
 
+  // Attach any referral of this person that was recorded before they had a
+  // member row (a partner referred them as a non-member, by email). Populating
+  // member_id lets referral reporting show them as a member and lets the
+  // member-level "referred once" constraint apply. Conversion/commission is
+  // matched by email regardless, so this is best-effort — a failure here must
+  // not break login/sync.
+  const email = (contact.email ?? '').toLowerCase()
+  if (email) {
+    const { error: linkError } = await ctx.supabase
+      .from('referral_partner_links')
+      .update({ member_id: userId, updated_at: new Date().toISOString() })
+      .eq('email', email)
+      .is('member_id', null)
+    if (linkError) {
+      log.warn('Referral link backfill skipped', { errorMessage: linkError.message })
+    }
+  }
+
   log.debug('Member upserted', { ghlContactId: contact.id })
   return { success: true, userId, action: 'updated' }
 }
