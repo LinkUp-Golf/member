@@ -43,8 +43,10 @@ export const POST = withAuth(
     const name = body.name?.trim() ?? ''
     const code = (body.code?.trim() || toSlug(name))
     const percentage = body.percentage ?? DEFAULT_REFERRAL_PERCENTAGE
+    // Empty string from the date input means "no expiry", same as omitting it.
+    const endsAt = body.ends_at?.trim() || null
 
-    const { valid, errors } = validateReferralPartnerPayload({ name, code, percentage })
+    const { valid, errors } = validateReferralPartnerPayload({ name, code, percentage, ends_at: endsAt })
     if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })
 
     const admin = createAdminClient()
@@ -62,6 +64,7 @@ export const POST = withAuth(
         name,
         code,
         percentage,
+        ends_at: endsAt,
         created_by: ctx.userId,
       })
       .select()

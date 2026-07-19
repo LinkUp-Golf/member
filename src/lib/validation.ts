@@ -173,6 +173,12 @@ export function validateReferralPartnerPayload(
     }
   }
 
+  // Optional in both create and edit — null/'' clears the expiry.
+  if ('ends_at' in b && b.ends_at !== null && b.ends_at !== '') {
+    const endsResult = validateDate(b.ends_at, 'Rate end date')
+    if (!endsResult.valid) errors.push(...endsResult.errors)
+  }
+
   return { valid: errors.length === 0, errors }
 }
 

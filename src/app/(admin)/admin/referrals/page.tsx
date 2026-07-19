@@ -7,6 +7,7 @@ import {
   AdminPageHeader, AdminTable, AdminTr, AdminTd, StatCard,
 } from '@/components/admin/AdminUI'
 import { DEFAULT_REFERRAL_PERCENTAGE } from '@/lib/constants'
+import { isRateExpired } from '@/lib/referral-rate'
 import ReferralContactPicker, { type ReferralSelection } from '@/components/admin/ReferralContactPicker'
 import type { ReferralPartnerWithStats } from '@/types'
 
@@ -16,6 +17,9 @@ function toSlug(value: string) {
 
 const fmtMoney = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 })
+
+const fmtDate = (d: string) =>
+  new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
 export default function AdminReferralPartnersPage() {
   const [partners, setPartners] = useState<ReferralPartnerWithStats[]>([])
@@ -108,7 +112,16 @@ export default function AdminReferralPartnersPage() {
                 </Link>
               </AdminTd>
               <AdminTd><code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{p.code}</code></AdminTd>
-              <AdminTd>{p.percentage}%</AdminTd>
+              <AdminTd>
+                <span className={isRateExpired(p.ends_at) ? 'text-gray-400 line-through' : undefined}>
+                  {p.percentage}%
+                </span>
+                {p.ends_at && (
+                  <span className={`block text-xs ${isRateExpired(p.ends_at) ? 'text-red-500' : 'text-gray-400'}`}>
+                    {isRateExpired(p.ends_at) ? 'Expired' : 'Until'} {fmtDate(p.ends_at)}
+                  </span>
+                )}
+              </AdminTd>
               <AdminTd>{p.referredCount} <span className="text-gray-400 text-xs">({p.nonMemberCount} non-member)</span></AdminTd>
               <AdminTd>{p.activeCount}</AdminTd>
               <AdminTd className="font-medium">{fmtMoney(p.commissionOwed)}</AdminTd>
@@ -154,7 +167,7 @@ export default function AdminReferralPartnersPage() {
 
 // ---- Create / edit drawer -----------------------------------
 
-type PartnerFormValues = { name: string; code: string; percentage: number | '' }
+type PartnerFormValues = { name: string; code: string; percentage: number | ''; ends_at: string }
 
 function PartnerDrawer({ editing, onClose, onSaved, onError }: {
   editing: ReferralPartnerWithStats | null
@@ -171,6 +184,7 @@ function PartnerDrawer({ editing, onClose, onSaved, onError }: {
       name: editing?.name ?? '',
       code: editing?.code ?? '',
       percentage: editing?.percentage ?? DEFAULT_REFERRAL_PERCENTAGE,
+      ends_at: editing?.ends_at?.slice(0, 10) ?? '',
     },
   })
 
@@ -214,6 +228,7 @@ function PartnerDrawer({ editing, onClose, onSaved, onError }: {
         name: data.name.trim(),
         code: data.code.trim(),
         percentage: Number(data.percentage),
+        ends_at: data.ends_at || null,
       }
       const res = await fetch(
         isEdit ? `/api/admin/referral-partners/${editing.id}` : '/api/admin/referral-partners',
@@ -308,6 +323,20 @@ function PartnerDrawer({ editing, onClose, onSaved, onError }: {
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
             </div>
             {errors.percentage && <p className={errMsg}>{errors.percentage.message}</p>}
+          </div>
+
+          <div>
+            <label htmlFor="partner-ends-at" className={labelCls}>Rate Valid Until</label>
+            <input
+              id="partner-ends-at"
+              type="date"
+              className={field(!!errors.ends_at)}
+              {...register('ends_at')}
+            />
+            <p className="mt-1 text-[11px] text-gray-400">
+              Last day this rate is honoured. Referrals who become members after it earn no commission.
+              Leave blank for no expiry.
+            </p>
           </div>
 
           <div className="pt-1 border-t border-gray-100">

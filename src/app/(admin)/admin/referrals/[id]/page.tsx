@@ -5,10 +5,14 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { AdminPageHeader, StatCard, Badge, AdminCard } from '@/components/admin/AdminUI'
 import ReferralContactPicker, { type ReferralSelection } from '@/components/admin/ReferralContactPicker'
+import { isRateExpired } from '@/lib/referral-rate'
 import type { ReferralPartner, ReferralPartnerLink, ReferralPartnerStats } from '@/types'
 
 const fmtMoney = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 })
+
+const fmtDate = (d: string) =>
+  new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
 interface Analytics {
   partner: ReferralPartner
@@ -105,8 +109,22 @@ export default function ReferralPartnerDetailPage() {
 
       <AdminPageHeader
         title={partner.name}
-        description={`Code: ${partner.code} · ${partner.percentage}% of ${fmtMoney(membershipFee)} membership fee`}
+        description={
+          `Code: ${partner.code} · ${partner.percentage}% of ${fmtMoney(membershipFee)} membership fee` +
+          (partner.ends_at
+            ? ` · rate ${isRateExpired(partner.ends_at) ? 'expired' : 'valid until'} ${fmtDate(partner.ends_at)}`
+            : '')
+        }
       />
+
+      {partner.ends_at && isRateExpired(partner.ends_at) && (
+        <div className="mb-6 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+          <p className="text-xs text-amber-700">
+            This partner&apos;s commission rate expired on {fmtDate(partner.ends_at)}. Referrals who become
+            members after that date earn no commission — edit the partner to extend the term.
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
         <StatCard label="Referred"     value={stats.referredCount} colour="blue" />

@@ -280,6 +280,8 @@ export interface ReferralPartner {
   name: string
   code: string
   percentage: number
+  /** Last day the commission percentage is honoured (YYYY-MM-DD). Null = no expiry. */
+  ends_at: string | null
   created_by: string | null
   created_at: string
   updated_at: string
