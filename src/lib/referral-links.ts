@@ -4,9 +4,18 @@
 // import of a partner-submitted referral list, so both agree on what
 // attribution means.
 //
-// referral_partner_links carries a global UNIQUE(email): a contact belongs to
-// exactly one partner, because attribution decides who gets paid. The two
-// callers differ only in what should happen when a contact is already claimed:
+// A person is referred exactly once, because attribution decides who gets
+// paid. "Once" is enforced on two keys, both backed by DB constraints:
+//
+//   email     — UNIQUE(email) on referral_partner_links.
+//   member_id — partial UNIQUE where member_id IS NOT NULL.
+//
+// The member key is what stops the same person being referred twice under two
+// different addresses (personal vs work, say). Email alone would let that
+// through, and they'd be counted twice in stats and paid twice in commission.
+//
+// The two callers differ only in what should happen when a person is already
+// claimed:
 //
 //   repoint: true  — an admin deliberately moving a contact between partners.
 //   repoint: false — importing a partner's own submission. Another partner's
@@ -42,6 +51,7 @@ interface ExistingLink {
   id: string
   email: string
   referral_partner_id: string
+  member_id: string | null
 }
 
 interface MemberRow {
@@ -77,19 +87,40 @@ export async function linkTargetsToPartner(
 
   const emails = [...byEmail.keys()]
 
-  const [{ data: existingLinks }, { data: memberRows }] = await Promise.all([
-    admin.from('referral_partner_links').select('id, email, referral_partner_id').in('email', emails),
+  const [{ data: linksByEmailRows }, { data: memberRows }] = await Promise.all([
+    admin.from('referral_partner_links').select('id, email, referral_partner_id, member_id').in('email', emails),
     admin.from('members').select('id, email, ghl_contact_id').in('email', emails),
   ])
 
   const linkByEmail = new Map(
-    ((existingLinks ?? []) as ExistingLink[]).map(l => [l.email.toLowerCase(), l])
+    ((linksByEmailRows ?? []) as ExistingLink[]).map(l => [l.email.toLowerCase(), l])
   )
   const memberByEmail = new Map(
     ((memberRows ?? []) as MemberRow[]).map(m => [m.email.toLowerCase(), m])
   )
 
+  // A person can be referred once, and a member is the same person whichever
+  // address they're listed under. Looking up only by email would miss someone
+  // already referred at a different address — they'd be attributed twice and
+  // counted twice in commission. So resolve members to their existing link too.
+  const memberIds = [...memberByEmail.values()].map(m => m.id)
+  const { data: linksByMemberRows } = memberIds.length
+    ? await admin
+        .from('referral_partner_links')
+        .select('id, email, referral_partner_id, member_id')
+        .in('member_id', memberIds)
+    : { data: [] as ExistingLink[] }
+
+  const linkByMemberId = new Map(
+    ((linksByMemberRows ?? []) as ExistingLink[])
+      .filter(l => l.member_id)
+      .map(l => [l.member_id as string, l])
+  )
+
   const outcomes: LinkOutcome[] = []
+  // Members newly linked during this run, so a second row in the same batch
+  // resolving to the same person can't slip past the pre-loop reads.
+  const claimedMemberIds = new Set<string>()
 
   for (const [email, target] of byEmail) {
     if (!validateEmail(email).valid) {
@@ -97,8 +128,15 @@ export async function linkTargetsToPartner(
       continue
     }
 
-    const existing = linkByEmail.get(email)
     const member = memberByEmail.get(email) ?? null
+
+    if (member && claimedMemberIds.has(member.id)) {
+      outcomes.push({ email, status: 'skipped', reason: 'Already referred in this list' })
+      continue
+    }
+
+    // Match on the address first, then on the member behind it.
+    const existing = linkByEmail.get(email) ?? (member ? linkByMemberId.get(member.id) : undefined)
 
     if (existing) {
       if (existing.referral_partner_id === partnerId) {
@@ -123,9 +161,12 @@ export async function linkTargetsToPartner(
         })
         .eq('id', existing.id)
 
-      outcomes.push(error
-        ? { email, status: 'skipped', reason: 'Could not move this contact' }
-        : { email, status: 'linked', linkId: existing.id, memberId: member?.id ?? null })
+      if (error) {
+        outcomes.push({ email, status: 'skipped', reason: 'Could not move this contact' })
+      } else {
+        if (member) claimedMemberIds.add(member.id)
+        outcomes.push({ email, status: 'linked', linkId: existing.id, memberId: member?.id ?? null })
+      }
       continue
     }
 
@@ -150,17 +191,19 @@ export async function linkTargetsToPartner(
       .single()
 
     if (error) {
-      // The unique constraint is the race-safe backstop for the check above.
+      // The unique constraints on email and member_id are the race-safe
+      // backstop for the checks above.
       outcomes.push({
         email,
         status: 'skipped',
         reason: error.code === '23505'
-          ? 'Already attributed to another referral partner'
+          ? 'Already referred'
           : 'Could not record this referral',
       })
       continue
     }
 
+    if (member) claimedMemberIds.add(member.id)
     outcomes.push({ email, status: 'linked', linkId: inserted.id, memberId: member?.id ?? null })
   }
 
