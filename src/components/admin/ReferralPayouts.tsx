@@ -47,6 +47,7 @@ export default function ReferralPayouts({
 }) {
   const [data, setData] = useState<PayoutsResponse | null>(null)
   const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
   const [paying, setPaying] = useState<PayoutPeriod | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
 
@@ -59,6 +60,21 @@ export default function ReferralPayouts({
 
   useEffect(() => { load() }, [load])
 
+  // Refresh membership from GHL, then reload the figures. Recording a payment
+  // does this automatically; this lets the admin see current numbers first.
+  const syncFromGhl = useCallback(async () => {
+    setSyncing(true)
+    const res = await fetch(`/api/admin/referral-partners/${partnerId}/sync`, { method: 'POST' })
+    const json = await res.json().catch(() => ({}))
+    if (res.ok) {
+      await load()
+      onToast(`Synced ${json.refreshed ?? 0} member${json.refreshed === 1 ? '' : 's'} from GHL.`)
+    } else {
+      onToast(json.error ?? 'Sync failed.', false)
+    }
+    setSyncing(false)
+  }, [partnerId, load, onToast])
+
   if (loading) return <AdminCard title="Commission & Payments"><p className="text-sm text-gray-400 py-4 text-center">Loading…</p></AdminCard>
   if (!data) return <AdminCard title="Commission & Payments"><p className="text-sm text-red-500 py-4 text-center">Could not load payouts.</p></AdminCard>
 
@@ -66,6 +82,20 @@ export default function ReferralPayouts({
 
   return (
     <>
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <p className="text-xs text-gray-400">
+          Membership is verified from GHL. Recording a payment re-syncs automatically.
+        </p>
+        <button
+          type="button"
+          onClick={syncFromGhl}
+          disabled={syncing}
+          className="flex-shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+        >
+          {syncing ? 'Syncing…' : 'Sync from GHL'}
+        </button>
+      </div>
+
       <div className="grid grid-cols-2 gap-3 mb-4">
         <StatCard label="Paid to date" value={fmtMoney(totalPaid)}        sub="Across all months" colour="green" />
         <StatCard label="Outstanding"  value={fmtMoney(totalOutstanding)} sub="Awaiting payout"   colour="gold" />

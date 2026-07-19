@@ -10,6 +10,7 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { loadPayoutSummary, monthOf, formatPeriod } from '@/lib/referral-payouts'
+import { syncPartnerReferredMembers } from '@/lib/referral-sync'
 import { sendPushToMember, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
@@ -56,6 +57,11 @@ export const POST = withAuth(
     const admin = createAdminClient()
     const partner = await getPartner(admin, id)
     if (!partner) return NextResponse.json({ error: 'Referral partner not found' }, { status: 404 })
+
+    // Membership lives in GHL, so refresh this partner's referred members from
+    // GHL before computing the payout — a payment must reflect who currently
+    // holds a membership, not who did at the last sync.
+    await syncPartnerReferredMembers(admin, id, ctx.requestId)
 
     const { periods } = await loadPayoutSummary(admin, partner)
     const period = periods.find(p => p.periodMonth === periodMonth)

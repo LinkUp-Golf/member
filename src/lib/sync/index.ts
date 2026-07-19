@@ -10,7 +10,8 @@
 
 import { logger } from '@/lib/logger'
 import { COURSE_TAG_MAP, hasAnyAccessTag } from '@/lib/ghl/tags'
-import { upsertMember } from './member.sync'
+import { getContactById } from '@/lib/ghl/client'
+import { upsertMember, deactivateMember } from './member.sync'
 import { syncCourseMemberships } from './membership.sync'
 import type { GHLContact } from '@/types'
 import type { SyncContext, SyncResult } from './types'
@@ -102,4 +103,45 @@ export async function syncMemberByContactId(params: {
   }
 
   return syncMember({ contact, userId: member.id, ctx })
+}
+
+// ---- Refresh a known set of members from GHL ----------------
+// Re-pulls each member's current GHL tags so membership state is up to date.
+// Mirrors the webhook: an access tag present → full sync (tags + active); no
+// access tag → deactivate, and update ghl_tags so a removed membership tag
+// isn't left stale (membership is read from ghl_tags). Best-effort per member.
+
+export async function refreshMembersFromGhl(
+  members: Array<{ id: string; ghl_contact_id: string | null }>,
+  ctx: SyncContext
+): Promise<{ refreshed: number; failed: number }> {
+  let refreshed = 0
+  let failed = 0
+
+  for (const m of members) {
+    if (!m.ghl_contact_id) { failed++; continue }
+    try {
+      const contact = await getContactById(m.ghl_contact_id)
+      if (!contact) { failed++; continue }
+
+      const tags = contact.tags ?? []
+      if (hasAnyAccessTag(tags)) {
+        const result = await syncMember({ contact, userId: m.id, ctx })
+        if (!result.success) { failed++; continue }
+      } else {
+        // No access tag — deactivate and refresh the stored tags so the
+        // membership check (which reads ghl_tags) reflects the removal.
+        await deactivateMember(m.id, ctx)
+        await ctx.supabase
+          .from('members')
+          .update({ ghl_tags: tags, updated_at: new Date().toISOString() })
+          .eq('id', m.id)
+      }
+      refreshed++
+    } catch {
+      failed++
+    }
+  }
+
+  return { refreshed, failed }
 }
