@@ -18,7 +18,10 @@ export const GET = withAuth(
 
     let query = admin
       .from('referral_partner_applications')
-      .select('*, member:members(first_name, last_name, email)')
+      // The FK must be named: the table points at members twice (member_id and
+      // reviewed_by), so a bare members(...) embed is ambiguous and PostgREST
+      // refuses it.
+      .select('*, member:members!referral_partner_applications_member_id_fkey(first_name, last_name, email)')
       // Pending first so the review queue is the top of the list, then newest.
       .order('created_at', { ascending: false })
 

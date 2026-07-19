@@ -24,8 +24,7 @@ const NAV_GROUPS = [
       { href: '/admin/members',          label: 'Members',            icon: '▪' },
       { href: '/admin/events',           label: 'Member Events',      icon: '▪', badge: true },
       { href: '/admin/guest-access',     label: 'Guest Access',       icon: '▪', badge: true },
-      { href: '/admin/referrals',        label: 'Referral Partners',  icon: '▪' },
-      { href: '/admin/referral-applications', label: 'Partner Applications', icon: '▪', badge: true },
+      { href: '/admin/referrals',        label: 'Referral Partners',  icon: '▪', badge: true },
       { href: '/admin/messaging',        label: 'Messaging Controls', icon: '▪' },
     ],
   },
@@ -109,7 +108,7 @@ function NavContent({
                   ? eventsCount
                   : item.href.includes('golf-events')
                   ? golfEventsCount
-                  : item.href.includes('referral-applications')
+                  : item.href.includes('referrals')
                   ? partnerApplicationsCount
                   : 0
                 : 0

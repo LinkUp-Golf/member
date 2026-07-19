@@ -41,7 +41,9 @@ export const PATCH = withAuth(
 
     const { data: application, error: fetchError } = await admin
       .from('referral_partner_applications')
-      .select('id, member_id, status, member:members(first_name, last_name)')
+      // Named FK — the table references members twice (member_id, reviewed_by),
+      // so an unqualified embed is ambiguous.
+      .select('id, member_id, status, member:members!referral_partner_applications_member_id_fkey(first_name, last_name)')
       .eq('id', id)
       .single()
 

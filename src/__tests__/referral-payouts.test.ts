@@ -42,9 +42,9 @@ describe('buildPayoutPeriods', () => {
     )
 
     expect(periods.map(p => p.periodMonth)).toEqual(['2026-04-01', '2026-03-01'])
-    expect(periods[0].total).toBe(10)
-    expect(periods[1].total).toBe(20)
-    expect(periods[1].conversions).toHaveLength(2)
+    expect(periods[0]?.total).toBe(10)
+    expect(periods[1]?.total).toBe(20)
+    expect(periods[1]?.conversions).toHaveLength(2)
   })
 
   it('orders periods newest first', () => {
@@ -68,8 +68,8 @@ describe('buildPayoutPeriods', () => {
       []
     )
     expect(periods).toHaveLength(1)
-    expect(periods[0].conversions).toHaveLength(1)
-    expect(periods[0].total).toBe(10)
+    expect(periods[0]?.conversions).toHaveLength(1)
+    expect(periods[0]?.total).toBe(10)
   })
 
   it('marks a month paid when a payment exists for it', () => {
@@ -77,9 +77,9 @@ describe('buildPayoutPeriods', () => {
       [conversion({ convertedAt: '2026-03-04' })],
       [payment('2026-03-01', 10)]
     )
-    expect(periods[0].paid).toBe(true)
-    expect(periods[0].paidAmount).toBe(10)
-    expect(periods[0].paymentId).toBe('pay-2026-03-01')
+    expect(periods[0]?.paid).toBe(true)
+    expect(periods[0]?.paidAmount).toBe(10)
+    expect(periods[0]?.paymentId).toBe('pay-2026-03-01')
   })
 
   it('leaves months without a payment outstanding', () => {
@@ -91,9 +91,9 @@ describe('buildPayoutPeriods', () => {
       [payment('2026-03-01', 10)]
     )
     const byMonth = Object.fromEntries(periods.map(p => [p.periodMonth, p]))
-    expect(byMonth['2026-03-01'].paid).toBe(true)
-    expect(byMonth['2026-04-01'].paid).toBe(false)
-    expect(byMonth['2026-04-01'].paidAmount).toBeNull()
+    expect(byMonth['2026-03-01']?.paid).toBe(true)
+    expect(byMonth['2026-04-01']?.paid).toBe(false)
+    expect(byMonth['2026-04-01']?.paidAmount).toBeNull()
   })
 
   it('surfaces an adjusted payment amount alongside the calculated total', () => {
@@ -101,16 +101,16 @@ describe('buildPayoutPeriods', () => {
       [conversion({ convertedAt: '2026-03-04' })],
       [payment('2026-03-01', 7.5)]
     )
-    expect(periods[0].total).toBe(10)     // what was earned
-    expect(periods[0].paidAmount).toBe(7.5) // what was actually paid
+    expect(periods[0]?.total).toBe(10)     // what was earned
+    expect(periods[0]?.paidAmount).toBe(7.5) // what was actually paid
   })
 
   it('keeps a paid month in history after its conversions are unlinked', () => {
     const periods = buildPayoutPeriods([], [payment('2026-03-01', 10)])
     expect(periods).toHaveLength(1)
-    expect(periods[0].paid).toBe(true)
-    expect(periods[0].conversions).toEqual([])
-    expect(periods[0].total).toBe(0)
+    expect(periods[0]?.paid).toBe(true)
+    expect(periods[0]?.conversions).toEqual([])
+    expect(periods[0]?.total).toBe(0)
   })
 
   it('returns nothing when there are no conversions and no payments', () => {

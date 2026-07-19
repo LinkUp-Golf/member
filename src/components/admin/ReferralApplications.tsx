@@ -1,10 +1,12 @@
 'use client'
 
+// Member applications for the referral-partner role. Rendered as a tab on the
+// admin Referral Partners page rather than a page of its own — reviewing an
+// application ends in creating a partner, so it belongs beside the partner
+// list, not in a separate destination.
+
 import { useState, useEffect, useCallback } from 'react'
-import Link from 'next/link'
-import {
-  AdminPageHeader, AdminTable, AdminTr, AdminTd, StatCard, Badge,
-} from '@/components/admin/AdminUI'
+import { AdminTable, AdminTr, AdminTd, StatCard, Badge } from '@/components/admin/AdminUI'
 import { DEFAULT_REFERRAL_PERCENTAGE } from '@/lib/constants'
 import type { ReferralPartnerApplication } from '@/types'
 
@@ -21,24 +23,28 @@ const STATUS_COLOURS = {
   rejected: 'red',
 } as const
 
-export default function AdminReferralApplicationsPage() {
+export default function ReferralApplications({
+  onToast,
+  onReviewed,
+}: {
+  onToast: (msg: string, ok?: boolean) => void
+  /** Approving creates a partner, so the host page refreshes its partner list. */
+  onReviewed: () => void
+}) {
   const [applications, setApplications] = useState<ReferralPartnerApplication[]>([])
   const [loading, setLoading] = useState(true)
-  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [reviewing, setReviewing] = useState<ReferralPartnerApplication | null>(null)
-
-  const showToast = (msg: string, ok = true) => {
-    setToast({ msg, ok })
-    setTimeout(() => setToast(null), 3500)
-  }
 
   const load = useCallback(async () => {
     setLoading(true)
     const res = await fetch('/api/admin/referral-partner-applications')
     const json = await res.json().catch(() => ({}))
-    if (!res.ok) showToast(json.error ?? 'Failed to load applications.', false)
+    if (!res.ok) onToast(json.error ?? 'Failed to load applications.', false)
     setApplications(Array.isArray(json.applications) ? json.applications : [])
     setLoading(false)
+    // onToast is recreated each render by the host; depending on it would
+    // reload the list on every parent render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -52,28 +58,7 @@ export default function AdminReferralApplicationsPage() {
     a.member ? `${a.member.first_name} ${a.member.last_name}`.trim() : 'Unknown member'
 
   return (
-    <div className="p-4 sm:p-8">
-      <div className="flex items-start justify-between gap-4 mb-6">
-        <AdminPageHeader
-          title="Partner Applications"
-          description="Review members applying to become referral partners"
-        />
-        <Link
-          href="/admin/referrals"
-          className="flex-shrink-0 px-4 py-2 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-        >
-          Referral Partners →
-        </Link>
-      </div>
-
-      {toast && (
-        <div className={`fixed top-6 right-6 z-[60] px-4 py-3 rounded-xl shadow-lg text-sm font-medium ${
-          toast.ok ? 'bg-green-900 text-white' : 'bg-red-600 text-white'
-        }`}>
-          {toast.msg}
-        </div>
-      )}
-
+    <>
       {!loading && (
         <div className="grid grid-cols-3 gap-3 mb-6">
           <StatCard label="Pending"  value={counts.pending  ?? 0} sub="Awaiting review" colour="gold" />
@@ -123,11 +108,11 @@ export default function AdminReferralApplicationsPage() {
           application={reviewing}
           memberName={memberName(reviewing)}
           onClose={() => setReviewing(null)}
-          onReviewed={(msg) => { setReviewing(null); showToast(msg); load() }}
-          onError={(msg) => showToast(msg, false)}
+          onReviewed={(msg) => { setReviewing(null); onToast(msg); load(); onReviewed() }}
+          onError={(msg) => onToast(msg, false)}
         />
       )}
-    </div>
+    </>
   )
 }
 

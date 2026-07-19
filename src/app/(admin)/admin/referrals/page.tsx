@@ -8,6 +8,7 @@ import {
 } from '@/components/admin/AdminUI'
 import { DEFAULT_REFERRAL_PERCENTAGE } from '@/lib/constants'
 import { isRateExpired } from '@/lib/referral-rate'
+import ReferralApplications from '@/components/admin/ReferralApplications'
 import ReferralContactPicker, { type ReferralSelection } from '@/components/admin/ReferralContactPicker'
 import type { ReferralPartnerWithStats } from '@/types'
 
@@ -21,7 +22,11 @@ const fmtMoney = (n: number) =>
 const fmtDate = (d: string) =>
   new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
+type Tab = 'partners' | 'applications'
+
 export default function AdminReferralPartnersPage() {
+  const [tab, setTab] = useState<Tab>('partners')
+  const [pendingCount, setPendingCount] = useState(0)
   const [partners, setPartners] = useState<ReferralPartnerWithStats[]>([])
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
@@ -44,7 +49,15 @@ export default function AdminReferralPartnersPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { loadPartners() }, [loadPartners])
+  // Drives the tab's pending badge, so it's fetched regardless of which tab is
+  // open. The Applications tab loads the full list itself when shown.
+  const loadPendingCount = useCallback(async () => {
+    const res = await fetch('/api/admin/referral-partner-applications?status=pending')
+    const json = await res.json().catch(() => ({}))
+    setPendingCount(Array.isArray(json.applications) ? json.applications.length : 0)
+  }, [])
+
+  useEffect(() => { loadPartners(); loadPendingCount() }, [loadPartners, loadPendingCount])
 
   async function deletePartner(partner: ReferralPartnerWithStats) {
     setProcessing(true)
@@ -70,14 +83,46 @@ export default function AdminReferralPartnersPage() {
       <div className="flex items-start justify-between gap-4 mb-6">
         <AdminPageHeader
           title="Referral Partners"
-          description="Manage referral partners, refer members & non-members, and track commission"
+          description="Manage referral partners, review applications, and track commission"
         />
-        <button
-          onClick={() => { setEditing(null); setShowCreate(true) }}
-          className="flex-shrink-0 px-4 py-2 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 transition-colors"
-        >
-          + Add Partner
-        </button>
+        {tab === 'partners' && (
+          <button
+            onClick={() => { setEditing(null); setShowCreate(true) }}
+            className="flex-shrink-0 px-4 py-2 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 transition-colors"
+          >
+            + Add Partner
+          </button>
+        )}
+      </div>
+
+      {/* Tabs — reviewing an application ends in creating a partner, so both
+          live on this page rather than in separate destinations. */}
+      <div className="flex gap-1 mb-6 border-b border-gray-100">
+        {([
+          { id: 'partners' as const,     label: 'Partners' },
+          { id: 'applications' as const, label: 'Applications' },
+        ]).map(t => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`relative px-4 py-2.5 text-sm font-medium transition-colors -mb-px border-b-2 ${
+              tab === t.id
+                ? 'border-green-900 text-green-900'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {t.label}
+            {t.id === 'applications' && pendingCount > 0 && (
+              <span
+                className="ml-2 text-xs font-semibold px-1.5 py-0.5 rounded-full"
+                style={{ background: '#85bb65', color: '#002669' }}
+              >
+                {pendingCount}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
       {toast && (
@@ -88,7 +133,14 @@ export default function AdminReferralPartnersPage() {
         </div>
       )}
 
-      {!loading && (
+      {tab === 'applications' && (
+        <ReferralApplications
+          onToast={showToast}
+          onReviewed={() => { loadPartners(); loadPendingCount() }}
+        />
+      )}
+
+      {tab === 'partners' && !loading && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <StatCard label="Partners"    value={partners.length}    sub="Active affiliates"    colour="green" />
           <StatCard label="Referred"    value={totals.referred}    sub="Members & non-members" colour="blue" />
@@ -97,7 +149,7 @@ export default function AdminReferralPartnersPage() {
         </div>
       )}
 
-      {loading ? (
+      {tab === 'partners' && (loading ? (
         <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
       ) : (
         <AdminTable
@@ -142,7 +194,7 @@ export default function AdminReferralPartnersPage() {
             </AdminTr>
           ))}
         </AdminTable>
-      )}
+      ))}
 
       {showCreate && (
         <PartnerDrawer

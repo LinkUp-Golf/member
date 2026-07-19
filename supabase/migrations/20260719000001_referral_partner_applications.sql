@@ -18,6 +18,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS referral_partners_member_unique
   ON referral_partners (member_id) WHERE member_id IS NOT NULL;
 
 -- ---- Applications --------------------------------------------------------
+-- NOTE: this table references members twice — member_id (the applicant) and
+-- reviewed_by (the admin). That makes a bare PostgREST `members(...)` embed
+-- ambiguous, so queries must name the constraint:
+--   member:members!referral_partner_applications_member_id_fkey(...)
 CREATE TABLE IF NOT EXISTS referral_partner_applications (
   id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   member_id         uuid NOT NULL REFERENCES members(id) ON DELETE CASCADE,
