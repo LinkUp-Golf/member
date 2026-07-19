@@ -289,6 +289,39 @@ export interface ReferralPartner {
   updated_at: string
 }
 
+export type ReferralPartnerSubmissionStatus = 'pending' | 'imported' | 'rejected'
+export type ReferralSubmissionEntryStatus = 'pending' | 'imported' | 'skipped'
+
+/** A batch of referrals a partner submitted for an admin to import. */
+export interface ReferralPartnerSubmission {
+  id: string
+  referral_partner_id: string
+  status: ReferralPartnerSubmissionStatus
+  note: string | null
+  entry_count: number
+  imported_count: number | null
+  rejection_reason: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  created_at: string
+  updated_at: string
+  // Enriched in API responses
+  entries?: ReferralSubmissionEntry[]
+  partner?: { id: string; name: string; code: string } | null
+}
+
+export interface ReferralSubmissionEntry {
+  id: string
+  submission_id: string
+  email: string
+  name: string | null
+  status: ReferralSubmissionEntryStatus
+  /** Why an entry didn't import (e.g. already attributed to another partner). */
+  skip_reason: string | null
+  link_id: string | null
+  created_at: string
+}
+
 export type ReferralPartnerApplicationStatus = 'pending' | 'approved' | 'rejected'
 
 export interface ReferralPartnerApplication {

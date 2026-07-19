@@ -9,6 +9,7 @@ import {
 import { DEFAULT_REFERRAL_PERCENTAGE } from '@/lib/constants'
 import { isRateExpired } from '@/lib/referral-rate'
 import ReferralApplications from '@/components/admin/ReferralApplications'
+import ReferralSubmissions from '@/components/admin/ReferralSubmissions'
 import ReferralContactPicker, { type ReferralSelection } from '@/components/admin/ReferralContactPicker'
 import type { ReferralPartnerWithStats } from '@/types'
 
@@ -22,11 +23,12 @@ const fmtMoney = (n: number) =>
 const fmtDate = (d: string) =>
   new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
-type Tab = 'partners' | 'applications'
+type Tab = 'partners' | 'applications' | 'submissions'
 
 export default function AdminReferralPartnersPage() {
   const [tab, setTab] = useState<Tab>('partners')
   const [pendingCount, setPendingCount] = useState(0)
+  const [pendingSubmissions, setPendingSubmissions] = useState(0)
   const [partners, setPartners] = useState<ReferralPartnerWithStats[]>([])
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
@@ -52,9 +54,14 @@ export default function AdminReferralPartnersPage() {
   // Drives the tab's pending badge, so it's fetched regardless of which tab is
   // open. The Applications tab loads the full list itself when shown.
   const loadPendingCount = useCallback(async () => {
-    const res = await fetch('/api/admin/referral-partner-applications?status=pending')
-    const json = await res.json().catch(() => ({}))
-    setPendingCount(Array.isArray(json.applications) ? json.applications.length : 0)
+    const [appsRes, subsRes] = await Promise.all([
+      fetch('/api/admin/referral-partner-applications?status=pending'),
+      fetch('/api/admin/referral-submissions?status=pending'),
+    ])
+    const apps = await appsRes.json().catch(() => ({}))
+    const subs = await subsRes.json().catch(() => ({}))
+    setPendingCount(Array.isArray(apps.applications) ? apps.applications.length : 0)
+    setPendingSubmissions(Array.isArray(subs.submissions) ? subs.submissions.length : 0)
   }, [])
 
   useEffect(() => { loadPartners(); loadPendingCount() }, [loadPartners, loadPendingCount])
@@ -99,8 +106,9 @@ export default function AdminReferralPartnersPage() {
           live on this page rather than in separate destinations. */}
       <div className="flex gap-1 mb-6 border-b border-gray-100">
         {([
-          { id: 'partners' as const,     label: 'Partners' },
-          { id: 'applications' as const, label: 'Applications' },
+          { id: 'partners' as const,     label: 'Partners',     badge: 0 },
+          { id: 'applications' as const, label: 'Applications', badge: pendingCount },
+          { id: 'submissions' as const,  label: 'Referral Lists', badge: pendingSubmissions },
         ]).map(t => (
           <button
             key={t.id}
@@ -113,12 +121,12 @@ export default function AdminReferralPartnersPage() {
             }`}
           >
             {t.label}
-            {t.id === 'applications' && pendingCount > 0 && (
+            {t.badge > 0 && (
               <span
                 className="ml-2 text-xs font-semibold px-1.5 py-0.5 rounded-full"
                 style={{ background: '#85bb65', color: '#002669' }}
               >
-                {pendingCount}
+                {t.badge}
               </span>
             )}
           </button>
@@ -137,6 +145,13 @@ export default function AdminReferralPartnersPage() {
         <ReferralApplications
           onToast={showToast}
           onReviewed={() => { loadPartners(); loadPendingCount() }}
+        />
+      )}
+
+      {tab === 'submissions' && (
+        <ReferralSubmissions
+          onToast={showToast}
+          onImported={() => { loadPartners(); loadPendingCount() }}
         />
       )}
 

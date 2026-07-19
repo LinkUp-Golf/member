@@ -19,6 +19,7 @@ import { useMemberRoles } from '@/hooks/useMemberRoles'
 const NAV_ITEMS = [
   { href: '/partner',           label: 'Overview' },
   { href: '/partner/referrals', label: 'My Referrals' },
+  { href: '/partner/submissions', label: 'Submit Referrals' },
   { href: '/partner/payments',  label: 'Payments' },
 ]
 

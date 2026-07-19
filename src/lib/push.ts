@@ -169,6 +169,22 @@ export const NotificationTemplates = {
     tag:   'referral-partner-approved',
   }),
 
+  referralListImported: (imported: number, total: number): PushPayload => ({
+    title: 'Your referral list was imported',
+    body:  imported === total
+      ? `All ${total} referral${total !== 1 ? 's' : ''} are now attributed to you.`
+      : `${imported} of ${total} referrals were added — open the list to see why the rest weren't.`,
+    url:   '/partner/submissions',
+    tag:   'referral-list-imported',
+  }),
+
+  referralListRejected: (reason: string): PushPayload => ({
+    title: 'Referral list not imported',
+    body:  reason,
+    url:   '/partner/submissions',
+    tag:   'referral-list-rejected',
+  }),
+
   referralCommissionPaid: (amount: number, period: string): PushPayload => ({
     title: 'Commission paid',
     body:  `Your ${period} referral commission of ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} has been paid.`,
