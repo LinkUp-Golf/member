@@ -60,8 +60,16 @@ export const POST = withAuth(
 
     // Membership lives in GHL, so refresh this partner's referred members from
     // GHL before computing the payout — a payment must reflect who currently
-    // holds a membership, not who did at the last sync.
-    await syncPartnerReferredMembers(admin, id, ctx.requestId)
+    // holds a membership, not who did at the last sync. Fail closed: if the
+    // refresh reached no one (a GHL outage — every lookup threw), refuse rather
+    // than pay on stale tags. A partial success still proceeds.
+    const sync = await syncPartnerReferredMembers(admin, id, ctx.requestId)
+    if (sync.failed > 0 && sync.refreshed === 0) {
+      return NextResponse.json(
+        { error: 'Could not verify current membership with GHL. Please try again in a moment.' },
+        { status: 503 }
+      )
+    }
 
     const { periods } = await loadPayoutSummary(admin, partner)
     const period = periods.find(p => p.periodMonth === periodMonth)
@@ -74,61 +82,43 @@ export const POST = withAuth(
     }
 
     // Default to the calculated figure; an explicit amount lets the admin
-    // record a partial or adjusted payment without rewriting the maths.
-    const amount = body.amount === undefined ? period.total : Number(body.amount)
+    // record a partial or adjusted payment without rewriting the maths. `== null`
+    // catches both undefined and an explicit null so neither records a $0 payment.
+    const amount = body.amount == null ? period.total : Number(body.amount)
     if (!Number.isFinite(amount) || amount < 0) {
       return NextResponse.json({ error: 'Amount must be a positive number' }, { status: 400 })
     }
 
-    const { data: payment, error } = await admin
-      .from('referral_partner_payments')
-      .insert({
-        referral_partner_id: id,
-        period_month: periodMonth,
-        calculated_amount: period.total,
-        amount,
-        conversion_count: period.conversions.length,
-        note: body.note?.trim() || null,
-        paid_by: ctx.userId,
-      })
-      .select()
-      .single()
+    // The payment row and its line-item snapshot are written in one transaction
+    // (record_referral_payment): a conversion already paid in another month
+    // trips the per-link unique index and rolls the whole payment back, so a
+    // paid month can never exist without its items.
+    const { data: payment, error } = await admin.rpc('record_referral_payment', {
+      p_partner_id: id,
+      p_period_month: periodMonth,
+      p_calculated_amount: period.total,
+      p_amount: amount,
+      p_note: body.note?.trim() || null,
+      p_paid_by: ctx.userId,
+      p_items: period.conversions.map(c => ({
+        link_id: c.linkId,
+        email: c.email,
+        name: c.name,
+        converted_at: c.convertedAt,
+        commission: c.commission,
+      })),
+    })
 
     if (error) {
+      // 23505 = the (partner, month) unique or the per-link unique — this month,
+      // or one of its referrals, has already been paid.
       if (error.code === '23505') {
         return NextResponse.json(
-          { error: `${formatPeriod(periodMonth)} has already been paid.` },
+          { error: `${formatPeriod(periodMonth)}, or one of its referrals, has already been paid.` },
           { status: 409 }
         )
       }
       return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    // Snapshot the covered conversions. Commission is otherwise derived from
-    // live member rows and the partner's current rate, so without this a later
-    // rate change would rewrite what this payment was for.
-    if (period.conversions.length) {
-      const { error: itemsError } = await admin
-        .from('referral_partner_payment_items')
-        .insert(period.conversions.map(c => ({
-          payment_id: payment.id,
-          link_id: c.linkId,
-          email: c.email,
-          name: c.name,
-          converted_at: c.convertedAt,
-          commission: c.commission,
-        })))
-
-      if (itemsError) {
-        // Without its line items the payment isn't auditable, and the
-        // link-level unique index may be what rejected it — meaning one of
-        // these conversions was already paid in another month. Roll back.
-        await admin.from('referral_partner_payments').delete().eq('id', payment.id)
-        return NextResponse.json(
-          { error: 'Could not record the covered referrals — some may already have been paid.' },
-          { status: 409 }
-        )
-      }
     }
 
     if (partner.member_id) {

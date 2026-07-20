@@ -3,6 +3,7 @@
 // separately in membership.sync.ts.
 
 import { logger } from '@/lib/logger'
+import { hasMembershipTag } from '@/lib/ghl/tags'
 import type { GHLContact } from '@/types'
 import type { SyncContext, SyncResult } from './types'
 
@@ -46,6 +47,22 @@ export async function upsertMember({
   if (error) {
     log.error('Member upsert failed', { errorMessage: error.message })
     return { success: false, userId, action: 'updated', error: error.message }
+  }
+
+  // Stamp the membership start date the first time we observe a membership tag,
+  // and never overwrite it. This is the date referral commission is dated and
+  // rate-windowed against — without it, that logic would fall back to the
+  // referral link's creation date and could credit a conversion in the wrong
+  // month or after the rate term. `.is(null)` makes it set-once/idempotent.
+  if (hasMembershipTag(contact.tags ?? [])) {
+    const { error: startError } = await ctx.supabase
+      .from('members')
+      .update({ membership_start_date: new Date().toISOString().slice(0, 10) })
+      .eq('id', userId)
+      .is('membership_start_date', null)
+    if (startError) {
+      log.warn('membership_start_date stamp skipped', { errorMessage: startError.message })
+    }
   }
 
   // Attach any referral of this person that was recorded before they had a
