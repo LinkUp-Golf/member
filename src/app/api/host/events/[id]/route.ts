@@ -50,14 +50,35 @@ export const GET = withHostAuth(
 
     const [enriched] = await enrichHostedEvents(admin, [event])
 
-    const { data: registrations } = await admin
+    // avatar_url lives on member_profiles, not members — asking members for it
+    // makes PostgREST reject the whole query, which then reads as "nobody has
+    // registered". The FK is named even though this table references members
+    // once today, since an added column would silently make it ambiguous.
+    const { data: registrationRows, error: registrationsError } = await admin
       .from('hosted_event_registrations')
-      // Named even though this table references members once today — an added
-      // column would silently make it ambiguous at runtime.
-      .select('*, member:members!hosted_event_registrations_member_id_fkey(first_name, last_name, avatar_url)')
+      .select('*, member:members!hosted_event_registrations_member_id_fkey(first_name, last_name, profile:member_profiles(avatar_url))')
       .eq('hosted_event_id', id)
       .eq('status', 'reserved')
       .order('created_at', { ascending: true })
+
+    // Surface it rather than rendering a failed query as an empty roster.
+    if (registrationsError) {
+      return NextResponse.json({ error: registrationsError.message }, { status: 500 })
+    }
+
+    // Flatten the nested profile so the client keeps a flat member shape.
+    const registrations = (registrationRows ?? []).map(r => {
+      const m = r.member as unknown as {
+        first_name: string
+        last_name: string
+        profile: { avatar_url: string | null } | { avatar_url: string | null }[] | null
+      } | null
+      const profile = Array.isArray(m?.profile) ? m?.profile[0] : m?.profile
+      return {
+        ...r,
+        member: m ? { first_name: m.first_name, last_name: m.last_name, avatar_url: profile?.avatar_url ?? null } : null,
+      }
+    })
 
     const { data: proofs } = await admin
       .from('hosted_event_proofs')
