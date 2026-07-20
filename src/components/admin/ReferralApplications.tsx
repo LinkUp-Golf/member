@@ -127,8 +127,11 @@ function ReviewDrawer({ application, memberName, onClose, onReviewed, onError }:
 }) {
   const readOnly = application.status !== 'pending'
 
+  // The applicant's proposed referral name is the default partner name/code.
+  const proposedName = application.name?.trim() || memberName
+
   const [percentage, setPercentage] = useState<number | ''>(DEFAULT_REFERRAL_PERCENTAGE)
-  const [code, setCode] = useState(toSlug(memberName))
+  const [code, setCode] = useState(toSlug(proposedName))
   const [endsAt, setEndsAt] = useState('')
   const [reason, setReason] = useState('')
   const [mode, setMode] = useState<'approve' | 'reject'>('approve')
@@ -149,7 +152,7 @@ function ReviewDrawer({ application, memberName, onClose, onReviewed, onError }:
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(
         mode === 'approve'
-          ? { action: 'approve', code: code.trim(), percentage: Number(percentage), ends_at: endsAt || null }
+          ? { action: 'approve', name: proposedName, code: code.trim(), percentage: Number(percentage), ends_at: endsAt || null }
           : { action: 'reject', rejection_reason: reason.trim() }
       ),
     })
@@ -175,9 +178,14 @@ function ReviewDrawer({ application, memberName, onClose, onReviewed, onError }:
           </div>
 
           <div>
-            <p className={labelCls}>Why they want the role</p>
+            <p className={labelCls}>Referral name</p>
+            <p className="text-sm text-gray-800 font-medium">{proposedName}</p>
+          </div>
+
+          <div>
+            <p className={labelCls}>Description</p>
             <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap bg-gray-50 rounded-xl px-4 py-3">
-              {application.motivation}
+              {application.description}
             </p>
           </div>
 

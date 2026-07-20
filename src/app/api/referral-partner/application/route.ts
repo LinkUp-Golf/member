@@ -36,11 +36,15 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
 })
 
 export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
-  const body = await req.json().catch(() => ({})) as { motivation?: string }
+  const body = await req.json().catch(() => ({})) as { name?: string; description?: string }
 
-  const motivation = body.motivation?.trim() ?? ''
-  const { valid, errors } = validateString(motivation, 'Motivation', { min: 20, max: 1000 })
-  if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })
+  const name = body.name?.trim() ?? ''
+  const description = body.description?.trim() ?? ''
+  const errors = [
+    ...validateString(name, 'Referral name', { min: 2, max: 120 }).errors,
+    ...validateString(description, 'Description', { min: 20, max: 1000 }).errors,
+  ]
+  if (errors.length) return NextResponse.json({ error: errors[0] }, { status: 400 })
 
   const admin = createAdminClient()
 
@@ -68,7 +72,11 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
   const { data, error } = await admin
     .from('referral_partner_applications')
-    .insert({ member_id: ctx.memberId, motivation: sanitiseText(motivation) })
+    .insert({
+      member_id: ctx.memberId,
+      name: sanitiseText(name),
+      description: sanitiseText(description),
+    })
     .select()
     .single()
 

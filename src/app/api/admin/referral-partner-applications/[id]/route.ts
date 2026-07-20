@@ -20,7 +20,8 @@ function toSlug(value: string) {
 
 interface PatchBody {
   action?: 'approve' | 'reject'
-  // Approval terms — the admin sets the partner's rate when granting the role.
+  // Approval terms — the admin sets the partner's name/rate when granting the role.
+  name?: string
   code?: string
   percentage?: number
   ends_at?: string | null
@@ -43,7 +44,7 @@ export const PATCH = withAuth(
       .from('referral_partner_applications')
       // Named FK — the table references members twice (member_id, reviewed_by),
       // so an unqualified embed is ambiguous.
-      .select('id, member_id, status, member:members!referral_partner_applications_member_id_fkey(first_name, last_name)')
+      .select('id, member_id, status, name, member:members!referral_partner_applications_member_id_fkey(first_name, last_name)')
       .eq('id', id)
       .single()
 
@@ -97,12 +98,15 @@ export const PATCH = withAuth(
     const member = Array.isArray(application.member) ? application.member[0] : application.member
     const memberName = `${member?.first_name ?? ''} ${member?.last_name ?? ''}`.trim() || 'Referral Partner'
 
+    // Partner name: the admin's override, else the name the applicant proposed,
+    // else the member's own name.
+    const partnerName = body.name?.trim() || application.name?.trim() || memberName
     const percentage = body.percentage ?? DEFAULT_REFERRAL_PERCENTAGE
-    const code = body.code?.trim() || toSlug(memberName)
+    const code = body.code?.trim() || toSlug(partnerName)
     const endsAt = body.ends_at?.trim() || null
 
     const { valid, errors } = validateReferralPartnerPayload(
-      { name: memberName, code, percentage, ends_at: endsAt }
+      { name: partnerName, code, percentage, ends_at: endsAt }
     )
     if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })
 
@@ -119,7 +123,7 @@ export const PATCH = withAuth(
     const { data: partner, error: partnerError } = await admin
       .from('referral_partners')
       .insert({
-        name: memberName,
+        name: partnerName,
         code,
         percentage,
         ends_at: endsAt,

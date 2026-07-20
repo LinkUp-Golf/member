@@ -331,7 +331,10 @@ export type ReferralPartnerApplicationStatus = 'pending' | 'approved' | 'rejecte
 export interface ReferralPartnerApplication {
   id: string
   member_id: string
-  motivation: string
+  /** Referral name the applicant proposes to operate under. */
+  name: string | null
+  /** The applicant's pitch — why they'd be a good partner. */
+  description: string
   status: ReferralPartnerApplicationStatus
   partner_id: string | null
   rejection_reason: string | null

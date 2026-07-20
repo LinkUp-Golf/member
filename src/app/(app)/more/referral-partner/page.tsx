@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useForm } from 'react-hook-form'
 import Link from 'next/link'
 import { BadgeDollarSign } from 'lucide-react'
 import { useProfile } from '@/hooks/useProfile'
@@ -112,9 +113,9 @@ export default function ReferralPartnerApplicationPage() {
               <ApplicationForm
                 heading={wasRejected ? 'Apply again' : 'Apply to become a partner'}
                 error={error}
-                onSubmit={async (motivation) => {
+                onSubmit={async ({ name, description }) => {
                   setError(null)
-                  const res = await apiClient.post('/api/referral-partner/application', { motivation })
+                  const res = await apiClient.post('/api/referral-partner/application', { name, description })
                   if (res.error) { setError(res.error.message); return false }
                   await load()
                   return true
@@ -140,8 +141,12 @@ const fmtDate = (d: string) =>
 
 // ---- Application form ---------------------------------------
 
-const MIN_MOTIVATION = 20
-const MAX_MOTIVATION = 1000
+const NAME_MIN = 2
+const NAME_MAX = 120
+const DESC_MIN = 20
+const DESC_MAX = 1000
+
+type ApplicationValues = { name: string; description: string }
 
 function ApplicationForm({
   heading,
@@ -149,56 +154,68 @@ function ApplicationForm({
   onSubmit,
 }: {
   heading: string
+  /** Server-side error (e.g. "you already have an application under review"). */
   error: string | null
-  onSubmit: (motivation: string) => Promise<boolean>
+  onSubmit: (values: ApplicationValues) => Promise<boolean>
 }) {
-  const [motivation, setMotivation] = useState('')
-  const [submitting, setSubmitting] = useState(false)
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<ApplicationValues>({ defaultValues: { name: '', description: '' } })
 
-  const tooShort = motivation.trim().length < MIN_MOTIVATION
-
-  async function handleSubmit() {
-    if (tooShort || submitting) return
-    setSubmitting(true)
-    const ok = await onSubmit(motivation.trim())
-    if (ok) setMotivation('')
-    setSubmitting(false)
-  }
+  const submit = handleSubmit(async (data) => {
+    const ok = await onSubmit({ name: data.name.trim(), description: data.description.trim() })
+    if (ok) reset()
+  })
 
   return (
-    <div className="card card-pad space-y-4">
+    <form onSubmit={submit} className="card card-pad space-y-4" noValidate>
       <p className="section-label">{heading}</p>
 
       <div>
-        <label htmlFor="partner-motivation" className="text-xs text-green-900/50 mb-1.5 block">
-          Why would you make a great referral partner?
+        <label htmlFor="partner-name" className="text-xs text-green-900/50 mb-1.5 block">
+          Referral name
+        </label>
+        <input
+          id="partner-name"
+          className="input"
+          placeholder="The name you'll refer under — your business or brand"
+          {...register('name', {
+            required: 'Enter a referral name',
+            maxLength: { value: NAME_MAX, message: `At most ${NAME_MAX} characters` },
+            validate: v => v.trim().length >= NAME_MIN || `At least ${NAME_MIN} characters`,
+          })}
+        />
+        {errors.name && <p className="text-xs text-red-500 mt-1.5">{errors.name.message}</p>}
+      </div>
+
+      <div>
+        <label htmlFor="partner-description" className="text-xs text-green-900/50 mb-1.5 block">
+          Description
         </label>
         <textarea
-          id="partner-motivation"
+          id="partner-description"
           className="input resize-none"
           rows={5}
-          maxLength={MAX_MOTIVATION}
+          maxLength={DESC_MAX}
           placeholder="Tell us about your network, the members you'd bring in, and how you'd represent LinkUp."
-          value={motivation}
-          onChange={e => setMotivation(e.target.value)}
+          {...register('description', {
+            required: 'Add a short description',
+            maxLength: { value: DESC_MAX, message: `At most ${DESC_MAX} characters` },
+            validate: v => v.trim().length >= DESC_MIN || `At least ${DESC_MIN} characters`,
+          })}
         />
-        <p className="text-xs text-green-900/35 mt-1.5">
-          {tooShort
-            ? `At least ${MIN_MOTIVATION} characters (${motivation.trim().length}/${MIN_MOTIVATION}).`
-            : `${motivation.length}/${MAX_MOTIVATION} characters.`}
-        </p>
+        {errors.description && <p className="text-xs text-red-500 mt-1.5">{errors.description.message}</p>}
       </div>
 
       {error && <p className="text-xs text-red-500">{error}</p>}
 
-      <button
-        onClick={handleSubmit}
-        disabled={tooShort || submitting}
-        className="btn btn-gold btn-full justify-center"
-      >
-        {submitting ? <Spinner className="w-4 h-4 text-green-900" /> : 'Submit application'}
+      <button type="submit" disabled={isSubmitting} className="btn btn-gold btn-full justify-center">
+        {isSubmitting ? <Spinner className="w-4 h-4 text-green-900" /> : 'Submit application'}
       </button>
-    </div>
+    </form>
   )
 }
 
