@@ -29,7 +29,7 @@ export default function HostOverviewPage() {
   useEffect(() => { load() }, [load])
 
   return (
-    <div className="p-4 sm:p-8 max-w-4xl">
+    <div className="p-4 sm:p-8 max-w-4xl mx-auto">
       <AdminPageHeader
         title="Host Dashboard"
         description={data ? `Hosting as ${data.host.name}` : 'Your events and credits'}

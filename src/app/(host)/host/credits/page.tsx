@@ -50,7 +50,7 @@ export default function HostCreditsPage() {
   const balance = summary?.balance ?? 0
 
   return (
-    <div className="p-4 sm:p-8 max-w-3xl">
+    <div className="p-4 sm:p-8 max-w-3xl mx-auto">
       <AdminPageHeader
         title="Credits"
         description="Credits you've earned from hosting, and what you've redeemed."

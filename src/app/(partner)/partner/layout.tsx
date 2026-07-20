@@ -124,9 +124,13 @@ export default function PartnerLayout({ children }: { children: React.ReactNode 
           </div>
         </header>
 
-        {/* Bottom padding on mobile so content clears the fixed tab bar. */}
+        {/* Bottom padding on mobile so content clears the fixed tab bar.
+            Content is centred and capped here rather than per page, matching
+            the admin shell. */}
         <div className="pb-[calc(var(--safe-bottom,0px)+72px)] md:pb-0">
-          {children}
+          <div className="max-w-6xl mx-auto">
+            {children}
+          </div>
         </div>
 
         {/* ---- Mobile bottom tabs ----------------------------- */}

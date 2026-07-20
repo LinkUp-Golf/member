@@ -54,7 +54,7 @@ export default function AdminHostDetailPage() {
   const memberName = host?.member ? `${host.member.first_name} ${host.member.last_name}`.trim() : ''
 
   return (
-    <div className="p-4 sm:p-8 max-w-3xl">
+    <div className="p-4 sm:p-8 max-w-3xl mx-auto">
       <Link href="/admin/hosts" className="text-xs text-gray-400 hover:text-gray-600">← All hosts</Link>
 
       {loading ? (

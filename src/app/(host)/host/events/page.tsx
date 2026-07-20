@@ -66,7 +66,7 @@ export default function HostEventsPage() {
   const handleNew = useCallback(() => setEditing('new'), [])
 
   return (
-    <div className="p-4 sm:p-8 max-w-4xl">
+    <div className="p-4 sm:p-8 max-w-4xl mx-auto">
       <AdminPageHeader
         title="My Events"
         description="Create rounds members can reserve, then earn credits once they run."

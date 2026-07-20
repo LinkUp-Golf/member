@@ -60,7 +60,7 @@ export default function HostEventDetailPage() {
   const meta = event ? STATUS_META[event.status] : null
 
   return (
-    <div className="p-4 sm:p-8 max-w-3xl">
+    <div className="p-4 sm:p-8 max-w-3xl mx-auto">
       <Link href="/host/events" className="text-xs text-gray-400 hover:text-gray-600">← My events</Link>
 
       {loading ? (
