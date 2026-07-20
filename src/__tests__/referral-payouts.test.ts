@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildPayoutPeriods, type PartnerPaymentRow } from '@/lib/referral-payouts'
+import { buildPayoutPeriods, type PartnerPaymentRow, type PaymentItemRow } from '@/lib/referral-payouts'
 import type { ReferralConversion } from '@/lib/referral-partners'
 
 function conversion(overrides: Partial<ReferralConversion> & { convertedAt: string }): ReferralConversion {
@@ -15,18 +15,31 @@ function conversion(overrides: Partial<ReferralConversion> & { convertedAt: stri
   }
 }
 
-function payment(periodMonth: string, amount: number): PartnerPaymentRow {
+function payment(periodMonth: string, amount: number, calculated = amount): PartnerPaymentRow {
   return {
     id: `pay-${periodMonth}`,
     referral_partner_id: 'partner-1',
     period_month: periodMonth,
-    calculated_amount: amount,
+    calculated_amount: calculated,
     amount,
     conversion_count: 1,
     note: null,
     paid_at: `${periodMonth}T12:00:00Z`,
     paid_by: 'admin-1',
     created_at: `${periodMonth}T12:00:00Z`,
+  }
+}
+
+function item(paymentId: string, overrides: Partial<PaymentItemRow> = {}): PaymentItemRow {
+  return {
+    id: `item-${paymentId}-${overrides.email ?? 'a'}`,
+    payment_id: paymentId,
+    link_id: `link-${overrides.email ?? 'a'}`,
+    email: 'a@example.com',
+    name: 'A Member',
+    converted_at: '2026-03-04',
+    commission: 10,
+    ...overrides,
   }
 }
 
@@ -96,21 +109,53 @@ describe('buildPayoutPeriods', () => {
     expect(byMonth['2026-04-01']?.paidAmount).toBeNull()
   })
 
-  it('surfaces an adjusted payment amount alongside the calculated total', () => {
+  it('surfaces an adjusted payment amount alongside the frozen calculated total', () => {
+    // Calculated $10, but only $7.50 was actually paid.
     const periods = buildPayoutPeriods(
       [conversion({ convertedAt: '2026-03-04' })],
-      [payment('2026-03-01', 7.5)]
+      [payment('2026-03-01', 7.5, 10)]
     )
-    expect(periods[0]?.total).toBe(10)     // what was earned
+    expect(periods[0]?.total).toBe(10)       // frozen figure the payment was calculated from
     expect(periods[0]?.paidAmount).toBe(7.5) // what was actually paid
   })
 
-  it('keeps a paid month in history after its conversions are unlinked', () => {
+  it('keeps a paid month in history, frozen to the recorded figure', () => {
     const periods = buildPayoutPeriods([], [payment('2026-03-01', 10)])
     expect(periods).toHaveLength(1)
     expect(periods[0]?.paid).toBe(true)
-    expect(periods[0]?.conversions).toEqual([])
-    expect(periods[0]?.total).toBe(0)
+    expect(periods[0]?.total).toBe(10)
+  })
+
+  it('freezes a paid month: a referral backdating into it does not reopen or inflate it', () => {
+    // The referral converted in an already-paid March, but was linked later.
+    const periods = buildPayoutPeriods(
+      [
+        conversion({ convertedAt: '2026-03-20', email: 'late@x.com', commission: 999 }),
+        conversion({ convertedAt: '2026-04-04', email: 'b@x.com' }),
+      ],
+      [payment('2026-03-01', 10)]
+    )
+    const byMonth = Object.fromEntries(periods.map(p => [p.periodMonth, p]))
+    // March stays closed at its recorded total; the late $999 is dropped.
+    expect(byMonth['2026-03-01']?.paid).toBe(true)
+    expect(byMonth['2026-03-01']?.total).toBe(10)
+    expect(byMonth['2026-03-01']?.conversions).toEqual([])
+    // April is still open and computed live.
+    expect(byMonth['2026-04-01']?.paid).toBe(false)
+    expect(byMonth['2026-04-01']?.total).toBe(10)
+  })
+
+  it('serves a paid month\'s line items from its snapshot, not live conversions', () => {
+    const periods = buildPayoutPeriods(
+      [conversion({ convertedAt: '2026-03-04', email: 'live@x.com', commission: 999 })],
+      [payment('2026-03-01', 20)],
+      new Map([['pay-2026-03-01', [
+        item('pay-2026-03-01', { email: 'snap1@x.com', commission: 12 }),
+        item('pay-2026-03-01', { email: 'snap2@x.com', commission: 8 }),
+      ]]])
+    )
+    expect(periods[0]?.conversions.map(c => c.email)).toEqual(['snap1@x.com', 'snap2@x.com'])
+    expect(periods[0]?.total).toBe(20)
   })
 
   it('returns nothing when there are no conversions and no payments', () => {

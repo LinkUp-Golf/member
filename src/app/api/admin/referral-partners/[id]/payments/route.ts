@@ -54,6 +54,17 @@ export const POST = withAuth(
     }
     const periodMonth = monthOf(`${body.period_month.slice(0, 7)}-01`)
 
+    // A month is paid once, after it has ended. Refusing the current (and any
+    // future) month is what keeps a paid month closed: once settled, no new
+    // membership can land in it, so the payout can't be reopened or inflated.
+    const currentMonth = monthOf(new Date().toISOString())
+    if (periodMonth >= currentMonth) {
+      return NextResponse.json(
+        { error: `${formatPeriod(periodMonth)} can only be paid once the month has ended.` },
+        { status: 400 }
+      )
+    }
+
     const admin = createAdminClient()
     const partner = await getPartner(admin, id)
     if (!partner) return NextResponse.json({ error: 'Referral partner not found' }, { status: 404 })

@@ -80,6 +80,10 @@ export default function ReferralPayouts({
 
   const { periods, totalPaid, totalOutstanding } = data
 
+  // A month is only payable once it has ended (mirrors the server guard), so a
+  // still-running month shows a hint rather than a payable action.
+  const currentMonth = `${new Date().toISOString().slice(0, 7)}-01`
+
   return (
     <>
       <div className="flex items-center justify-between gap-3 mb-3">
@@ -131,6 +135,8 @@ export default function ReferralPayouts({
                       </span>
                       {p.paid ? (
                         <Badge label="Paid" colour="green" />
+                      ) : p.periodMonth >= currentMonth ? (
+                        <span className="text-[11px] text-gray-400 whitespace-nowrap">Payable after month ends</span>
                       ) : (
                         <button
                           type="button"
