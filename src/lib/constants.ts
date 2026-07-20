@@ -27,6 +27,13 @@ export const GHL_OPPORTUNITY_FIELDS = {
 export const MEMBERSHIP_FEE_USD = 100
 export const DEFAULT_REFERRAL_PERCENTAGE = 10
 
+// ---- Hosts --------------------------------------------------
+
+// A hosted event's displayed member price is the host's member guest rate plus
+// this fixed markup. Only the guest rate is stored; the host never sets the
+// member price directly, and the earned credit is based on the guest rate.
+export const HOST_MEMBER_PRICE_MARKUP_USD = 10
+
 export const GHL_CANCEL_BOOKING_URL = 'https://api.leadconnectorhq.com/widget/cancel-booking'
 export const GHL_CALENDAR_PROVIDER_ID = 'bdd10QRepJvC6EYoy32m'
 

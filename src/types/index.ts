@@ -40,6 +40,9 @@ export type NotificationType =
   | 'guest_access'
   | 'referral'
   | 'member_event'
+  | 'host_application'
+  | 'hosted_event'
+  | 'host_credit'
   | 'test'
   | 'general'
 export type RSVPStatus = 'attending' | 'maybe' | 'declined'
@@ -370,6 +373,150 @@ export interface ReferralPartnerStats {
   nonMemberCount: number
   activeCount: number
   commissionOwed: number
+}
+
+// ---- Hosts --------------------------------------------------
+
+export type HostStatus = 'active' | 'suspended'
+
+/** A member with the host role — the row's existence grants /host. */
+export interface Host {
+  id: string
+  member_id: string
+  name: string
+  status: HostStatus
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type HostApplicationStatus = 'pending' | 'approved' | 'rejected'
+
+export interface HostApplication {
+  id: string
+  member_id: string
+  /** Host name the applicant proposes to operate under. */
+  name: string | null
+  /** The applicant's pitch — the kind of events they'd run. */
+  description: string
+  status: HostApplicationStatus
+  host_id: string | null
+  rejection_reason: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  created_at: string
+  updated_at: string
+  // Enriched (present when joined to the member row in API responses)
+  member?: { first_name: string; last_name: string; email: string } | null
+}
+
+export type HostedEventStatus =
+  | 'draft'
+  /** Submitted by the host, awaiting admin approval before members can see it. */
+  | 'pending_review'
+  | 'upcoming'
+  | 'completed'
+  | 'cancelled'
+  | 'pending_credit_approval'
+  | 'credits_awarded'
+
+export interface HostedEvent {
+  id: string
+  host_id: string
+  course_id: string
+  event_date: string
+  /** HH:MM[:SS], or null when the event has no fixed tee time. */
+  tee_time: string | null
+  total_spots: number
+  member_guest_rate: number
+  description: string | null
+  status: HostedEventStatus
+  cancellation_reason: string | null
+  /** Why an admin sent the event back for changes. */
+  rejection_reason: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  /** Set when the event was listed from one of the host's existing bookings. */
+  source_booking_id: string | null
+  created_at: string
+  updated_at: string
+  // Enriched in API responses
+  /** member_guest_rate + HOST_MEMBER_PRICE_MARKUP_USD. */
+  member_price?: number
+  filled_spots?: number
+  remaining_spots?: number
+  course?: { id: string; name: string; city?: string | null } | null
+  host?: { id: string; name: string; member?: { first_name: string; last_name: string } | null } | null
+  proofs?: HostedEventProof[]
+  /** True when the requesting member holds an active reservation. */
+  is_registered?: boolean
+}
+
+/**
+ * An active upcoming booking a host can take on and run as a hosted event —
+ * any member's booking, not only the host's own. A booking "group" is several
+ * bookings rows sharing member/created_at/date/tee time — one row per seat —
+ * so `seats` is that row count.
+ */
+export interface HostBookingOption {
+  /** The representative bookings row the event will link to. */
+  id: string
+  course_id: string
+  course_name: string | null
+  /** The member who made the booking. */
+  booked_by: string | null
+  booking_date: string
+  tee_time: string
+  seats: number
+  /** True when this booking is already listed as a live hosted event. */
+  already_listed: boolean
+}
+
+export type HostedEventRegistrationStatus = 'reserved' | 'cancelled'
+
+export interface HostedEventRegistration {
+  id: string
+  hosted_event_id: string
+  member_id: string
+  status: HostedEventRegistrationStatus
+  created_at: string
+  // Enriched
+  member?: { first_name: string; last_name: string; avatar_url?: string | null } | null
+}
+
+export interface HostedEventProof {
+  id: string
+  hosted_event_id: string
+  image_url: string
+  uploaded_by: string | null
+  created_at: string
+}
+
+export type HostCreditKind = 'earned' | 'redeemed' | 'adjusted'
+
+export interface HostCreditEntry {
+  id: string
+  host_id: string
+  event_id: string | null
+  kind: HostCreditKind
+  amount: number
+  note: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export interface HostCreditSummary {
+  earned: number
+  redeemed: number
+  balance: number
+}
+
+export interface HostStats {
+  upcomingCount: number
+  completedCount: number
+  cancelledCount: number
+  totalEvents: number
+  credits: HostCreditSummary
 }
 
 export type ReferralPartnerWithStats = ReferralPartner & ReferralPartnerStats

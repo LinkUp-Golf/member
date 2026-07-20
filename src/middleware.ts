@@ -37,6 +37,10 @@ const ADMIN_ROUTES = ['/admin']
 // column, the same way /admin keys off members.is_admin.
 const PARTNER_ROUTES = ['/partner']
 
+// The host workspace. Access is owning a hosts row, created when an admin
+// approves a host application — same row-is-the-role model as /partner.
+const HOST_ROUTES = ['/host']
+
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
@@ -165,6 +169,38 @@ export async function middleware(request: NextRequest) {
       } else if (!partner) {
         // Not a partner — send them to the page where they can apply.
         const redirectResponse = NextResponse.redirect(new URL('/more/referral-partner', request.url))
+        redirectResponse.headers.set('X-Request-Id', requestId)
+        return redirectResponse
+      }
+    }
+
+    // ---- Host routes: must own a hosts row -------------------
+    if (user && HOST_ROUTES.some(route => pathname.startsWith(route))) {
+      const { data: host, error: hostError } = await supabase
+        .from('hosts')
+        .select('id')
+        .eq('member_id', user.id)
+          .eq('status', 'active')
+        .maybeSingle()
+
+      // Retry once on a DB error before denying, mirroring the admin/partner
+      // gates — a cold start shouldn't look like a revoked role.
+      if (hostError) {
+        const { data: retried, error: retryError } = await supabase
+          .from('hosts')
+          .select('id')
+          .eq('member_id', user.id)
+          .eq('status', 'active')
+          .maybeSingle()
+
+        if (retryError || !retried) {
+          const redirectResponse = NextResponse.redirect(new URL('/more/host', request.url))
+          redirectResponse.headers.set('X-Request-Id', requestId)
+          return redirectResponse
+        }
+      } else if (!host) {
+        // Not a host — send them to the page where they can apply.
+        const redirectResponse = NextResponse.redirect(new URL('/more/host', request.url))
         redirectResponse.headers.set('X-Request-Id', requestId)
         return redirectResponse
       }

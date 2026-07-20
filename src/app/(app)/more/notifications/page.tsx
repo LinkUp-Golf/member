@@ -24,6 +24,9 @@ const TYPE_ICONS: Record<NotificationType, string> = {
   guest_access:    '🔑',
   referral:        '🤝',
   member_event:    '📅',
+  host_application: '🎪',
+  hosted_event:    '🏌️',
+  host_credit:     '🎟️',
   test:            '🔔',
   general:         '📣',
 }
@@ -41,6 +44,9 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   guest_access:    'Guest access',
   referral:        'Referral',
   member_event:    'Member event',
+  host_application: 'Host application',
+  hosted_event:    'Hosted event',
+  host_credit:     'Host credit',
   test:            'Test',
   general:         'Notification',
 }

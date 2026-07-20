@@ -182,6 +182,80 @@ export function validateReferralPartnerPayload(
   return { valid: errors.length === 0, errors }
 }
 
+// ---- Host application payload --------------------------------
+// A member's application to become a host: a proposed host name and a pitch.
+export function validateHostApplicationPayload(body: unknown): ValidationResult {
+  if (typeof body !== 'object' || body === null) {
+    return { valid: false, errors: ['Invalid request body'] }
+  }
+
+  const b = body as Record<string, unknown>
+  const errors: string[] = []
+
+  const nameResult = validateString(b.name, 'Host name', { min: 2, max: 120 })
+  if (!nameResult.valid) errors.push(...nameResult.errors)
+
+  const descResult = validateString(b.description, 'Description', { min: 20, max: 1000 })
+  if (!descResult.valid) errors.push(...descResult.errors)
+
+  return { valid: errors.length === 0, errors }
+}
+
+// ---- Hosted event payload -----------------------------------
+// The create/edit form for a hosted event. `partial` (PATCH) only validates the
+// fields present. tee_time is optional; total_spots is a small positive int;
+// member_guest_rate is a non-negative amount.
+export function validateHostedEventPayload(
+  body: unknown,
+  options: { partial?: boolean } = {}
+): ValidationResult {
+  if (typeof body !== 'object' || body === null) {
+    return { valid: false, errors: ['Invalid request body'] }
+  }
+
+  const b = body as Record<string, unknown>
+  const errors: string[] = []
+  const { partial = false } = options
+
+  if (!partial || 'course_id' in b) {
+    const courseResult = validateUUID(b.course_id, 'Course')
+    if (!courseResult.valid) errors.push(...courseResult.errors)
+  }
+
+  if (!partial || 'event_date' in b) {
+    const dateResult = validateDate(b.event_date, 'Event date')
+    if (!dateResult.valid) errors.push(...dateResult.errors)
+  }
+
+  // Optional in both create and edit — null/'' means no fixed tee time.
+  if ('tee_time' in b && b.tee_time !== null && b.tee_time !== '') {
+    if (typeof b.tee_time !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(b.tee_time)) {
+      errors.push('Tee time must be in HH:MM format')
+    }
+  }
+
+  if (!partial || 'total_spots' in b) {
+    const spots = Number(b.total_spots)
+    if (!Number.isInteger(spots) || spots < 1 || spots > 200) {
+      errors.push('Available spots must be a whole number between 1 and 200')
+    }
+  }
+
+  if (!partial || 'member_guest_rate' in b) {
+    const rate = Number(b.member_guest_rate)
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100000) {
+      errors.push('Member guest rate must be a positive amount')
+    }
+  }
+
+  if ('description' in b && b.description !== null && b.description !== '') {
+    const descResult = validateString(b.description, 'Description', { max: 2000, required: false })
+    if (!descResult.valid) errors.push(...descResult.errors)
+  }
+
+  return { valid: errors.length === 0, errors }
+}
+
 // ---- Message payload ----------------------------------------
 export function validateMessagePayload(body: unknown): ValidationResult {
   if (typeof body !== 'object' || body === null) {

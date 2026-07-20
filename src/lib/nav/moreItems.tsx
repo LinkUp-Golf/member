@@ -1,4 +1,4 @@
-import { Gift, Bell, Smartphone, FileText, Settings, BadgeDollarSign, ShieldCheck } from 'lucide-react'
+import { Gift, Bell, Smartphone, FileText, Settings, BadgeDollarSign, ShieldCheck, Flag, CalendarDays } from 'lucide-react'
 import Icon, { type IconName } from '@/components/ui/Icon'
 import { FEATURES } from '@/lib/features'
 import type { MemberRoles } from '@/hooks/useMemberRoles'
@@ -36,6 +36,20 @@ const PARTNER_WORKSPACE_ITEM: MoreItem = {
   desc: 'Your referrals, commission & payouts',
 }
 
+const HOST_APPLY_ITEM: MoreItem = {
+  href: '/more/host',
+  label: 'Become a Host',
+  icon: <Flag className="w-5 h-5" strokeWidth={1.9} />,
+  desc: 'Run your own events and earn credits',
+}
+
+const HOST_WORKSPACE_ITEM: MoreItem = {
+  href: '/host',
+  label: 'Host Dashboard',
+  icon: <Flag className="w-5 h-5" strokeWidth={1.9} />,
+  desc: 'Your events, spots & credits',
+}
+
 const ADMIN_WORKSPACE_ITEM: MoreItem = {
   href: '/admin',
   label: 'Admin',
@@ -54,6 +68,7 @@ export const MORE_ITEMS: MoreGroup[] = [
       ...(FEATURES.FOCUS_LINKUPS ? [{ href: '/more/focus-linkups', label: 'Focus LinkUps', icon: svgIcon('focus-linkup'), desc: 'Manage your category subscriptions' }] : []),
       { href: '/more/referrals', label: 'Refer a Member', icon: svgIcon('new-member'), desc: 'Invite someone to the community' },
       PARTNER_APPLY_ITEM,
+      HOST_APPLY_ITEM,
       { href: '/more/guest-access', label: 'Guest Access', icon: svgIcon('visiting-member'), desc: 'Request access to another city' },
     ],
   },
@@ -61,6 +76,7 @@ export const MORE_ITEMS: MoreGroup[] = [
     group: 'Community',
     items: [
       { href: '/more/events', label: 'Member Events', icon: svgIcon('next-round'), desc: 'Browse and submit community events' },
+      { href: '/more/hosted-events', label: 'Hosted Events', icon: <CalendarDays className="w-5 h-5" strokeWidth={1.9} />, desc: 'Reserve a spot at a member-hosted round' },
       { href: '/more/announcements', label: 'Announcements', icon: svgIcon('announcement'), desc: 'Community news and updates' },
       { href: '/more/promotions', label: 'Member Offers', icon: <Gift className="w-5 h-5" strokeWidth={1.9} />, desc: 'Exclusive deals for members' },
     ],
@@ -85,13 +101,20 @@ export const MORE_ITEMS: MoreGroup[] = [
  */
 export function getMoreItems(roles: MemberRoles): MoreGroup[] {
   const workspaceItems: MoreItem[] = []
+  if (roles.isHost) workspaceItems.push(HOST_WORKSPACE_ITEM)
   if (roles.isPartner) workspaceItems.push(PARTNER_WORKSPACE_ITEM)
   if (roles.isAdmin) workspaceItems.push(ADMIN_WORKSPACE_ITEM)
 
-  const groups = roles.isPartner
+  // Once someone holds a role the matching "apply" item is redundant, so it
+  // drops out in favour of the workspace link.
+  const hiddenApplyHrefs = new Set<string>()
+  if (roles.isPartner) hiddenApplyHrefs.add(PARTNER_APPLY_ITEM.href)
+  if (roles.isHost) hiddenApplyHrefs.add(HOST_APPLY_ITEM.href)
+
+  const groups = hiddenApplyHrefs.size
     ? MORE_ITEMS.map(g => ({
         ...g,
-        items: g.items.filter(i => i.href !== PARTNER_APPLY_ITEM.href),
+        items: g.items.filter(i => !hiddenApplyHrefs.has(i.href)),
       }))
     : MORE_ITEMS
 

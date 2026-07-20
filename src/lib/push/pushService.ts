@@ -158,6 +158,9 @@ const TAG_TYPE_MAP: Record<string, NotificationType> = {
   'guest-access':     'guest_access',
   'referral':         'referral',
   'member-event':     'member_event',
+  'host-application': 'host_application',
+  'hosted-event':     'hosted_event',
+  'host-credit':      'host_credit',
   'test-notification': 'test',
 }
 

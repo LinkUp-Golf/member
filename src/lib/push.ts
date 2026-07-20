@@ -275,4 +275,109 @@ export const NotificationTemplates = {
     url:   '/more/events',
     tag:   'member-event-rejected',
   }),
+
+  // ---- Hosts ------------------------------------------------
+  hostApplicationApproved: (): PushPayload => ({
+    title: 'You\'re now a host',
+    body:  'Your application was approved — create your first event and start earning credits.',
+    url:   '/host',
+    tag:   'host-application-approved',
+  }),
+
+  hostApplicationRejected: (reason: string): PushPayload => ({
+    title: 'Host application',
+    body:  `Your application wasn't approved this time. ${reason}`,
+    url:   '/more/host',
+    tag:   'host-application-rejected',
+  }),
+
+  hostedEventPublished: (courseName: string, date: string): PushPayload => ({
+    title: 'Your event is live',
+    body:  `Your event at ${courseName} on ${date} is now open for members to reserve spots.`,
+    url:   '/host/events',
+    tag:   'hosted-event-created',
+  }),
+
+  hostedEventJoined: (memberName: string, courseName: string, date: string): PushPayload => ({
+    title: 'New reservation',
+    body:  `${memberName} reserved a spot at your ${courseName} event on ${date}.`,
+    url:   '/host/events',
+    tag:   'hosted-event-joined',
+  }),
+
+  hostedEventProofSubmitted: (hostName: string, courseName: string, date: string): PushPayload => ({
+    title: 'Event proof submitted',
+    body:  `${hostName} uploaded proof for their ${courseName} event on ${date}. Review it to approve credits.`,
+    url:   '/admin/hosts',
+    tag:   'hosted-event-proof',
+  }),
+
+  hostCreditApproved: (amount: number): PushPayload => ({
+    title: 'Credits awarded',
+    body:  `${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in host credits has been added to your balance.`,
+    url:   '/host/credits',
+    tag:   'host-credit-approved',
+  }),
+
+  hostCreditRejected: (reason: string): PushPayload => ({
+    title: 'Event credits not approved',
+    body:  `Your event's credits weren't approved. ${reason} You can upload new proof.`,
+    url:   '/host/events',
+    tag:   'host-credit-rejected',
+  }),
+
+  hostCreditRedeemed: (amount: number): PushPayload => ({
+    title: 'Credits redeemed',
+    body:  `You redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in host credits.`,
+    url:   '/host/credits',
+    tag:   'host-credit-redeemed',
+  }),
+
+  // Sent to admins when a host submits an event for review.
+  hostedEventSubmitted: (hostName: string, courseName: string, date: string): PushPayload => ({
+    title: 'Event awaiting review',
+    body:  `${hostName} submitted an event at ${courseName} on ${date}. Approve it to make it visible to members.`,
+    url:   '/admin/hosts',
+    tag:   'hosted-event-submitted',
+  }),
+
+  // Sent to the host once an admin approves their event.
+  hostedEventApproved: (courseName: string, date: string): PushPayload => ({
+    title: 'Your event is live',
+    body:  `Your event at ${courseName} on ${date} was approved and is now open for members to reserve.`,
+    url:   '/host/events',
+    tag:   'hosted-event-approved',
+  }),
+
+  // Sent to the host when an admin sends the event back for changes.
+  hostedEventRejected: (reason: string): PushPayload => ({
+    title: 'Event not approved',
+    body:  `Your event wasn't approved. ${reason} You can edit it and submit again.`,
+    url:   '/host/events',
+    tag:   'hosted-event-rejected',
+  }),
+
+  // Sent to members who had reserved a spot when the host cancels the event.
+  hostedEventCancelled: (courseName: string, date: string, reason?: string): PushPayload => ({
+    title: 'A hosted event was cancelled',
+    body:  `The ${courseName} event on ${date} has been cancelled.${reason ? ` ${reason}` : ''} Your spot has been released.`,
+    url:   '/more/hosted-events',
+    tag:   'hosted-event-cancelled',
+  }),
+
+  // Sent to members who had reserved a spot when the host changes event details.
+  hostedEventUpdated: (courseName: string, date: string): PushPayload => ({
+    title: 'A hosted event was updated',
+    body:  `Details changed for the ${courseName} event on ${date}. Open it to see the latest.`,
+    url:   '/more/hosted-events',
+    tag:   'hosted-event-updated',
+  }),
+
+  // Sent to the host when a member releases their spot.
+  hostedEventMemberCancelled: (memberName: string, courseName: string, date: string): PushPayload => ({
+    title: 'A spot opened up',
+    body:  `${memberName} released their spot at your ${courseName} event on ${date}.`,
+    url:   '/host/events',
+    tag:   'hosted-event-joined',
+  }),
 }
