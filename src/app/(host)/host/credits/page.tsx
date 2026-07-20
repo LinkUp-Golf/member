@@ -23,6 +23,7 @@ export default function HostCreditsPage() {
   const [summary, setSummary] = useState<HostCreditSummary | null>(null)
   const [entries, setEntries] = useState<HostCreditEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [redeeming, setRedeeming] = useState(false)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
@@ -33,7 +34,14 @@ export default function HostCreditsPage() {
   const load = useCallback(async () => {
     const res = await fetch('/api/host/credits')
     const json = await res.json().catch(() => ({}))
-    if (res.ok) { setSummary(json.summary); setEntries(json.entries ?? []) }
+    if (res.ok) {
+      setError(null)
+      setSummary(json.summary)
+      setEntries(json.entries ?? [])
+    } else {
+      // Without this a failed load renders as a confident "$0.00 balance".
+      setError(json.error ?? 'Could not load your credits.')
+    }
     setLoading(false)
   }, [])
 
@@ -59,6 +67,13 @@ export default function HostCreditsPage() {
 
       {loading ? (
         <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
+      ) : error ? (
+        <AdminCard>
+          <div className="py-10 text-center">
+            <p className="text-sm text-red-500">{error}</p>
+            <button onClick={() => { setLoading(true); load() }} className="btn btn-outline btn-sm mt-4">Try again</button>
+          </div>
+        </AdminCard>
       ) : (
         <>
           <div className="grid grid-cols-3 gap-3 mb-6">

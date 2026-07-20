@@ -2,7 +2,7 @@
 
 // Members browse upcoming member-hosted events and open one to reserve a spot.
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, memo } from 'react'
 import Link from 'next/link'
 import { CalendarDays, MapPin, Users } from 'lucide-react'
 import AppShell from '@/components/layout/AppShell'
@@ -29,7 +29,7 @@ function hostLabel(e: HostedEvent) {
   return e.host?.name || person || 'A member'
 }
 
-function EventCard({ e }: { e: HostedEvent }) {
+const EventCard = memo(function EventCard({ e }: { e: HostedEvent }) {
   const remaining = e.remaining_spots ?? 0
   const full = remaining <= 0
   // A reservation list can include events that are no longer open.
@@ -74,36 +74,56 @@ function EventCard({ e }: { e: HostedEvent }) {
       </div>
     </Link>
   )
-}
+})
 
 export default function HostedEventsPage() {
   const [events, setEvents] = useState<HostedEvent[]>([])
   const [mine, setMine] = useState<HostedEvent[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    const [browseRes, mineRes] = await Promise.all([
-      fetch('/api/hosted-events'),
-      fetch('/api/hosted-events?mine=1'),
-    ])
-    const browseJson = await browseRes.json().catch(() => ({}))
-    const mineJson = await mineRes.json().catch(() => ({}))
-    if (browseRes.ok) setEvents(Array.isArray(browseJson.events) ? browseJson.events : [])
-    if (mineRes.ok) setMine(Array.isArray(mineJson.events) ? mineJson.events : [])
-    setLoading(false)
+    try {
+      const [browseRes, mineRes] = await Promise.all([
+        fetch('/api/hosted-events'),
+        fetch('/api/hosted-events?mine=1'),
+      ])
+      const browseJson = await browseRes.json().catch(() => ({}))
+      const mineJson = await mineRes.json().catch(() => ({}))
+
+      if (!browseRes.ok) {
+        // An empty list and a failed load look identical otherwise.
+        setError(browseJson.error ?? 'Could not load hosted events.')
+      } else {
+        setError(null)
+        setEvents(Array.isArray(browseJson.events) ? browseJson.events : [])
+      }
+      if (mineRes.ok) setMine(Array.isArray(mineJson.events) ? mineJson.events : [])
+    } catch {
+      setError('Could not load hosted events. Check your connection and try again.')
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => { load() }, [load])
 
   // Don't repeat an event the member already holds a spot in.
-  const mineIds = new Set(mine.map(e => e.id))
-  const browsable = events.filter(e => !mineIds.has(e.id))
+  const browsable = useMemo(() => {
+    const mineIds = new Set(mine.map(e => e.id))
+    return events.filter(e => !mineIds.has(e.id))
+  }, [events, mine])
 
   return (
     <AppShell title="Hosted Events" description="Rounds hosted by fellow members">
       <div className="screen-content px-5 py-5">
         {loading ? (
           <div className="py-16 flex justify-center"><Spinner className="w-5 h-5 text-green-900" /></div>
+        ) : error ? (
+          <div className="card card-pad text-center py-10">
+            <p className="text-sm text-red-500">{error}</p>
+            <button onClick={() => { setLoading(true); load() }} className="btn btn-outline btn-sm mt-4">Try again</button>
+          </div>
         ) : (
           <>
             {mine.length > 0 && (

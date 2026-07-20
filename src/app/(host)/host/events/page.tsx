@@ -4,7 +4,7 @@
 // upload proof → pending approval → credits awarded. Cancelling frees any
 // reserved spots.
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react'
 import Link from 'next/link'
 import { useForm, Controller } from 'react-hook-form'
 import { AdminPageHeader, AdminCard, Badge, ProgressBar } from '@/components/admin/AdminUI'
@@ -60,12 +60,17 @@ export default function HostEventsPage() {
 
   useEffect(() => { load() }, [load])
 
+  // One stable callback for every row, so the memoized cards don't re-render
+  // whenever this page does.
+  const handleEdit = useCallback((e: HostedEvent) => setEditing(e), [])
+  const handleNew = useCallback(() => setEditing('new'), [])
+
   return (
     <div className="p-4 sm:p-8 max-w-4xl">
       <AdminPageHeader
         title="My Events"
         description="Create rounds members can reserve, then earn credits once they run."
-        action={<button onClick={() => setEditing('new')} className="btn btn-gold btn-sm">New event</button>}
+        action={<button onClick={handleNew} className="btn btn-gold btn-sm">New event</button>}
       />
 
       {loading ? (
@@ -74,13 +79,13 @@ export default function HostEventsPage() {
         <AdminCard>
           <div className="py-10 text-center">
             <p className="text-sm text-gray-500">You haven&apos;t created any events yet.</p>
-            <button onClick={() => setEditing('new')} className="btn btn-gold btn-sm mt-4">Create your first event</button>
+            <button onClick={handleNew} className="btn btn-gold btn-sm mt-4">Create your first event</button>
           </div>
         </AdminCard>
       ) : (
         <div className="space-y-3">
           {events.map(e => (
-            <EventCard key={e.id} event={e} onChanged={load} onToast={showToast} onEdit={() => setEditing(e)} />
+            <EventCard key={e.id} event={e} onChanged={load} onToast={showToast} onEdit={handleEdit} />
           ))}
         </div>
       )}
@@ -105,16 +110,19 @@ export default function HostEventsPage() {
 
 // ---- Event card ---------------------------------------------
 
-function EventCard({ event, onChanged, onToast, onEdit }: {
+const EventCard = memo(function EventCard({ event, onChanged, onToast, onEdit }: {
   event: HostedEvent
   onChanged: () => void
   onToast: (msg: string, ok?: boolean) => void
-  onEdit: () => void
+  /** Takes the event so the parent can pass one stable callback for every row. */
+  onEdit: (event: HostedEvent) => void
 }) {
   const [busy, setBusy] = useState(false)
   const meta = STATUS_META[event.status]
   const filled = event.filled_spots ?? 0
-  const editable = event.status === 'draft' || event.status === 'upcoming'
+  // Mirrors the server's editable/cancellable set — a host can still fix an
+  // event while it's awaiting review.
+  const editable = event.status === 'draft' || event.status === 'pending_review' || event.status === 'upcoming'
   const canProof = event.status === 'completed' || event.status === 'pending_credit_approval'
 
   async function act(action: string, extra: Record<string, unknown> = {}) {
@@ -128,7 +136,11 @@ function EventCard({ event, onChanged, onToast, onEdit }: {
     const json = await res.json().catch(() => ({}))
     setBusy(false)
     if (!res.ok) { onToast(json.error ?? 'Action failed.', false); return }
-    onToast(action === 'publish' ? 'Event published.' : action === 'cancel' ? 'Event cancelled.' : 'Saved.')
+    onToast(
+      action === 'publish' ? 'Submitted for review.'
+        : action === 'cancel' ? 'Event cancelled.'
+        : 'Saved.'
+    )
     onChanged()
   }
 
@@ -173,7 +185,7 @@ function EventCard({ event, onChanged, onToast, onEdit }: {
       {/* Actions */}
       <div className="flex flex-wrap gap-2 mt-4">
         {editable && (
-          <button onClick={onEdit} disabled={busy} className="btn btn-outline btn-sm">Edit</button>
+          <button onClick={() => onEdit(event)} disabled={busy} className="btn btn-outline btn-sm">Edit</button>
         )}
         {event.status === 'draft' && (
           <button onClick={() => act('publish')} disabled={busy} className="btn btn-gold btn-sm">Submit for review</button>
@@ -201,7 +213,7 @@ function EventCard({ event, onChanged, onToast, onEdit }: {
       )}
       {event.source_booking_id && (
         <p className="text-[11px] text-gray-400 mt-2">
-          Listed from your existing booking — course, date, and tee time are fixed.
+          Listed from an existing booking — course, date, and tee time are fixed.
         </p>
       )}
       {event.status === 'cancelled' && event.cancellation_reason && (
@@ -209,7 +221,7 @@ function EventCard({ event, onChanged, onToast, onEdit }: {
       )}
     </div>
   )
-}
+})
 
 // ---- Cancel with optional reason ----------------------------
 
@@ -319,6 +331,7 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
   const [slots, setSlots] = useState<TeeSlot[]>([])
   const [slotsState, setSlotsState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle')
   const [bookings, setBookings] = useState<HostBookingOption[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   // A new event is either listed from a tee time the host already holds, or
   // proposed from scratch. Editing keeps whichever it was created as.
@@ -331,6 +344,7 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
     handleSubmit,
     watch,
     setValue,
+    clearErrors,
     formState: { errors, isSubmitting },
   } = useForm<EventFormValues>({
     defaultValues: {
@@ -352,9 +366,23 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
   // Spots offered can never exceed the seats the linked booking holds.
   const spotCap = selectedBooking?.seats ?? 200
 
+  // A failed load leaves an empty dropdown with no explanation, so surface it
+  // rather than swallowing the error.
   useEffect(() => {
-    fetch('/api/courses').then(r => r.json()).then(j => setCourses(j.courses ?? [])).catch(() => {})
-    fetch('/api/host/bookings').then(r => r.json()).then(j => setBookings(j.bookings ?? [])).catch(() => {})
+    let cancelled = false
+
+    Promise.all([
+      fetch('/api/courses').then(r => r.ok ? r.json() : Promise.reject(new Error('courses'))),
+      fetch('/api/host/bookings').then(r => r.ok ? r.json() : Promise.reject(new Error('bookings'))),
+    ])
+      .then(([coursesJson, bookingsJson]) => {
+        if (cancelled) return
+        setCourses(coursesJson.courses ?? [])
+        setBookings(bookingsJson.bookings ?? [])
+      })
+      .catch(() => { if (!cancelled) setLoadError('Could not load courses and bookings. Close and reopen to retry.') })
+
+    return () => { cancelled = true }
   }, [])
 
   // Tee times come from the course's real availability for that date (the same
@@ -388,32 +416,43 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
   // Same helper the server uses, so the preview can't drift from the real price.
   const previewPrice = rate !== '' && Number.isFinite(Number(rate)) ? memberPrice(Number(rate)) : null
 
-  const courseOptions: SelectOption[] = courses.map(c => ({
-    value: c.id,
-    label: c.city ? `${c.name} — ${c.city}` : c.name,
-  }))
+  // Select is memoized on its props, so these must be stable across renders —
+  // rebuilding the arrays every keystroke would re-render the whole dropdown.
+  const courseOptions: SelectOption[] = useMemo(
+    () => courses.map(c => ({
+      value: c.id,
+      label: c.city ? `${c.name} — ${c.city}` : c.name,
+    })),
+    [courses]
+  )
 
-  const bookingOptions: SelectOption[] = bookings
-    // An already-listed booking can't be listed again (the DB enforces it too).
-    .filter(b => !b.already_listed || b.id === bookingId)
-    .map(b => ({
-      value: b.id,
-      label: `${b.course_name ?? 'Course'} · ${fmtDate(b.booking_date)} · ${fmtTime(b.tee_time) ?? b.tee_time} · ${b.seats} seat${b.seats === 1 ? '' : 's'}${b.booked_by ? ` · ${b.booked_by}` : ''}`,
-    }))
+  const bookingOptions: SelectOption[] = useMemo(
+    () => bookings
+      // An already-listed booking can't be listed again (the DB enforces it too).
+      .filter(b => !b.already_listed || b.id === bookingId)
+      .map(b => ({
+        value: b.id,
+        label: `${b.course_name ?? 'Course'} · ${fmtDate(b.booking_date)} · ${fmtTime(b.tee_time) ?? b.tee_time} · ${b.seats} seat${b.seats === 1 ? '' : 's'}${b.booked_by ? ` · ${b.booked_by}` : ''}`,
+      })),
+    [bookings, bookingId]
+  )
 
   const currentTee = watch('tee_time')
-  const teeOptions: SelectOption[] = [
-    { value: NO_TEE_TIME, label: 'No specific tee time' },
-    ...slots.map(s => ({
-      value: s.value,
-      label: s.spotsOpen !== null ? `${s.label} · ${s.spotsOpen} open` : s.label,
-    })),
-    // An already-saved tee time may no longer be in the course's published
-    // availability — keep it selectable so editing doesn't silently drop it.
-    ...(currentTee && !slots.some(s => s.value === currentTee)
-      ? [{ value: currentTee, label: `${fmtTime(currentTee) ?? currentTee} (currently set)` }]
-      : []),
-  ]
+  const teeOptions: SelectOption[] = useMemo(
+    () => [
+      { value: NO_TEE_TIME, label: 'No specific tee time' },
+      ...slots.map(s => ({
+        value: s.value,
+        label: s.spotsOpen !== null ? `${s.label} · ${s.spotsOpen} open` : s.label,
+      })),
+      // An already-saved tee time may no longer be in the course's published
+      // availability — keep it selectable so editing doesn't silently drop it.
+      ...(currentTee && !slots.some(s => s.value === currentTee)
+        ? [{ value: currentTee, label: `${fmtTime(currentTee) ?? currentTee} (currently set)` }]
+        : []),
+    ],
+    [slots, currentTee]
+  )
 
   const field = 'input text-sm'
   const labelCls = 'block text-xs font-medium text-gray-600 mb-1'
@@ -453,7 +492,7 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
 
     const json = await res.json().catch(() => ({}))
     if (!res.ok) { onError(json.error ?? 'Could not save.'); return }
-    onSaved(isEdit ? 'Event updated.' : publish ? 'Event published.' : 'Draft saved.')
+    onSaved(isEdit ? 'Event updated.' : publish ? 'Submitted for review.' : 'Draft saved.')
   }
 
   const submit = (publish: boolean) => handleSubmit(v => save(v, publish))()
@@ -468,6 +507,12 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
         </div>
 
         <form className="flex-1 overflow-y-auto px-6 py-6 space-y-4" noValidate onSubmit={e => e.preventDefault()}>
+          {loadError && (
+            <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-xs text-red-700">
+              {loadError}
+            </div>
+          )}
+
           {/* Source: an existing booking, or a newly proposed schedule. */}
           {!isEdit && (
             <div className="flex gap-2 p-1 bg-gray-100 rounded-xl">
@@ -485,6 +530,8 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
                     setValue('course_id', '')
                     setValue('event_date', '')
                     setValue('tee_time', NO_TEE_TIME)
+                    // Errors from the other mode's required fields no longer apply.
+                    clearErrors(['source_booking_id', 'course_id', 'event_date'])
                   }}
                   className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
                     mode === m.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'

@@ -15,6 +15,13 @@ const fmtMoney = (n: number) =>
 
 type Tab = 'hosts' | 'applications' | 'events'
 
+// Module-level so the array isn't rebuilt on every render.
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'hosts', label: 'Hosts' },
+  { key: 'applications', label: 'Applications' },
+  { key: 'events', label: 'Events & Credits' },
+]
+
 interface AdminHostRow {
   id: string
   name: string
@@ -48,12 +55,6 @@ export default function AdminHostsPage() {
 
   const memberName = (h: AdminHostRow) =>
     h.member ? `${h.member.first_name} ${h.member.last_name}`.trim() : '—'
-
-  const TABS: { key: Tab; label: string }[] = [
-    { key: 'hosts', label: 'Hosts' },
-    { key: 'applications', label: 'Applications' },
-    { key: 'events', label: 'Events & Credits' },
-  ]
 
   return (
     <div className="p-4 sm:p-8">

@@ -3,7 +3,7 @@
 // Admin: browse all hosted events, review proof, and approve or reject the
 // host's credit. Rendered as a tab on the admin Hosts page.
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, memo } from 'react'
 import { AdminCard, Badge } from '@/components/admin/AdminUI'
 import type { HostedEvent, HostedEventStatus } from '@/types'
 
@@ -88,7 +88,7 @@ export default function HostedEventsAdmin({ onToast }: { onToast: (msg: string, 
   )
 }
 
-function EventRow({ event, onChanged, onToast }: {
+const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
   event: HostedEvent
   onChanged: () => void
   onToast: (msg: string, ok?: boolean) => void
@@ -201,4 +201,4 @@ function EventRow({ event, onChanged, onToast }: {
       )}
     </div>
   )
-}
+})
