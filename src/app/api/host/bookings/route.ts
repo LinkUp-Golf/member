@@ -26,6 +26,18 @@ const ACTIVE_STATUSES = [
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
+// This reads bookings community-wide, so it has to stay bounded: a horizon on
+// how far ahead we look, and a row cap. Rows are per-seat, so the cap is
+// roughly a quarter of that many distinct bookings.
+const HORIZON_DAYS = 90
+const MAX_ROWS = 600
+
+const horizonISO = () => {
+  const d = new Date()
+  d.setDate(d.getDate() + HORIZON_DAYS)
+  return d.toISOString().slice(0, 10)
+}
+
 interface BookingRow {
   id: string
   member_id: string
@@ -44,8 +56,10 @@ export const GET = withHostAuth(async (_req: NextRequest, _ctx: HostAuthContext)
     .from('bookings')
     .select('id, member_id, course_id, booking_date, tee_time, created_at, course:courses(name), member:members(first_name, last_name)')
     .gte('booking_date', todayISO())
+    .lte('booking_date', horizonISO())
     .in('status', ACTIVE_STATUSES)
     .order('booking_date', { ascending: true })
+    .limit(MAX_ROWS)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

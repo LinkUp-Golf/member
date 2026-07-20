@@ -81,7 +81,10 @@ export const POST = withAuth(
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    const amount = Number(ledgerRow?.amount ?? event.member_guest_rate)
+    // A composite-returning function may come back as the row or as a
+    // single-element array depending on how PostgREST resolves it.
+    const row = Array.isArray(ledgerRow) ? ledgerRow[0] : ledgerRow
+    const amount = Number(row?.amount ?? event.member_guest_rate)
     if (host?.member_id) {
       void sendPushToMember(host.member_id, NotificationTemplates.hostCreditApproved(amount)).catch(() => {})
     }

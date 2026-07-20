@@ -25,6 +25,8 @@ export const GET = withAuth(
       .from('hosted_events')
       .select('*, course:courses(id, name, city), host:hosts(id, name, member:members!hosts_member_id_fkey(first_name, last_name)), proofs:hosted_event_proofs(*)')
       .order('event_date', { ascending: false })
+      // Embeds proofs per row, so this must stay bounded as events accumulate.
+      .limit(300)
 
     if (status && VALID_STATUSES.has(status)) query = query.eq('status', status)
 

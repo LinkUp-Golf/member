@@ -61,6 +61,8 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     .eq('status', 'upcoming')
     .gte('event_date', todayISO())
     .order('event_date', { ascending: true })
+    // Browsing is a read-heavy path; keep the payload bounded.
+    .limit(200)
 
   if (courseId) query = query.eq('course_id', courseId)
   if (hostId) query = query.eq('host_id', hostId)
