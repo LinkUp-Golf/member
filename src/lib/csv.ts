@@ -21,8 +21,9 @@ export interface CsvParseResult {
 /** Split raw CSV text into a header row and data rows. */
 export function parseCsv(text: string): CsvParseResult {
   // Strip the BOM: Excel prepends it, and it would become part of the first
-  // header name, so "name" would silently fail to match.
-  const input = text.replace(/^﻿/, '')
+  // header name, so "name" would silently fail to match. Use the escape rather
+  // than a literal invisible char so an editor can't mangle it.
+  const input = text.replace(/^\uFEFF/, '')
 
   const rows: string[][] = []
   let row: string[] = []

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { commissionForRate, isWithinRateWindow, isRateExpired } from '@/lib/referral-rate'
+import { commissionForRate, isWithinRateWindow, isRateExpired, sumCents } from '@/lib/referral-rate'
 import { MEMBERSHIP_FEE_USD } from '@/lib/constants'
 
 describe('commissionForRate', () => {
@@ -11,6 +11,26 @@ describe('commissionForRate', () => {
 
   it('accepts a numeric string (numeric columns come back as strings)', () => {
     expect(commissionForRate('12.5' as unknown as number)).toBe(MEMBERSHIP_FEE_USD * 0.125)
+  })
+
+  it('rounds to whole cents', () => {
+    // 33.33% of $100 = $33.33, cleanly, not 33.329999…
+    expect(commissionForRate(33.33)).toBe(33.33)
+  })
+})
+
+describe('sumCents', () => {
+  it('sums without binary-float drift', () => {
+    // Three lines that would otherwise land on 99.99000000000001.
+    expect(sumCents([33.33, 33.33, 33.33])).toBe(99.99)
+  })
+
+  it('is exact across many lines', () => {
+    expect(sumCents(Array(10).fill(12.5))).toBe(125)
+  })
+
+  it('returns 0 for an empty set', () => {
+    expect(sumCents([])).toBe(0)
   })
 })
 

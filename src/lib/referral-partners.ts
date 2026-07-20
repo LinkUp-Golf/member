@@ -19,7 +19,7 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { commissionForRate, isWithinRateWindow } from '@/lib/referral-rate'
+import { commissionForRate, isWithinRateWindow, sumCents } from '@/lib/referral-rate'
 import { hasMembershipTag } from '@/lib/ghl/tags'
 import type { ReferralPartnerStats } from '@/types'
 
@@ -210,7 +210,7 @@ export function statsFromLoaded(
     const partnerConversions = conversions.get(p.id) ?? []
     // activeCount = referrals who became members (converted).
     s.activeCount = partnerConversions.length
-    s.commissionOwed = partnerConversions.reduce((sum, c) => sum + c.commission, 0)
+    s.commissionOwed = sumCents(partnerConversions.map(c => c.commission))
   }
 
   return byPartner

@@ -12,7 +12,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadPartnerConversions, type PartnerRate, type ReferralConversion } from '@/lib/referral-partners'
-import { monthOf } from '@/lib/referral-rate'
+import { monthOf, sumCents } from '@/lib/referral-rate'
 
 // Re-exported for server callers that already import from this module.
 export { monthOf, formatPeriod } from '@/lib/referral-rate'
@@ -80,7 +80,7 @@ export function buildPayoutPeriods(
       return {
         periodMonth,
         conversions: monthConversions,
-        total: monthConversions.reduce((sum, c) => sum + c.commission, 0),
+        total: sumCents(monthConversions.map(c => c.commission)),
         paid: !!payment,
         paymentId: payment?.id ?? null,
         paidAmount: payment ? Number(payment.amount) : null,
@@ -125,7 +125,7 @@ export async function loadPayoutSummary(
   return {
     periods,
     payments,
-    totalPaid: payments.reduce((sum, p) => sum + Number(p.amount), 0),
-    totalOutstanding: periods.filter(p => !p.paid).reduce((sum, p) => sum + p.total, 0),
+    totalPaid: sumCents(payments.map(p => Number(p.amount))),
+    totalOutstanding: sumCents(periods.filter(p => !p.paid).map(p => p.total)),
   }
 }

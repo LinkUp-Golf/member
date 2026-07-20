@@ -12,9 +12,18 @@
 
 import { MEMBERSHIP_FEE_USD } from '@/lib/constants'
 
-/** Commission earned on a single conversion at the given rate. */
+/**
+ * Commission earned on a single conversion at the given rate, rounded to whole
+ * cents so downstream sums don't accumulate binary-float drift (e.g. many lines
+ * at 33.33%). Money is stored as numeric(10,2), so a cent is the resolution.
+ */
 export function commissionForRate(percentage: number): number {
-  return MEMBERSHIP_FEE_USD * (Number(percentage) / 100)
+  return Math.round(MEMBERSHIP_FEE_USD * Number(percentage)) / 100
+}
+
+/** Sum money values and snap the total to whole cents. */
+export function sumCents(values: number[]): number {
+  return Math.round(values.reduce((sum, v) => sum + v * 100, 0)) / 100
 }
 
 /** True when `date` falls on or before the partner's rate expiry. */

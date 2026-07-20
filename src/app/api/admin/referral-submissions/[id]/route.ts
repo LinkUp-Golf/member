@@ -110,11 +110,14 @@ export const PATCH = withAuth(
       const outcome = outcomeByEmail.get(entry.email.toLowerCase())
 
       // Record the per-entry result so the partner can see exactly what
-      // happened to each name they submitted.
+      // happened to each name they submitted. 'already' counts as imported: the
+      // person IS now referred by this partner — and treating it so makes a
+      // retry after a partial failure (links created, status update failed)
+      // report the true count instead of 0.
       const update = outcome?.status === 'linked'
         ? { status: 'imported', link_id: outcome.linkId, skip_reason: null }
         : outcome?.status === 'already'
-        ? { status: 'skipped', link_id: outcome.linkId, skip_reason: 'Already referred by you' }
+        ? { status: 'imported', link_id: outcome.linkId, skip_reason: null }
         : { status: 'skipped', link_id: null, skip_reason: outcome?.reason ?? 'Could not import' }
 
       if (update.status === 'imported') importedCount++
@@ -163,10 +166,9 @@ export const PATCH = withAuth(
       status: 'imported',
       imported: importedCount,
       total: entries.length,
-      skipped: outcomes.filter(o => o.status !== 'linked').map(o => ({
-        email: o.email,
-        reason: o.status === 'already' ? 'Already referred by you' : o.reason,
-      })),
+      skipped: outcomes
+        .filter((o): o is Extract<typeof o, { status: 'skipped' }> => o.status === 'skipped')
+        .map(o => ({ email: o.email, reason: o.reason })),
     })
   },
   { requireAdmin: true, skipGHLCheck: true }
