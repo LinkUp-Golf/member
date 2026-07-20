@@ -11,7 +11,7 @@ import { AdminPageHeader, AdminCard, Badge, ProgressBar } from '@/components/adm
 import { Spinner } from '@/components/ui/Loading'
 import Select, { type SelectOption } from '@/components/ui/Select'
 import { HOST_MEMBER_PRICE_MARKUP_USD } from '@/lib/constants'
-import { memberPrice } from '@/lib/hosts/events'
+import { memberPrice, canUploadProof } from '@/lib/hosts/events'
 import type { HostedEvent, HostedEventStatus, Course, HostBookingOption } from '@/types'
 
 const fmtMoney = (n: number) =>
@@ -123,7 +123,7 @@ const EventCard = memo(function EventCard({ event, onChanged, onToast, onEdit }:
   // Mirrors the server's editable/cancellable set — a host can still fix an
   // event while it's awaiting review.
   const editable = event.status === 'draft' || event.status === 'pending_review' || event.status === 'upcoming'
-  const canProof = event.status === 'completed' || event.status === 'pending_credit_approval'
+  const canProof = canUploadProof(event.status, event.event_date)
 
   async function act(action: string, extra: Record<string, unknown> = {}) {
     if (busy) return

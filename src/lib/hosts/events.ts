@@ -20,6 +20,27 @@ export function memberPrice(memberGuestRate: number): number {
 export const JOINABLE_STATUSES = ['upcoming'] as const
 
 /**
+ * Whether a host may upload proof for an event.
+ *
+ * Proof only makes sense once the event has taken place:
+ *   completed               — it ran and the cron has closed it
+ *   pending_credit_approval — replacing proof already submitted
+ *   upcoming, date arrived  — it ran today; don't make the host wait for the
+ *                             daily completion cron to catch up
+ *
+ * Never for draft or pending_review (it hasn't been approved, let alone
+ * happened), cancelled, or credits_awarded (already settled).
+ *
+ * Isomorphic on purpose: the route enforces it and the UI decides whether to
+ * show the button, and the two must not drift.
+ */
+export function canUploadProof(status: string, eventDate: string, today = new Date().toISOString().slice(0, 10)): boolean {
+  if (status === 'completed' || status === 'pending_credit_approval') return true
+  if (status === 'upcoming' && eventDate <= today) return true
+  return false
+}
+
+/**
  * Annotate events with member_price, filled/remaining spots and (when a member
  * is given) whether they already hold an active reservation. Batches the
  * registration count into a single query across all events.

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { summarizeCredits } from '@/lib/hosts/credits'
-import { memberPrice } from '@/lib/hosts/events'
+import { memberPrice, canUploadProof } from '@/lib/hosts/events'
 import { HOST_MEMBER_PRICE_MARKUP_USD } from '@/lib/constants'
 
 describe('summarizeCredits', () => {
@@ -36,5 +36,32 @@ describe('memberPrice', () => {
 
   it('keeps cents clean', () => {
     expect(memberPrice(49.99)).toBe(59.99)
+  })
+})
+
+describe('canUploadProof', () => {
+  const TODAY = '2026-07-21'
+
+  it('allows it once the event has run', () => {
+    expect(canUploadProof('completed', '2026-07-01', TODAY)).toBe(true)
+    // Replacing proof already submitted.
+    expect(canUploadProof('pending_credit_approval', '2026-07-01', TODAY)).toBe(true)
+  })
+
+  it('allows it on the event day without waiting for the completion cron', () => {
+    expect(canUploadProof('upcoming', TODAY, TODAY)).toBe(true)
+    // And after, if the cron hasn't caught up yet.
+    expect(canUploadProof('upcoming', '2026-07-20', TODAY)).toBe(true)
+  })
+
+  it('refuses it before the event has happened', () => {
+    expect(canUploadProof('upcoming', '2026-07-22', TODAY)).toBe(false)
+    expect(canUploadProof('draft', TODAY, TODAY)).toBe(false)
+    expect(canUploadProof('pending_review', TODAY, TODAY)).toBe(false)
+  })
+
+  it('refuses it once the event is settled or called off', () => {
+    expect(canUploadProof('cancelled', '2026-07-01', TODAY)).toBe(false)
+    expect(canUploadProof('credits_awarded', '2026-07-01', TODAY)).toBe(false)
   })
 })

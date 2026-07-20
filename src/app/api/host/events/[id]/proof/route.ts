@@ -9,22 +9,15 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
+import { canUploadProof } from '@/lib/hosts/events'
 import { sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
 
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const MAX_BYTES = 10 * 1024 * 1024
 
-const todayISO = () => new Date().toISOString().slice(0, 10)
-
-// Proof makes sense once the event has occurred: any completed/awaiting-approval
-// event, or an upcoming one whose date has already arrived (so the host isn't
-// blocked waiting for the daily completion cron on the event day itself).
-function canProof(status: string, eventDate: string): boolean {
-  if (status === 'completed' || status === 'pending_credit_approval') return true
-  if (status === 'upcoming' && eventDate <= todayISO()) return true
-  return false
-}
+// Eligibility lives in lib/hosts/events so this route and the host UI can't
+// disagree about when the upload button should exist.
 
 export const POST = withHostAuth(
   async (req: NextRequest, ctx: HostAuthContext, routeCtx?: { params: Record<string, string> }) => {
@@ -53,7 +46,7 @@ export const POST = withHostAuth(
       .maybeSingle()
 
     if (!event) return NextResponse.json({ error: 'Event not found' }, { status: 404 })
-    if (!canProof(event.status, event.event_date)) {
+    if (!canUploadProof(event.status, event.event_date)) {
       return NextResponse.json(
         { error: 'You can only upload proof once the event has taken place.' },
         { status: 409 }
