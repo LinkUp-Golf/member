@@ -10,7 +10,7 @@
 
 import { logger } from '@/lib/logger'
 import { COURSE_TAG_MAP, hasAnyAccessTag } from '@/lib/ghl/tags'
-import { getContactById } from '@/lib/ghl/client'
+import { getContactByIdStrict } from '@/lib/ghl/client'
 import { upsertMember, deactivateMember } from './member.sync'
 import { syncCourseMemberships } from './membership.sync'
 import type { GHLContact } from '@/types'
@@ -107,9 +107,14 @@ export async function syncMemberByContactId(params: {
 
 // ---- Refresh a known set of members from GHL ----------------
 // Re-pulls each member's current GHL tags so membership state is up to date.
-// Mirrors the webhook: an access tag present → full sync (tags + active); no
-// access tag → deactivate, and update ghl_tags so a removed membership tag
-// isn't left stale (membership is read from ghl_tags). Best-effort per member.
+// Uses getContactByIdStrict so a genuine 404 (contact deleted in GHL) is told
+// apart from a transient outage:
+//   - contact present, access tag  → full sync (tags + active)
+//   - contact present, no access tag → deactivate + refresh stored tags
+//   - contact deleted (404)        → deactivate + clear tags (no longer a member)
+//   - outage / network (throws)    → leave tags as-is, count as failed
+// The failed/refreshed split lets the payment flow fail closed on a total
+// outage instead of paying on stale membership tags.
 
 export async function refreshMembersFromGhl(
   members: Array<{ id: string; ghl_contact_id: string | null }>,
@@ -118,27 +123,38 @@ export async function refreshMembersFromGhl(
   let refreshed = 0
   let failed = 0
 
+  async function storeTags(memberId: string, tags: string[]) {
+    await deactivateMember(memberId, ctx)
+    await ctx.supabase
+      .from('members')
+      .update({ ghl_tags: tags, updated_at: new Date().toISOString() })
+      .eq('id', memberId)
+  }
+
   for (const m of members) {
     if (!m.ghl_contact_id) { failed++; continue }
     try {
-      const contact = await getContactById(m.ghl_contact_id)
-      if (!contact) { failed++; continue }
+      const contact = await getContactByIdStrict(m.ghl_contact_id)
+
+      if (!contact) {
+        // Genuinely deleted in GHL — no longer a member; clear the stale tags
+        // so they stop counting as converted.
+        await storeTags(m.id, [])
+        refreshed++
+        continue
+      }
 
       const tags = contact.tags ?? []
       if (hasAnyAccessTag(tags)) {
         const result = await syncMember({ contact, userId: m.id, ctx })
         if (!result.success) { failed++; continue }
       } else {
-        // No access tag — deactivate and refresh the stored tags so the
-        // membership check (which reads ghl_tags) reflects the removal.
-        await deactivateMember(m.id, ctx)
-        await ctx.supabase
-          .from('members')
-          .update({ ghl_tags: tags, updated_at: new Date().toISOString() })
-          .eq('id', m.id)
+        await storeTags(m.id, tags)
       }
       refreshed++
     } catch {
+      // Outage / transient — do NOT touch the stored tags; this counts as a
+      // failure so a whole-outage payout is refused rather than run stale.
       failed++
     }
   }

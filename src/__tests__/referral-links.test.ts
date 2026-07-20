@@ -24,7 +24,11 @@ interface FakeMember { id: string; email: string; ghl_contact_id: string | null 
  * then by member_id) and members, then per-target `.insert().select().single()`
  * or `.update().eq()`.
  */
-function fakeAdmin({ links = [], members = [] }: { links?: FakeLink[]; members?: FakeMember[] }) {
+function fakeAdmin({
+  links = [],
+  members = [],
+  paidLinkIds = [],
+}: { links?: FakeLink[]; members?: FakeMember[]; paidLinkIds?: string[] }) {
   const inserts: Array<Record<string, unknown>> = []
   const updates: Array<{ id: string; patch: Record<string, unknown> }> = []
   let nextId = 1
@@ -36,6 +40,9 @@ function fakeAdmin({ links = [], members = [] }: { links?: FakeLink[]; members?:
           // The real client filters server-side; mirror that here so a lookup
           // by member_id doesn't return links belonging to other people.
           in: async (column: string, values: string[]) => {
+            if (table === 'referral_partner_payment_items') {
+              return { data: paidLinkIds.filter(id => values.includes(id)).map(link_id => ({ link_id })) }
+            }
             if (table !== 'referral_partner_links') return { data: members }
             return {
               data: links.filter(l =>
@@ -249,7 +256,35 @@ describe('linkTargetsToPartner', () => {
       expect(updates).toHaveLength(0)
     })
 
-    it('moves the existing link rather than creating a second one when repointing', async () => {
+    it('refuses to move an already-paid link on repoint (would block the new partner payout)', async () => {
+    const { client, inserts, updates } = fakeAdmin({
+      links: [{
+        id: 'link-paid',
+        email: 'paid@example.com',
+        referral_partner_id: OTHER_PARTNER,
+        member_id: 'member-1',
+      }],
+      members: [{ id: 'member-1', email: 'paid@example.com', ghl_contact_id: 'ghl-1' }],
+      paidLinkIds: ['link-paid'], // already has a payment_item under the other partner
+    })
+
+    const outcomes = await linkTargetsToPartner(
+      client as never,
+      PARTNER,
+      [{ email: 'paid@example.com' }],
+      { repoint: true }
+    )
+
+    expect(outcomes[0]).toMatchObject({
+      status: 'skipped',
+      reason: 'Already paid to another partner — cannot move',
+    })
+    // Not moved, not duplicated — the paid link stays put.
+    expect(updates).toHaveLength(0)
+    expect(inserts).toHaveLength(0)
+  })
+
+  it('moves the existing link rather than creating a second one when repointing', async () => {
       const { client, inserts, updates } = fakeAdmin({
         links: [{
           id: 'link-9',

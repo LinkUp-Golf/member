@@ -117,6 +117,24 @@ export async function linkTargetsToPartner(
       .map(l => [l.member_id as string, l])
   )
 
+  // Links that have already been paid to their current partner. Repointing one
+  // to a new partner would leave a payment_item pointing at it, and that item's
+  // link is UNIQUE — so when the new partner is paid, the whole month's payout
+  // would be rejected by that one link. Refuse to move a paid link instead.
+  const candidateLinkIds = [...new Set(
+    [...linkByEmail.values(), ...linkByMemberId.values()].map(l => l.id)
+  )]
+  const paidLinkIds = new Set<string>()
+  if (repoint && candidateLinkIds.length) {
+    const { data: paidItems } = await admin
+      .from('referral_partner_payment_items')
+      .select('link_id')
+      .in('link_id', candidateLinkIds)
+    for (const it of (paidItems ?? []) as Array<{ link_id: string | null }>) {
+      if (it.link_id) paidLinkIds.add(it.link_id)
+    }
+  }
+
   const outcomes: LinkOutcome[] = []
   // Members newly linked during this run, so a second row in the same batch
   // resolving to the same person can't slip past the pre-loop reads.
@@ -148,6 +166,18 @@ export async function linkTargetsToPartner(
           email,
           status: 'skipped',
           reason: 'Already attributed to another referral partner',
+        })
+        continue
+      }
+
+      // Moving a link that's already been paid would orphan its payment_item
+      // and block the new partner's next payout. Leave it with its current
+      // partner.
+      if (paidLinkIds.has(existing.id)) {
+        outcomes.push({
+          email,
+          status: 'skipped',
+          reason: 'Already paid to another partner — cannot move',
         })
         continue
       }
