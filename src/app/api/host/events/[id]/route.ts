@@ -52,7 +52,9 @@ export const GET = withHostAuth(
 
     const { data: registrations } = await admin
       .from('hosted_event_registrations')
-      .select('*, member:members(first_name, last_name, avatar_url)')
+      // Named even though this table references members once today — an added
+      // column would silently make it ambiguous at runtime.
+      .select('*, member:members!hosted_event_registrations_member_id_fkey(first_name, last_name, avatar_url)')
       .eq('hosted_event_id', id)
       .eq('status', 'reserved')
       .order('created_at', { ascending: true })

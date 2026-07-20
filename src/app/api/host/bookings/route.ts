@@ -54,7 +54,11 @@ export const GET = withHostAuth(async (_req: NextRequest, _ctx: HostAuthContext)
 
   const { data, error } = await admin
     .from('bookings')
-    .select('id, member_id, course_id, booking_date, tee_time, created_at, course:courses(name), member:members(first_name, last_name)')
+    // The FK must be named: bookings references members twice — member_id (the
+    // booker) and player_member_id (a member guest occupying the seat) — so a
+    // bare members(...) embed is ambiguous and PostgREST refuses it. We want
+    // the booker.
+    .select('id, member_id, course_id, booking_date, tee_time, created_at, course:courses(name), member:members!bookings_member_id_fkey(first_name, last_name)')
     .gte('booking_date', todayISO())
     .lte('booking_date', horizonISO())
     .in('status', ACTIVE_STATUSES)
