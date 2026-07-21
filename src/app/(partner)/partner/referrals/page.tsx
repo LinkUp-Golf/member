@@ -31,11 +31,10 @@ export default function PartnerReferralsPage() {
         <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
       ) : (
         <AdminTable
-          headers={['Contact', 'Referred', 'Type', 'Status']}
+          headers={['Contact', 'Referred', 'Status']}
           empty={links.length === 0 ? 'No referrals yet. The LinkUp team attributes contacts to your code.' : undefined}
         >
           {links.map(link => {
-            const isMember = !!link.member_id
             const isActive = link.member?.membership_status === 'active'
             return (
               <AdminTr key={link.id}>
@@ -48,9 +47,6 @@ export default function PartnerReferralsPage() {
                   )}
                 </AdminTd>
                 <AdminTd>{fmtDate(link.created_at)}</AdminTd>
-                <AdminTd>
-                  <Badge label={isMember ? 'Member' : 'Non-member'} colour={isMember ? 'green' : 'gray'} />
-                </AdminTd>
                 <AdminTd>
                   {isActive
                     ? <Badge label="Active" colour="green" />
