@@ -73,11 +73,11 @@ export default function PartnerOverviewPage() {
       )}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
-        <StatCard label="Referred"   value={stats.referredCount} sub="Total contacts" colour="blue" />
-        <StatCard label="Active"     value={stats.activeCount}   sub="Paying members" colour="green" />
-        <StatCard label="Conversion" value={`${Math.round(conversionRate * 100)}%`}   colour="gold" />
-        <StatCard label="Commission" value={fmtMoney(stats.commissionOwed)} sub="Earned to date" colour="gold" />
-        <StatCard label="Rate"       value={`${partner.percentage}%`} sub={expired ? 'Expired' : 'Per member'} colour={expired ? 'gray' : 'green'} />
+        <StatCard label="Referred"    value={stats.referredCount} sub="Total contacts" colour="blue" />
+        <StatCard label="Active"      value={stats.activeCount}   sub="Paying members" colour="green" />
+        <StatCard label="Conversion"  value={`${Math.round(conversionRate * 100)}%`}   colour="gold" />
+        <StatCard label="Rate"        value={`${partner.percentage}%`} sub={expired ? 'Expired' : 'Per member'} colour={expired ? 'gray' : 'green'} />
+        <StatCard label="Commissions" value={fmtMoney(stats.commissionOwed)} sub="Earned to date" colour="gold" />
       </div>
 
       <AdminCard title="Recent Conversions">
