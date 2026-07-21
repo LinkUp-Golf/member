@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Upload, FileText, Download, X } from 'lucide-react'
+import { Upload, FileText, Download, X, PencilLine, Plus, Trash2 } from 'lucide-react'
 import { AdminPageHeader, AdminCard, Badge, StatCard } from '@/components/admin/AdminUI'
 import { parseReferralCsv, type ReferralCsvResult } from '@/lib/csv'
 import type { ReferralPartnerSubmission, ReferralSubmissionEntry } from '@/types'
@@ -20,6 +20,7 @@ export default function PartnerSubmissionsPage() {
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [mode, setMode] = useState<'csv' | 'manual'>('csv')
 
   const showToast = (msg: string, ok = true) => {
     setToast({ msg, ok })
@@ -62,11 +63,43 @@ export default function PartnerSubmissionsPage() {
       )}
 
       {!loading && !hasPending && (
-        <div className="mb-8">
-          <UploadForm
-            onSubmitted={(msg) => { showToast(msg); load() }}
-            onError={(msg) => showToast(msg, false)}
-          />
+        <div className="mb-8 space-y-4">
+          {/* Partners can either upload a CSV export or type a few referrals in
+              by hand — both submit the same list for the team to import. */}
+          <div className="inline-flex rounded-xl border border-gray-200 p-1 bg-gray-50">
+            <button
+              type="button"
+              onClick={() => setMode('csv')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                mode === 'csv' ? 'bg-white text-green-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <Upload className="w-3.5 h-3.5" strokeWidth={2} />
+              Upload CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('manual')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                mode === 'manual' ? 'bg-white text-green-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <PencilLine className="w-3.5 h-3.5" strokeWidth={2} />
+              Enter manually
+            </button>
+          </div>
+
+          {mode === 'csv' ? (
+            <UploadForm
+              onSubmitted={(msg) => { showToast(msg); load() }}
+              onError={(msg) => showToast(msg, false)}
+            />
+          ) : (
+            <ManualForm
+              onSubmitted={(msg) => { showToast(msg); load() }}
+              onError={(msg) => showToast(msg, false)}
+            />
+          )}
         </div>
       )}
 
@@ -357,6 +390,165 @@ function UploadForm({
             ? 'Submitting…'
             : parsed?.valid
             ? `Submit ${parsed.rows.length} referral${parsed.rows.length !== 1 ? 's' : ''}`
+            : 'Submit referrals'}
+        </button>
+      </div>
+    </AdminCard>
+  )
+}
+
+// ---- Manual entry form --------------------------------------
+// Types a handful of referrals by hand instead of uploading a file. The rows
+// are serialised into exactly the same [name,email] CSV the upload path
+// produces, so the server contract and validation are identical.
+
+const csvField = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v)
+
+const rowsToCsv = (rows: { name: string; email: string }[]) =>
+  ['name,email', ...rows.map(r => `${csvField(r.name.trim())},${csvField(r.email.trim())}`)].join('\r\n') + '\r\n'
+
+function ManualForm({
+  onSubmitted,
+  onError,
+}: {
+  onSubmitted: (msg: string) => void
+  onError: (msg: string) => void
+}) {
+  const [rows, setRows] = useState<{ name: string; email: string }[]>([
+    { name: '', email: '' },
+    { name: '', email: '' },
+  ])
+  const [note, setNote] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const setRow = (i: number, patch: Partial<{ name: string; email: string }>) =>
+    setRows(rs => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
+  const addRow = () => setRows(rs => (rs.length >= MAX_ENTRIES ? rs : [...rs, { name: '', email: '' }]))
+  const removeRow = (i: number) => setRows(rs => (rs.length > 1 ? rs.filter((_, idx) => idx !== i) : rs))
+
+  const filled = rows.filter(r => r.name.trim() || r.email.trim())
+  // Validate through the shared parser so manual entry reports the same errors
+  // (missing name, malformed email, duplicates) as an uploaded file.
+  const parsed = filled.length ? parseReferralCsv(rowsToCsv(filled)) : null
+  const canSubmit = filled.length > 0 && !!parsed?.valid && !submitting
+
+  async function submit() {
+    if (!canSubmit) return
+    setSubmitting(true)
+    const res = await fetch('/api/partner/submissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ csv: rowsToCsv(filled), filename: 'manual-entry.csv', note: note.trim() || undefined }),
+    })
+    const json = await res.json().catch(() => ({}))
+    setSubmitting(false)
+    if (!res.ok) { onError(json.error ?? 'Could not submit your referrals.'); return }
+
+    const count = filled.length
+    setRows([{ name: '', email: '' }, { name: '', email: '' }])
+    setNote('')
+    onSubmitted(`Submitted ${count} referral${count !== 1 ? 's' : ''} for review.`)
+  }
+
+  const field = 'w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:border-green-700 outline-none transition-colors bg-white'
+
+  return (
+    <AdminCard title="Add Referrals">
+      <div className="space-y-4">
+        <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3">
+          <p className="text-[11px] text-gray-500 leading-relaxed">
+            Enter each person&apos;s name and email. Every row needs a name and a valid email address.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          {rows.map((r, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input
+                className={field}
+                value={r.name}
+                onChange={e => setRow(i, { name: e.target.value })}
+                placeholder="Name"
+                aria-label={`Referral ${i + 1} name`}
+              />
+              <input
+                className={field}
+                type="email"
+                value={r.email}
+                onChange={e => setRow(i, { email: e.target.value })}
+                placeholder="email@example.com"
+                aria-label={`Referral ${i + 1} email`}
+              />
+              <button
+                type="button"
+                onClick={() => removeRow(i)}
+                disabled={rows.length <= 1}
+                aria-label={`Remove referral ${i + 1}`}
+                className="flex-shrink-0 text-gray-300 hover:text-red-500 disabled:opacity-30 disabled:hover:text-gray-300"
+              >
+                <Trash2 className="w-4 h-4" strokeWidth={1.9} />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={addRow}
+          disabled={rows.length >= MAX_ENTRIES}
+          className="flex items-center gap-1.5 text-xs font-medium text-green-800 hover:underline disabled:opacity-40"
+        >
+          <Plus className="w-3.5 h-3.5" strokeWidth={2} />
+          Add another
+        </button>
+
+        {/* Same validation surface as the upload path. */}
+        {parsed && !parsed.valid && (
+          <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3">
+            <p className="text-xs font-medium text-red-700 mb-1.5">
+              {parsed.errors.length === 1
+                ? 'Fix this before you can submit:'
+                : `${parsed.errors.length} things to fix before you can submit:`}
+            </p>
+            <div className="max-h-40 overflow-y-auto">
+              {parsed.errors.slice(0, 15).map(err => (
+                <p key={err} className="text-[11px] text-red-600 leading-relaxed">{err}</p>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <label htmlFor="manual-note" className="block text-xs font-medium text-gray-600 mb-1">
+            Note for the team
+          </label>
+          <input
+            id="manual-note"
+            className={field}
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="Where you met them, anything useful…"
+          />
+        </div>
+
+        <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3">
+          <p className="text-[11px] text-gray-500">
+            The LinkUp team reviews your referrals and adds each one to your account at your agreed
+            commission rate. Anyone already attributed to another partner is skipped — you&apos;ll see
+            the reason per person.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!canSubmit}
+          className="w-full py-2.5 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 disabled:opacity-40 transition-colors"
+        >
+          {submitting
+            ? 'Submitting…'
+            : filled.length
+            ? `Submit ${filled.length} referral${filled.length !== 1 ? 's' : ''}`
             : 'Submit referrals'}
         </button>
       </div>
