@@ -351,7 +351,8 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
       course_id: event?.course_id ?? '',
       event_date: event?.event_date?.slice(0, 10) ?? '',
       tee_time: event?.tee_time?.slice(0, 5) ?? NO_TEE_TIME,
-      total_spots: event?.total_spots ?? '',
+      // A linkup defaults to the host + 3 players; the host can still change it.
+      total_spots: event?.total_spots ?? 3,
       member_guest_rate: event?.member_guest_rate ?? '',
       description: event?.description ?? '',
       source_booking_id: event?.source_booking_id ?? '',
