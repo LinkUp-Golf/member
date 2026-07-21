@@ -31,7 +31,7 @@ const PARTNER_APPLY_ITEM: MoreItem = {
 
 const PARTNER_WORKSPACE_ITEM: MoreItem = {
   href: '/partner',
-  label: 'Referral Partner',
+  label: 'Your Referrals',
   icon: <BadgeDollarSign className="w-5 h-5" strokeWidth={1.9} />,
   desc: 'Your referrals, commission & payouts',
 }
