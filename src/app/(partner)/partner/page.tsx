@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { AdminPageHeader, StatCard, AdminCard } from '@/components/admin/AdminUI'
+import { AdminPageHeader, StatCard, AdminCard, Badge } from '@/components/admin/AdminUI'
 import { isRateExpired } from '@/lib/referral-rate'
-import type { ReferralPartner, ReferralPartnerStats } from '@/types'
+import type { ReferralPartner, ReferralPartnerStats, ReferralPartnerLink } from '@/types'
 
 const fmtMoney = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 })
@@ -31,14 +31,23 @@ interface Overview {
 
 export default function PartnerOverviewPage() {
   const [overview, setOverview] = useState<Overview | null>(null)
+  const [links, setLinks] = useState<ReferralPartnerLink[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    const res = await fetch('/api/partner/overview')
-    const json = await res.json().catch(() => ({}))
-    if (!res.ok) setError(json.error ?? 'Failed to load your referral data.')
+    // Overview drives the stats and earnings ledger; the referrals list feeds
+    // the "Recent Referrals" card (everyone referred, converted or not).
+    const [overviewRes, referralsRes] = await Promise.all([
+      fetch('/api/partner/overview'),
+      fetch('/api/partner/referrals'),
+    ])
+    const json = await overviewRes.json().catch(() => ({}))
+    if (!overviewRes.ok) setError(json.error ?? 'Failed to load your referral data.')
     else setOverview(json)
+
+    const referralsJson = await referralsRes.json().catch(() => ({}))
+    setLinks(Array.isArray(referralsJson.links) ? referralsJson.links : [])
     setLoading(false)
   }, [])
 
@@ -52,6 +61,10 @@ export default function PartnerOverviewPage() {
 
   // Most recent conversions first — this is the partner's earnings ledger.
   const recent = [...conversions].sort((a, b) => b.convertedAt.localeCompare(a.convertedAt)).slice(0, 10)
+
+  // Everyone referred, newest first — includes people who haven't converted yet,
+  // which the conversions ledger deliberately omits.
+  const recentReferrals = [...links].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 5)
 
   return (
     <div className="p-4 sm:p-8">
@@ -78,6 +91,42 @@ export default function PartnerOverviewPage() {
         <StatCard label="Conversion"  value={`${Math.round(conversionRate * 100)}%`}   colour="gold" />
         <StatCard label="Rate"        value={`${partner.percentage}%`} sub={expired ? 'Expired' : 'Per member'} colour={expired ? 'gray' : 'green'} />
         <StatCard label="Commissions" value={fmtMoney(stats.commissionOwed)} sub="Earned to date" colour="gold" />
+      </div>
+
+      <div className="mb-6">
+        <AdminCard title="Recent Referrals">
+          {recentReferrals.length === 0 ? (
+            <p className="text-sm text-gray-400 italic py-4 text-center">
+              No referrals yet — the LinkUp team attributes contacts to your code.
+            </p>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {recentReferrals.map(link => {
+                const isActive = link.member?.membership_status === 'active'
+                const name = link.member ? `${link.member.first_name} ${link.member.last_name}`.trim() : null
+                return (
+                  <div key={link.id} className="flex items-center justify-between gap-3 py-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{name || link.email}</p>
+                      <p className="text-xs text-gray-400">Referred {fmtDate(link.created_at)}</p>
+                    </div>
+                    <div className="flex-shrink-0">
+                      {isActive
+                        ? <Badge label="Active" colour="green" />
+                        : <Badge label="Referred" colour="blue" />}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          <div className="pt-4 mt-2 border-t border-gray-50">
+            <Link href="/partner/referrals" className="text-sm text-green-800 hover:underline">
+              View all referrals →
+            </Link>
+          </div>
+        </AdminCard>
       </div>
 
       <AdminCard title="Recent Conversions">
