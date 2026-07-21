@@ -517,8 +517,8 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
           {!isEdit && (
             <div className="flex gap-2 p-1 bg-gray-100 rounded-xl">
               {([
-                { key: 'booking', label: 'Existing booking' },
-                { key: 'new', label: 'New schedule' },
+                { key: 'booking', label: 'Pending linkups' },
+                { key: 'new', label: 'New linkup' },
               ] as const).map(m => (
                 <button
                   key={m.key}
@@ -566,7 +566,7 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
                 {errors.source_booking_id && <p className={errCls}>{errors.source_booking_id.message}</p>}
                 {!isEdit && bookingOptions.length === 0 && (
                   <p className="text-[11px] text-amber-600 mt-1">
-                    No active bookings are available to take on right now — switch to &quot;New schedule&quot; to propose your own.
+                    No active bookings are available to take on right now — switch to &quot;New linkup&quot; to propose your own.
                   </p>
                 )}
               </div>
