@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { AdminPageHeader, StatCard, AdminCard, Badge } from '@/components/admin/AdminUI'
-import { Spinner } from '@/components/ui/Loading'
+import { Spinner, ContentLoader } from '@/components/ui/Loading'
 import type { HostCreditEntry, HostCreditSummary, HostCreditKind } from '@/types'
 
 const fmtMoney = (n: number) =>
@@ -66,7 +66,7 @@ export default function HostCreditsPage() {
       />
 
       {loading ? (
-        <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
+        <ContentLoader />
       ) : error ? (
         <AdminCard>
           <div className="py-10 text-center">

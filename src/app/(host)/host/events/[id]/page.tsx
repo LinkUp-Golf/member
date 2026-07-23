@@ -8,6 +8,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { AdminPageHeader, AdminCard, Badge, ProgressBar } from '@/components/admin/AdminUI'
+import { ContentLoader } from '@/components/ui/Loading'
 import Avatar from '@/components/ui/Avatar'
 import type { HostedEvent, HostedEventRegistration, HostedEventStatus } from '@/types'
 
@@ -64,7 +65,7 @@ export default function HostEventDetailPage() {
       <Link href="/host/events" className="text-xs text-gray-400 hover:text-gray-600">← My events</Link>
 
       {loading ? (
-        <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
+        <ContentLoader />
       ) : !event ? (
         <div className="py-16 text-center text-sm text-red-500">{error ?? 'Event not found.'}</div>
       ) : (

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { AdminPageHeader, StatCard, AdminCard, Badge } from '@/components/admin/AdminUI'
+import { ContentLoader } from '@/components/ui/Loading'
 import { formatPeriod } from '@/lib/referral-rate'
 
 const fmtMoney = (n: number) =>
@@ -39,7 +40,7 @@ export default function PartnerPaymentsPage() {
 
   useEffect(() => { load() }, [load])
 
-  if (loading) return <div className="p-8 text-sm text-gray-400">Loading…</div>
+  if (loading) return <ContentLoader />
   if (!data) return <div className="p-8 text-sm text-red-500">Could not load your payments.</div>
 
   const { periods, totalPaid, totalOutstanding } = data

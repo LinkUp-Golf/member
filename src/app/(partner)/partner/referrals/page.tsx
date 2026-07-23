@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { AdminPageHeader, AdminCard, Badge } from '@/components/admin/AdminUI'
+import { ContentLoader } from '@/components/ui/Loading'
 import type { ReferralPartnerLink } from '@/types'
 
 const fmtDate = (d: string) =>
@@ -28,7 +29,7 @@ export default function PartnerReferralsPage() {
       />
 
       {loading ? (
-        <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
+        <ContentLoader />
       ) : (
         // A stacked list rather than a table — it fits a phone screen without a
         // horizontal scrollbar and reads the same held in portrait or landscape.

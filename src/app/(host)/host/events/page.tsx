@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react'
 import Link from 'next/link'
 import { useForm, Controller } from 'react-hook-form'
 import { AdminPageHeader, AdminCard, Badge, ProgressBar } from '@/components/admin/AdminUI'
-import { Spinner } from '@/components/ui/Loading'
+import { Spinner, ContentLoader } from '@/components/ui/Loading'
 import Select, { type SelectOption } from '@/components/ui/Select'
 import { HOST_MEMBER_PRICE_MARKUP_USD } from '@/lib/constants'
 import { memberPrice, canUploadProof } from '@/lib/hosts/events'
@@ -74,7 +74,7 @@ export default function HostEventsPage() {
       />
 
       {loading ? (
-        <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
+        <ContentLoader />
       ) : events.length === 0 ? (
         <AdminCard>
           <div className="py-10 text-center">

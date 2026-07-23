@@ -34,6 +34,19 @@ export function FullScreenLoader() {
   )
 }
 
+// ---- Content loader -----------------------------------------
+// A spinner centred both ways within the page content area. Use for the
+// initial load of a workspace page (host/partner), where the shell is already
+// painted and only the inner content is still fetching — the min-height keeps
+// it visually centred rather than pinned to the top.
+export function ContentLoader({ className }: { className?: string }) {
+  return (
+    <div className={cn('flex items-center justify-center w-full min-h-[60vh]', className)}>
+      <Spinner className="text-green-700" />
+    </div>
+  )
+}
+
 // ---- Skeleton block -----------------------------------------
 export function Skeleton({ className }: { className?: string }) {
   return (

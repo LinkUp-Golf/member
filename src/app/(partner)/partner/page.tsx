@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { AdminPageHeader, StatCard, AdminCard, Badge } from '@/components/admin/AdminUI'
+import { ContentLoader } from '@/components/ui/Loading'
 import { isRateExpired } from '@/lib/referral-rate'
 import type { ReferralPartner, ReferralPartnerStats, ReferralPartnerLink } from '@/types'
 
@@ -53,7 +54,7 @@ export default function PartnerOverviewPage() {
 
   useEffect(() => { load() }, [load])
 
-  if (loading) return <div className="p-8 text-sm text-gray-400">Loading…</div>
+  if (loading) return <ContentLoader />
   if (error || !overview) return <div className="p-8 text-sm text-red-500">{error ?? 'Not found.'}</div>
 
   const { partner, stats, conversionRate, membershipFee, conversions } = overview

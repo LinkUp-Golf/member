@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { AdminPageHeader, StatCard, AdminCard } from '@/components/admin/AdminUI'
+import { ContentLoader } from '@/components/ui/Loading'
 import type { Host, HostStats } from '@/types'
 
 const fmtMoney = (n: number) =>
@@ -37,7 +38,7 @@ export default function HostOverviewPage() {
       />
 
       {loading ? (
-        <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
+        <ContentLoader />
       ) : !data ? (
         <div className="py-16 text-center text-sm text-red-500">Could not load your dashboard.</div>
       ) : (
