@@ -102,7 +102,10 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       return NextResponse.json({ error: 'Event date cannot be in the past.' }, { status: 400 })
     }
     courseId = String(body.course_id)
-    teeTime = body.tee_time ? String(body.tee_time) : null
+    // Free text the host typed — sanitise like any other free-form field.
+    teeTime = typeof body.tee_time === 'string' && body.tee_time.trim()
+      ? sanitiseText(body.tee_time.trim())
+      : null
   }
 
   // Spots/rate are validated in both paths.

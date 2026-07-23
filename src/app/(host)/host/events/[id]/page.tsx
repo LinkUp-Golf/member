@@ -9,6 +9,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { AdminPageHeader, AdminCard, Badge, ProgressBar } from '@/components/admin/AdminUI'
 import { ContentLoader } from '@/components/ui/Loading'
+import { formatEventTeeTime as fmtTime } from '@/lib/utils'
 import Avatar from '@/components/ui/Avatar'
 import type { HostedEvent, HostedEventRegistration, HostedEventStatus } from '@/types'
 
@@ -21,12 +22,6 @@ const fmtDate = (d: string) =>
 const fmtDateTime = (d: string) =>
   new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
-const fmtTime = (t: string | null) => {
-  if (!t) return null
-  const [h, m] = t.split(':')
-  const hour = Number(h)
-  return `${hour % 12 || 12}:${m} ${hour >= 12 ? 'PM' : 'AM'}`
-}
 
 const STATUS_META: Record<HostedEventStatus, { label: string; colour: 'green' | 'gold' | 'red' | 'blue' | 'gray' }> = {
   draft:                   { label: 'Draft',            colour: 'gray' },

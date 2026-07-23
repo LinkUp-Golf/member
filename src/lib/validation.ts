@@ -227,11 +227,12 @@ export function validateHostedEventPayload(
     if (!dateResult.valid) errors.push(...dateResult.errors)
   }
 
-  // Optional in both create and edit — null/'' means no fixed tee time.
+  // Optional free text in both create and edit — null/'' means no fixed tee
+  // time. A host types whatever suits ("8:30 AM", "Shotgun 9am"); we only bound
+  // the length.
   if ('tee_time' in b && b.tee_time !== null && b.tee_time !== '') {
-    if (typeof b.tee_time !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(b.tee_time)) {
-      errors.push('Tee time must be in HH:MM format')
-    }
+    const teeResult = validateString(b.tee_time, 'Tee time', { max: 50, required: false })
+    if (!teeResult.valid) errors.push(...teeResult.errors)
   }
 
   if (!partial || 'total_spots' in b) {

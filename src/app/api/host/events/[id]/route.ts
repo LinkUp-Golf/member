@@ -204,7 +204,11 @@ export const PATCH = withHostAuth(
       }
       patch.event_date = String(body.event_date)
     }
-    if ('tee_time' in body) patch.tee_time = body.tee_time ? String(body.tee_time) : null
+    if ('tee_time' in body) {
+      patch.tee_time = typeof body.tee_time === 'string' && body.tee_time.trim()
+        ? sanitiseText(body.tee_time.trim())
+        : null
+    }
     if ('member_guest_rate' in body) patch.member_guest_rate = Number(body.member_guest_rate)
     if ('description' in body) {
       patch.description = typeof body.description === 'string' && body.description.trim()

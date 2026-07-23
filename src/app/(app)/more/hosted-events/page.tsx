@@ -8,6 +8,7 @@ import { CalendarDays, MapPin, Users } from 'lucide-react'
 import AppShell from '@/components/layout/AppShell'
 import { Spinner } from '@/components/ui/Loading'
 import { memberPrice } from '@/lib/hosts/events'
+import { formatEventTeeTime as fmtTime } from '@/lib/utils'
 import type { HostedEvent } from '@/types'
 
 const fmtMoney = (n: number) =>
@@ -15,13 +16,6 @@ const fmtMoney = (n: number) =>
 
 const fmtDate = (d: string) =>
   new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-
-const fmtTime = (t: string | null) => {
-  if (!t) return null
-  const [h, m] = t.split(':')
-  const hour = Number(h)
-  return `${hour % 12 || 12}:${m} ${hour >= 12 ? 'PM' : 'AM'}`
-}
 
 function hostLabel(e: HostedEvent) {
   const m = e.host?.member

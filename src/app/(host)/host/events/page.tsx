@@ -12,6 +12,7 @@ import { Spinner, ContentLoader } from '@/components/ui/Loading'
 import Select, { type SelectOption } from '@/components/ui/Select'
 import { HOST_MEMBER_PRICE_MARKUP_USD } from '@/lib/constants'
 import { memberPrice, canUploadProof } from '@/lib/hosts/events'
+import { formatEventTeeTime as fmtTime } from '@/lib/utils'
 import type { HostedEvent, HostedEventStatus, Course, HostBookingOption } from '@/types'
 
 const fmtMoney = (n: number) =>
@@ -19,15 +20,6 @@ const fmtMoney = (n: number) =>
 
 const fmtDate = (d: string) =>
   new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
-
-const fmtTime = (t: string | null) => {
-  if (!t) return null
-  const [h, m] = t.split(':')
-  const hour = Number(h)
-  const ampm = hour >= 12 ? 'PM' : 'AM'
-  const h12 = hour % 12 || 12
-  return `${h12}:${m} ${ampm}`
-}
 
 const STATUS_META: Record<HostedEventStatus, { label: string; colour: 'green' | 'gold' | 'red' | 'blue' | 'gray' }> = {
   draft:                   { label: 'Draft',              colour: 'gray' },
@@ -299,14 +291,6 @@ interface EventFormValues {
   source_booking_id: string
 }
 
-/** A tee time offered by the course on the chosen date. */
-interface TeeSlot {
-  /** Course-local wall clock, HH:MM — what we store in hosted_events.tee_time. */
-  value: string
-  label: string
-  spotsOpen: number | null
-}
-
 const NO_TEE_TIME = ''
 
 function EventDrawer({ event, onClose, onSaved, onError }: {
@@ -317,8 +301,6 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
 }) {
   const isEdit = !!event
   const [courses, setCourses] = useState<Pick<Course, 'id' | 'name' | 'city'>[]>([])
-  const [slots, setSlots] = useState<TeeSlot[]>([])
-  const [slotsState, setSlotsState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle')
   const [bookings, setBookings] = useState<HostBookingOption[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -339,7 +321,7 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
     defaultValues: {
       course_id: event?.course_id ?? '',
       event_date: event?.event_date?.slice(0, 10) ?? '',
-      tee_time: event?.tee_time?.slice(0, 5) ?? NO_TEE_TIME,
+      tee_time: event?.tee_time ?? NO_TEE_TIME,
       // A linkup defaults to the host + 3 players; the host can still change it.
       total_spots: event?.total_spots ?? 3,
       member_guest_rate: event?.member_guest_rate ?? '',
@@ -348,8 +330,6 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
     },
   })
 
-  const courseId = watch('course_id')
-  const eventDate = watch('event_date')
   const rate = watch('member_guest_rate')
   const bookingId = watch('source_booking_id')
   const selectedBooking = bookings.find(b => b.id === bookingId) ?? null
@@ -375,34 +355,6 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
     return () => { cancelled = true }
   }, [])
 
-  // Tee times come from the course's real availability for that date (the same
-  // source the booking screen uses), so a host can only pick a slot the course
-  // actually offers rather than typing an arbitrary time.
-  useEffect(() => {
-    if (!courseId || !eventDate) { setSlots([]); setSlotsState('idle'); return }
-
-    let cancelled = false
-    setSlotsState('loading')
-    const month = eventDate.slice(0, 7)
-
-    fetch(`/api/bookings/create?month=${month}&courseId=${courseId}`)
-      .then(r => r.json())
-      .then(j => {
-        if (cancelled) return
-        const forDate: { startTime: string; spotsOpen?: number }[] = j?.slots?.[eventDate] ?? []
-        setSlots(forDate.map(s => {
-          // startTime carries the course's own UTC offset, so the wall-clock
-          // time at the venue is exactly the HH:MM in the string.
-          const hhmm = s.startTime.slice(11, 16)
-          return { value: hhmm, label: fmtTime(hhmm) ?? hhmm, spotsOpen: s.spotsOpen ?? null }
-        }))
-        setSlotsState('loaded')
-      })
-      .catch(() => { if (!cancelled) { setSlots([]); setSlotsState('error') } })
-
-    return () => { cancelled = true }
-  }, [courseId, eventDate])
-
   // Same helper the server uses, so the preview can't drift from the real price.
   const previewPrice = rate !== '' && Number.isFinite(Number(rate)) ? memberPrice(Number(rate)) : null
 
@@ -425,23 +377,6 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
         label: `${b.course_name ?? 'Course'} · ${fmtDate(b.booking_date)} · ${fmtTime(b.tee_time) ?? b.tee_time} · ${b.seats} seat${b.seats === 1 ? '' : 's'}${b.booked_by ? ` · ${b.booked_by}` : ''}`,
       })),
     [bookings, bookingId]
-  )
-
-  const currentTee = watch('tee_time')
-  const teeOptions: SelectOption[] = useMemo(
-    () => [
-      { value: NO_TEE_TIME, label: 'No specific tee time' },
-      ...slots.map(s => ({
-        value: s.value,
-        label: s.spotsOpen !== null ? `${s.label} · ${s.spotsOpen} open` : s.label,
-      })),
-      // An already-saved tee time may no longer be in the course's published
-      // availability — keep it selectable so editing doesn't silently drop it.
-      ...(currentTee && !slots.some(s => s.value === currentTee)
-        ? [{ value: currentTee, label: `${fmtTime(currentTee) ?? currentTee} (currently set)` }]
-        : []),
-    ],
-    [slots, currentTee]
   )
 
   const field = 'input text-sm'
@@ -590,12 +525,7 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
                   id="ev-course"
                   options={courseOptions}
                   value={f.value}
-                  onChange={v => {
-                    f.onChange(v)
-                    // Tee times belong to a course+date pair; a new course
-                    // invalidates the current pick.
-                    setValue('tee_time', NO_TEE_TIME)
-                  }}
+                  onChange={f.onChange}
                   placeholder="Select a course…"
                   searchPlaceholder="Search courses…"
                 />
@@ -614,7 +544,6 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
               {...register('event_date', {
                 required: fromBooking ? false : 'Choose a date',
                 validate: v => fromBooking || !v || v >= new Date().toISOString().slice(0, 10) || 'Date cannot be in the past',
-                onChange: () => setValue('tee_time', NO_TEE_TIME),
               })}
             />
             {errors.event_date && <p className={errCls}>{errors.event_date.message}</p>}
@@ -622,35 +551,17 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
 
           <div>
             <label htmlFor="ev-time" className={labelCls}>Tee time</label>
-            <Controller
-              name="tee_time"
-              control={control}
-              render={({ field: f }) => (
-                <Select
-                  id="ev-time"
-                  options={teeOptions}
-                  value={f.value}
-                  onChange={f.onChange}
-                  disabled={!courseId || !eventDate || slotsState === 'loading'}
-                  placeholder={
-                    !courseId || !eventDate ? 'Pick a course and date first'
-                      : slotsState === 'loading' ? 'Loading tee times…'
-                      : 'No specific tee time'
-                  }
-                  searchPlaceholder="Search times…"
-                />
-              )}
+            <input
+              id="ev-time"
+              type="text"
+              className={field}
+              placeholder="e.g. 8:30 AM (optional)"
+              maxLength={50}
+              {...register('tee_time')}
             />
-            {slotsState === 'loaded' && slots.length === 0 && (
-              <p className="text-[11px] text-amber-600 mt-1">
-                No tee times published for this date — you can still run the event without a fixed time.
-              </p>
-            )}
-            {slotsState === 'error' && (
-              <p className="text-[11px] text-amber-600 mt-1">
-                Couldn&apos;t load tee times. You can still save without a fixed time.
-              </p>
-            )}
+            <p className="text-[11px] text-gray-400 mt-1">
+              Type the tee time however you like, or leave it blank if there&apos;s no fixed time.
+            </p>
           </div>
             </>
           )}
