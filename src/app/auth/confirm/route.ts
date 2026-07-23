@@ -23,7 +23,8 @@ import type { EmailOtpType } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { getContactByEmail } from '@/lib/ghl/client'
-import { hasAnyAccessTag } from '@/lib/ghl/tags'
+import { hasAnyAccessTag, hasPartnerTag, hasHostTag } from '@/lib/ghl/tags'
+import { workspaceLandingPath } from '@/lib/auth/landing'
 import { syncMember } from '@/lib/sync'
 import { safeRedirectPath } from '@/lib/utils'
 import { logger, auditLog } from '@/lib/logger'
@@ -90,11 +91,16 @@ export async function GET(request: NextRequest) {
   // ---- Suspension check --------------------------------------
   const { data: memberRecord } = await adminClient
     .from('members')
-    .select('membership_status')
+    .select('membership_status, home_course_id')
     .eq('id', user.id)
     .maybeSingle()
 
-  if (memberRecord?.membership_status === 'suspended') {
+  // A role tag (referral-partner / host) grants access independent of golf
+  // membership status, so it overrides a 'suspended' membership at login too.
+  const tags = contact?.tags ?? []
+  const hasRole = hasPartnerTag(tags) || hasHostTag(tags)
+
+  if (memberRecord?.membership_status === 'suspended' && !hasRole) {
     reqLog.warn('Suspended member attempted login — destroying session', { userId: user.id })
     auditLog('LOGIN_DENIED', { requestId, userId: user.id, metadata: { reason: 'account_suspended' } })
     await supabase.auth.signOut()
@@ -112,6 +118,12 @@ export async function GET(request: NextRequest) {
     ghlContactId: contact?.id,
     metadata: { method: 'magic_link_confirm' },
   })
+
+  // A non-member (no home course) lands in their workspace, not the member app.
+  if (!memberRecord?.home_course_id && !next.startsWith('/partner') && !next.startsWith('/host')) {
+    const dest = await workspaceLandingPath(adminClient, user.id)
+    if (dest) return NextResponse.redirect(new URL(dest, request.url))
+  }
 
   return NextResponse.redirect(new URL(next, request.url))
 }

@@ -15,7 +15,7 @@ import { getContactByEmail } from '@/lib/ghl/client'
 import { authRateLimit } from '@/lib/rateLimit'
 import { validateEmail } from '@/lib/validation'
 import { logger, auditLog } from '@/lib/logger'
-import { hasAnyAccessTag } from '@/lib/ghl/tags'
+import { hasAnyAccessTag, hasPartnerTag, hasHostTag } from '@/lib/ghl/tags'
 import { createAdminClient } from '@/lib/supabase-server'
 
 // Intentionally vague — prevents email enumeration
@@ -68,19 +68,23 @@ export async function POST(request: NextRequest) {
       .maybeSingle()
 
     if (existingMember) {
-      // Block suspended accounts immediately — no GHL check needed.
-      if (existingMember.membership_status === 'suspended') {
+      // Re-validate GHL tags even for returning members — their membership
+      // may have been revoked since their last login.
+      const contact = await getContactByEmail(normalizedEmail)
+      const tags = contact?.tags ?? []
+      const hasAccess = hasAnyAccessTag(tags)
+      // A referral-partner / host role tag grants login independent of golf
+      // membership status — so it overrides a 'suspended' membership too.
+      const hasRole = hasPartnerTag(tags) || hasHostTag(tags)
+
+      // Block suspended accounts — unless they hold a role tag.
+      if (existingMember.membership_status === 'suspended' && !hasRole) {
         auditLog('LOGIN_DENIED', { requestId, metadata: { reason: 'account_suspended', memberId: existingMember.id } })
         return NextResponse.json(
           { allowed: false, suspended: true },
           { headers: { 'X-Request-Id': requestId } }
         )
       }
-
-      // Re-validate GHL tags even for returning members — their membership
-      // may have been revoked since their last login.
-      const contact = await getContactByEmail(normalizedEmail)
-      const hasAccess = contact ? hasAnyAccessTag(contact.tags ?? []) : false
 
       if (!hasAccess) {
         auditLog('LOGIN_DENIED', { requestId, metadata: { reason: 'ghl_tag_missing_returning_member' } })
