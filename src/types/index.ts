@@ -399,6 +399,8 @@ export interface HostApplication {
   name: string | null
   /** The applicant's pitch — the kind of events they'd run. */
   description: string
+  /** The course ids the applicant wants to host at. */
+  requested_course_ids: string[]
   status: HostApplicationStatus
   host_id: string | null
   rejection_reason: string | null

@@ -17,6 +17,8 @@ interface PatchBody {
   action?: 'approve' | 'reject'
   // Approval terms — the admin can override the host's display name.
   name?: string
+  // Venues to grant the host. Defaults to what the applicant requested.
+  course_ids?: string[]
   rejection_reason?: string
 }
 
@@ -34,7 +36,7 @@ export const PATCH = withAuth(
 
     const { data: application, error: fetchError } = await admin
       .from('host_applications')
-      .select('id, member_id, status, name, member:members!host_applications_member_id_fkey(first_name, last_name)')
+      .select('id, member_id, status, name, requested_course_ids, member:members!host_applications_member_id_fkey(first_name, last_name)')
       .eq('id', id)
       .single()
 
@@ -121,6 +123,33 @@ export const PATCH = withAuth(
       return NextResponse.json({ error: hostError.message }, { status: 500 })
     }
 
+    // Grant the host their venues: the admin's override if given, otherwise the
+    // courses the applicant requested. Filter to real, active courses so a stale
+    // id can't produce a dangling host_venues row.
+    const requestedVenueIds = Array.from(new Set(
+      Array.isArray(body.course_ids) && body.course_ids.length
+        ? body.course_ids
+        : (application.requested_course_ids ?? [])
+    ))
+    if (requestedVenueIds.length) {
+      const { data: activeCourses } = await admin
+        .from('courses')
+        .select('id')
+        .in('id', requestedVenueIds)
+        .eq('active', true)
+        .eq('approval_status', 'active')
+      const venueRows = (activeCourses ?? []).map(c => ({ host_id: host.id, course_id: c.id }))
+      if (venueRows.length) {
+        const { error: venuesError } = await admin.from('host_venues').insert(venueRows)
+        if (venuesError) {
+          // Don't leave a host with no venues when the applicant asked for some —
+          // roll the host back and let the admin retry.
+          await admin.from('hosts').delete().eq('id', host.id)
+          return NextResponse.json({ error: venuesError.message }, { status: 500 })
+        }
+      }
+    }
+
     const { data: approved, error: statusError } = await admin
       .from('host_applications')
       .update({
@@ -136,7 +165,8 @@ export const PATCH = withAuth(
 
     // Either a DB error, or another admin already moved it out of pending
     // (0 rows). In both cases the just-created host row would be orphaned, so
-    // roll it back — the queue and the role must not disagree.
+    // roll it back — the queue and the role must not disagree. host_venues rows
+    // cascade-delete with the host.
     if (statusError || !approved || approved.length === 0) {
       await admin.from('hosts').delete().eq('id', host.id)
       if (statusError) return NextResponse.json({ error: statusError.message }, { status: 500 })

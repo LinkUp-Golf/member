@@ -36,7 +36,7 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
 })
 
 export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
-  const body = await req.json().catch(() => ({})) as { name?: string; description?: string }
+  const body = await req.json().catch(() => ({})) as { name?: string; description?: string; course_ids?: string[] }
 
   const { valid, errors } = validateHostApplicationPayload(body)
   if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })
@@ -45,6 +45,20 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   const description = body.description?.trim() ?? ''
 
   const admin = createAdminClient()
+
+  // The requested venues must be real, bookable courses. De-dupe so a repeated
+  // selection can't inflate the list.
+  const requestedIds = Array.from(new Set(body.course_ids ?? []))
+  const { data: validCourses } = await admin
+    .from('courses')
+    .select('id')
+    .in('id', requestedIds)
+    .eq('active', true)
+    .eq('approval_status', 'active')
+  const requestedCourseIds = (validCourses ?? []).map(c => c.id)
+  if (requestedCourseIds.length === 0) {
+    return NextResponse.json({ error: 'Choose at least one valid venue.' }, { status: 400 })
+  }
 
   // Already a host — nothing to apply for.
   const { data: existingHost } = await admin
@@ -74,6 +88,7 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
       member_id: ctx.memberId,
       name: sanitiseText(name),
       description: sanitiseText(description),
+      requested_course_ids: requestedCourseIds,
     })
     .select()
     .single()

@@ -8,7 +8,7 @@ import { NextResponse } from 'next/server'
 import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateHostedEventPayload, sanitiseText } from '@/lib/validation'
-import { enrichHostedEvents } from '@/lib/hosts/events'
+import { enrichHostedEvents, hostCanUseCourse } from '@/lib/hosts/events'
 import { logger } from '@/lib/logger'
 import type { HostedEvent } from '@/types'
 
@@ -106,6 +106,12 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     teeTime = typeof body.tee_time === 'string' && body.tee_time.trim()
       ? sanitiseText(body.tee_time.trim())
       : null
+
+    // A host scoped to specific venues can only propose events there. An empty
+    // set means unrestricted (legacy hosts), matching the event form's fallback.
+    if (!(await hostCanUseCourse(admin, ctx.host.id, courseId))) {
+      return NextResponse.json({ error: 'You can only host events at your approved venues.' }, { status: 400 })
+    }
   }
 
   // Spots/rate are validated in both paths.

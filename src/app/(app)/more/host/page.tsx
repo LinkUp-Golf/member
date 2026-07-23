@@ -9,7 +9,9 @@ import { apiClient } from '@/lib/api-client'
 import { Spinner } from '@/components/ui/Loading'
 import AppShell from '@/components/layout/AppShell'
 import { formatRelativeTime } from '@/lib/utils'
-import type { Host, HostApplication } from '@/types'
+import type { Host, HostApplication, Course } from '@/types'
+
+type VenueOption = Pick<Course, 'id' | 'name' | 'city'>
 
 interface ApplicationState {
   application: HostApplication | null
@@ -109,9 +111,9 @@ export default function HostApplicationPage() {
               <ApplicationForm
                 heading={wasRejected ? 'Apply again' : 'Apply to become a host'}
                 error={error}
-                onSubmit={async ({ name, description }) => {
+                onSubmit={async ({ name, description, course_ids }) => {
                   setError(null)
-                  const res = await apiClient.post('/api/host/application', { name, description })
+                  const res = await apiClient.post('/api/host/application', { name, description, course_ids })
                   if (res.error) { setError(res.error.message); return false }
                   await load()
                   return true
@@ -140,6 +142,7 @@ const DESC_MIN = 20
 const DESC_MAX = 1000
 
 type ApplicationValues = { name: string; description: string }
+type SubmitValues = ApplicationValues & { course_ids: string[] }
 
 function ApplicationForm({
   heading,
@@ -149,7 +152,7 @@ function ApplicationForm({
   heading: string
   /** Server-side error (e.g. "you already have an application under review"). */
   error: string | null
-  onSubmit: (values: ApplicationValues) => Promise<boolean>
+  onSubmit: (values: SubmitValues) => Promise<boolean>
 }) {
   const {
     register,
@@ -158,9 +161,24 @@ function ApplicationForm({
     formState: { errors, isSubmitting },
   } = useForm<ApplicationValues>({ defaultValues: { name: '', description: '' } })
 
+  const [venues, setVenues] = useState<VenueOption[]>([])
+  const [venueIds, setVenueIds] = useState<string[]>([])
+  const [venueError, setVenueError] = useState<string | null>(null)
+
+  useEffect(() => {
+    apiClient.get<{ courses: VenueOption[] }>('/api/courses').then(res => {
+      if (res.data?.courses) setVenues(res.data.courses)
+    })
+  }, [])
+
+  const toggleVenue = (id: string) =>
+    setVenueIds(prev => (prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]))
+
   const submit = handleSubmit(async (data) => {
-    const ok = await onSubmit({ name: data.name.trim(), description: data.description.trim() })
-    if (ok) reset()
+    if (venueIds.length === 0) { setVenueError('Choose at least one venue you want to host at.'); return }
+    setVenueError(null)
+    const ok = await onSubmit({ name: data.name.trim(), description: data.description.trim(), course_ids: venueIds })
+    if (ok) { reset(); setVenueIds([]) }
   })
 
   return (
@@ -201,6 +219,28 @@ function ApplicationForm({
           })}
         />
         {errors.description && <p className="text-xs text-red-500 mt-1.5">{errors.description.message}</p>}
+      </div>
+
+      <div>
+        <span className="text-xs text-green-900/50 mb-1.5 block">Which venues do you want to host at?</span>
+        {venues.length === 0 ? (
+          <p className="text-xs text-green-900/35">Loading venues…</p>
+        ) : (
+          <div className="space-y-1.5">
+            {venues.map(v => (
+              <label key={v.id} className="flex items-center gap-3 rounded-xl border border-green-900/10 px-3 py-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-green-900/30 text-green-900 focus:ring-green-800"
+                  checked={venueIds.includes(v.id)}
+                  onChange={() => toggleVenue(v.id)}
+                />
+                <span className="text-sm text-green-900/80">{v.city ? `${v.name} — ${v.city}` : v.name}</span>
+              </label>
+            ))}
+          </div>
+        )}
+        {venueError && <p className="text-xs text-red-500 mt-1.5">{venueError}</p>}
       </div>
 
       {error && <p className="text-xs text-red-500">{error}</p>}

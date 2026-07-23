@@ -198,6 +198,15 @@ export function validateHostApplicationPayload(body: unknown): ValidationResult 
   const descResult = validateString(b.description, 'Description', { min: 20, max: 1000 })
   if (!descResult.valid) errors.push(...descResult.errors)
 
+  // Venues the applicant wants to host at — at least one, each a UUID.
+  if (!Array.isArray(b.course_ids) || b.course_ids.length === 0) {
+    errors.push('Choose at least one venue')
+  } else if (b.course_ids.length > 50) {
+    errors.push('Too many venues selected')
+  } else if (b.course_ids.some(id => !validateUUID(id, 'Venue').valid)) {
+    errors.push('One of the selected venues is invalid')
+  }
+
   return { valid: errors.length === 0, errors }
 }
 

@@ -9,7 +9,7 @@ import { NextResponse } from 'next/server'
 import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateHostedEventPayload, sanitiseText } from '@/lib/validation'
-import { enrichHostedEvents } from '@/lib/hosts/events'
+import { enrichHostedEvents, hostCanUseCourse } from '@/lib/hosts/events'
 import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
 import type { HostedEvent } from '@/types'
@@ -257,12 +257,19 @@ export const PATCH = withHostAuth(
       patch.total_spots = nextSpots
     }
 
-    // Changing the course is allowed while editable, but must stay a bookable course.
-    if ('course_id' in body) {
+    // Changing the course is allowed while editable, but must stay a bookable
+    // course the host is approved to use. Only enforce the venue rule when the
+    // course actually changes, so editing other fields on an event whose course
+    // predates the host's venue list isn't blocked. (Booking-linked events can't
+    // reach here — course_id is a locked field, rejected above.)
+    if ('course_id' in body && body.course_id !== event.course_id) {
       const { data: course } = await admin
         .from('courses').select('id, approval_status').eq('id', body.course_id as string).maybeSingle()
       if (!course || course.approval_status !== 'active') {
         return NextResponse.json({ error: 'That course is not available for events.' }, { status: 400 })
+      }
+      if (!(await hostCanUseCourse(admin, ctx.host.id, course.id))) {
+        return NextResponse.json({ error: 'You can only host events at your approved venues.' }, { status: 400 })
       }
       patch.course_id = course.id
     }

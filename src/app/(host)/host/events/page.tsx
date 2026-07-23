@@ -301,6 +301,9 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
 }) {
   const isEdit = !!event
   const [courses, setCourses] = useState<Pick<Course, 'id' | 'name' | 'city'>[]>([])
+  // The host's approved venues. Empty means unrestricted (legacy hosts) — the
+  // course dropdown then falls back to every bookable course.
+  const [venues, setVenues] = useState<Pick<Course, 'id' | 'name' | 'city'>[]>([])
   const [bookings, setBookings] = useState<HostBookingOption[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -344,15 +347,23 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
     Promise.all([
       fetch('/api/courses').then(r => r.ok ? r.json() : Promise.reject(new Error('courses'))),
       fetch('/api/host/bookings').then(r => r.ok ? r.json() : Promise.reject(new Error('bookings'))),
+      fetch('/api/host/venues').then(r => r.ok ? r.json() : Promise.reject(new Error('venues'))),
     ])
-      .then(([coursesJson, bookingsJson]) => {
+      .then(([coursesJson, bookingsJson, venuesJson]) => {
         if (cancelled) return
         setCourses(coursesJson.courses ?? [])
         setBookings(bookingsJson.bookings ?? [])
+        const vs = venuesJson.venues ?? []
+        setVenues(vs)
+        // Pre-populate the course for a brand-new event when the host has a
+        // single venue — nothing to choose.
+        if (!isEdit && vs.length === 1) setValue('course_id', vs[0].id)
       })
       .catch(() => { if (!cancelled) setLoadError('Could not load courses and bookings. Close and reopen to retry.') })
 
     return () => { cancelled = true }
+    // isEdit/setValue are stable for the drawer's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Same helper the server uses, so the preview can't drift from the real price.
@@ -360,12 +371,23 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
 
   // Select is memoized on its props, so these must be stable across renders —
   // rebuilding the arrays every keystroke would re-render the whole dropdown.
+  // Scope the course list to the host's venues when they have any; otherwise
+  // (legacy hosts with no venue rows) offer every bookable course.
+  const courseChoices = venues.length ? venues : courses
   const courseOptions: SelectOption[] = useMemo(
-    () => courses.map(c => ({
-      value: c.id,
-      label: c.city ? `${c.name} — ${c.city}` : c.name,
-    })),
-    [courses]
+    () => {
+      const opts = courseChoices.map(c => ({
+        value: c.id,
+        label: c.city ? `${c.name} — ${c.city}` : c.name,
+      }))
+      // When editing an event whose course predates the host's venue list, keep
+      // it selectable so the dropdown doesn't render blank.
+      if (event?.course_id && !opts.some(o => o.value === event.course_id)) {
+        opts.unshift({ value: event.course_id, label: event.course?.name ?? 'Current course' })
+      }
+      return opts
+    },
+    [courseChoices, event?.course_id, event?.course?.name]
   )
 
   const bookingOptions: SelectOption[] = useMemo(

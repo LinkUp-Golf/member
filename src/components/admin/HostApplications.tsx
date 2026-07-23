@@ -129,6 +129,23 @@ function ReviewDrawer({ application, memberName, onClose, onReviewed, onError }:
   const [mode, setMode] = useState<'approve' | 'reject'>('approve')
   const [submitting, setSubmitting] = useState(false)
 
+  // Resolve the requested venue ids to names for display. Approval grants
+  // exactly these venues (the server reads requested_course_ids).
+  const [venueNames, setVenueNames] = useState<string[]>([])
+  const requestedIds = application.requested_course_ids ?? []
+  useEffect(() => {
+    if (requestedIds.length === 0) { setVenueNames([]); return }
+    fetch('/api/courses')
+      .then(r => r.json())
+      .then((j: { courses?: { id: string; name: string; city: string | null }[] }) => {
+        const byId = new Map((j.courses ?? []).map(c => [c.id, c.city ? `${c.name} — ${c.city}` : c.name]))
+        setVenueNames(requestedIds.map(id => byId.get(id) ?? 'Unknown venue'))
+      })
+      .catch(() => setVenueNames(requestedIds.map(() => 'Unknown venue')))
+    // requestedIds is derived from the immutable application prop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const field = 'w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:border-green-700 outline-none transition-colors bg-white'
   const labelCls = 'block text-xs font-medium text-gray-600 mb-1'
 
@@ -179,6 +196,22 @@ function ReviewDrawer({ application, memberName, onClose, onReviewed, onError }:
             <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap bg-gray-50 rounded-xl px-4 py-3">
               {application.description}
             </p>
+          </div>
+
+          <div>
+            <p className={labelCls}>Requested venues</p>
+            {venueNames.length === 0 ? (
+              <p className="text-sm text-gray-400">None specified</p>
+            ) : (
+              <ul className="text-sm text-gray-700 space-y-1">
+                {venueNames.map((n, i) => (
+                  <li key={i} className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-700 flex-shrink-0" />{n}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {!readOnly && <p className="mt-1 text-[11px] text-gray-400">Approving grants the host these venues.</p>}
           </div>
 
           {readOnly ? (

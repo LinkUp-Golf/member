@@ -16,6 +16,22 @@ export function memberPrice(memberGuestRate: number): number {
   return Math.round((memberGuestRate + HOST_MEMBER_PRICE_MARKUP_USD) * 100) / 100
 }
 
+/**
+ * Whether a host may propose an event at the given course. A host with venue
+ * rows is scoped to those; a host with none is unrestricted (legacy hosts
+ * granted before venues existed), which mirrors the event form falling back to
+ * every bookable course. Booking-sourced events skip this — their course comes
+ * from a real tee time the host already holds.
+ */
+export async function hostCanUseCourse(admin: AdminClient, hostId: string, courseId: string): Promise<boolean> {
+  const { data } = await admin
+    .from('host_venues')
+    .select('course_id')
+    .eq('host_id', hostId)
+  const venueIds = (data ?? []).map(v => v.course_id)
+  return venueIds.length === 0 || venueIds.includes(courseId)
+}
+
 /** Statuses in which a member can still reserve a spot. */
 export const JOINABLE_STATUSES = ['upcoming'] as const
 
