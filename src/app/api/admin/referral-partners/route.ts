@@ -10,6 +10,7 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { validateReferralPartnerPayload } from '@/lib/validation'
 import { DEFAULT_REFERRAL_PERCENTAGE } from '@/lib/constants'
 import { computeStatsForPartners, emptyStats } from '@/lib/referral-partners'
+import { loadPartnerCommission } from '@/lib/referral-commission'
 import type { AuthContext } from '@/lib/auth/types'
 import type { ReferralPartner } from '@/types'
 
@@ -29,7 +30,14 @@ export const GET = withAuth(
 
     const partners = (data ?? []) as ReferralPartner[]
     const stats = await computeStatsForPartners(admin, partners)
-    const withStats = partners.map(p => ({ ...p, ...(stats.get(p.id) ?? emptyStats()) }))
+    // commissionOwed is the recurring balance (accrued to date), not the old
+    // one-time figure — computed per partner from live membership dates.
+    const balances = await Promise.all(partners.map(p => loadPartnerCommission(admin, p)))
+    const withStats = partners.map((p, i) => ({
+      ...p,
+      ...(stats.get(p.id) ?? emptyStats()),
+      commissionOwed: balances[i]?.balance.totalAccrued ?? 0,
+    }))
 
     return NextResponse.json({ partners: withStats })
   },
@@ -45,6 +53,7 @@ export const POST = withAuth(
     const percentage = body.percentage ?? DEFAULT_REFERRAL_PERCENTAGE
     // Empty string from the date input means "no expiry", same as omitting it.
     const endsAt = body.ends_at?.trim() || null
+    const payoutMethod = body.payout_method === 'coupon' ? 'coupon' : 'cash'
 
     const { valid, errors } = validateReferralPartnerPayload({ name, code, percentage, ends_at: endsAt })
     if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })
@@ -65,6 +74,7 @@ export const POST = withAuth(
         code,
         percentage,
         ends_at: endsAt,
+        payout_method: payoutMethod,
         created_by: ctx.userId,
       })
       .select()

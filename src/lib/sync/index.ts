@@ -11,7 +11,7 @@
 import { logger } from '@/lib/logger'
 import { COURSE_TAG_MAP, hasAnyAccessTag, hasCourseAccessTag, hasHostTag, hasPartnerTag } from '@/lib/ghl/tags'
 import { getContactByIdStrict } from '@/lib/ghl/client'
-import { upsertMember, deactivateMember } from './member.sync'
+import { upsertMember, deactivateMember, stampMembershipLifecycle } from './member.sync'
 import { syncCourseMemberships } from './membership.sync'
 import { ensureHostRow, ensurePartnerRow } from './roles.sync'
 import type { GHLContact } from '@/types'
@@ -128,6 +128,8 @@ export async function refreshMembersFromGhl(
       .from('members')
       .update({ ghl_tags: tags, updated_at: new Date().toISOString() })
       .eq('id', memberId)
+    // Lost their membership tag — stamp the cancellation so commission accrual stops.
+    await stampMembershipLifecycle(ctx.supabase, memberId, tags)
   }
 
   for (const m of members) {

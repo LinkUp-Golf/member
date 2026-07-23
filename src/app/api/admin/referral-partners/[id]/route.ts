@@ -22,9 +22,13 @@ export const PATCH = withAuth(
     const { valid, errors } = validateReferralPartnerPayload(body, { partial: true })
     if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })
 
+    if (body.payout_method != null && body.payout_method !== 'cash' && body.payout_method !== 'coupon') {
+      return NextResponse.json({ error: 'payout_method must be cash or coupon' }, { status: 400 })
+    }
+
     const admin = createAdminClient()
 
-    const allowed: Array<keyof ReferralPartner> = ['name', 'code', 'percentage', 'ends_at']
+    const allowed: Array<keyof ReferralPartner> = ['name', 'code', 'percentage', 'ends_at', 'payout_method']
     const updates: Record<string, unknown> = {}
     for (const key of allowed) {
       if (key in body) updates[key] = body[key]

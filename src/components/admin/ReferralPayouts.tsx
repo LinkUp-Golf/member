@@ -1,13 +1,12 @@
 'use client'
 
-// Monthly commission payouts for one referral partner, rendered on the admin
-// partner detail page. Commission is settled manually outside the app, so this
-// is a ledger: it shows what each month earned and lets an admin record that a
-// month has been paid.
+// Recurring commission for one referral partner, on the admin partner detail
+// page. Commission accrues monthly per referred member; a payout settles the
+// outstanding balance once it clears the threshold. Payouts happen outside the
+// app (cash or coupon) — this records them and shows the running balance.
 
 import { useState, useEffect, useCallback } from 'react'
 import { AdminCard, StatCard, Badge } from '@/components/admin/AdminUI'
-import { formatPeriod } from '@/lib/referral-rate'
 
 const fmtMoney = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -15,27 +14,39 @@ const fmtMoney = (n: number) =>
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
-interface Conversion {
+interface MemberAccrual {
   linkId: string
   email: string
   name: string | null
-  convertedAt: string
-  commission: number
+  startDate: string
+  endDate: string | null
+  months: number
+  accrued: number
 }
 
-interface PayoutPeriod {
-  periodMonth: string
-  conversions: Conversion[]
-  total: number
-  paid: boolean
-  paidAmount: number | null
-  paidAt: string | null
+interface Payout {
+  id: string
+  amount: number
+  method: string
+  reference: string | null
+  note: string | null
+  paid_at: string
+}
+
+interface Balance {
+  totalAccrued: number
+  totalPaid: number
+  outstanding: number
+  payable: boolean
+  threshold: number
 }
 
 interface PayoutsResponse {
-  periods: PayoutPeriod[]
-  totalPaid: number
-  totalOutstanding: number
+  partner: { payout_method: 'cash' | 'coupon' }
+  accruals: MemberAccrual[]
+  payouts: Payout[]
+  balance: Balance
+  monthlyRate: number
 }
 
 export default function ReferralPayouts({
@@ -48,8 +59,7 @@ export default function ReferralPayouts({
   const [data, setData] = useState<PayoutsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
-  const [paying, setPaying] = useState<PayoutPeriod | null>(null)
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const [paying, setPaying] = useState(false)
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/admin/referral-partners/${partnerId}/payments`)
@@ -60,8 +70,8 @@ export default function ReferralPayouts({
 
   useEffect(() => { load() }, [load])
 
-  // Refresh membership from GHL, then reload the figures. Recording a payment
-  // does this automatically; this lets the admin see current numbers first.
+  // Refresh membership from GHL, then reload. Recording a payout does this
+  // automatically; this lets the admin see current numbers first.
   const syncFromGhl = useCallback(async () => {
     setSyncing(true)
     const res = await fetch(`/api/admin/referral-partners/${partnerId}/sync`, { method: 'POST' })
@@ -75,20 +85,17 @@ export default function ReferralPayouts({
     setSyncing(false)
   }, [partnerId, load, onToast])
 
-  if (loading) return <AdminCard title="Commission & Payments"><p className="text-sm text-gray-400 py-4 text-center">Loading…</p></AdminCard>
-  if (!data) return <AdminCard title="Commission & Payments"><p className="text-sm text-red-500 py-4 text-center">Could not load payouts.</p></AdminCard>
+  if (loading) return <AdminCard title="Commission & Payouts"><p className="text-sm text-gray-400 py-4 text-center">Loading…</p></AdminCard>
+  if (!data) return <AdminCard title="Commission & Payouts"><p className="text-sm text-red-500 py-4 text-center">Could not load payouts.</p></AdminCard>
 
-  const { periods, totalPaid, totalOutstanding } = data
-
-  // A month is only payable once it has ended (mirrors the server guard), so a
-  // still-running month shows a hint rather than a payable action.
-  const currentMonth = `${new Date().toISOString().slice(0, 7)}-01`
+  const { balance, accruals, payouts, monthlyRate, partner } = data
+  const toThreshold = Math.max(0, balance.threshold - balance.outstanding)
 
   return (
     <>
       <div className="flex items-center justify-between gap-3 mb-3">
         <p className="text-xs text-gray-400">
-          Membership is verified from GHL. Recording a payment re-syncs automatically.
+          {fmtMoney(monthlyRate)}/month per active member. Membership is verified from GHL on payout.
         </p>
         <button
           type="button"
@@ -100,81 +107,82 @@ export default function ReferralPayouts({
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        <StatCard label="Paid to date" value={fmtMoney(totalPaid)}        sub="Across all months" colour="green" />
-        <StatCard label="Outstanding"  value={fmtMoney(totalOutstanding)} sub="Awaiting payout"   colour="gold" />
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <StatCard label="Outstanding"  value={fmtMoney(Math.max(0, balance.outstanding))} sub="Unpaid balance"     colour="gold" />
+        <StatCard label="Paid to date" value={fmtMoney(balance.totalPaid)}                sub="Across all payouts" colour="green" />
+        <StatCard label="Earned"       value={fmtMoney(balance.totalAccrued)}             sub="All time"           colour="blue" />
       </div>
 
-      <AdminCard title="Commission & Payments">
-        {periods.length === 0 ? (
+      <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+        <p className="text-xs text-gray-600">
+          {balance.payable
+            ? `Ready to pay out ${fmtMoney(balance.outstanding)}.`
+            : `${fmtMoney(toThreshold)} below the ${fmtMoney(balance.threshold)} threshold — rolls over.`}
+        </p>
+        <button
+          type="button"
+          onClick={() => setPaying(true)}
+          disabled={!balance.payable}
+          className="flex-shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg bg-green-900 text-white hover:bg-green-800 disabled:opacity-40 transition-colors"
+        >
+          Record payout
+        </button>
+      </div>
+
+      <AdminCard title="Accrual by member">
+        {accruals.length === 0 ? (
           <p className="text-sm text-gray-400 italic py-4 text-center">
-            No commission earned yet — a month appears here once a referral becomes a paying member.
+            No commission yet — accrual starts the month a referral becomes a paying member.
           </p>
         ) : (
           <div className="divide-y divide-gray-50">
-            {periods.map(p => {
-              const isOpen = expanded === p.periodMonth
-              return (
-                <div key={p.periodMonth} className="py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setExpanded(isOpen ? null : p.periodMonth)}
-                      className="min-w-0 text-left flex-1"
-                    >
-                      <p className="text-sm font-medium text-gray-800">{formatPeriod(p.periodMonth)}</p>
-                      <p className="text-xs text-gray-400">
-                        {p.conversions.length} conversion{p.conversions.length !== 1 ? 's' : ''}
-                        {p.paid && p.paidAt ? ` · paid ${fmtDate(p.paidAt)}` : ''}
-                      </p>
-                    </button>
-
-                    <div className="flex items-center gap-3 flex-shrink-0">
-                      <span className="text-sm font-medium text-gray-900">
-                        {fmtMoney(p.paid && p.paidAmount !== null ? p.paidAmount : p.total)}
-                      </span>
-                      {p.paid ? (
-                        <Badge label="Paid" colour="green" />
-                      ) : p.periodMonth >= currentMonth ? (
-                        <span className="text-[11px] text-gray-400 whitespace-nowrap">Payable after month ends</span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setPaying(p)}
-                          className="text-xs font-medium px-2.5 py-1 rounded-lg bg-green-900 text-white hover:bg-green-800 transition-colors"
-                        >
-                          Record payment
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {isOpen && p.conversions.length > 0 && (
-                    <div className="mt-3 ml-1 pl-3 border-l border-gray-100 space-y-2">
-                      {p.conversions.map(c => (
-                        <div key={c.linkId} className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-xs text-gray-600 truncate">{c.name ?? c.email}</p>
-                            <p className="text-[11px] text-gray-400">Joined {fmtDate(c.convertedAt)}</p>
-                          </div>
-                          <span className="text-xs text-gray-500 flex-shrink-0">{fmtMoney(c.commission)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+            {accruals.map(a => (
+              <div key={a.linkId} className="flex items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm text-gray-700 truncate">{a.name ?? a.email}</p>
+                  <p className="text-[11px] text-gray-400">
+                    {a.months} month{a.months !== 1 ? 's' : ''} · since {fmtDate(a.startDate)}
+                  </p>
                 </div>
-              )
-            })}
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  <span className="text-sm font-medium text-gray-900">{fmtMoney(a.accrued)}</span>
+                  <Badge label={a.endDate ? 'Ended' : 'Active'} colour={a.endDate ? 'gray' : 'green'} />
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </AdminCard>
 
+      <div className="mt-4">
+        <AdminCard title="Payout history">
+          {payouts.length === 0 ? (
+            <p className="text-sm text-gray-400 italic py-4 text-center">No payouts recorded yet.</p>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {payouts.map(p => (
+                <div key={p.id} className="flex items-center justify-between gap-3 py-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-800">{fmtDate(p.paid_at)}</p>
+                    <p className="text-[11px] text-gray-400">
+                      {p.method === 'coupon' ? 'Coupon' : 'Cash'}{p.reference ? ` · ${p.reference}` : ''}{p.note ? ` · ${p.note}` : ''}
+                    </p>
+                  </div>
+                  <span className="text-sm font-medium text-gray-900 flex-shrink-0">{fmtMoney(p.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </AdminCard>
+      </div>
+
       {paying && (
-        <RecordPaymentModal
+        <RecordPayoutModal
           partnerId={partnerId}
-          period={paying}
-          onClose={() => setPaying(null)}
-          onPaid={(msg) => { setPaying(null); onToast(msg); load() }}
+          outstanding={balance.outstanding}
+          defaultMethod={partner.payout_method}
+          onClose={() => setPaying(false)}
+          onPaid={(msg) => { setPaying(false); onToast(msg); load() }}
           onError={(msg) => onToast(msg, false)}
         />
       )}
@@ -182,20 +190,21 @@ export default function ReferralPayouts({
   )
 }
 
-// ---- Record payment modal -----------------------------------
+// ---- Record payout modal ------------------------------------
 
-function RecordPaymentModal({ partnerId, period, onClose, onPaid, onError }: {
+function RecordPayoutModal({ partnerId, outstanding, defaultMethod, onClose, onPaid, onError }: {
   partnerId: string
-  period: PayoutPeriod
+  outstanding: number
+  defaultMethod: 'cash' | 'coupon'
   onClose: () => void
   onPaid: (msg: string) => void
   onError: (msg: string) => void
 }) {
-  const [amount, setAmount] = useState(period.total.toFixed(2))
+  const [amount, setAmount] = useState(outstanding.toFixed(2))
+  const [method, setMethod] = useState<'cash' | 'coupon'>(defaultMethod)
+  const [reference, setReference] = useState('')
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
-
-  const adjusted = Number(amount) !== period.total
 
   async function submit() {
     if (submitting) return
@@ -204,15 +213,16 @@ function RecordPaymentModal({ partnerId, period, onClose, onPaid, onError }: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        period_month: period.periodMonth.slice(0, 7),
         amount: Number(amount),
+        method,
+        reference: reference.trim() || undefined,
         note: note.trim() || undefined,
       }),
     })
     const json = await res.json().catch(() => ({}))
     setSubmitting(false)
-    if (!res.ok) { onError(json.error ?? 'Could not record the payment.'); return }
-    onPaid(`${formatPeriod(period.periodMonth)} marked as paid.`)
+    if (!res.ok) { onError(json.error ?? 'Could not record the payout.'); return }
+    onPaid('Payout recorded.')
   }
 
   const field = 'w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:border-green-700 outline-none transition-colors bg-white'
@@ -222,49 +232,72 @@ function RecordPaymentModal({ partnerId, period, onClose, onPaid, onError }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button type="button" aria-label="Close" className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-1">Record Payment</h2>
-        <p className="text-sm text-gray-500 mb-5">
-          {formatPeriod(period.periodMonth)} · {period.conversions.length} conversion
-          {period.conversions.length !== 1 ? 's' : ''} · calculated {fmtMoney(period.total)}
-        </p>
+        <h2 className="text-lg font-bold text-gray-900 mb-1">Record Payout</h2>
+        <p className="text-sm text-gray-500 mb-5">Outstanding balance {fmtMoney(outstanding)}.</p>
 
         <div className="space-y-4">
           <div>
-            <label htmlFor="payment-amount" className={labelCls}>Amount Paid *</label>
+            <label htmlFor="payout-amount" className={labelCls}>Amount *</label>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">$</span>
               <input
-                id="payment-amount"
+                id="payout-amount"
                 type="number"
                 step="0.01"
                 min={0}
+                max={outstanding}
                 className={`${field} pl-7`}
                 value={amount}
                 onChange={e => setAmount(e.target.value)}
               />
             </div>
-            {adjusted && (
-              <p className="mt-1 text-[11px] text-amber-600">
-                Differs from the calculated {fmtMoney(period.total)} — the original figure is kept on the record.
-              </p>
-            )}
           </div>
 
           <div>
-            <label htmlFor="payment-note" className={labelCls}>Note</label>
+            <span className={labelCls}>Method</span>
+            <div className="flex gap-2 p-1 bg-gray-100 rounded-xl">
+              {(['cash', 'coupon'] as const).map(m => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMethod(m)}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium capitalize transition-colors ${
+                    method === m ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="payout-ref" className={labelCls}>
+              {method === 'coupon' ? 'Coupon code' : 'Reference'}
+            </label>
             <input
-              id="payment-note"
+              id="payout-ref"
+              className={field}
+              value={reference}
+              onChange={e => setReference(e.target.value)}
+              placeholder={method === 'coupon' ? 'Coupon code issued' : 'Bank transfer ref'}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="payout-note" className={labelCls}>Note</label>
+            <input
+              id="payout-note"
               className={field}
               value={note}
               onChange={e => setNote(e.target.value)}
-              placeholder="Bank transfer ref, adjustment reason…"
+              placeholder="Optional"
             />
           </div>
 
           <div className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-3">
             <p className="text-[11px] text-gray-500">
-              This records a payment made outside the app and notifies the partner. A month can only be
-              paid once.
+              Records a payout made outside the app and notifies the partner. Settles the balance up to the amount entered.
             </p>
           </div>
         </div>
@@ -280,10 +313,10 @@ function RecordPaymentModal({ partnerId, period, onClose, onPaid, onError }: {
           <button
             type="button"
             onClick={submit}
-            disabled={submitting || !amount}
+            disabled={submitting || !amount || Number(amount) <= 0}
             className="flex-1 py-2.5 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 disabled:opacity-50 transition-colors"
           >
-            {submitting ? 'Saving…' : 'Mark as paid'}
+            {submitting ? 'Saving…' : 'Record payout'}
           </button>
         </div>
       </div>

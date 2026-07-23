@@ -7,10 +7,10 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withPartnerAuth, type PartnerAuthContext } from '@/lib/auth/with-partner-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { loadPayoutSummary } from '@/lib/referral-payouts'
+import { loadPartnerCommission } from '@/lib/referral-commission'
 
 export const GET = withPartnerAuth(async (_req: NextRequest, ctx: PartnerAuthContext) => {
   const admin = createAdminClient()
-  const summary = await loadPayoutSummary(admin, ctx.partner)
+  const summary = await loadPartnerCommission(admin, ctx.partner)
   return NextResponse.json({ partner: ctx.partner, ...summary })
 })

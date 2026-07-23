@@ -13,13 +13,14 @@ const fmtMoney = (n: number) =>
 const fmtDate = (d: string) =>
   new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
-interface Conversion {
+interface MemberAccrual {
   linkId: string
   email: string
   name: string | null
-  convertedAt: string
-  commission: number
-  withinRateWindow: boolean
+  startDate: string
+  endDate: string | null
+  months: number
+  accrued: number
 }
 
 interface Overview {
@@ -27,7 +28,8 @@ interface Overview {
   stats: ReferralPartnerStats
   conversionRate: number
   membershipFee: number
-  conversions: Conversion[]
+  monthlyRate: number
+  accruals: MemberAccrual[]
 }
 
 export default function PartnerOverviewPage() {
@@ -57,11 +59,11 @@ export default function PartnerOverviewPage() {
   if (loading) return <ContentLoader />
   if (error || !overview) return <div className="p-8 text-sm text-red-500">{error ?? 'Not found.'}</div>
 
-  const { partner, stats, conversionRate, membershipFee, conversions } = overview
+  const { partner, stats, conversionRate, membershipFee, monthlyRate, accruals } = overview
   const expired = isRateExpired(partner.ends_at)
 
-  // Most recent conversions first — this is the partner's earnings ledger.
-  const recent = [...conversions].sort((a, b) => b.convertedAt.localeCompare(a.convertedAt)).slice(0, 10)
+  // Converted members, most recently joined first — the earnings ledger.
+  const recent = [...accruals].sort((a, b) => b.startDate.localeCompare(a.startDate)).slice(0, 10)
 
   // Everyone referred, newest first — includes people who haven't converted yet,
   // which the conversions ledger deliberately omits.
@@ -90,7 +92,7 @@ export default function PartnerOverviewPage() {
         <StatCard label="Referred"    value={stats.referredCount} sub="Total contacts" colour="blue" />
         <StatCard label="Active"      value={stats.activeCount}   sub="Paying members" colour="green" />
         <StatCard label="Conversion"  value={`${Math.round(conversionRate * 100)}%`}   colour="gold" />
-        <StatCard label="Rate"        value={`${partner.percentage}%`} sub={expired ? 'Expired' : 'Per member'} colour={expired ? 'gray' : 'green'} />
+        <StatCard label="Rate"        value={`${partner.percentage}%`} sub={`${fmtMoney(monthlyRate)}/mo per member`} colour={expired ? 'gray' : 'green'} />
         <StatCard label="Commissions" value={fmtMoney(stats.commissionOwed)} sub="Earned to date" colour="gold" />
       </div>
 
@@ -141,13 +143,13 @@ export default function PartnerOverviewPage() {
               <div key={c.linkId} className="flex items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-800 truncate">{c.name ?? c.email}</p>
-                  <p className="text-xs text-gray-400">Joined {fmtDate(c.convertedAt)}</p>
+                  <p className="text-xs text-gray-400">
+                    Joined {fmtDate(c.startDate)} · {c.months} month{c.months !== 1 ? 's' : ''} earned
+                  </p>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="text-sm font-medium text-gray-900">{fmtMoney(c.commission)}</p>
-                  {!c.withinRateWindow && (
-                    <p className="text-[11px] text-gray-400">Outside rate term</p>
-                  )}
+                  <p className="text-sm font-medium text-gray-900">{fmtMoney(c.accrued)}</p>
+                  {c.endDate && <p className="text-[11px] text-gray-400">Ended</p>}
                 </div>
               </div>
             ))}

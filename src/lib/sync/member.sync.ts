@@ -61,21 +61,7 @@ export async function upsertMember({
     return { success: false, userId, action: 'updated', error: error.message }
   }
 
-  // Stamp the membership start date the first time we observe a membership tag,
-  // and never overwrite it. This is the date referral commission is dated and
-  // rate-windowed against — without it, that logic would fall back to the
-  // referral link's creation date and could credit a conversion in the wrong
-  // month or after the rate term. `.is(null)` makes it set-once/idempotent.
-  if (hasMembershipTag(contact.tags ?? [])) {
-    const { error: startError } = await ctx.supabase
-      .from('members')
-      .update({ membership_start_date: new Date().toISOString().slice(0, 10) })
-      .eq('id', userId)
-      .is('membership_start_date', null)
-    if (startError) {
-      log.warn('membership_start_date stamp skipped', { errorMessage: startError.message })
-    }
-  }
+  await stampMembershipLifecycle(ctx.supabase, userId, contact.tags ?? [])
 
   // Attach any referral of this person that was recorded before they had a
   // member row (a partner referred them as a non-member, by email). Populating
@@ -97,6 +83,37 @@ export async function upsertMember({
 
   log.debug('Member upserted', { ghlContactId: contact.id })
   return { success: true, userId, action: 'updated' }
+}
+
+/**
+ * Keep the membership lifecycle dates in step with GHL, which drives recurring
+ * referral commission:
+ *   - has a membership tag → stamp membership_start_date once, clear any
+ *     cancellation (they're active again),
+ *   - no membership tag but was once a member → stamp membership_ended_at once
+ *     (the cancellation month accrual stops at).
+ * Set-once on each date so a re-sync can't shift an established start/end.
+ */
+export async function stampMembershipLifecycle(
+  supabase: SyncContext['supabase'],
+  userId: string,
+  tags: string[]
+): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10)
+  if (hasMembershipTag(tags)) {
+    await supabase.from('members')
+      .update({ membership_start_date: today })
+      .eq('id', userId).is('membership_start_date', null)
+    await supabase.from('members')
+      .update({ membership_ended_at: null })
+      .eq('id', userId).not('membership_ended_at', 'is', null)
+  } else {
+    await supabase.from('members')
+      .update({ membership_ended_at: today })
+      .eq('id', userId)
+      .not('membership_start_date', 'is', null)
+      .is('membership_ended_at', null)
+  }
 }
 
 export async function deactivateMember(

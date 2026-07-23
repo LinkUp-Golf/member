@@ -286,6 +286,8 @@ export interface ReferralPartner {
   percentage: number
   /** Last day the commission percentage is honoured (YYYY-MM-DD). Null = no expiry. */
   ends_at: string | null
+  /** How commission is paid out: cash or a coupon/account credit. */
+  payout_method: 'cash' | 'coupon'
   /** Owning member, when the partner is a member rather than an external affiliate. */
   member_id: string | null
   created_by: string | null

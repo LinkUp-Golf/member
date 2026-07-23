@@ -240,7 +240,7 @@ export default function AdminReferralPartnersPage() {
 
 // ---- Create / edit drawer -----------------------------------
 
-type PartnerFormValues = { name: string; code: string; percentage: number | ''; ends_at: string }
+type PartnerFormValues = { name: string; code: string; percentage: number | ''; ends_at: string; payout_method: 'cash' | 'coupon' }
 
 function PartnerDrawer({ editing, onClose, onSaved, onError }: {
   editing: ReferralPartnerWithStats | null
@@ -258,6 +258,7 @@ function PartnerDrawer({ editing, onClose, onSaved, onError }: {
       code: editing?.code ?? '',
       percentage: editing?.percentage ?? DEFAULT_REFERRAL_PERCENTAGE,
       ends_at: editing?.ends_at?.slice(0, 10) ?? '',
+      payout_method: editing?.payout_method ?? 'cash',
     },
   })
 
@@ -302,6 +303,7 @@ function PartnerDrawer({ editing, onClose, onSaved, onError }: {
         code: data.code.trim(),
         percentage: Number(data.percentage),
         ends_at: data.ends_at || null,
+        payout_method: data.payout_method,
       }
       const res = await fetch(
         isEdit ? `/api/admin/referral-partners/${editing.id}` : '/api/admin/referral-partners',
@@ -409,6 +411,21 @@ function PartnerDrawer({ editing, onClose, onSaved, onError }: {
             <p className="mt-1 text-[11px] text-gray-400">
               Last day this rate is honoured. Referrals who become members after it earn no commission.
               Leave blank for no expiry.
+            </p>
+          </div>
+
+          <div>
+            <label htmlFor="partner-payout" className={labelCls}>Payout Method</label>
+            <select
+              id="partner-payout"
+              className={field(false)}
+              {...register('payout_method')}
+            >
+              <option value="cash">Cash</option>
+              <option value="coupon">Coupon</option>
+            </select>
+            <p className="mt-1 text-[11px] text-gray-400">
+              Default method for this partner&apos;s payouts. Can be overridden per payout.
             </p>
           </div>
 

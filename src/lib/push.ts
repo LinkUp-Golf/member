@@ -185,9 +185,9 @@ export const NotificationTemplates = {
     tag:   'referral-list-rejected',
   }),
 
-  referralCommissionPaid: (amount: number, period: string): PushPayload => ({
+  referralCommissionPaid: (amount: number, method: 'cash' | 'coupon' = 'cash'): PushPayload => ({
     title: 'Commission paid',
-    body:  `Your ${period} referral commission of ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} has been paid.`,
+    body:  `A referral commission payout of ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} has been ${method === 'coupon' ? 'issued as a coupon' : 'paid'}.`,
     url:   '/partner/payments',
     tag:   'referral-commission-paid',
   }),
