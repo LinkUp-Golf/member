@@ -22,6 +22,8 @@ import { LayoutDashboard, Users, Upload, Wallet, ChevronLeft } from 'lucide-reac
 import { cn } from '@/lib/utils'
 import { FullScreenLoader } from '@/components/ui/Loading'
 import { useMemberRoles } from '@/hooks/useMemberRoles'
+import { useProfile } from '@/hooks/useProfile'
+import WorkspaceSwitcher from '@/components/layout/WorkspaceSwitcher'
 
 const NAV_ITEMS = [
   { href: '/partner',             label: 'Overview',  short: 'Overview', icon: LayoutDashboard },
@@ -39,6 +41,9 @@ export default function PartnerLayout({ children }: { children: React.ReactNode 
   const pathname = usePathname()
   const router = useRouter()
   const { isPartner, loading } = useMemberRoles()
+  const { profile } = useProfile()
+  // A non-member has no member app to go 'back' to — hide that link for them.
+  const isMember = !!profile?.home_course_id
 
   useEffect(() => {
     if (!loading && !isPartner) router.push('/more/referral-partner')
@@ -46,8 +51,6 @@ export default function PartnerLayout({ children }: { children: React.ReactNode 
 
   if (loading) return <FullScreenLoader />
   if (!isPartner) return null
-
-  const current = NAV_ITEMS.find(i => isActive(pathname, i.href))
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -62,14 +65,14 @@ export default function PartnerLayout({ children }: { children: React.ReactNode 
             className="rounded-lg flex-shrink-0"
             priority
           />
-          <div>
-            <div className="font-sans text-base font-semibold" style={{ color: '#85bb65' }}>
-              LinkUp Golf
-            </div>
-            <div className="text-[10px] uppercase tracking-widest text-white/30 mt-0.5">
-              Referral Partner
-            </div>
+          <div className="font-sans text-base font-semibold" style={{ color: '#85bb65' }}>
+            LinkUp Golf
           </div>
+        </div>
+
+        {/* Workspace switcher — for users who hold more than one workspace. */}
+        <div className="px-3 py-3 border-b border-white/[0.06]">
+          <WorkspaceSwitcher current="partner" />
         </div>
 
         <nav className="flex-1 px-3 py-4 overflow-y-auto">
@@ -94,33 +97,32 @@ export default function PartnerLayout({ children }: { children: React.ReactNode 
           })}
         </nav>
 
-        <div className="px-4 py-3 border-t border-white/[0.07]">
-          <Link href="/home" className="text-xs text-white/40 hover:text-white/70 transition-colors">
-            ← Back to LinkUp
-          </Link>
-        </div>
+        {isMember && (
+          <div className="px-4 py-3 border-t border-white/[0.07]">
+            <Link href="/home" className="text-xs text-white/40 hover:text-white/70 transition-colors">
+              ← Back to LinkUp
+            </Link>
+          </div>
+        )}
       </aside>
 
       <div className="flex-1 min-w-0">
         {/* ---- Mobile header ---------------------------------- */}
         <header
-          className="md:hidden sticky top-0 z-30 bg-green-950 px-4 py-3 flex items-center gap-3"
+          className="md:hidden sticky top-0 z-30 bg-green-950 px-4 py-3 flex items-center gap-2"
           style={{ paddingTop: 'calc(0.75rem + var(--safe-top, 0px))' }}
         >
-          <Link
-            href="/home"
-            aria-label="Back to LinkUp"
-            className="focus-ring -ml-1 p-1 rounded-lg text-white/50 hover:text-white transition-colors"
-          >
-            <ChevronLeft className="w-5 h-5" strokeWidth={2} />
-          </Link>
-          <div className="min-w-0">
-            <p className="text-[10px] uppercase tracking-widest text-white/35 leading-none">
-              Referral Partner
-            </p>
-            <p className="text-sm font-semibold text-white leading-tight mt-1 truncate">
-              {current?.label ?? 'Overview'}
-            </p>
+          {isMember && (
+            <Link
+              href="/home"
+              aria-label="Back to LinkUp"
+              className="focus-ring -ml-1 p-1 rounded-lg text-white/50 hover:text-white transition-colors flex-shrink-0"
+            >
+              <ChevronLeft className="w-5 h-5" strokeWidth={2} />
+            </Link>
+          )}
+          <div className="min-w-0 flex-1">
+            <WorkspaceSwitcher current="partner" />
           </div>
         </header>
 
