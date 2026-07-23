@@ -49,6 +49,7 @@ export default function AdminMembersPage() {
     total: number;
     synced: number;
     skipped: number;
+    deactivated?: number;
     errors: string[];
   } | null>(null);
 
@@ -254,6 +255,7 @@ export default function AdminMembersPage() {
         >
           <span className="font-medium">Sync complete:</span>{" "}
           {syncResult.synced} synced, {syncResult.skipped} skipped
+          {syncResult.deactivated ? `, ${syncResult.deactivated} deactivated` : ""}
           {syncResult.errors.length > 0 && (
             <div className="mt-1 text-xs text-yellow-700">
               {syncResult.errors.slice(0, 3).join(" · ")}

@@ -7,6 +7,8 @@ import {
   AdminPageHeader, AdminTable, AdminTr, AdminTd, StatCard,
 } from '@/components/admin/AdminUI'
 import { DEFAULT_REFERRAL_PERCENTAGE } from '@/lib/constants'
+import { isRateExpired } from '@/lib/referral-rate'
+import ReferralApplications from '@/components/admin/ReferralApplications'
 import ReferralContactPicker, { type ReferralSelection } from '@/components/admin/ReferralContactPicker'
 import type { ReferralPartnerWithStats } from '@/types'
 
@@ -17,7 +19,18 @@ function toSlug(value: string) {
 const fmtMoney = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 })
 
+const fmtDate = (d: string) =>
+  new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+
+type Tab = 'partners' | 'applications'
+
 export default function AdminReferralPartnersPage() {
+  const [tab, setTab] = useState<Tab>('partners')
+  const [pendingCount, setPendingCount] = useState(0)
+  // Partner ids with a referral list awaiting review. Reviewing happens on the
+  // partner's own page (the import applies their rate), so this is just a
+  // pointer to which partners need attention.
+  const [partnersWithLists, setPartnersWithLists] = useState<Set<string>>(new Set())
   const [partners, setPartners] = useState<ReferralPartnerWithStats[]>([])
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
@@ -40,7 +53,23 @@ export default function AdminReferralPartnersPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { loadPartners() }, [loadPartners])
+  // Drives the tab's pending badge, so it's fetched regardless of which tab is
+  // open. The Applications tab loads the full list itself when shown.
+  const loadPendingCount = useCallback(async () => {
+    const [appsRes, subsRes] = await Promise.all([
+      fetch('/api/admin/referral-partner-applications?status=pending'),
+      fetch('/api/admin/referral-submissions?status=pending'),
+    ])
+    const apps = await appsRes.json().catch(() => ({}))
+    const subs = await subsRes.json().catch(() => ({}))
+    setPendingCount(Array.isArray(apps.applications) ? apps.applications.length : 0)
+    setPartnersWithLists(new Set(
+      (Array.isArray(subs.submissions) ? subs.submissions : [])
+        .map((s: { referral_partner_id: string }) => s.referral_partner_id)
+    ))
+  }, [])
+
+  useEffect(() => { loadPartners(); loadPendingCount() }, [loadPartners, loadPendingCount])
 
   async function deletePartner(partner: ReferralPartnerWithStats) {
     setProcessing(true)
@@ -54,26 +83,58 @@ export default function AdminReferralPartnersPage() {
 
   const totals = partners.reduce(
     (acc, p) => ({
-      linked: acc.linked + p.linkedCount,
-      converted: acc.converted + p.convertedCount,
+      referred: acc.referred + p.referredCount,
+      active: acc.active + p.activeCount,
       commission: acc.commission + p.commissionOwed,
     }),
-    { linked: 0, converted: 0, commission: 0 }
+    { referred: 0, active: 0, commission: 0 }
   )
 
   return (
     <div className="p-4 sm:p-8">
       <div className="flex items-start justify-between gap-4 mb-6">
         <AdminPageHeader
-          title="Referral Pipeline"
-          description="Manage referral partners, link members & non-members, and track commission"
+          title="Referral Partners"
+          description="Manage referral partners, review applications, and track commission"
         />
-        <button
-          onClick={() => { setEditing(null); setShowCreate(true) }}
-          className="flex-shrink-0 px-4 py-2 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 transition-colors"
-        >
-          + Add Partner
-        </button>
+        {tab === 'partners' && (
+          <button
+            onClick={() => { setEditing(null); setShowCreate(true) }}
+            className="flex-shrink-0 px-4 py-2 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 transition-colors"
+          >
+            + Add Partner
+          </button>
+        )}
+      </div>
+
+      {/* Tabs — reviewing an application ends in creating a partner, so both
+          live on this page rather than in separate destinations. */}
+      <div className="flex gap-1 mb-6 border-b border-gray-100">
+        {([
+          { id: 'partners' as const,     label: 'Partners',     badge: partnersWithLists.size },
+          { id: 'applications' as const, label: 'Applications', badge: pendingCount },
+        ]).map(t => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`relative px-4 py-2.5 text-sm font-medium transition-colors -mb-px border-b-2 ${
+              tab === t.id
+                ? 'border-green-900 text-green-900'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {t.label}
+            {t.badge > 0 && (
+              <span
+                className="ml-2 text-xs font-semibold px-1.5 py-0.5 rounded-full"
+                style={{ background: '#85bb65', color: '#002669' }}
+              >
+                {t.badge}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
       {toast && (
@@ -84,20 +145,27 @@ export default function AdminReferralPartnersPage() {
         </div>
       )}
 
-      {!loading && (
+      {tab === 'applications' && (
+        <ReferralApplications
+          onToast={showToast}
+          onReviewed={() => { loadPartners(); loadPendingCount() }}
+        />
+      )}
+
+      {tab === 'partners' && !loading && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <StatCard label="Partners"    value={partners.length}    sub="Active affiliates"    colour="green" />
-          <StatCard label="Linked"      value={totals.linked}      sub="Members & non-members" colour="blue" />
-          <StatCard label="Converted"   value={totals.converted}   sub="Paying members"        colour="green" />
+          <StatCard label="Referred"    value={totals.referred}    sub="Members & non-members" colour="blue" />
+          <StatCard label="Active"      value={totals.active}      sub="Paying members"        colour="green" />
           <StatCard label="Commission"  value={fmtMoney(totals.commission)} sub="Owed to date" colour="gold" />
         </div>
       )}
 
-      {loading ? (
+      {tab === 'partners' && (loading ? (
         <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
       ) : (
         <AdminTable
-          headers={['Partner', 'Code', 'Rate', 'Linked', 'Converted', 'Commission', '']}
+          headers={['Partner', 'Code', 'Rate', 'Referred', 'Active', 'Commission', '']}
           empty={partners.length === 0 ? 'No referral partners yet. Add one to get started.' : undefined}
         >
           {partners.map(p => (
@@ -106,11 +174,29 @@ export default function AdminReferralPartnersPage() {
                 <Link href={`/admin/referrals/${p.id}`} className="hover:text-green-800 hover:underline">
                   {p.name}
                 </Link>
+                {partnersWithLists.has(p.id) && (
+                  <Link
+                    href={`/admin/referrals/${p.id}`}
+                    className="ml-2 text-[11px] font-medium px-1.5 py-0.5 rounded-full bg-yellow-50 text-yellow-700 hover:bg-yellow-100 whitespace-nowrap"
+                    title="This partner submitted a referral list awaiting review"
+                  >
+                    List to review
+                  </Link>
+                )}
               </AdminTd>
               <AdminTd><code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{p.code}</code></AdminTd>
-              <AdminTd>{p.percentage}%</AdminTd>
-              <AdminTd>{p.linkedCount} <span className="text-gray-400 text-xs">({p.nonMemberCount} non-member)</span></AdminTd>
-              <AdminTd>{p.convertedCount}</AdminTd>
+              <AdminTd>
+                <span className={isRateExpired(p.ends_at) ? 'text-gray-400 line-through' : undefined}>
+                  {p.percentage}%
+                </span>
+                {p.ends_at && (
+                  <span className={`block text-xs ${isRateExpired(p.ends_at) ? 'text-red-500' : 'text-gray-400'}`}>
+                    {isRateExpired(p.ends_at) ? 'Expired' : 'Until'} {fmtDate(p.ends_at)}
+                  </span>
+                )}
+              </AdminTd>
+              <AdminTd>{p.referredCount} <span className="text-gray-400 text-xs">({p.nonMemberCount} non-member)</span></AdminTd>
+              <AdminTd>{p.activeCount}</AdminTd>
               <AdminTd className="font-medium">{fmtMoney(p.commissionOwed)}</AdminTd>
               <AdminTd className="text-right whitespace-nowrap">
                 <button
@@ -129,7 +215,7 @@ export default function AdminReferralPartnersPage() {
             </AdminTr>
           ))}
         </AdminTable>
-      )}
+      ))}
 
       {showCreate && (
         <PartnerDrawer
@@ -154,7 +240,7 @@ export default function AdminReferralPartnersPage() {
 
 // ---- Create / edit drawer -----------------------------------
 
-type PartnerFormValues = { name: string; code: string; percentage: number | '' }
+type PartnerFormValues = { name: string; code: string; percentage: number | ''; ends_at: string; payout_method: 'cash' | 'coupon' }
 
 function PartnerDrawer({ editing, onClose, onSaved, onError }: {
   editing: ReferralPartnerWithStats | null
@@ -171,6 +257,8 @@ function PartnerDrawer({ editing, onClose, onSaved, onError }: {
       name: editing?.name ?? '',
       code: editing?.code ?? '',
       percentage: editing?.percentage ?? DEFAULT_REFERRAL_PERCENTAGE,
+      ends_at: editing?.ends_at?.slice(0, 10) ?? '',
+      payout_method: editing?.payout_method ?? 'cash',
     },
   })
 
@@ -214,6 +302,8 @@ function PartnerDrawer({ editing, onClose, onSaved, onError }: {
         name: data.name.trim(),
         code: data.code.trim(),
         percentage: Number(data.percentage),
+        ends_at: data.ends_at || null,
+        payout_method: data.payout_method,
       }
       const res = await fetch(
         isEdit ? `/api/admin/referral-partners/${editing.id}` : '/api/admin/referral-partners',
@@ -239,9 +329,9 @@ function PartnerDrawer({ editing, onClose, onSaved, onError }: {
         const linkJson = await linkRes.json().catch(() => ({}))
         if (linkRes.ok) {
           const failed = (linkJson.failed ?? []).length
-          linkedMsg = ` Linked ${linkJson.succeeded ?? 0} contact${linkJson.succeeded !== 1 ? 's' : ''}${failed ? `, ${failed} failed` : ''}.`
+          linkedMsg = ` Referred ${linkJson.succeeded ?? 0} contact${linkJson.succeeded !== 1 ? 's' : ''}${failed ? `, ${failed} failed` : ''}.`
         } else {
-          linkedMsg = ` (Partner saved, but linking failed: ${linkJson.error ?? 'unknown error'})`
+          linkedMsg = ` (Partner saved, but referring failed: ${linkJson.error ?? 'unknown error'})`
         }
       }
 
@@ -310,8 +400,37 @@ function PartnerDrawer({ editing, onClose, onSaved, onError }: {
             {errors.percentage && <p className={errMsg}>{errors.percentage.message}</p>}
           </div>
 
+          <div>
+            <label htmlFor="partner-ends-at" className={labelCls}>Rate Valid Until</label>
+            <input
+              id="partner-ends-at"
+              type="date"
+              className={field(!!errors.ends_at)}
+              {...register('ends_at')}
+            />
+            <p className="mt-1 text-[11px] text-gray-400">
+              Last day this rate is honoured. Referrals who become members after it earn no commission.
+              Leave blank for no expiry.
+            </p>
+          </div>
+
+          <div>
+            <label htmlFor="partner-payout" className={labelCls}>Payout Method</label>
+            <select
+              id="partner-payout"
+              className={field(false)}
+              {...register('payout_method')}
+            >
+              <option value="cash">Cash</option>
+              <option value="coupon">Coupon</option>
+            </select>
+            <p className="mt-1 text-[11px] text-gray-400">
+              Default method for this partner&apos;s payouts. Can be overridden per payout.
+            </p>
+          </div>
+
           <div className="pt-1 border-t border-gray-100">
-            <h3 className="text-sm font-semibold text-gray-700 mt-4 mb-1">Link contacts</h3>
+            <h3 className="text-sm font-semibold text-gray-700 mt-4 mb-1">Refer contacts</h3>
             <p className="text-[11px] text-gray-400 mb-3">
               Optionally select members and add non-member emails now — they&apos;re attributed to this partner when
               you save. Non-members are also created in your CRM as leads.
@@ -351,8 +470,8 @@ function DeletePartnerModal({ partner, processing, onConfirm, onClose }: {
         <p className="text-sm font-semibold text-gray-800 text-center mb-4">&ldquo;{partner.name}&rdquo;</p>
         <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 mb-6">
           <p className="text-xs text-amber-700">
-            This removes its {partner.linkedCount} link{partner.linkedCount !== 1 ? 's' : ''}. The linked members and
-            CRM contacts themselves are not deleted.
+            This removes its {partner.referredCount} referral{partner.referredCount !== 1 ? 's' : ''}. The referred
+            members and CRM contacts themselves are not deleted.
           </p>
         </div>
         <div className="flex gap-3">

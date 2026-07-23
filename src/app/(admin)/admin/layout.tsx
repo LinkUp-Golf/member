@@ -24,7 +24,8 @@ const NAV_GROUPS = [
       { href: '/admin/members',          label: 'Members',            icon: '▪' },
       { href: '/admin/events',           label: 'Member Events',      icon: '▪', badge: true },
       { href: '/admin/guest-access',     label: 'Guest Access',       icon: '▪', badge: true },
-      { href: '/admin/referrals',        label: 'Referral Pipeline',  icon: '▪' },
+      { href: '/admin/referrals',        label: 'Referral Partners',  icon: '▪', badge: true },
+      { href: '/admin/hosts',            label: 'Hosts',              icon: '▪', badge: true },
       { href: '/admin/messaging',        label: 'Messaging Controls', icon: '▪' },
     ],
   },
@@ -49,6 +50,8 @@ function NavContent({
   guestCount,
   eventsCount,
   golfEventsCount,
+  partnerApplicationsCount,
+  hostsCount,
   activeCourses,
   user,
   onNavigate,
@@ -57,6 +60,8 @@ function NavContent({
   guestCount: number
   eventsCount: number
   golfEventsCount: number
+  partnerApplicationsCount: number
+  hostsCount: number
   activeCourses: { id: string; name: string }[]
   user: { email: string }
   onNavigate?: () => void
@@ -106,6 +111,10 @@ function NavContent({
                   ? eventsCount
                   : item.href.includes('golf-events')
                   ? golfEventsCount
+                  : item.href.includes('referrals')
+                  ? partnerApplicationsCount
+                  : item.href.includes('/admin/hosts')
+                  ? hostsCount
                   : 0
                 : 0
 
@@ -222,6 +231,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [guestCount, setGuestCount] = useState(0)
   const [eventsCount, setEventsCount] = useState(0)
   const [golfEventsCount, setGolfEventsCount] = useState(0)
+  const [partnerApplicationsCount, setPartnerApplicationsCount] = useState(0)
+  const [hostsCount, setHostsCount] = useState(0)
   const [activeCourses, setActiveCourses] = useState<{ id: string; name: string }[]>([])
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerMounted, setDrawerMounted] = useState(false)
@@ -239,6 +250,22 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const fetchCounts = useCallback(async () => {
     const supabase = createClient()
+
+    // Partner applications aren't course-scoped, so count them before the
+    // course lookup below (which bails out when no LinkUp course is present).
+    const { count: applicationsCount } = await supabase
+      .from('referral_partner_applications')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending')
+    setPartnerApplicationsCount(applicationsCount ?? 0)
+
+    // Host attention badge: pending role applications + events awaiting credit
+    // approval. (There's no event-review gate anymore — events publish live.)
+    const [hostAppsRes, hostProofRes] = await Promise.all([
+      supabase.from('host_applications').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabase.from('hosted_events').select('id', { count: 'exact', head: true }).eq('status', 'pending_credit_approval'),
+    ])
+    setHostsCount((hostAppsRes.count ?? 0) + (hostProofRes.count ?? 0))
 
     const { data: courses } = await supabase
       .from('courses')
@@ -302,8 +329,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <NavContent
           pathname={pathname}
           guestCount={guestCount}
-                    eventsCount={eventsCount}
+          eventsCount={eventsCount}
           golfEventsCount={golfEventsCount}
+          partnerApplicationsCount={partnerApplicationsCount}
+                  hostsCount={hostsCount}
           activeCourses={activeCourses}
           user={{ email: user.email ?? '' }}
         />
@@ -348,9 +377,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <NavContent
               pathname={pathname}
               guestCount={guestCount}
-                            eventsCount={eventsCount}
+              eventsCount={eventsCount}
               golfEventsCount={golfEventsCount}
-          activeCourses={activeCourses}
+              partnerApplicationsCount={partnerApplicationsCount}
+                  hostsCount={hostsCount}
+              activeCourses={activeCourses}
               user={{ email: user.email ?? '' }}
               onNavigate={() => setDrawerOpen(false)}
             />

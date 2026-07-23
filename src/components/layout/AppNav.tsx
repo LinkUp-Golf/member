@@ -1,15 +1,18 @@
 "use client";
 
 import { useEffect, useState, useCallback, memo, type ReactNode } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Bell, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Icon, { type IconName } from "@/components/ui/Icon";
+import { FullScreenLoader } from "@/components/ui/Loading";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useProfile } from "@/hooks/useProfile";
-import { MORE_ITEMS } from "@/lib/nav/moreItems";
+import { getMoreItems } from "@/lib/nav/moreItems";
+import { useMemberRoles } from "@/hooks/useMemberRoles";
+import { PARTNER_ROLE_TAG, HOST_ROLE_TAG } from "@/lib/ghl/tags";
 
 // Extracted + memoized so a pathname change (i.e. every navigation) only
 // re-renders the one or two nav rows whose `active` flag actually flips,
@@ -105,9 +108,27 @@ const DISMISSED_KEY = "linkup-notif-prompt-dismissed";
 // active-state highlighting, so this is the minimal client boundary.
 export default function AppNav({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { permission, isSubscribed, subscribe } = usePushNotifications();
   const { profile, loading } = useProfile();
+  const roles = useMemberRoles();
+  const moreGroups = getMoreItems(roles);
   const [dismissed, setDismissed] = useState(true); // start hidden, reveal after mount
+
+  // A non-member (a referral partner / host with no golf membership, so no home
+  // course) has no membership features — the member app is hidden from them and
+  // they're sent to their workspace. Enforced app-wide here since AppNav wraps
+  // every member route.
+  const isNonMember = !loading && !!profile && !profile.home_course_id;
+  useEffect(() => {
+    if (!isNonMember) return;
+    const tags = profile?.ghl_tags ?? [];
+    router.replace(
+      tags.includes(PARTNER_ROLE_TAG) ? "/partner"
+      : tags.includes(HOST_ROLE_TAG) ? "/host"
+      : "/membership-required"
+    );
+  }, [isNonMember, profile, router]);
 
   // Applies the member's saved text-size preference once it loads. The shell
   // (nav/sidebar) renders immediately at the browser default — there's no
@@ -159,6 +180,12 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
     setDismissed(true);
   }, []);
 
+  // Don't paint the member shell/features for a non-member — hold a loader
+  // while the effect above redirects them to their workspace.
+  if (isNonMember) {
+    return <FullScreenLoader />;
+  }
+
   return (
     <div className="app-shell">
       {/* Sidebar — tablet+ */}
@@ -193,7 +220,7 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
 
           {/* More items — expanded permanently in the sidebar (tablet+ has the
               room); mobile still gets these via the bottom nav's "More" tab. */}
-          {MORE_ITEMS.map((group) => (
+          {moreGroups.map((group) => (
             <div key={group.group} className="mt-4 first:mt-2">
               <p
                 className="px-5 pb-1.5 text-[10px] font-semibold uppercase tracking-widest"

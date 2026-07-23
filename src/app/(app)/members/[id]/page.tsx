@@ -10,7 +10,7 @@ import Avatar from "@/components/ui/Avatar";
 import { Spinner } from "@/components/ui/Loading";
 import AppShell from "@/components/layout/AppShell";
 import { RateLimitBanner } from "@/components/ui/RateLimitModal";
-import type { MemberWithProfile } from "@/types";
+import type { MemberWithProfile, HostedEvent } from "@/types";
 
 export default function MemberProfilePage() {
   const { id } = useParams<{ id: string }>();
@@ -19,6 +19,7 @@ export default function MemberProfilePage() {
   const [member, setMember] = useState<MemberWithProfile | null>(null);
   const [playedTogether, setPlayedTogether] = useState(false);
   const [focusGroups, setFocusGroups] = useState<string[]>([]);
+  const [hostedEvents, setHostedEvents] = useState<HostedEvent[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadMember = useCallback(async () => {
@@ -42,6 +43,16 @@ export default function MemberProfilePage() {
   useEffect(() => {
     if (id) loadMember();
   }, [id, loadMember]);
+
+  // Events this member is hosting (if they're a host) — surfaced so others can
+  // discover and reserve a spot from the profile.
+  useEffect(() => {
+    if (!id) return;
+    fetch(`/api/hosted-events?host_member_id=${id}`)
+      .then(r => r.json())
+      .then(j => setHostedEvents(Array.isArray(j.events) ? j.events : []))
+      .catch(() => {});
+  }, [id]);
 
   const [startingConv, setStartingConv] = useState(false);
   const [blocked, setBlocked] = useState<{ title: string; message: string } | null>(null);
@@ -241,6 +252,34 @@ export default function MemberProfilePage() {
             <p className="text-sm text-green-900/25 italic">No Focus LinkUp groups</p>
           )}
         </div>
+
+        {/* Events this member is hosting */}
+        {hostedEvents.length > 0 && (
+          <div className="px-5 py-4 border-b border-green-900/08">
+            <p className="text-xs uppercase tracking-widest text-green-900/40 mb-3">Hosting</p>
+            <div className="space-y-2">
+              {hostedEvents.map(e => {
+                const remaining = e.remaining_spots ?? 0;
+                return (
+                  <Link
+                    key={e.id}
+                    href={`/more/hosted-events/${e.id}`}
+                    className="flex items-center justify-between gap-3 bg-green-50 rounded-xl px-3 py-2.5 border border-green-900/10"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-green-950 truncate">{e.course?.name ?? "Hosted event"}</p>
+                      <p className="text-xs text-green-900/50">
+                        {new Date(`${e.event_date.slice(0, 10)}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        {" · "}{remaining > 0 ? `${remaining} spot${remaining === 1 ? "" : "s"} left` : "Full"}
+                      </p>
+                    </div>
+                    <span className="text-xs font-medium text-green-800 flex-shrink-0">View →</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
       </div>
     </AppShell>

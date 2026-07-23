@@ -22,10 +22,26 @@ export const GHL_OPPORTUNITY_FIELDS = {
 
 // ---- Referral partners --------------------------------------
 
-// Membership fee used to compute referral-partner commission
-// (commission = converted members × MEMBERSHIP_FEE_USD × percentage / 100).
+// Membership fee used to compute referral-partner commission. Commission is
+// recurring: a partner earns `percentage`% of this fee EACH month a referred
+// member stays a paying member, for up to COMMISSION_TERM_MONTHS months, and it
+// stops the month the member cancels.
 export const MEMBERSHIP_FEE_USD = 100
 export const DEFAULT_REFERRAL_PERCENTAGE = 10
+
+// A referred membership earns commission for at most this many months.
+export const COMMISSION_TERM_MONTHS = 12
+
+// A partner is only paid once their unpaid balance reaches this threshold;
+// below it, the balance rolls over to the next payout run.
+export const PAYOUT_THRESHOLD_USD = 100
+
+// ---- Hosts --------------------------------------------------
+
+// A hosted event's displayed member price is the host's member guest rate plus
+// this fixed markup. Only the guest rate is stored; the host never sets the
+// member price directly, and the earned credit is based on the guest rate.
+export const HOST_MEMBER_PRICE_MARKUP_USD = 10
 
 export const GHL_CANCEL_BOOKING_URL = 'https://api.leadconnectorhq.com/widget/cancel-booking'
 export const GHL_CALENDAR_PROVIDER_ID = 'bdd10QRepJvC6EYoy32m'

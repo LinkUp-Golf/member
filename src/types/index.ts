@@ -4,7 +4,7 @@
 
 // ---- Enums --------------------------------------------------
 
-export type MembershipStatus = 'active' | 'waitlist' | 'pending' | 'suspended' | 'cancelled'
+export type MembershipStatus = 'active' | 'waitlist' | 'pending' | 'suspended' | 'cancelled' | 'non_member'
 export type AccessType = 'home' | 'guest'
 export type CourseMembershipStatus = 'active' | 'pending' | 'expired'
 export type BookingStatus =
@@ -40,6 +40,9 @@ export type NotificationType =
   | 'guest_access'
   | 'referral'
   | 'member_event'
+  | 'host_application'
+  | 'hosted_event'
+  | 'host_credit'
   | 'test'
   | 'general'
 export type RSVPStatus = 'attending' | 'maybe' | 'declined'
@@ -166,7 +169,8 @@ export interface Member {
   first_name: string
   last_name: string
   phone: string | null
-  home_course_id: string
+  /** Null for a non-member (a referral partner / host with no golf membership). */
+  home_course_id: string | null
   membership_status: MembershipStatus
   membership_start_date: string | null
   referred_by: string | null
@@ -280,9 +284,72 @@ export interface ReferralPartner {
   name: string
   code: string
   percentage: number
+  /** Last day the commission percentage is honoured (YYYY-MM-DD). Null = no expiry. */
+  ends_at: string | null
+  /** How commission is paid out: cash or a coupon/account credit. */
+  payout_method: 'cash' | 'coupon'
+  /** Owning member, when the partner is a member rather than an external affiliate. */
+  member_id: string | null
   created_by: string | null
   created_at: string
   updated_at: string
+}
+
+export type ReferralPartnerSubmissionStatus = 'pending' | 'imported' | 'rejected'
+export type ReferralSubmissionEntryStatus = 'pending' | 'imported' | 'skipped'
+
+/** A batch of referrals a partner submitted for an admin to import. */
+export interface ReferralPartnerSubmission {
+  id: string
+  referral_partner_id: string
+  status: ReferralPartnerSubmissionStatus
+  note: string | null
+  entry_count: number
+  imported_count: number | null
+  /** Original filename of the uploaded CSV. */
+  csv_filename: string | null
+  /** Commission rate at import time — an audit record, not the commission source. */
+  applied_percentage: number | null
+  rejection_reason: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  created_at: string
+  updated_at: string
+  // Enriched in API responses
+  entries?: ReferralSubmissionEntry[]
+  partner?: { id: string; name: string; code: string } | null
+}
+
+export interface ReferralSubmissionEntry {
+  id: string
+  submission_id: string
+  email: string
+  name: string | null
+  status: ReferralSubmissionEntryStatus
+  /** Why an entry didn't import (e.g. already attributed to another partner). */
+  skip_reason: string | null
+  link_id: string | null
+  created_at: string
+}
+
+export type ReferralPartnerApplicationStatus = 'pending' | 'approved' | 'rejected'
+
+export interface ReferralPartnerApplication {
+  id: string
+  member_id: string
+  /** Referral name the applicant proposes to operate under. */
+  name: string | null
+  /** The applicant's pitch — why they'd be a good partner. */
+  description: string
+  status: ReferralPartnerApplicationStatus
+  partner_id: string | null
+  rejection_reason: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  created_at: string
+  updated_at: string
+  // Enriched (present when joined to the member row in API responses)
+  member?: { first_name: string; last_name: string; email: string } | null
 }
 
 export interface ReferralPartnerLink {
@@ -299,12 +366,161 @@ export interface ReferralPartnerLink {
   member?: { first_name: string; last_name: string; email: string; membership_status: string } | null
 }
 
+// Naming note: a "referred" contact is anyone attributed to the partner; an
+// "active" one has since become a paying member. The link row's DB status
+// values ('linked' / 'converted') are the historical spelling of the same two
+// states — the UI and these counters use the member-facing wording.
 export interface ReferralPartnerStats {
-  linkedCount: number
+  referredCount: number
   memberCount: number
   nonMemberCount: number
-  convertedCount: number
+  activeCount: number
   commissionOwed: number
+}
+
+// ---- Hosts --------------------------------------------------
+
+export type HostStatus = 'active' | 'suspended'
+
+/** A member with the host role — the row's existence grants /host. */
+export interface Host {
+  id: string
+  member_id: string
+  name: string
+  status: HostStatus
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type HostApplicationStatus = 'pending' | 'approved' | 'rejected'
+
+export interface HostApplication {
+  id: string
+  member_id: string
+  /** Host name the applicant proposes to operate under. */
+  name: string | null
+  /** The applicant's pitch — the kind of events they'd run. */
+  description: string
+  /** The course ids the applicant wants to host at. */
+  requested_course_ids: string[]
+  status: HostApplicationStatus
+  host_id: string | null
+  rejection_reason: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  created_at: string
+  updated_at: string
+  // Enriched (present when joined to the member row in API responses)
+  member?: { first_name: string; last_name: string; email: string } | null
+}
+
+export type HostedEventStatus =
+  | 'draft'
+  | 'upcoming'
+  | 'completed'
+  | 'cancelled'
+  | 'pending_credit_approval'
+  | 'credits_awarded'
+
+export interface HostedEvent {
+  id: string
+  host_id: string
+  course_id: string
+  event_date: string
+  /** HH:MM[:SS], or null when the event has no fixed tee time. */
+  tee_time: string | null
+  total_spots: number
+  member_guest_rate: number
+  /** Whether dinner is included with the event. */
+  dinner: boolean
+  status: HostedEventStatus
+  cancellation_reason: string | null
+  /** Why an admin sent the event back for changes. */
+  rejection_reason: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  /** Set when the event was listed from one of the host's existing bookings. */
+  source_booking_id: string | null
+  created_at: string
+  updated_at: string
+  // Enriched in API responses
+  /** member_guest_rate + HOST_MEMBER_PRICE_MARKUP_USD. */
+  member_price?: number
+  filled_spots?: number
+  remaining_spots?: number
+  course?: { id: string; name: string; city?: string | null } | null
+  host?: { id: string; name: string; member?: { first_name: string; last_name: string } | null } | null
+  proofs?: HostedEventProof[]
+  /** True when the requesting member holds an active reservation. */
+  is_registered?: boolean
+}
+
+/**
+ * An active upcoming booking a host can take on and run as a hosted event —
+ * any member's booking, not only the host's own. A booking "group" is several
+ * bookings rows sharing member/created_at/date/tee time — one row per seat —
+ * so `seats` is that row count.
+ */
+export interface HostBookingOption {
+  /** The representative bookings row the event will link to. */
+  id: string
+  course_id: string
+  course_name: string | null
+  /** The member who made the booking. */
+  booked_by: string | null
+  booking_date: string
+  tee_time: string
+  seats: number
+  /** True when this booking is already listed as a live hosted event. */
+  already_listed: boolean
+}
+
+export type HostedEventRegistrationStatus = 'reserved' | 'cancelled'
+
+export interface HostedEventRegistration {
+  id: string
+  hosted_event_id: string
+  member_id: string
+  status: HostedEventRegistrationStatus
+  created_at: string
+  // Enriched
+  member?: { first_name: string; last_name: string; avatar_url?: string | null } | null
+}
+
+export interface HostedEventProof {
+  id: string
+  hosted_event_id: string
+  image_url: string
+  uploaded_by: string | null
+  created_at: string
+}
+
+export type HostCreditKind = 'earned' | 'redeemed' | 'adjusted'
+
+export interface HostCreditEntry {
+  id: string
+  host_id: string
+  event_id: string | null
+  kind: HostCreditKind
+  amount: number
+  note: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export interface HostCreditSummary {
+  earned: number
+  redeemed: number
+  balance: number
+}
+
+export interface HostStats {
+  upcomingCount: number
+  completedCount: number
+  cancelledCount: number
+  totalEvents: number
+  credits: HostCreditSummary
 }
 
 export type ReferralPartnerWithStats = ReferralPartner & ReferralPartnerStats

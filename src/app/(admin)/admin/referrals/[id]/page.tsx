@@ -5,10 +5,16 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { AdminPageHeader, StatCard, Badge, AdminCard } from '@/components/admin/AdminUI'
 import ReferralContactPicker, { type ReferralSelection } from '@/components/admin/ReferralContactPicker'
+import { isRateExpired } from '@/lib/referral-rate'
+import ReferralPayouts from '@/components/admin/ReferralPayouts'
+import ReferralSubmissions from '@/components/admin/ReferralSubmissions'
 import type { ReferralPartner, ReferralPartnerLink, ReferralPartnerStats } from '@/types'
 
 const fmtMoney = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 })
+
+const fmtDate = (d: string) =>
+  new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
 interface Analytics {
   partner: ReferralPartner
@@ -65,11 +71,11 @@ export default function ReferralPartnerDetailPage() {
     })
     const json = await res.json().catch(() => ({}))
     if (!res.ok) {
-      showToast(json.error ?? 'Linking failed.', false)
+      showToast(json.error ?? 'Referring failed.', false)
     } else {
       setResult({ succeeded: json.succeeded ?? 0, failed: json.failed ?? [] })
       setSelection({ memberIds: [], emails: [] })
-      showToast(`Linked ${json.succeeded} contact${json.succeeded !== 1 ? 's' : ''}.`)
+      showToast(`Referred ${json.succeeded} contact${json.succeeded !== 1 ? 's' : ''}.`)
       await loadAll()
     }
     setAssigning(false)
@@ -100,26 +106,56 @@ export default function ReferralPartnerDetailPage() {
       )}
 
       <Link href="/admin/referrals" className="text-sm text-gray-400 hover:text-gray-600 mb-4 inline-block">
-        ← Back to Referral Pipeline
+        ← Back to Referral Partners
       </Link>
 
       <AdminPageHeader
         title={partner.name}
-        description={`Code: ${partner.code} · ${partner.percentage}% of ${fmtMoney(membershipFee)} membership fee`}
+        description={
+          `Code: ${partner.code} · ${partner.percentage}% of ${fmtMoney(membershipFee)} membership fee` +
+          (partner.ends_at
+            ? ` · rate ${isRateExpired(partner.ends_at) ? 'expired' : 'valid until'} ${fmtDate(partner.ends_at)}`
+            : '')
+        }
       />
 
+      {partner.ends_at && isRateExpired(partner.ends_at) && (
+        <div className="mb-6 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+          <p className="text-xs text-amber-700">
+            This partner&apos;s commission rate expired on {fmtDate(partner.ends_at)}. Referrals who become
+            members after that date earn no commission — edit the partner to extend the term.
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
-        <StatCard label="Linked"       value={stats.linkedCount} colour="blue" />
+        <StatCard label="Referred"     value={stats.referredCount} colour="blue" />
         <StatCard label="Members"      value={stats.memberCount} colour="green" />
         <StatCard label="Non-members"  value={stats.nonMemberCount} colour="gray" />
-        <StatCard label="Converted"    value={stats.convertedCount} sub="Paying members" colour="green" />
+        <StatCard label="Active"       value={stats.activeCount} sub="Paying members" colour="green" />
         <StatCard label="Conversion"   value={`${Math.round(conversionRate * 100)}%`} colour="gold" />
         <StatCard label="Commission"   value={fmtMoney(stats.commissionOwed)} sub="Owed to date" colour="gold" />
       </div>
 
-      {/* Link contacts */}
+      {/* Referral lists this partner submitted, imported at their rate */}
       <div className="mb-8">
-        <AdminCard title="Link Members & Non-members">
+        <ReferralSubmissions
+          partnerId={id}
+          percentage={partner.percentage}
+          endsAt={partner.ends_at}
+          onToast={showToast}
+          onImported={loadAll}
+        />
+      </div>
+
+      {/* Monthly commission payouts */}
+      <div className="mb-8">
+        <ReferralPayouts partnerId={id} onToast={showToast} />
+      </div>
+
+      {/* Refer contacts */}
+      <div className="mb-8">
+        <AdminCard title="Refer Members & Non-members">
           <div className="space-y-5">
             <ReferralContactPicker value={selection} onChange={setSelection} linkedEmails={linkedEmails} />
 
@@ -130,13 +166,13 @@ export default function ReferralPartnerDetailPage() {
               className="w-full py-2.5 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 disabled:opacity-40 transition-colors"
             >
               {assigning
-                ? 'Linking…'
-                : `Link ${selection.memberIds.length + selection.emails.length} contact${selection.memberIds.length + selection.emails.length !== 1 ? 's' : ''}`}
+                ? 'Referring…'
+                : `Refer ${selection.memberIds.length + selection.emails.length} contact${selection.memberIds.length + selection.emails.length !== 1 ? 's' : ''}`}
             </button>
 
             {result && (
               <div className="text-xs rounded-xl px-4 py-3 bg-gray-50 border border-gray-100">
-                <p className="text-gray-700 font-medium">Linked {result.succeeded} contact{result.succeeded !== 1 ? 's' : ''}.</p>
+                <p className="text-gray-700 font-medium">Referred {result.succeeded} contact{result.succeeded !== 1 ? 's' : ''}.</p>
                 {result.failed.length > 0 && (
                   <p className="text-red-500 mt-1">Failed: {result.failed.join(', ')}</p>
                 )}
@@ -147,14 +183,14 @@ export default function ReferralPartnerDetailPage() {
       </div>
 
       {/* Linked list */}
-      <AdminCard title={`Linked Contacts (${links.length})`}>
+      <AdminCard title={`Referred Contacts (${links.length})`}>
         {links.length === 0 ? (
-          <p className="text-sm text-gray-400 italic py-4 text-center">No contacts linked yet.</p>
+          <p className="text-sm text-gray-400 italic py-4 text-center">No contacts referred yet.</p>
         ) : (
           <div className="divide-y divide-gray-50">
             {links.map(link => {
               const isMember = !!link.member_id
-              const isConverted = link.member?.membership_status === 'active'
+              const isActive = link.member?.membership_status === 'active'
               return (
                 <div key={link.id} className="flex items-center justify-between gap-3 py-3">
                   <div className="min-w-0">
@@ -165,7 +201,7 @@ export default function ReferralPartnerDetailPage() {
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <Badge label={isMember ? 'Member' : 'Non-member'} colour={isMember ? 'green' : 'gray'} />
-                    {isConverted && <Badge label="Converted" colour="green" />}
+                    {isActive && <Badge label="Active" colour="green" />}
                     <button
                       onClick={() => removeLink(link.id)}
                       disabled={removingId === link.id}

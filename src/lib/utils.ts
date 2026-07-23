@@ -92,6 +92,22 @@ export function formatTeeTime(timeString: string): string {
   return `${h12}:${minutes} ${period}`
 }
 
+// A hosted event's tee time is free text — a host can type "8:30 AM", "Shotgun
+// 9am", or leave it blank — but events listed from a real booking (and legacy
+// rows) still store a "HH:MM[:SS]" clock value. Format the clock case to a 12h
+// label; show anything else exactly as the host wrote it.
+const CLOCK_RE = /^([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/
+export function formatEventTeeTime(value: string | null | undefined): string | null {
+  const t = value?.trim()
+  if (!t) return null
+  if (!CLOCK_RE.test(t)) return t
+  const [hours = '0', minutes = '00'] = t.split(':')
+  const h = parseInt(hours, 10)
+  const period = h >= 12 ? 'PM' : 'AM'
+  const h12 = h % 12 || 12
+  return `${h12}:${minutes} ${period}`
+}
+
 export function formatRelativeTime(dateString: string): string {
   return formatDistanceToNow(new Date(dateString), { addSuffix: true })
 }

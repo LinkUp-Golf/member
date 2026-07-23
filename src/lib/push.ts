@@ -162,6 +162,43 @@ export const NotificationTemplates = {
     tag:   'guest-access',
   }),
 
+  referralPartnerApproved: (percentage: number): PushPayload => ({
+    title: 'You\'re now a referral partner',
+    body:  `Your application was approved — you'll earn ${percentage}% commission on every referral who joins.`,
+    url:   '/partner',
+    tag:   'referral-partner-approved',
+  }),
+
+  referralListImported: (imported: number, total: number): PushPayload => ({
+    title: 'Your referral list was imported',
+    body:  imported === total
+      ? `All ${total} referral${total !== 1 ? 's' : ''} are now attributed to you.`
+      : `${imported} of ${total} referrals were added — open the list to see why the rest weren't.`,
+    url:   '/partner/submissions',
+    tag:   'referral-list-imported',
+  }),
+
+  referralListRejected: (reason: string): PushPayload => ({
+    title: 'Referral list not imported',
+    body:  reason,
+    url:   '/partner/submissions',
+    tag:   'referral-list-rejected',
+  }),
+
+  referralCommissionPaid: (amount: number, method: 'cash' | 'coupon' = 'cash'): PushPayload => ({
+    title: 'Commission paid',
+    body:  `A referral commission payout of ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} has been ${method === 'coupon' ? 'issued as a coupon' : 'paid'}.`,
+    url:   '/partner/payments',
+    tag:   'referral-commission-paid',
+  }),
+
+  referralPartnerRejected: (reason: string): PushPayload => ({
+    title: 'Referral partner application',
+    body:  `Your application wasn't approved this time. ${reason}`,
+    url:   '/more/referral-partner',
+    tag:   'referral-partner-rejected',
+  }),
+
   referralJoined: (referredName: string): PushPayload => ({
     title: `${referredName} has joined!`,
     body:  `Your referral ${referredName} is now a member. Book your introductory round together.`,
@@ -237,5 +274,86 @@ export const NotificationTemplates = {
     body:  `Your event "${eventTitle}" wasn't approved. Reason: ${reason}`,
     url:   '/more/events',
     tag:   'member-event-rejected',
+  }),
+
+  // ---- Hosts ------------------------------------------------
+  hostApplicationApproved: (): PushPayload => ({
+    title: 'You\'re now a host',
+    body:  'Your application was approved — create your first event and start earning credits.',
+    url:   '/host',
+    tag:   'host-application-approved',
+  }),
+
+  hostApplicationRejected: (reason: string): PushPayload => ({
+    title: 'Host application',
+    body:  `Your application wasn't approved this time. ${reason}`,
+    url:   '/more/host',
+    tag:   'host-application-rejected',
+  }),
+
+  hostedEventPublished: (courseName: string, date: string): PushPayload => ({
+    title: 'Your event is live',
+    body:  `Your event at ${courseName} on ${date} is now open for members to reserve spots.`,
+    url:   '/host/events',
+    tag:   'hosted-event-created',
+  }),
+
+  hostedEventJoined: (memberName: string, courseName: string, date: string): PushPayload => ({
+    title: 'New reservation',
+    body:  `${memberName} reserved a spot at your ${courseName} event on ${date}.`,
+    url:   '/host/events',
+    tag:   'hosted-event-joined',
+  }),
+
+  hostedEventProofSubmitted: (hostName: string, courseName: string, date: string): PushPayload => ({
+    title: 'Event proof submitted',
+    body:  `${hostName} uploaded proof for their ${courseName} event on ${date}. Review it to approve credits.`,
+    url:   '/admin/hosts',
+    tag:   'hosted-event-proof',
+  }),
+
+  hostCreditApproved: (amount: number): PushPayload => ({
+    title: 'Credits awarded',
+    body:  `${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in host credits has been added to your balance.`,
+    url:   '/host/credits',
+    tag:   'host-credit-approved',
+  }),
+
+  hostCreditRejected: (reason: string): PushPayload => ({
+    title: 'Event credits not approved',
+    body:  `Your event's credits weren't approved. ${reason} You can upload new proof.`,
+    url:   '/host/events',
+    tag:   'host-credit-rejected',
+  }),
+
+  hostCreditRedeemed: (amount: number): PushPayload => ({
+    title: 'Credits redeemed',
+    body:  `You redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in host credits.`,
+    url:   '/host/credits',
+    tag:   'host-credit-redeemed',
+  }),
+
+  // Sent to members who had reserved a spot when the host cancels the event.
+  hostedEventCancelled: (courseName: string, date: string, reason?: string): PushPayload => ({
+    title: 'A hosted event was cancelled',
+    body:  `The ${courseName} event on ${date} has been cancelled.${reason ? ` ${reason}` : ''} Your spot has been released.`,
+    url:   '/more/hosted-events',
+    tag:   'hosted-event-cancelled',
+  }),
+
+  // Sent to members who had reserved a spot when the host changes event details.
+  hostedEventUpdated: (courseName: string, date: string): PushPayload => ({
+    title: 'A hosted event was updated',
+    body:  `Details changed for the ${courseName} event on ${date}. Open it to see the latest.`,
+    url:   '/more/hosted-events',
+    tag:   'hosted-event-updated',
+  }),
+
+  // Sent to the host when a member releases their spot.
+  hostedEventMemberCancelled: (memberName: string, courseName: string, date: string): PushPayload => ({
+    title: 'A spot opened up',
+    body:  `${memberName} released their spot at your ${courseName} event on ${date}.`,
+    url:   '/host/events',
+    tag:   'hosted-event-joined',
   }),
 }

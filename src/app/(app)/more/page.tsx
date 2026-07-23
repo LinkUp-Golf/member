@@ -6,10 +6,13 @@ import { ChevronRight, ExternalLink, LogOut } from 'lucide-react'
 import { useProfile } from '@/hooks/useProfile'
 import Avatar from '@/components/ui/Avatar'
 import AppShell from '@/components/layout/AppShell'
-import { MORE_ITEMS } from '@/lib/nav/moreItems'
+import { getMoreItems } from '@/lib/nav/moreItems'
+import { useMemberRoles } from '@/hooks/useMemberRoles'
 
 export default function MorePage() {
   const { profile, signOut } = useProfile()
+  const roles = useMemberRoles()
+  const groups = getMoreItems(roles)
   const m = profile
 
   return (
@@ -45,7 +48,7 @@ export default function MorePage() {
 
       {/* Navigation groups */}
       <div className="pb-8 space-y-6 pt-6 px-5">
-        {MORE_ITEMS.map((group, gi) => (
+        {groups.map((group, gi) => (
           <motion.div
             key={group.group}
             initial={{ opacity: 0, y: 10 }}

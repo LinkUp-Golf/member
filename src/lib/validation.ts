@@ -173,6 +173,96 @@ export function validateReferralPartnerPayload(
     }
   }
 
+  // Optional in both create and edit — null/'' clears the expiry.
+  if ('ends_at' in b && b.ends_at !== null && b.ends_at !== '') {
+    const endsResult = validateDate(b.ends_at, 'Rate end date')
+    if (!endsResult.valid) errors.push(...endsResult.errors)
+  }
+
+  return { valid: errors.length === 0, errors }
+}
+
+// ---- Host application payload --------------------------------
+// A member's application to become a host: a proposed host name and a pitch.
+export function validateHostApplicationPayload(body: unknown): ValidationResult {
+  if (typeof body !== 'object' || body === null) {
+    return { valid: false, errors: ['Invalid request body'] }
+  }
+
+  const b = body as Record<string, unknown>
+  const errors: string[] = []
+
+  const nameResult = validateString(b.name, 'Host name', { min: 2, max: 120 })
+  if (!nameResult.valid) errors.push(...nameResult.errors)
+
+  const descResult = validateString(b.description, 'Description', { min: 20, max: 1000 })
+  if (!descResult.valid) errors.push(...descResult.errors)
+
+  // Venues the applicant wants to host at — at least one, each a UUID.
+  if (!Array.isArray(b.course_ids) || b.course_ids.length === 0) {
+    errors.push('Choose at least one venue')
+  } else if (b.course_ids.length > 50) {
+    errors.push('Too many venues selected')
+  } else if (b.course_ids.some(id => !validateUUID(id, 'Venue').valid)) {
+    errors.push('One of the selected venues is invalid')
+  }
+
+  return { valid: errors.length === 0, errors }
+}
+
+// ---- Hosted event payload -----------------------------------
+// The create/edit form for a hosted event. `partial` (PATCH) only validates the
+// fields present. tee_time is optional; total_spots is a small positive int;
+// member_guest_rate is a non-negative amount.
+export function validateHostedEventPayload(
+  body: unknown,
+  options: { partial?: boolean } = {}
+): ValidationResult {
+  if (typeof body !== 'object' || body === null) {
+    return { valid: false, errors: ['Invalid request body'] }
+  }
+
+  const b = body as Record<string, unknown>
+  const errors: string[] = []
+  const { partial = false } = options
+
+  if (!partial || 'course_id' in b) {
+    const courseResult = validateUUID(b.course_id, 'Course')
+    if (!courseResult.valid) errors.push(...courseResult.errors)
+  }
+
+  if (!partial || 'event_date' in b) {
+    const dateResult = validateDate(b.event_date, 'Event date')
+    if (!dateResult.valid) errors.push(...dateResult.errors)
+  }
+
+  // Optional free text in both create and edit — null/'' means no fixed tee
+  // time. A host types whatever suits ("8:30 AM", "Shotgun 9am"); we only bound
+  // the length.
+  if ('tee_time' in b && b.tee_time !== null && b.tee_time !== '') {
+    const teeResult = validateString(b.tee_time, 'Tee time', { max: 50, required: false })
+    if (!teeResult.valid) errors.push(...teeResult.errors)
+  }
+
+  if (!partial || 'total_spots' in b) {
+    const spots = Number(b.total_spots)
+    if (!Number.isInteger(spots) || spots < 1 || spots > 200) {
+      errors.push('Available spots must be a whole number between 1 and 200')
+    }
+  }
+
+  if (!partial || 'member_guest_rate' in b) {
+    const rate = Number(b.member_guest_rate)
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100000) {
+      errors.push('Member guest rate must be a positive amount')
+    }
+  }
+
+  // Whether dinner is included — optional boolean.
+  if ('dinner' in b && b.dinner !== undefined && typeof b.dinner !== 'boolean') {
+    errors.push('Dinner must be true or false')
+  }
+
   return { valid: errors.length === 0, errors }
 }
 

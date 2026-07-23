@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { computeStatsForPartners, emptyStats } from '@/lib/referral-partners'
+import { loadPartnerCommission } from '@/lib/referral-commission'
 import { MEMBERSHIP_FEE_USD } from '@/lib/constants'
 import type { AuthContext } from '@/lib/auth/types'
 import type { ReferralPartner } from '@/types'
@@ -23,14 +24,21 @@ export const GET = withAuth(
     if (error || !partner) return NextResponse.json({ error: 'Referral partner not found' }, { status: 404 })
 
     const p = partner as ReferralPartner
-    const stats = (await computeStatsForPartners(admin, [p])).get(id) ?? emptyStats()
-    const conversionRate = stats.linkedCount ? stats.convertedCount / stats.linkedCount : 0
+    const [stats, commission] = await Promise.all([
+      computeStatsForPartners(admin, [p]).then(m => m.get(id) ?? emptyStats()),
+      loadPartnerCommission(admin, p),
+    ])
+    // Recurring accrued balance, not the old one-time figure.
+    stats.commissionOwed = commission.balance.totalAccrued
+    const conversionRate = stats.referredCount ? stats.activeCount / stats.referredCount : 0
 
     return NextResponse.json({
       partner: p,
       stats,
       conversionRate,
       membershipFee: MEMBERSHIP_FEE_USD,
+      balance: commission.balance,
+      monthlyRate: commission.monthlyRate,
     })
   },
   { requireAdmin: true, skipGHLCheck: true }

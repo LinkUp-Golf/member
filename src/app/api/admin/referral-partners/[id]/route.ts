@@ -22,15 +22,21 @@ export const PATCH = withAuth(
     const { valid, errors } = validateReferralPartnerPayload(body, { partial: true })
     if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })
 
+    if (body.payout_method != null && body.payout_method !== 'cash' && body.payout_method !== 'coupon') {
+      return NextResponse.json({ error: 'payout_method must be cash or coupon' }, { status: 400 })
+    }
+
     const admin = createAdminClient()
 
-    const allowed: Array<keyof ReferralPartner> = ['name', 'code', 'percentage']
+    const allowed: Array<keyof ReferralPartner> = ['name', 'code', 'percentage', 'ends_at', 'payout_method']
     const updates: Record<string, unknown> = {}
     for (const key of allowed) {
       if (key in body) updates[key] = body[key]
     }
     if (typeof updates.name === 'string') updates.name = updates.name.trim()
     if (typeof updates.code === 'string') updates.code = updates.code.trim()
+    // Empty string from the date input clears the expiry rather than failing.
+    if (typeof updates.ends_at === 'string' && !updates.ends_at.trim()) updates.ends_at = null
     if (!Object.keys(updates).length) return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
     updates.updated_at = new Date().toISOString()
 
