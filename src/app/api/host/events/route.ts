@@ -131,9 +131,7 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
   // Publishing takes an event straight live — there's no admin review gate.
   // A host either saves a draft or publishes to 'upcoming' immediately.
   const publish = body.publish === true
-  const description = typeof body.description === 'string' && body.description.trim()
-    ? sanitiseText(body.description.trim())
-    : null
+  const dinner = body.dinner === true
 
   const { data: event, error } = await admin
     .from('hosted_events')
@@ -144,7 +142,7 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       tee_time: teeTime,
       total_spots: spots,
       member_guest_rate: rate,
-      description,
+      dinner,
       source_booking_id: sourceBookingId,
       status: publish ? 'upcoming' : 'draft',
     })

@@ -169,8 +169,8 @@ const EventCard = memo(function EventCard({ event, onChanged, onToast, onEdit }:
         <ProgressBar value={filled} max={event.total_spots} />
       </div>
 
-      {event.description && (
-        <p className="text-xs text-gray-500 mt-3 whitespace-pre-wrap">{event.description}</p>
+      {event.dinner && (
+        <p className="text-xs text-green-800 mt-3 font-medium">🍽 Dinner included</p>
       )}
 
       {/* Actions */}
@@ -286,7 +286,7 @@ interface EventFormValues {
   tee_time: string
   total_spots: number | ''
   member_guest_rate: number | ''
-  description: string
+  dinner: boolean
   /** Set when listing one of the host's existing bookings. */
   source_booking_id: string
 }
@@ -325,7 +325,7 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
       // A linkup defaults to the host + 3 players; the host can still change it.
       total_spots: event?.total_spots ?? 3,
       member_guest_rate: event?.member_guest_rate ?? '',
-      description: event?.description ?? '',
+      dinner: event?.dinner ?? false,
       source_booking_id: event?.source_booking_id ?? '',
     },
   })
@@ -392,7 +392,7 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
           source_booking_id: values.source_booking_id,
           total_spots: Number(values.total_spots),
           member_guest_rate: Number(values.member_guest_rate),
-          description: values.description.trim() || null,
+          dinner: values.dinner,
         }
       : {
           course_id: values.course_id,
@@ -400,7 +400,7 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
           tee_time: values.tee_time || null,
           total_spots: Number(values.total_spots),
           member_guest_rate: Number(values.member_guest_rate),
-          description: values.description.trim() || null,
+          dinner: values.dinner,
         }
 
     const res = isEdit && event
@@ -616,16 +616,16 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
           )}
 
           <div>
-            <label htmlFor="ev-desc" className={labelCls}>Description</label>
-            <textarea
-              id="ev-desc"
-              rows={4}
-              maxLength={2000}
-              className={`${field} resize-none`}
-              placeholder="Anything members should know — format, meeting point, dress code…"
-              {...register('description', { maxLength: { value: 2000, message: 'At most 2000 characters' } })}
-            />
-            {errors.description && <p className={errCls}>{errors.description.message}</p>}
+            <span className={labelCls}>Dinner</span>
+            <label htmlFor="ev-dinner" className="flex items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 cursor-pointer">
+              <input
+                id="ev-dinner"
+                type="checkbox"
+                className="h-4 w-4 rounded border-gray-300 text-green-900 focus:ring-green-800"
+                {...register('dinner')}
+              />
+              <span className="text-sm text-gray-700">Dinner is included with this event</span>
+            </label>
           </div>
         </form>
 

@@ -210,11 +210,7 @@ export const PATCH = withHostAuth(
         : null
     }
     if ('member_guest_rate' in body) patch.member_guest_rate = Number(body.member_guest_rate)
-    if ('description' in body) {
-      patch.description = typeof body.description === 'string' && body.description.trim()
-        ? sanitiseText(body.description.trim())
-        : null
-    }
+    if ('dinner' in body) patch.dinner = body.dinner === true
 
     if ('total_spots' in body) {
       const nextSpots = Number(body.total_spots)

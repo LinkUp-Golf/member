@@ -109,11 +109,8 @@ export default function HostedEventDetailPage() {
                 {event.tee_time && <p className="flex items-center gap-2"><Clock className="w-4 h-4 text-green-900/40" strokeWidth={1.75} />{fmtTime(event.tee_time)}</p>}
                 {event.course?.city && <p className="flex items-center gap-2"><MapPin className="w-4 h-4 text-green-900/40" strokeWidth={1.75} />{event.course.city}</p>}
                 <p className="flex items-center gap-2"><Users className="w-4 h-4 text-green-900/40" strokeWidth={1.75} />{full ? 'Full' : `${remaining} of ${event.total_spots} spots left`}</p>
+                {event.dinner && <p className="flex items-center gap-2"><span className="w-4 text-center" aria-hidden>🍽</span>Dinner included</p>}
               </div>
-
-              {event.description && (
-                <p className="text-sm text-green-900/70 leading-relaxed whitespace-pre-wrap border-t border-green-900/5 pt-4">{event.description}</p>
-              )}
 
               <div className="border-t border-green-900/5 pt-4">
                 <div className="flex items-baseline justify-between">

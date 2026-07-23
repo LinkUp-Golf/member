@@ -249,9 +249,9 @@ export function validateHostedEventPayload(
     }
   }
 
-  if ('description' in b && b.description !== null && b.description !== '') {
-    const descResult = validateString(b.description, 'Description', { max: 2000, required: false })
-    if (!descResult.valid) errors.push(...descResult.errors)
+  // Whether dinner is included — optional boolean.
+  if ('dinner' in b && b.dinner !== undefined && typeof b.dinner !== 'boolean') {
+    errors.push('Dinner must be true or false')
   }
 
   return { valid: errors.length === 0, errors }

@@ -427,7 +427,8 @@ export interface HostedEvent {
   tee_time: string | null
   total_spots: number
   member_guest_rate: number
-  description: string | null
+  /** Whether dinner is included with the event. */
+  dinner: boolean
   status: HostedEventStatus
   cancellation_reason: string | null
   /** Why an admin sent the event back for changes. */

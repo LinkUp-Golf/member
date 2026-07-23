@@ -44,6 +44,7 @@ const EventCard = memo(function EventCard({ e }: { e: HostedEvent }) {
               {e.course.city}
             </p>
           )}
+          {e.dinner && <p className="text-xs text-green-800 mt-0.5 font-medium">🍽 Dinner included</p>}
           <p className="text-xs text-green-900/40 mt-1">Hosted by {hostLabel(e)}</p>
         </div>
         <div className="text-right flex-shrink-0">

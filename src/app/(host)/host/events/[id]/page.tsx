@@ -80,6 +80,9 @@ export default function HostEventDetailPage() {
               Members pay {fmtMoney(event.member_price ?? event.member_guest_rate)} · your guest rate {fmtMoney(event.member_guest_rate)}
               {' · '}credit for this event {fmtMoney(event.member_guest_rate)}
             </p>
+            {event.dinner && (
+              <p className="text-xs text-green-800 mt-2 font-medium">🍽 Dinner included</p>
+            )}
           </AdminCard>
 
           <AdminCard title={`Registered members (${registrations.length})`}>
@@ -125,11 +128,6 @@ export default function HostEventDetailPage() {
             </AdminCard>
           )}
 
-          {event.description && (
-            <AdminCard title="Details">
-              <p className="text-sm text-gray-600 whitespace-pre-wrap">{event.description}</p>
-            </AdminCard>
-          )}
 
           {event.status === 'cancelled' && event.cancellation_reason && (
             <AdminCard title="Cancellation">
