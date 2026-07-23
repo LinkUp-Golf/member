@@ -1,14 +1,10 @@
--- Non-member access via GHL role tags.
+-- Non-member access via GHL role tags — part 1 of 2: the enum value.
 --
--- A contact tagged 'referral-partner' or 'host' in GHL can now use the app even
--- without a golf membership. Such a user gets a member row with no home course
--- and a 'non_member' status, and is routed to their workspace.
+-- A contact tagged 'referral-partner' or 'host' in GHL can use the app without
+-- a golf membership. Such a user is a 'non_member' with no home course.
 --
---   1. Add a 'non_member' membership status (distinct from paying members, so
---      referral-conversion accounting still keys off 'active' only).
---   2. Allow members.home_course_id to be null — a non-member has no home course.
-
+-- This MUST be its own migration: `ALTER TYPE ... ADD VALUE` is transaction-
+-- sensitive, and Postgres won't let a newly added enum value be used in the
+-- same transaction that adds it. Keeping it alone (and dropping the NOT NULL on
+-- home_course_id in the next migration) guarantees each applies cleanly.
 ALTER TYPE membership_status ADD VALUE IF NOT EXISTS 'non_member';
-
-ALTER TABLE members
-  ALTER COLUMN home_course_id DROP NOT NULL;
