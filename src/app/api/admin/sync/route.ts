@@ -2,9 +2,13 @@ export const dynamic = 'force-dynamic'
 
 // ============================================================
 // POST /api/admin/sync
-// Bulk-imports all GHL contacts with any access tag into
-// Supabase — creating auth users for new contacts and running
-// the full member sync for each.
+// Full reconcile of Supabase members against GHL, treating GHL
+// as the source of truth:
+//   1. Import/update every GHL contact holding an access tag
+//      (creating auth users for new contacts).
+//   2. Reconcile existing members GHL no longer tags — a member
+//      whose access tag was removed (or whose contact was deleted)
+//      in GHL is deactivated, so a cancellation propagates.
 //
 // Idempotent: safe to run multiple times.
 // ============================================================
@@ -14,8 +18,8 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { listContactsByTag } from '@/lib/ghl/client'
-import { syncMember } from '@/lib/sync'
-import { ALL_ACCESS_TAGS } from '@/lib/ghl/tags'
+import { syncMember, refreshMembersFromGhl } from '@/lib/sync'
+import { ALL_ACCESS_TAGS, hasAnyAccessTag } from '@/lib/ghl/tags'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 import { randomUUID } from 'crypto'
@@ -51,6 +55,15 @@ export const POST = withAuth(
     for (const contact of contacts) {
       try {
         if (!contact.email) {
+          skipped++
+          continue
+        }
+
+        // Don't provision an account for a contact GHL doesn't actually grant
+        // access to — otherwise a contact returned without a usable access tag
+        // would leave an orphaned auth user with no member row. syncMember would
+        // skip it anyway; bail before creating the user.
+        if (!hasAnyAccessTag(contact.tags ?? [])) {
           skipped++
           continue
         }
@@ -105,12 +118,55 @@ export const POST = withAuth(
       }
     }
 
-    log.info('Bulk sync complete', { metadata: { total: contacts.length, synced, skipped, errors: errors.length } })
+    // ---- 3. Reconcile members GHL no longer tags -------------
+    // The import pass above only sees contacts that still hold an access tag.
+    // A member whose tag was removed (cancelled) — or whose contact was deleted
+    // — in GHL never appears there, so their status would stay 'active' forever.
+    // Re-check exactly those members against GHL and deactivate the ones that
+    // no longer qualify, so a cancellation in the source of truth propagates.
+    let deactivated = 0
+    const seenContactIds = new Set(contacts.map(c => c.id))
+
+    const { data: existingMembers } = await adminClient
+      .from('members')
+      .select('id, ghl_contact_id, membership_status')
+      .neq('membership_status', 'suspended')
+
+    // Only members we didn't already sync this run, and only those we can look
+    // up in GHL (a member with no ghl_contact_id can't be reconciled here).
+    const stale = (existingMembers ?? []).filter(
+      m => m.ghl_contact_id && !seenContactIds.has(m.ghl_contact_id)
+    )
+
+    if (stale.length) {
+      const staleIds = stale.map(m => m.id)
+      const { failed } = await refreshMembersFromGhl(
+        stale.map(m => ({ id: m.id, ghl_contact_id: m.ghl_contact_id })),
+        { supabase: adminClient, requestId }
+      )
+
+      // Count what actually got deactivated rather than inferring it: none of
+      // the stale set was suspended before this run (we excluded suspended
+      // above), so any now-suspended row was deactivated by this reconcile.
+      // refreshMembersFromGhl leaves still-tagged members active, so this
+      // doesn't overcount a member a stale fetch happened to miss.
+      const { count } = await adminClient
+        .from('members')
+        .select('id', { count: 'exact', head: true })
+        .in('id', staleIds)
+        .eq('membership_status', 'suspended')
+      deactivated = count ?? 0
+
+      if (failed) errors.push(`${failed} member(s) could not be reconciled — GHL lookup failed`)
+    }
+
+    log.info('Bulk sync complete', { metadata: { total: contacts.length, synced, skipped, deactivated, errors: errors.length } })
 
     return NextResponse.json({
       total: contacts.length,
       synced,
       skipped,
+      deactivated,
       errors,
     })
   },
