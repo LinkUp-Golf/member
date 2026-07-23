@@ -24,6 +24,7 @@ import type {
 
 export default function HomePage() {
   const { user, profile, loading: authLoading, refetch } = useProfile();
+  const homeRouter = useRouter();
   const [nextBooking, setNextBooking] = useState<Booking | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
@@ -44,6 +45,19 @@ export default function HomePage() {
   useEffect(() => {
     setGreeting(getGreeting());
   }, []);
+
+  // A non-member (referral partner / host with no golf membership) has no home
+  // course and no member app to show — send them to their workspace. The
+  // callback already does this on login; this catches direct /home navigation.
+  useEffect(() => {
+    if (authLoading || !profile || profile.home_course_id) return;
+    const tags = profile.ghl_tags ?? [];
+    homeRouter.replace(
+      tags.includes('referral-partner') ? '/partner'
+      : tags.includes('host') ? '/host'
+      : '/membership-required'
+    );
+  }, [authLoading, profile, homeRouter]);
 
   const loadHomeData = useCallback(async () => {
     const [bookingRes, announcementRes, promoRes] =

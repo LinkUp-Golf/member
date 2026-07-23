@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
   // ---- Suspension check --------------------------------------
   const { data: memberRecord } = await adminClient
     .from('members')
-    .select('membership_status')
+    .select('membership_status, home_course_id')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -101,5 +101,28 @@ export async function GET(request: NextRequest) {
     metadata: { method: 'magic_link_callback' },
   })
 
+  // A non-member (no home course) has no member app to land on — send them to
+  // their workspace instead of /home. An explicit workspace `next` is honoured.
+  if (!memberRecord?.home_course_id && !next.startsWith('/partner') && !next.startsWith('/host')) {
+    const dest = await workspaceLandingPath(adminClient, user.id)
+    if (dest) return NextResponse.redirect(new URL(dest, request.url))
+  }
+
   return NextResponse.redirect(new URL(next, request.url))
+}
+
+// Where a non-member should land: their referral-partner workspace, else their
+// host workspace. Returns null if they own neither (defensive — role sync
+// provisions the row, so this is unexpected).
+async function workspaceLandingPath(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string
+): Promise<string | null> {
+  const { data: partner } = await admin
+    .from('referral_partners').select('id').eq('member_id', userId).maybeSingle()
+  if (partner) return '/partner'
+  const { data: host } = await admin
+    .from('hosts').select('id').eq('member_id', userId).eq('status', 'active').maybeSingle()
+  if (host) return '/host'
+  return null
 }

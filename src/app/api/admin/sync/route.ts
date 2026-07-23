@@ -19,7 +19,7 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { listContactsByTag } from '@/lib/ghl/client'
 import { syncMember, refreshMembersFromGhl } from '@/lib/sync'
-import { ALL_ACCESS_TAGS, hasAnyAccessTag } from '@/lib/ghl/tags'
+import { ALL_LOGIN_TAGS, hasAnyAccessTag } from '@/lib/ghl/tags'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 import { randomUUID } from 'crypto'
@@ -35,7 +35,7 @@ export const POST = withAuth(
     const contactMap = new Map<string, (typeof contacts)[number]>()
     let contacts: Awaited<ReturnType<typeof listContactsByTag>> = []
 
-    for (const tag of ALL_ACCESS_TAGS) {
+    for (const tag of ALL_LOGIN_TAGS) {
       try {
         const page = await listContactsByTag(tag)
         for (const c of page) contactMap.set(c.id, c)

@@ -23,6 +23,18 @@ export const ALL_ACCESS_TAGS = Object.keys(COURSE_TAG_MAP) as CourseTag[]
 /** Unique course slugs across all access tags — use this instead of hardcoding a slug. */
 export const COURSE_SLUGS = [...new Set(Object.values(COURSE_TAG_MAP))] as CourseSlug[]
 
+// ---- Role tags ----------------------------------------------
+// GHL tags that make someone a referral partner / host. These grant app access
+// on their own — a person carrying one can log in and use their workspace even
+// without a golf membership (they become a 'non_member' member row with no home
+// course). Someone can hold both a membership tag and a role tag.
+export const PARTNER_ROLE_TAG = 'referral-partner'
+export const HOST_ROLE_TAG = 'host'
+export const ROLE_ACCESS_TAGS = [PARTNER_ROLE_TAG, HOST_ROLE_TAG] as const
+
+/** Every tag that lets someone into the app — course/membership tags plus roles. */
+export const ALL_LOGIN_TAGS = [...ALL_ACCESS_TAGS, ...ROLE_ACCESS_TAGS] as string[]
+
 /** Returns true if a tag grants access to any course */
 export function isAccessTag(tag: string): tag is CourseTag {
   return tag in COURSE_TAG_MAP
@@ -33,8 +45,27 @@ export function courseSlugForTag(tag: string): CourseSlug | null {
   return (COURSE_TAG_MAP as Record<string, string>)[tag] as CourseSlug ?? null
 }
 
-/** Returns true if a tag array contains at least one access tag */
+/** Whether the person carries the referral-partner role tag. */
+export function hasPartnerTag(tags: string[]): boolean {
+  return tags.includes(PARTNER_ROLE_TAG)
+}
+
+/** Whether the person carries the host role tag. */
+export function hasHostTag(tags: string[]): boolean {
+  return tags.includes(HOST_ROLE_TAG)
+}
+
+/**
+ * Returns true if a tag array lets the person into the app at all — a course
+ * access tag OR a role tag (referral partner / host). This is the login gate
+ * used at magic-link request, callback, and the per-request revalidator.
+ */
 export function hasAnyAccessTag(tags: string[]): boolean {
+  return ALL_ACCESS_TAGS.some(tag => tags.includes(tag)) || ROLE_ACCESS_TAGS.some(tag => tags.includes(tag))
+}
+
+/** Whether the person holds a course access tag (i.e. is a golf member, not a role-only user). */
+export function hasCourseAccessTag(tags: string[]): boolean {
   return ALL_ACCESS_TAGS.some(tag => tags.includes(tag))
 }
 

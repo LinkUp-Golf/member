@@ -9,10 +9,11 @@
 // ============================================================
 
 import { logger } from '@/lib/logger'
-import { COURSE_TAG_MAP, hasAnyAccessTag } from '@/lib/ghl/tags'
+import { COURSE_TAG_MAP, hasAnyAccessTag, hasCourseAccessTag, hasHostTag, hasPartnerTag } from '@/lib/ghl/tags'
 import { getContactByIdStrict } from '@/lib/ghl/client'
 import { upsertMember, deactivateMember } from './member.sync'
 import { syncCourseMemberships } from './membership.sync'
+import { ensureHostRow, ensurePartnerRow } from './roles.sync'
 import type { GHLContact } from '@/types'
 import type { SyncContext, SyncResult } from './types'
 
@@ -34,45 +35,43 @@ export async function syncMember(params: {
     return { success: true, userId, action: 'skipped' }
   }
 
-  // Resolve home course from the first matching access tag
+  // A golf member carries a course tag; a role-only user (referral partner /
+  // host with no membership) does not, and becomes a course-less non-member.
+  const isMember = hasCourseAccessTag(tags)
+  let homeCourseId: string | null = null
+
   const homeTag = (Object.keys(COURSE_TAG_MAP) as (keyof typeof COURSE_TAG_MAP)[])
     .find(tag => tags.includes(tag))
 
-  if (!homeTag) {
-    return { success: true, userId, action: 'skipped' }
+  if (isMember && homeTag) {
+    const courseSlug = COURSE_TAG_MAP[homeTag]
+    const { data: homeCourse } = await ctx.supabase
+      .from('courses')
+      .select('id')
+      .eq('slug', courseSlug)
+      .single()
+
+    if (!homeCourse) {
+      log.warn('Home course not found', { metadata: { courseSlug } })
+      return { success: false, userId, action: 'skipped', error: `Course not found: ${courseSlug}` }
+    }
+    homeCourseId = homeCourse.id
   }
 
-  const courseSlug = COURSE_TAG_MAP[homeTag]
-  const { data: homeCourse } = await ctx.supabase
-    .from('courses')
-    .select('id')
-    .eq('slug', courseSlug)
-    .single()
-
-  if (!homeCourse) {
-    log.warn('Home course not found', { metadata: { courseSlug } })
-    return { success: false, userId, action: 'skipped', error: `Course not found: ${courseSlug}` }
-  }
-
-  // Upsert member row
-  const memberResult = await upsertMember({
-    contact,
-    userId,
-    homeCourseId: homeCourse.id,
-    ctx,
-  })
-
+  // Upsert member row (course-less for a non-member)
+  const memberResult = await upsertMember({ contact, userId, homeCourseId, isMember, ctx })
   if (!memberResult.success) return memberResult
 
-  // Upsert course memberships
-  await syncCourseMemberships({
-    userId,
-    tags,
-    homeCourseId: homeCourse.id,
-    ctx,
-  })
+  // Course memberships only apply to golf members.
+  if (isMember && homeCourseId) {
+    await syncCourseMemberships({ userId, tags, homeCourseId, ctx })
+  }
 
-  log.info('Member sync complete', { ghlContactId: contact.id })
+  // Provision the workspace row each role tag implies (idempotent).
+  if (hasHostTag(tags)) await ensureHostRow(userId, contact, ctx)
+  if (hasPartnerTag(tags)) await ensurePartnerRow(userId, contact, ctx)
+
+  log.info('Member sync complete', { ghlContactId: contact.id, metadata: { isMember } })
   return { success: true, userId, action: 'updated' }
 }
 

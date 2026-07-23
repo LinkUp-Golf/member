@@ -10,7 +10,10 @@ import type { SyncContext, SyncResult } from './types'
 interface UpsertMemberParams {
   contact: GHLContact
   userId: string
-  homeCourseId: string
+  /** The home course, or null for a role-only non-member. */
+  homeCourseId: string | null
+  /** True when the contact holds a course/membership tag; false for a role-only non-member. */
+  isMember: boolean
   ctx: SyncContext
 }
 
@@ -18,6 +21,7 @@ export async function upsertMember({
   contact,
   userId,
   homeCourseId,
+  isMember,
   ctx,
 }: UpsertMemberParams): Promise<SyncResult> {
   const log = logger.child({
@@ -26,23 +30,40 @@ export async function upsertMember({
     action: 'member_upsert',
   })
 
+  // Identity fields are always refreshed from GHL (the source of truth).
+  const base = {
+    id: userId,
+    ghl_contact_id: contact.id,
+    email: (contact.email ?? '').toLowerCase(),
+    first_name: contact.firstName ?? '',
+    last_name: contact.lastName ?? '',
+    phone: contact.phone ?? null,
+    ghl_tags: contact.tags ?? [],
+    updated_at: new Date().toISOString(),
+  }
+
+  // Membership fields depend on whether they're a golf member:
+  //  - member          → set the home course and mark active
+  //  - non-member, new  → no home course, 'non_member' status
+  //  - non-member, but already a course member → leave their membership alone
+  //    (a role tag must never wipe an existing membership)
+  let row: Record<string, unknown> = base
+  if (isMember) {
+    row = { ...base, home_course_id: homeCourseId, membership_status: 'active' }
+  } else {
+    const { data: existing } = await ctx.supabase
+      .from('members')
+      .select('home_course_id')
+      .eq('id', userId)
+      .maybeSingle()
+    if (!existing?.home_course_id) {
+      row = { ...base, home_course_id: null, membership_status: 'non_member' }
+    }
+  }
+
   const { error } = await ctx.supabase
     .from('members')
-    .upsert(
-      {
-        id: userId,
-        ghl_contact_id: contact.id,
-        email: (contact.email ?? '').toLowerCase(),
-        first_name: contact.firstName ?? '',
-        last_name: contact.lastName ?? '',
-        phone: contact.phone ?? null,
-        home_course_id: homeCourseId,
-        membership_status: 'active',
-        ghl_tags: contact.tags ?? [],
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'id' }
-    )
+    .upsert(row, { onConflict: 'id' })
 
   if (error) {
     log.error('Member upsert failed', { errorMessage: error.message })

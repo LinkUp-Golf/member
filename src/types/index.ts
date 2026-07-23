@@ -4,7 +4,7 @@
 
 // ---- Enums --------------------------------------------------
 
-export type MembershipStatus = 'active' | 'waitlist' | 'pending' | 'suspended' | 'cancelled'
+export type MembershipStatus = 'active' | 'waitlist' | 'pending' | 'suspended' | 'cancelled' | 'non_member'
 export type AccessType = 'home' | 'guest'
 export type CourseMembershipStatus = 'active' | 'pending' | 'expired'
 export type BookingStatus =
@@ -169,7 +169,8 @@ export interface Member {
   first_name: string
   last_name: string
   phone: string | null
-  home_course_id: string
+  /** Null for a non-member (a referral partner / host with no golf membership). */
+  home_course_id: string | null
   membership_status: MembershipStatus
   membership_start_date: string | null
   referred_by: string | null
