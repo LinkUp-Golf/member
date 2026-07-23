@@ -42,24 +42,15 @@ export async function upsertMember({
     updated_at: new Date().toISOString(),
   }
 
-  // Membership fields depend on whether they're a golf member:
-  //  - member          → set the home course and mark active
-  //  - non-member, new  → no home course, 'non_member' status
-  //  - non-member, but already a course member → leave their membership alone
-  //    (a role tag must never wipe an existing membership)
-  let row: Record<string, unknown> = base
-  if (isMember) {
-    row = { ...base, home_course_id: homeCourseId, membership_status: 'active' }
-  } else {
-    const { data: existing } = await ctx.supabase
-      .from('members')
-      .select('home_course_id')
-      .eq('id', userId)
-      .maybeSingle()
-    if (!existing?.home_course_id) {
-      row = { ...base, home_course_id: null, membership_status: 'non_member' }
-    }
-  }
+  // Membership fields track GHL (the source of truth):
+  //  - has a course tag → golf member: set the home course, mark active
+  //  - no course tag    → not a golf member: clear the home course, mark
+  //    'non_member' (they reached here via a role tag). This runs only after
+  //    login is already authorized, so an empty course set genuinely means
+  //    "not a member", not a transient GHL blip.
+  const row = isMember
+    ? { ...base, home_course_id: homeCourseId, membership_status: 'active' }
+    : { ...base, home_course_id: null, membership_status: 'non_member' }
 
   const { error } = await ctx.supabase
     .from('members')
