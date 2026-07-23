@@ -1,7 +1,8 @@
 'use client'
 
 // Admin: browse all hosted events, review proof, and approve or reject the
-// host's credit. Rendered as a tab on the admin Hosts page.
+// host's credit. Rendered as a tab on the admin Hosts page. Events publish
+// live without admin review, so the only decision here is credit approval.
 
 import { useState, useEffect, useCallback, memo } from 'react'
 import { AdminCard, Badge } from '@/components/admin/AdminUI'
@@ -15,7 +16,6 @@ const fmtDate = (d: string) =>
 
 const STATUS_META: Record<HostedEventStatus, { label: string; colour: 'green' | 'gold' | 'red' | 'blue' | 'gray' }> = {
   draft:                   { label: 'Draft',            colour: 'gray' },
-  pending_review:          { label: 'Awaiting review',  colour: 'gold' },
   upcoming:                { label: 'Upcoming',         colour: 'green' },
   completed:               { label: 'Completed',        colour: 'blue' },
   pending_credit_approval: { label: 'Credit approval',  colour: 'gold' },
@@ -24,7 +24,6 @@ const STATUS_META: Record<HostedEventStatus, { label: string; colour: 'green' | 
 }
 
 const FILTERS: { key: string; label: string }[] = [
-  { key: 'pending_review', label: 'Awaiting review' },
   { key: 'pending_credit_approval', label: 'Credit approval' },
   { key: 'upcoming', label: 'Upcoming' },
   { key: 'completed', label: 'Completed' },
@@ -42,7 +41,7 @@ function hostLabel(e: HostedEvent) {
 export default function HostedEventsAdmin({ onToast }: { onToast: (msg: string, ok?: boolean) => void }) {
   const [events, setEvents] = useState<HostedEvent[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState('pending_review')
+  const [filter, setFilter] = useState('pending_credit_approval')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -99,17 +98,15 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
   const meta = STATUS_META[event.status]
   const proofs = event.proofs ?? []
 
-  // Two distinct decisions land on this row: approving the event so members can
-  // see it, and (after it runs) approving the host's credit.
-  const awaitingReview = event.status === 'pending_review'
+  // The only decision left on this row is approving the host's credit after the
+  // event has run — there's no event-review gate anymore.
   const awaitingCredit = event.status === 'pending_credit_approval'
-  const endpoint = awaitingReview ? 'review' : 'credits'
 
   async function decide(action: 'approve' | 'reject') {
     if (busy) return
     if (action === 'reject' && !reason.trim()) { onToast('Enter a reason.', false); return }
     setBusy(true)
-    const res = await fetch(`/api/admin/hosted-events/${event.id}/${endpoint}`, {
+    const res = await fetch(`/api/admin/hosted-events/${event.id}/credits`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(action === 'approve' ? { action } : { action, reason: reason.trim() }),
@@ -118,13 +115,9 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
     setBusy(false)
     if (!res.ok) { onToast(json.error ?? 'Action failed.', false); return }
 
-    if (awaitingReview) {
-      onToast(action === 'approve' ? 'Event approved — now live for members.' : 'Event sent back to the host.')
-    } else {
-      onToast(action === 'approve'
-        ? `Credit of ${fmtMoney(json.amount ?? event.member_guest_rate)} awarded.`
-        : 'Credit rejected.')
-    }
+    onToast(action === 'approve'
+      ? `Credit of ${fmtMoney(json.amount ?? event.member_guest_rate)} awarded.`
+      : 'Credit rejected.')
     setRejecting(false); setReason('')
     onChanged()
   }
@@ -162,15 +155,15 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
         <p className="text-[11px] text-gray-400 mt-2">Listed from one of the host&apos;s existing bookings.</p>
       )}
 
-      {(awaitingReview || awaitingCredit) && (
+      {awaitingCredit && (
         <div className="mt-4">
-          {awaitingCredit && proofs.length === 0 && (
+          {proofs.length === 0 && (
             <p className="text-[11px] text-amber-600 mb-2">No proof image was uploaded.</p>
           )}
           {!rejecting ? (
             <div className="flex gap-2">
               <button onClick={() => decide('approve')} disabled={busy} className="btn btn-sm bg-green-900 text-white">
-                {awaitingReview ? 'Approve event' : 'Approve credit'}
+                Approve credit
               </button>
               <button onClick={() => setRejecting(true)} disabled={busy} className="btn btn-outline btn-sm text-red-600 border-red-200">
                 Reject
@@ -187,15 +180,10 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
               <div className="flex gap-2">
                 <button onClick={() => { setRejecting(false); setReason('') }} disabled={busy} className="btn btn-outline btn-sm flex-1">Back</button>
                 <button onClick={() => decide('reject')} disabled={busy} className="btn btn-sm flex-1 bg-red-600 text-white">
-                  {awaitingReview ? 'Send back' : 'Reject credit'}
+                  Reject credit
                 </button>
               </div>
             </div>
-          )}
-          {awaitingReview && (
-            <p className="text-[11px] text-gray-400 mt-2">
-              Approving makes this event visible to members. Rejecting returns it to the host as a draft.
-            </p>
           )}
         </div>
       )}

@@ -412,8 +412,6 @@ export interface HostApplication {
 
 export type HostedEventStatus =
   | 'draft'
-  /** Submitted by the host, awaiting admin approval before members can see it. */
-  | 'pending_review'
   | 'upcoming'
   | 'completed'
   | 'cancelled'

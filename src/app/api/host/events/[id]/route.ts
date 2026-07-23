@@ -10,15 +10,15 @@ import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateHostedEventPayload, sanitiseText } from '@/lib/validation'
 import { enrichHostedEvents } from '@/lib/hosts/events'
-import { sendPushToMembers, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
+import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
 import type { HostedEvent } from '@/types'
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
 // A host may still change an event that hasn't happened yet.
-const EDITABLE_STATUSES = ['draft', 'pending_review', 'upcoming']
-const CANCELLABLE_STATUSES = ['draft', 'pending_review', 'upcoming']
+const EDITABLE_STATUSES = ['draft', 'upcoming']
+const CANCELLABLE_STATUSES = ['draft', 'upcoming']
 
 // Fields that come from the linked booking and therefore can't be edited.
 const BOOKING_LOCKED_FIELDS = ['course_id', 'event_date', 'tee_time']
@@ -105,35 +105,29 @@ export const PATCH = withHostAuth(
     const event = await loadOwnEvent(admin, id, ctx.host.id)
     if (!event) return NextResponse.json({ error: 'Event not found' }, { status: 404 })
 
-    // ---- Submit for review (draft -> pending_review) ---------
-    // An event is only visible to members once an admin approves it.
+    // ---- Publish (draft -> upcoming) -------------------------
+    // No admin review gate: publishing takes the event live immediately.
     if (action === 'publish') {
       if (event.status !== 'draft') {
-        return NextResponse.json({ error: 'Only a draft can be submitted for review.' }, { status: 409 })
+        return NextResponse.json({ error: 'Only a draft can be published.' }, { status: 409 })
       }
       if (event.event_date < todayISO()) {
-        return NextResponse.json({ error: 'Set a future date before submitting.' }, { status: 400 })
+        return NextResponse.json({ error: 'Set a future date before publishing.' }, { status: 400 })
       }
-      const { data: submitted, error } = await admin
+      const { data: published, error } = await admin
         .from('hosted_events')
-        .update({ status: 'pending_review', rejection_reason: null })
+        .update({ status: 'upcoming', rejection_reason: null })
         .eq('id', id).eq('status', 'draft')
         .select('id')
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-      if (!submitted || submitted.length === 0) {
+      if (!published || published.length === 0) {
         return NextResponse.json({ error: 'This event is no longer a draft.' }, { status: 409 })
       }
 
-      void sendPushToAdmins(
-        NotificationTemplates.hostedEventSubmitted(
-          ctx.host.name, event.course?.name ?? 'a course', event.event_date
-        )
-      ).catch(() => {})
-
-      logger.info('Hosted event submitted for review', {
-        action: 'host.event.submitted', userId: ctx.userId, metadata: { event_id: id },
+      logger.info('Hosted event published', {
+        action: 'host.event.published', userId: ctx.userId, metadata: { event_id: id },
       })
-      return NextResponse.json({ ok: true, status: 'pending_review' })
+      return NextResponse.json({ ok: true, status: 'upcoming' })
     }
 
     // ---- Cancel ----------------------------------------------

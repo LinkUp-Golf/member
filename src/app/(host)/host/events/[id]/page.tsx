@@ -30,7 +30,6 @@ const fmtTime = (t: string | null) => {
 
 const STATUS_META: Record<HostedEventStatus, { label: string; colour: 'green' | 'gold' | 'red' | 'blue' | 'gray' }> = {
   draft:                   { label: 'Draft',            colour: 'gray' },
-  pending_review:          { label: 'Awaiting review',  colour: 'gold' },
   upcoming:                { label: 'Upcoming',         colour: 'green' },
   completed:               { label: 'Completed',        colour: 'blue' },
   pending_credit_approval: { label: 'Credit approval',  colour: 'gold' },

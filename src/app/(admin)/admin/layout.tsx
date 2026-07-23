@@ -259,14 +259,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       .eq('status', 'pending')
     setPartnerApplicationsCount(applicationsCount ?? 0)
 
-    // Host attention badge: pending role applications + events awaiting review
-    // + events awaiting credit approval.
-    const [hostAppsRes, hostReviewRes, hostProofRes] = await Promise.all([
+    // Host attention badge: pending role applications + events awaiting credit
+    // approval. (There's no event-review gate anymore — events publish live.)
+    const [hostAppsRes, hostProofRes] = await Promise.all([
       supabase.from('host_applications').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
-      supabase.from('hosted_events').select('id', { count: 'exact', head: true }).eq('status', 'pending_review'),
       supabase.from('hosted_events').select('id', { count: 'exact', head: true }).eq('status', 'pending_credit_approval'),
     ])
-    setHostsCount((hostAppsRes.count ?? 0) + (hostReviewRes.count ?? 0) + (hostProofRes.count ?? 0))
+    setHostsCount((hostAppsRes.count ?? 0) + (hostProofRes.count ?? 0))
 
     const { data: courses } = await supabase
       .from('courses')

@@ -57,7 +57,6 @@ describe('canUploadProof', () => {
   it('refuses it before the event has happened', () => {
     expect(canUploadProof('upcoming', '2026-07-22', TODAY)).toBe(false)
     expect(canUploadProof('draft', TODAY, TODAY)).toBe(false)
-    expect(canUploadProof('pending_review', TODAY, TODAY)).toBe(false)
   })
 
   it('refuses it once the event is settled or called off', () => {

@@ -31,7 +31,6 @@ const fmtTime = (t: string | null) => {
 
 const STATUS_META: Record<HostedEventStatus, { label: string; colour: 'green' | 'gold' | 'red' | 'blue' | 'gray' }> = {
   draft:                   { label: 'Draft',              colour: 'gray' },
-  pending_review:          { label: 'Awaiting review',    colour: 'gold' },
   upcoming:                { label: 'Upcoming',           colour: 'green' },
   completed:               { label: 'Completed',          colour: 'blue' },
   pending_credit_approval: { label: 'Credit approval',    colour: 'gold' },
@@ -121,8 +120,8 @@ const EventCard = memo(function EventCard({ event, onChanged, onToast, onEdit }:
   const meta = STATUS_META[event.status]
   const filled = event.filled_spots ?? 0
   // Mirrors the server's editable/cancellable set — a host can still fix an
-  // event while it's awaiting review.
-  const editable = event.status === 'draft' || event.status === 'pending_review' || event.status === 'upcoming'
+  // event that hasn't happened yet.
+  const editable = event.status === 'draft' || event.status === 'upcoming'
   const canProof = canUploadProof(event.status, event.event_date)
 
   async function act(action: string, extra: Record<string, unknown> = {}) {
@@ -137,7 +136,7 @@ const EventCard = memo(function EventCard({ event, onChanged, onToast, onEdit }:
     setBusy(false)
     if (!res.ok) { onToast(json.error ?? 'Action failed.', false); return }
     onToast(
-      action === 'publish' ? 'Submitted for review.'
+      action === 'publish' ? 'Published — now live for members.'
         : action === 'cancel' ? 'Event cancelled.'
         : 'Saved.'
     )
@@ -188,7 +187,7 @@ const EventCard = memo(function EventCard({ event, onChanged, onToast, onEdit }:
           <button onClick={() => onEdit(event)} disabled={busy} className="btn btn-outline btn-sm">Edit</button>
         )}
         {event.status === 'draft' && (
-          <button onClick={() => act('publish')} disabled={busy} className="btn btn-gold btn-sm">Submit for review</button>
+          <button onClick={() => act('publish')} disabled={busy} className="btn btn-gold btn-sm">Publish</button>
         )}
         {canProof && (
           <ProofControl event={event} onDone={onChanged} onToast={onToast} />
@@ -198,16 +197,6 @@ const EventCard = memo(function EventCard({ event, onChanged, onToast, onEdit }:
         )}
       </div>
 
-      {event.status === 'pending_review' && (
-        <p className="text-[11px] text-amber-600 mt-3">
-          Submitted — an admin will review it before members can see it.
-        </p>
-      )}
-      {event.status === 'draft' && event.rejection_reason && (
-        <p className="text-[11px] text-red-600 mt-3">
-          Sent back by an admin: {event.rejection_reason} — edit and submit again.
-        </p>
-      )}
       {event.status === 'pending_credit_approval' && (
         <p className="text-[11px] text-amber-600 mt-3">Proof submitted — awaiting admin approval for your credit.</p>
       )}

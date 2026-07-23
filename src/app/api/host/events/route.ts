@@ -9,7 +9,6 @@ import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateHostedEventPayload, sanitiseText } from '@/lib/validation'
 import { enrichHostedEvents } from '@/lib/hosts/events'
-import { sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
 import type { HostedEvent } from '@/types'
 
@@ -126,9 +125,9 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     return NextResponse.json({ error: 'That course is not available for events.' }, { status: 400 })
   }
 
-  // "Publish" now means submit for admin review — events are only visible to
-  // members once an admin approves them.
-  const submit = body.publish === true
+  // Publishing takes an event straight live — there's no admin review gate.
+  // A host either saves a draft or publishes to 'upcoming' immediately.
+  const publish = body.publish === true
   const description = typeof body.description === 'string' && body.description.trim()
     ? sanitiseText(body.description.trim())
     : null
@@ -144,7 +143,7 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       member_guest_rate: rate,
       description,
       source_booking_id: sourceBookingId,
-      status: submit ? 'pending_review' : 'draft',
+      status: publish ? 'upcoming' : 'draft',
     })
     .select()
     .single()
@@ -158,16 +157,10 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  if (submit) {
-    void sendPushToAdmins(
-      NotificationTemplates.hostedEventSubmitted(ctx.host.name, course.name, eventDate)
-    ).catch(() => {})
-  }
-
   logger.info('Hosted event created', {
     action: 'host.event.created',
     userId: ctx.userId,
-    metadata: { event_id: event.id, host_id: ctx.host.id, submitted: submit, from_booking: !!sourceBookingId },
+    metadata: { event_id: event.id, host_id: ctx.host.id, published: publish, from_booking: !!sourceBookingId },
   })
 
   return NextResponse.json({ event }, { status: 201 })

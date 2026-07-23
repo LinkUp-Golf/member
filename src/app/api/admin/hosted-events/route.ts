@@ -12,7 +12,7 @@ import type { AuthContext } from '@/lib/auth/types'
 import type { HostedEvent } from '@/types'
 
 const VALID_STATUSES = new Set([
-  'draft', 'pending_review', 'upcoming', 'completed', 'cancelled',
+  'draft', 'upcoming', 'completed', 'cancelled',
   'pending_credit_approval', 'credits_awarded',
 ])
 
@@ -35,9 +35,8 @@ export const GET = withAuth(
 
     const events = await enrichHostedEvents(admin, (data ?? []) as HostedEvent[])
     const pendingCount = events.filter(e => e.status === 'pending_credit_approval').length
-    const pendingReviewCount = events.filter(e => e.status === 'pending_review').length
 
-    return NextResponse.json({ events, pendingCount, pendingReviewCount })
+    return NextResponse.json({ events, pendingCount })
   },
   { requireAdmin: true, skipGHLCheck: true }
 )

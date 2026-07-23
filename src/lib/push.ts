@@ -333,30 +333,6 @@ export const NotificationTemplates = {
     tag:   'host-credit-redeemed',
   }),
 
-  // Sent to admins when a host submits an event for review.
-  hostedEventSubmitted: (hostName: string, courseName: string, date: string): PushPayload => ({
-    title: 'Event awaiting review',
-    body:  `${hostName} submitted an event at ${courseName} on ${date}. Approve it to make it visible to members.`,
-    url:   '/admin/hosts',
-    tag:   'hosted-event-submitted',
-  }),
-
-  // Sent to the host once an admin approves their event.
-  hostedEventApproved: (courseName: string, date: string): PushPayload => ({
-    title: 'Your event is live',
-    body:  `Your event at ${courseName} on ${date} was approved and is now open for members to reserve.`,
-    url:   '/host/events',
-    tag:   'hosted-event-approved',
-  }),
-
-  // Sent to the host when an admin sends the event back for changes.
-  hostedEventRejected: (reason: string): PushPayload => ({
-    title: 'Event not approved',
-    body:  `Your event wasn't approved. ${reason} You can edit it and submit again.`,
-    url:   '/host/events',
-    tag:   'hosted-event-rejected',
-  }),
-
   // Sent to members who had reserved a spot when the host cancels the event.
   hostedEventCancelled: (courseName: string, date: string, reason?: string): PushPayload => ({
     title: 'A hosted event was cancelled',
