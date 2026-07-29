@@ -216,7 +216,7 @@ export function validateHostApplicationPayload(body: unknown): ValidationResult 
 // member_guest_rate is a non-negative amount.
 export function validateHostedEventPayload(
   body: unknown,
-  options: { partial?: boolean } = {}
+  options: { partial?: boolean; requireCourse?: boolean } = {}
 ): ValidationResult {
   if (typeof body !== 'object' || body === null) {
     return { valid: false, errors: ['Invalid request body'] }
@@ -224,9 +224,11 @@ export function validateHostedEventPayload(
 
   const b = body as Record<string, unknown>
   const errors: string[] = []
-  const { partial = false } = options
+  const { partial = false, requireCourse = true } = options
 
-  if (!partial || 'course_id' in b) {
+  // The "new club" path has no course_id (a pending course is created for it),
+  // so callers pass requireCourse: false and validate the club fields instead.
+  if (requireCourse && (!partial || 'course_id' in b)) {
     const courseResult = validateUUID(b.course_id, 'Course')
     if (!courseResult.valid) errors.push(...courseResult.errors)
   }

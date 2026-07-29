@@ -61,6 +61,27 @@ export const PATCH = withAuth(
           .eq('id', id).select().single()
         if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+        // Grant host access to any host who already has an event queued at this
+        // club — e.g. the host who proposed it while creating a draft event —
+        // so they can now publish. Best-effort; never blocks the approval.
+        try {
+          const { data: eventHosts } = await admin
+            .from('hosted_events')
+            .select('host_id')
+            .eq('course_id', id)
+          const hostIds = Array.from(new Set((eventHosts ?? []).map(e => e.host_id)))
+          if (hostIds.length) {
+            await admin
+              .from('host_venues')
+              .upsert(hostIds.map(host_id => ({ host_id, course_id: id })), {
+                onConflict: 'host_id,course_id',
+                ignoreDuplicates: true,
+              })
+          }
+        } catch (err) {
+          console.error('[courses/approve] host_venues grant failed (non-fatal):', err)
+        }
+
         // This is the "goes live" moment for a member-requested course.
         void activeCourseIds(admin, data.id)
           .then(courseIds => postAnnouncementToCourses(admin, courseIds, {

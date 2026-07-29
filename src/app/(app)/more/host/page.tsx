@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import Link from "next/link";
-import { Flag } from "lucide-react";
+import { Flag, Plus } from "lucide-react";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
 import { Spinner } from "@/components/ui/Loading";
@@ -211,6 +211,7 @@ function ApplicationForm({
   const [venues, setVenues] = useState<VenueOption[]>([]);
   const [venueIds, setVenueIds] = useState<string[]>([]);
   const [venueError, setVenueError] = useState<string | null>(null);
+  const [requestedClubs, setRequestedClubs] = useState<string[]>([]);
 
   useEffect(() => {
     apiClient.get<{ courses: VenueOption[] }>("/api/courses").then((res) => {
@@ -304,6 +305,25 @@ function ApplicationForm({
         <span className="text-xs text-green-900/50 mb-1.5 block">
           Which venues do you want to host at?
         </span>
+
+        <AddNewClub
+          onRequested={(name) =>
+            setRequestedClubs((prev) =>
+              prev.includes(name) ? prev : [...prev, name],
+            )
+          }
+        />
+
+        {requestedClubs.length > 0 && (
+          <div className="rounded-xl bg-green-50 border border-green-900/10 px-3 py-2.5 mb-1.5">
+            <p className="text-xs text-green-800 leading-relaxed">
+              {requestedClubs.length === 1
+                ? `Thanks — we've sent ${requestedClubs[0]} to our team to set up. Once it's ready it'll appear here to select.`
+                : `Thanks — we've sent these clubs to our team to set up: ${requestedClubs.join(", ")}. Once they're ready they'll appear here to select.`}
+            </p>
+          </div>
+        )}
+
         {venues.length === 0 ? (
           <p className="text-xs text-green-900/35">Loading venues…</p>
         ) : (
@@ -345,6 +365,102 @@ function ApplicationForm({
         )}
       </button>
     </form>
+  );
+}
+
+// ---- Add a club not yet on LinkUp ---------------------------
+// Submits the club name to /api/courses/request, which creates a `pending`
+// course for admins to review and set up. The club is NOT added to the
+// selectable list — it can only be hosted at once an admin approves it.
+
+function AddNewClub({ onRequested }: { onRequested: (name: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async () => {
+    const trimmed = name.trim();
+    if (trimmed.length < 2) {
+      setError("Enter the club name (at least 2 characters).");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    const res = await apiClient.post("/api/courses/request", { name: trimmed });
+    setSubmitting(false);
+    if (res.error) {
+      setError(res.error.message);
+      return;
+    }
+    onRequested(trimmed);
+    setName("");
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex w-full items-center gap-2 rounded-xl border border-dashed border-green-900/25 px-3 py-2.5 text-sm text-green-900/70 mb-1.5"
+      >
+        <Plus className="h-4 w-4" strokeWidth={2} />
+        Add new club
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-green-900/15 bg-green-50/40 px-3 py-3 mb-1.5 space-y-2">
+      <label
+        htmlFor="new-club-name"
+        className="text-xs text-green-900/50 block"
+      >
+        Golf Club Name
+      </label>
+      <input
+        id="new-club-name"
+        className="input"
+        placeholder="e.g. Torrey Pines Golf Course"
+        value={name}
+        maxLength={120}
+        autoFocus
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            submit();
+          }
+        }}
+      />
+      {error && <p className="text-xs text-red-500">{error}</p>}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={submit}
+          disabled={submitting}
+          className="btn btn-gold flex-1 justify-center text-sm"
+        >
+          {submitting ? (
+            <Spinner className="w-4 h-4 text-green-900" />
+          ) : (
+            "Request club"
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setError(null);
+            setName("");
+          }}
+          className="text-sm text-green-900/60 px-3"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 
