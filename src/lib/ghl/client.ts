@@ -212,15 +212,17 @@ export interface GHLCustomFieldDef {
 // stores each value under on a contact.
 let _contactCustomFieldDefs: GHLCustomFieldDef[] | null = null
 
-// GET /custom-fields/object-key/contact?locationId=... → the location's contact
-// custom-field definitions (each carries its object key + id).
+// GET /locations/:locationId/customFields?model=contact → the location's contact
+// custom-field definitions (each carries its object key + id). The
+// /custom-fields/object-key/:objectKey endpoint only supports custom objects,
+// not the standard contact/opportunity models, so we use this one for contacts.
 export async function getContactCustomFieldDefs(): Promise<GHLCustomFieldDef[]> {
   if (_contactCustomFieldDefs) return _contactCustomFieldDefs
   try {
     const data = await ghlFetch<{
-      fields?: Array<{ id: string; name?: string; fieldKey?: string; key?: string }>
-    }>(`/custom-fields/object-key/contact?locationId=${GHL_LOCATION_ID}`)
-    const fields = (data.fields ?? [])
+      customFields?: Array<{ id: string; name?: string; fieldKey?: string; key?: string }>
+    }>(`/locations/${GHL_LOCATION_ID}/customFields?model=contact`)
+    const fields = (data.customFields ?? [])
       .map(f => ({ id: f.id, name: f.name ?? '', fieldKey: f.fieldKey ?? f.key ?? '' }))
       .filter(f => f.id && f.fieldKey)
     _contactCustomFieldDefs = fields
