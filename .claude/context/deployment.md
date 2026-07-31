@@ -61,6 +61,8 @@ Declared in `vercel.json`:
 | Path | Schedule (UTC) | Work |
 |------|----------------|------|
 | `/api/cron/booking-reminders` | `*/15 * * * *` (every 15 min) | push + SMS reminders 7 days, 3 days, and 6 hours before each booking's tee time |
+| `/api/cron/hosted-events-complete` | `0 8 * * *` (daily) | moves past-dated `upcoming` hosted events to `completed` |
+| `/api/cron/ghl-member-sync` | `0 * * * *` (hourly) | full GHL → Supabase member reconcile (`runBulkGhlSync` in `src/lib/sync/bulk.ts`): imports newly access-tagged contacts, deactivates members whose tag was removed. Replaced the admin "Sync from GHL" button; `maxDuration = 300` because it walks every tagged contact |
 
 - Each handler verifies `Authorization: Bearer ${CRON_SECRET}` before running.
 - Add new cron jobs by adding both the `vercel.json` entry **and** the

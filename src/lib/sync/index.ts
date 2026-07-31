@@ -19,6 +19,8 @@ import type { GHLContact } from '@/types'
 import type { SyncContext, SyncResult } from './types'
 
 export type { SyncResult, BulkSyncResult, SyncContext } from './types'
+// The bulk reconcile lives in './bulk' and is imported from there directly —
+// re-exporting it here would make index ↔ bulk a cycle.
 
 // ---- Single member sync ------------------------------------
 

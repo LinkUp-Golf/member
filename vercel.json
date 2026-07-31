@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/hosted-events-complete",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/ghl-member-sync",
+      "schedule": "0 * * * *"
     }
   ]
 }
