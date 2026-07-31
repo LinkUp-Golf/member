@@ -9,6 +9,7 @@ import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateHostedEventPayload, sanitiseText } from '@/lib/validation'
 import { enrichHostedEvents, hostCanUseCourse } from '@/lib/hosts/events'
+import { requestPendingCourse } from '@/lib/courses/request-course'
 import { logger } from '@/lib/logger'
 import type { HostedEvent } from '@/types'
 
@@ -43,10 +44,20 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     ? body.source_booking_id
     : null
 
+  // A "new club" event: the host proposes a round at a club not yet on LinkUp.
+  // We file it as a pending course and save the event as a draft — it can't go
+  // live until an admin sets the club up and approves it (enforced on publish).
+  const newClubRaw = body.new_club
+  const newClub = !sourceBookingId && newClubRaw && typeof newClubRaw === 'object'
+    ? (newClubRaw as { name?: unknown; website?: unknown })
+    : null
+
   let courseId: string
   let eventDate: string
   let teeTime: string | null
   let seatCap: number | null = null
+  // Forced true for the new_club path — a pending club may only be a draft.
+  let forceDraft = false
 
   if (sourceBookingId) {
     // ---- Listed from an existing booking -------------------------------
@@ -92,8 +103,42 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
         { status: 400 }
       )
     }
+  } else if (newClub) {
+    // ---- Proposed at a brand-new club ----------------------------------
+    // Everything but the course is validated; the course is created here.
+    const { valid, errors } = validateHostedEventPayload(body, { requireCourse: false })
+    if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })
+
+    const clubName = typeof newClub.name === 'string' ? newClub.name.trim() : ''
+    if (clubName.length < 2) {
+      return NextResponse.json({ error: 'Enter the golf club name (at least 2 characters).' }, { status: 400 })
+    }
+
+    const website = typeof newClub.website === 'string' ? newClub.website.trim() : ''
+    if (!website) {
+      return NextResponse.json({ error: 'Enter the club website.' }, { status: 400 })
+    }
+    if (!/^https?:\/\/.+/i.test(website)) {
+      return NextResponse.json({ error: 'Website must be a valid URL (https://…).' }, { status: 400 })
+    }
+
+    eventDate = String(body.event_date)
+    if (eventDate < todayISO()) {
+      return NextResponse.json({ error: 'Event date cannot be in the past.' }, { status: 400 })
+    }
+    // Free text the host typed — sanitise like any other free-form field.
+    teeTime = typeof body.tee_time === 'string' && body.tee_time.trim()
+      ? sanitiseText(body.tee_time.trim())
+      : null
+
+    const result = await requestPendingCourse({ admin, name: clubName, website, requestedBy: ctx.memberId })
+    if (result.error || !result.course) {
+      return NextResponse.json({ error: result.error ?? 'Could not add the club.' }, { status: result.status ?? 500 })
+    }
+    courseId = result.course.id
+    forceDraft = true
   } else {
-    // ---- A newly proposed schedule -------------------------------------
+    // ---- A newly proposed schedule at an existing course ---------------
     const { valid, errors } = validateHostedEventPayload(body)
     if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })
 
@@ -124,26 +169,30 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     return NextResponse.json({ error: 'Member guest rate must be a positive amount' }, { status: 400 })
   }
 
-  // The course must exist and be bookable.
-  const { data: course } = await admin
-    .from('courses')
-    .select('id, name, approval_status')
-    .eq('id', courseId)
-    .maybeSingle()
-  if (!course || course.approval_status !== 'active') {
-    return NextResponse.json({ error: 'That course is not available for events.' }, { status: 400 })
+  // The course must exist and be bookable — except the new_club path, whose
+  // course is intentionally pending until an admin approves it.
+  if (!newClub) {
+    const { data: course } = await admin
+      .from('courses')
+      .select('id, approval_status')
+      .eq('id', courseId)
+      .maybeSingle()
+    if (!course || course.approval_status !== 'active') {
+      return NextResponse.json({ error: 'That course is not available for events.' }, { status: 400 })
+    }
   }
 
   // Publishing takes an event straight live — there's no admin review gate.
-  // A host either saves a draft or publishes to 'upcoming' immediately.
-  const publish = body.publish === true
+  // A host either saves a draft or publishes to 'upcoming' immediately. A
+  // new_club event is forced to draft; its club isn't approved yet.
+  const publish = !forceDraft && body.publish === true
   const dinner = body.dinner === true
 
   const { data: event, error } = await admin
     .from('hosted_events')
     .insert({
       host_id: ctx.host.id,
-      course_id: course.id,
+      course_id: courseId,
       event_date: eventDate,
       tee_time: teeTime,
       total_spots: spots,
@@ -167,7 +216,7 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
   logger.info('Hosted event created', {
     action: 'host.event.created',
     userId: ctx.userId,
-    metadata: { event_id: event.id, host_id: ctx.host.id, published: publish, from_booking: !!sourceBookingId },
+    metadata: { event_id: event.id, host_id: ctx.host.id, published: publish, from_booking: !!sourceBookingId, new_club: !!newClub },
   })
 
   return NextResponse.json({ event }, { status: 201 })

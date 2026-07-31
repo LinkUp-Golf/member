@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react'
 import Link from 'next/link'
+import { Plus } from 'lucide-react'
 import { useForm, Controller } from 'react-hook-form'
 import { AdminPageHeader, AdminCard, Badge, ProgressBar } from '@/components/admin/AdminUI'
 import { Spinner, ContentLoader } from '@/components/ui/Loading'
@@ -281,6 +282,9 @@ function ProofControl({ event, onDone, onToast }: {
 
 interface EventFormValues {
   course_id: string
+  /** New-club mode: the club name + website used in place of course_id. */
+  new_club_name: string
+  new_club_website: string
   event_date: string
   /** '' means "no fixed tee time". */
   tee_time: string
@@ -306,6 +310,9 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
   const [venues, setVenues] = useState<Pick<Course, 'id' | 'name' | 'city'>[]>([])
   const [bookings, setBookings] = useState<HostBookingOption[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
+  // New event only: switch the course picker over to "add a club not yet on
+  // LinkUp". The event then saves as a draft the host publishes once approved.
+  const [addingClub, setAddingClub] = useState(false)
 
   // A new event is either listed from a tee time the host already holds, or
   // proposed from scratch. Editing keeps whichever it was created as.
@@ -323,6 +330,8 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
   } = useForm<EventFormValues>({
     defaultValues: {
       course_id: event?.course_id ?? '',
+      new_club_name: '',
+      new_club_website: '',
       event_date: event?.event_date?.slice(0, 10) ?? '',
       tee_time: event?.tee_time ?? NO_TEE_TIME,
       // A linkup defaults to the host + 3 players; the host can still change it.
@@ -332,6 +341,19 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
       source_booking_id: event?.source_booking_id ?? '',
     },
   })
+
+  // Switch the course field between "pick existing" and "add new club",
+  // clearing whichever side's value/errors no longer apply.
+  const toggleAddingClub = (next: boolean) => {
+    setAddingClub(next)
+    clearErrors(['course_id', 'new_club_name', 'new_club_website'])
+    if (next) {
+      setValue('course_id', '')
+    } else {
+      setValue('new_club_name', '')
+      setValue('new_club_website', '')
+    }
+  }
 
   const rate = watch('member_guest_rate')
   const bookingId = watch('source_booking_id')
@@ -416,14 +438,26 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
           member_guest_rate: Number(values.member_guest_rate),
           dinner: values.dinner,
         }
-      : {
-          course_id: values.course_id,
-          event_date: values.event_date,
-          tee_time: values.tee_time || null,
-          total_spots: Number(values.total_spots),
-          member_guest_rate: Number(values.member_guest_rate),
-          dinner: values.dinner,
-        }
+      : addingClub
+        ? {
+            new_club: {
+              name: values.new_club_name.trim(),
+              website: values.new_club_website.trim() || null,
+            },
+            event_date: values.event_date,
+            tee_time: values.tee_time || null,
+            total_spots: Number(values.total_spots),
+            member_guest_rate: Number(values.member_guest_rate),
+            dinner: values.dinner,
+          }
+        : {
+            course_id: values.course_id,
+            event_date: values.event_date,
+            tee_time: values.tee_time || null,
+            total_spots: Number(values.total_spots),
+            member_guest_rate: Number(values.member_guest_rate),
+            dinner: values.dinner,
+          }
 
     const res = isEdit && event
       ? await fetch(`/api/host/events/${event.id}`, {
@@ -439,7 +473,12 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
 
     const json = await res.json().catch(() => ({}))
     if (!res.ok) { onError(json.error ?? 'Could not save.'); return }
-    onSaved(isEdit ? 'Event updated.' : publish ? 'Submitted for review.' : 'Draft saved.')
+    onSaved(
+      isEdit ? 'Event updated.'
+        : addingClub ? 'Club requested — your event is saved as a draft.'
+        : publish ? 'Submitted for review.'
+        : 'Draft saved.'
+    )
   }
 
   const submit = (publish: boolean) => handleSubmit(v => save(v, publish))()
@@ -477,8 +516,12 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
                     setValue('course_id', '')
                     setValue('event_date', '')
                     setValue('tee_time', NO_TEE_TIME)
+                    // Adding a club only applies to the "New linkup" path.
+                    setAddingClub(false)
+                    setValue('new_club_name', '')
+                    setValue('new_club_website', '')
                     // Errors from the other mode's required fields no longer apply.
-                    clearErrors(['source_booking_id', 'course_id', 'event_date'])
+                    clearErrors(['source_booking_id', 'course_id', 'event_date', 'new_club_name', 'new_club_website'])
                   }}
                   className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
                     mode === m.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
@@ -537,23 +580,80 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
           ) : (
             <>
           <div>
-            <label htmlFor="ev-course" className={labelCls}>Course *</label>
-            <Controller
-              name="course_id"
-              control={control}
-              rules={{ required: fromBooking ? false : 'Choose a course' }}
-              render={({ field: f }) => (
-                <Select
-                  id="ev-course"
-                  options={courseOptions}
-                  value={f.value}
-                  onChange={f.onChange}
-                  placeholder="Select a course…"
-                  searchPlaceholder="Search courses…"
-                />
+            <div className="flex items-center justify-between mb-1">
+              <label htmlFor="ev-course" className="text-xs font-medium text-gray-600">
+                {addingClub ? 'New club *' : 'Course *'}
+              </label>
+              {!isEdit && (
+                <button
+                  type="button"
+                  onClick={() => toggleAddingClub(!addingClub)}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-green-800 hover:text-green-900"
+                >
+                  {addingClub ? (
+                    '← Choose from list'
+                  ) : (
+                    <>
+                      <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+                      Add new club
+                    </>
+                  )}
+                </button>
               )}
-            />
-            {errors.course_id && <p className={errCls}>{errors.course_id.message}</p>}
+            </div>
+
+            {addingClub ? (
+              <div className="space-y-2">
+                <input
+                  id="ev-club-name"
+                  className={field}
+                  placeholder="Golf Club Name"
+                  maxLength={120}
+                  autoFocus
+                  {...register('new_club_name', {
+                    shouldUnregister: true,
+                    required: 'Enter the golf club name',
+                    validate: v => v.trim().length >= 2 || 'At least 2 characters',
+                  })}
+                />
+                {errors.new_club_name && <p className={errCls}>{errors.new_club_name.message}</p>}
+                <input
+                  id="ev-club-website"
+                  className={field}
+                  placeholder="Website link — https://…"
+                  maxLength={200}
+                  {...register('new_club_website', {
+                    shouldUnregister: true,
+                    required: 'Enter the club website',
+                    validate: v => /^https?:\/\/.+/i.test(v.trim()) || 'Enter a valid URL (https://…)',
+                  })}
+                />
+                {errors.new_club_website && <p className={errCls}>{errors.new_club_website.message}</p>}
+                <p className="text-[11px] text-gray-400">
+                  We&apos;ll set this club up for you. Your event saves as a draft you can publish once it&apos;s approved.
+                </p>
+              </div>
+            ) : (
+              <>
+                <Controller
+                  name="course_id"
+                  control={control}
+                  shouldUnregister
+                  rules={{ required: fromBooking ? false : 'Choose a course' }}
+                  render={({ field: f }) => (
+                    <Select
+                      id="ev-course"
+                      options={courseOptions}
+                      value={f.value}
+                      onChange={f.onChange}
+                      placeholder="Select a course…"
+                      searchPlaceholder="Search courses…"
+                    />
+                  )}
+                />
+                {errors.course_id && <p className={errCls}>{errors.course_id.message}</p>}
+              </>
+            )}
           </div>
 
           <div>
@@ -655,6 +755,10 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
           {isEdit ? (
             <button type="button" onClick={() => submit(false)} disabled={isSubmitting} className="btn btn-gold btn-full justify-center">
               {isSubmitting ? <Spinner className="w-4 h-4 text-green-900" /> : 'Save changes'}
+            </button>
+          ) : addingClub ? (
+            <button type="button" onClick={() => submit(false)} disabled={isSubmitting} className="btn btn-gold btn-full justify-center">
+              {isSubmitting ? <Spinner className="w-4 h-4 text-green-900" /> : 'Request club & save draft'}
             </button>
           ) : (
             <>

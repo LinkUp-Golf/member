@@ -249,7 +249,30 @@ export interface Booking {
   admin_notes?: string | null
   created_at: string
   booker_name?: string | null
-  course?: { name: string; city: string; state: string; payment_url: string | null; timezone: string } | null
+  course?: {
+    name: string
+    city: string
+    state: string
+    payment_url: string | null
+    timezone: string
+    /** Round length, used to work out when the round finished. */
+    meeting_duration_mins?: number | null
+  } | null
+}
+
+// Post-round satisfaction response — one per booking, collected by the survey
+// prompt shortly after the round is scheduled to finish.
+export interface BookingSurvey {
+  id: string
+  booking_id: string
+  member_id: string
+  course_id: string
+  /** 1–5 stars. Always answered; the comment is the optional part. */
+  rating: number
+  /** False when the member ticked "I didn't make it" — excluded from averages. */
+  attended: boolean
+  comment: string | null
+  created_at: string
 }
 
 export interface PlayHistory {

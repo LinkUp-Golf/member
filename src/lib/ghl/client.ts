@@ -197,6 +197,69 @@ export async function removeTagFromContact(contactId: string, tag: string): Prom
   }
 }
 
+// ---- Custom fields ------------------------------------------
+
+export interface GHLCustomFieldDef {
+  id: string
+  name: string
+  /** Stable object key, e.g. "contact.company_name". */
+  fieldKey: string
+}
+
+// Contact custom-field definitions are memoised for the process lifetime (like
+// getLocationTimezone) — they change only when an admin edits the field schema
+// in GHL, and we need them to map a stable object key to the opaque id GHL
+// stores each value under on a contact.
+let _contactCustomFieldDefs: GHLCustomFieldDef[] | null = null
+
+// GET /locations/:locationId/customFields?model=contact → the location's contact
+// custom-field definitions (each carries its object key + id). The
+// /custom-fields/object-key/:objectKey endpoint only supports custom objects,
+// not the standard contact/opportunity models, so we use this one for contacts.
+export async function getContactCustomFieldDefs(): Promise<GHLCustomFieldDef[]> {
+  if (_contactCustomFieldDefs) return _contactCustomFieldDefs
+  try {
+    const data = await ghlFetch<{
+      customFields?: Array<{ id: string; name?: string; fieldKey?: string; key?: string }>
+    }>(`/locations/${GHL_LOCATION_ID}/customFields?model=contact`)
+    const fields = (data.customFields ?? [])
+      .map(f => ({ id: f.id, name: f.name ?? '', fieldKey: f.fieldKey ?? f.key ?? '' }))
+      .filter(f => f.id && f.fieldKey)
+    _contactCustomFieldDefs = fields
+    return fields
+  } catch (err) {
+    logger.warn('getContactCustomFieldDefs failed', { action: 'ghl_custom_fields', errorMessage: String(err) })
+    return []
+  }
+}
+
+// Reads named custom-field values off a contact, keyed by object key
+// (e.g. "contact.company_name"). Returns only keys that resolved to a
+// non-empty, trimmed string value.
+export async function getContactCustomFieldValues(
+  contact: GHLContact,
+  objectKeys: string[]
+): Promise<Record<string, string>> {
+  // GHL returns the value under `value` (typed) but some responses use
+  // `fieldValue`; read both defensively.
+  const cfs = (contact.customFields ?? []) as Array<{ id: string; value?: unknown; fieldValue?: unknown }>
+  if (cfs.length === 0) return {}
+
+  const defs = await getContactCustomFieldDefs()
+  const idByKey = new Map(defs.map(d => [d.fieldKey, d.id]))
+  const rawById = new Map(cfs.map(f => [f.id, f.value ?? f.fieldValue]))
+
+  const out: Record<string, string> = {}
+  for (const key of objectKeys) {
+    const id = idByKey.get(key)
+    if (!id) continue
+    const raw = rawById.get(id)
+    const value = typeof raw === 'string' ? raw.trim() : ''
+    if (value) out[key] = value
+  }
+  return out
+}
+
 // ---- Conversations -------------------------------------------
 
 // Sends an SMS immediately via the GHL Conversations API — no workflow or

@@ -10,8 +10,13 @@ import { Spinner } from "@/components/ui/Loading";
 import EmptyState from "@/components/ui/EmptyState";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { MessageCircle } from "lucide-react";
+import { MessageCircle, Star } from "lucide-react";
 import { formatTeeTime, cn, bookingToLocalDate } from "@/lib/utils";
+import { createClient } from "@/lib/supabase";
+import BookingSurveySheet, {
+  type SurveyTarget,
+} from "@/components/surveys/BookingSurveySheet";
+import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
 import { formatInTimeZone } from "date-fns-tz";
 import {
   format,
@@ -3616,6 +3621,29 @@ function MyBookingsTab({
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
   const [editTarget, setEditTarget] = useState<EditGuestTarget | null>(null);
   const [addTarget, setAddTarget] = useState<AddPlayerTarget | null>(null);
+  const [surveyTarget, setSurveyTarget] = useState<SurveyTarget | null>(null);
+
+  // Ratings this member has already given, so a rated round shows its score
+  // instead of offering the form again. Scoped to the member explicitly: RLS
+  // would also allow an admin to read every response, which this page has no
+  // use for.
+  const [ratings, setRatings] = useState<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    createClient()
+      .from("booking_surveys")
+      .select("booking_id, rating")
+      .eq("member_id", user.id)
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setRatings(new Map(data.map((r) => [r.booking_id as string, r.rating as number])));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const now = new Date();
   const allGroups = groupBookings(bookings);
@@ -3680,6 +3708,19 @@ function MyBookingsTab({
         }}
       />
 
+      {/* Rate a past round on demand — the way rounds that finished before the
+          survey existed (or that a member dismissed) still get a response. */}
+      <BookingSurveySheet
+        target={surveyTarget}
+        onDismiss={() => setSurveyTarget(null)}
+        onSubmitted={(bookingId, rating) => {
+          // Reflect the new rating in place; the row swaps to its score.
+          setRatings((prev) => new Map(prev).set(bookingId, rating));
+          setSurveyTarget(null);
+        }}
+        dismissLabel="Cancel"
+      />
+
       {upcoming.length === 0 && cancelledAndPast.length === 0 && (
         <EmptyState
           icon="🗓️"
@@ -3717,6 +3758,17 @@ function MyBookingsTab({
               const displayTime = formatTeeTime(group.primary.tee_time);
               const courseName = group.primary.course?.name ?? "Golf course";
               const isCancelled = group.primary.status === "cancelled";
+              const rating = ratings.get(group.primary.id);
+              // Rateable once the round has actually finished — a cancelled or
+              // never-confirmed booking was never a round to rate. The server
+              // re-checks all of this on submit.
+              const canRate =
+                !isCancelled &&
+                rating === undefined &&
+                (SURVEYABLE_BOOKING_STATUSES as readonly string[]).includes(
+                  group.primary.status,
+                ) &&
+                isSurveyDue(group.primary, group.primary.course, now);
 
               return (
                 <div
@@ -3741,7 +3793,34 @@ function MyBookingsTab({
                       {format(displayDate, "EEE, MMM d, yyyy")} · {displayTime}
                     </p>
                   </div>
-                  {isCancelled && <BookingStatusBadge status="cancelled" />}
+                  {isCancelled ? (
+                    <BookingStatusBadge status="cancelled" />
+                  ) : rating !== undefined ? (
+                    <span
+                      className="flex items-center gap-1 text-xs font-medium flex-shrink-0"
+                      style={{ color: "rgba(0,38,105,0.45)" }}
+                      aria-label={`You rated this round ${rating} out of 5`}
+                    >
+                      <Star className="w-3.5 h-3.5 text-gold fill-gold" strokeWidth={1.5} aria-hidden />
+                      {rating}
+                    </span>
+                  ) : canRate ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSurveyTarget({
+                          booking_id: group.primary.id,
+                          booking_date: group.primary.booking_date,
+                          tee_time: group.primary.tee_time,
+                          course_name: courseName,
+                        })
+                      }
+                      className="btn btn-outline btn-sm flex-shrink-0"
+                    >
+                      <Star className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden />
+                      Rate round
+                    </button>
+                  ) : null}
                 </div>
               );
             })}

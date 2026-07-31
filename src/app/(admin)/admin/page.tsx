@@ -12,7 +12,7 @@ import {
   Badge,
   ProgressBar,
 } from "@/components/admin/AdminUI";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatRelativeTime, formatTeeTime } from "@/lib/utils";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 
 interface DashboardData {
@@ -34,11 +34,14 @@ interface DashboardData {
   }>;
   recentBookings: Array<{
     id: string;
+    created_at: string;
     booking_date: string;
     tee_time: string;
+    status: string;
     amount_charged: number;
     member: { first_name: string; last_name: string } | null;
   }>;
+  recentBookingsError: string | null;
 }
 
 export default function AdminDashboard() {
@@ -115,14 +118,19 @@ export default function AdminDashboard() {
         .in("home_course_id", courseIds)
         .order("created_at", { ascending: false })
         .limit(5),
+      // The 5 most recently *made* bookings, whatever state they're in. Two
+      // things to keep in mind here:
+      //  - `bookings` has two FKs to `members` (member_id and player_member_id),
+      //    so the embed must name the one it wants or PostgREST 300s.
+      //  - order by created_at, not booking_date: booking_date desc returns the
+      //    furthest-out tee times, which is a different card entirely.
       supabase
         .from("bookings")
         .select(
-          "id, booking_date, tee_time, amount_charged, member:members(first_name, last_name)",
+          "id, created_at, booking_date, tee_time, status, amount_charged, member:members!bookings_member_id_fkey(first_name, last_name)",
         )
         .in("course_id", courseIds)
-        .eq("status", "confirmed")
-        .order("booking_date", { ascending: false })
+        .order("created_at", { ascending: false })
         .limit(5),
     ]);
 
@@ -142,6 +150,9 @@ export default function AdminDashboard() {
       recentMembers: recentMembersRes.data ?? [],
       recentBookings: (recentBookingsRes.data ??
         []) as unknown as DashboardData["recentBookings"],
+      // A failed query and a course with no bookings both leave `data` null —
+      // don't let the first one quietly render as "no bookings yet".
+      recentBookingsError: recentBookingsRes.error?.message ?? null,
     });
     setLoading(false);
   }
@@ -333,27 +344,47 @@ export default function AdminDashboard() {
             />
           }
         >
-          {data.recentBookings.length === 0 ? (
+          {data.recentBookingsError ? (
+            <p className="text-sm text-red-500">
+              Could not load bookings — {data.recentBookingsError}
+            </p>
+          ) : data.recentBookings.length === 0 ? (
             <p className="text-sm text-gray-400 italic">No bookings yet.</p>
           ) : (
             <div className="space-y-3">
-              {data.recentBookings.map((b) => (
-                <div key={b.id} className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-800 capitalize">
-                      {b.member?.first_name ?? ""}{" "}
-                      {b.member?.last_name ?? ""}
-                    </p>
-                    <p className="text-xs text-gray-400">
-                      {format(new Date(b.booking_date + "T12:00:00"), "MMM d")}{" "}
-                      · {b.tee_time?.slice(0, 5)}
-                    </p>
+              {data.recentBookings.map((b) => {
+                const name = `${b.member?.first_name ?? ""} ${b.member?.last_name ?? ""}`.trim();
+                const amount = Number(b.amount_charged);
+                return (
+                  <div key={b.id} className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-800 capitalize truncate">
+                        {name || "Unknown member"}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        Tee{" "}
+                        {format(new Date(b.booking_date + "T12:00:00"), "MMM d")}{" "}
+                        · {formatTeeTime(b.tee_time)}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        Booked {formatRelativeTime(b.created_at)}
+                      </p>
+                    </div>
+                    <div className="flex-shrink-0 text-right">
+                      <BookingStatusBadge status={b.status} />
+                      <p
+                        className={
+                          amount > 0
+                            ? "text-sm font-medium text-green-700 mt-1"
+                            : "text-sm text-gray-300 mt-1"
+                        }
+                      >
+                        {amount > 0 ? `$${amount.toFixed(0)}` : "—"}
+                      </p>
+                    </div>
                   </div>
-                  <span className="text-sm font-medium text-green-700">
-                    ${Number(b.amount_charged).toFixed(0)}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </AdminCard>
@@ -377,6 +408,26 @@ function CapStat({
       <p className="text-xs text-gray-400 mt-0.5">{label}</p>
     </div>
   );
+}
+
+// Booking statuses, labelled to match /admin/bookings. A booking starts life as
+// tentative/awaiting_approval, so the recent list is mostly non-confirmed rows.
+function BookingStatusBadge({ status }: { status: string }) {
+  const map: Record<
+    string,
+    { label: string; colour: "green" | "yellow" | "blue" | "red" | "gray" }
+  > = {
+    awaiting_approval: { label: "Awaiting approval", colour: "red" },
+    tentative: { label: "Tentative", colour: "yellow" },
+    availability_confirmed: { label: "Avail. confirmed", colour: "blue" },
+    payment_confirmed: { label: "Paid", colour: "green" },
+    confirmed: { label: "Confirmed", colour: "green" },
+    pending: { label: "Pending", colour: "yellow" },
+    cancelled: { label: "Cancelled", colour: "gray" },
+    waitlist: { label: "Waitlist", colour: "gray" },
+  };
+  const s = map[status] ?? { label: status, colour: "gray" as const };
+  return <Badge label={s.label} colour={s.colour} />;
 }
 
 function StatusBadge({ status }: { status: string }) {

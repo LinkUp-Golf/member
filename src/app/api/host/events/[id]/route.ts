@@ -114,6 +114,19 @@ export const PATCH = withHostAuth(
       if (event.event_date < todayISO()) {
         return NextResponse.json({ error: 'Set a future date before publishing.' }, { status: 400 })
       }
+      // A draft created for a not-yet-approved club can't go live until an admin
+      // sets the club up and approves it into a bookable course.
+      const { data: course } = await admin
+        .from('courses')
+        .select('approval_status')
+        .eq('id', event.course_id)
+        .maybeSingle()
+      if (!course || course.approval_status !== 'active') {
+        return NextResponse.json(
+          { error: "This club is still being set up by our team — you can publish once it's approved." },
+          { status: 409 },
+        )
+      }
       const { data: published, error } = await admin
         .from('hosted_events')
         .update({ status: 'upcoming', rejection_reason: null })

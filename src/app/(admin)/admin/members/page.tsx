@@ -44,14 +44,6 @@ export default function AdminMembersPage() {
   const [generatingLink, setGeneratingLink] = useState(false);
   const [generatedLink, setGeneratedLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState<{
-    total: number;
-    synced: number;
-    skipped: number;
-    deactivated?: number;
-    errors: string[];
-  } | null>(null);
 
   useEffect(() => {
     loadMembers();
@@ -180,26 +172,6 @@ export default function AdminMembersPage() {
     }
   }
 
-  async function bulkSyncFromGHL() {
-    setSyncing(true);
-    setSyncResult(null);
-    try {
-      const res = await fetch("/api/admin/sync", { method: "POST" });
-      const json = await res.json();
-      setSyncResult(json);
-      await loadMembers();
-    } catch {
-      setSyncResult({
-        total: 0,
-        synced: 0,
-        skipped: 0,
-        errors: ["Request failed"],
-      });
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   async function toggleAdmin(memberId: string, isAdmin: boolean) {
     setSaving(true);
     const supabase = createClient();
@@ -224,48 +196,26 @@ export default function AdminMembersPage() {
 
   return (
     <div className="p-4 sm:p-8">
-      <div className="flex items-start justify-between gap-4 mb-6 sm:mb-8">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">
-            Members
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {statusCounts.active} active · {statusCounts.waitlist} waitlisted ·{" "}
-            {statusCounts.pending} pending
-            {statusCounts.suspended > 0 && (
-              <span className="text-red-500">
-                {" "}
-                · {statusCounts.suspended} suspended
-              </span>
-            )}
-          </p>
-        </div>
-        <button
-          onClick={bulkSyncFromGHL}
-          disabled={syncing}
-          className="flex-shrink-0 px-3 py-2 text-sm font-medium rounded-xl bg-green-900 text-white hover:bg-green-800 disabled:opacity-60 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-        >
-          {syncing ? "Syncing…" : "Sync from GHL"}
-        </button>
-      </div>
-
-      {syncResult && (
-        <div
-          className={`mb-4 p-3 rounded-xl text-sm border ${syncResult.errors.length > 0 ? "bg-yellow-50 border-yellow-200 text-yellow-800" : "bg-green-50 border-green-200 text-green-800"}`}
-        >
-          <span className="font-medium">Sync complete:</span>{" "}
-          {syncResult.synced} synced, {syncResult.skipped} skipped
-          {syncResult.deactivated ? `, ${syncResult.deactivated} deactivated` : ""}
-          {syncResult.errors.length > 0 && (
-            <div className="mt-1 text-xs text-yellow-700">
-              {syncResult.errors.slice(0, 3).join(" · ")}
-              {syncResult.errors.length > 3
-                ? ` +${syncResult.errors.length - 3} more`
-                : ""}
-            </div>
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">
+          Members
+        </h1>
+        <p className="text-sm text-gray-500 mt-1">
+          {statusCounts.active} active · {statusCounts.waitlist} waitlisted ·{" "}
+          {statusCounts.pending} pending
+          {statusCounts.suspended > 0 && (
+            <span className="text-red-500">
+              {" "}
+              · {statusCounts.suspended} suspended
+            </span>
           )}
-        </div>
-      )}
+        </p>
+        {/* The manual "Sync from GHL" button was replaced by an hourly cron
+            (/api/cron/ghl-member-sync) — say so, or the list looks stale. */}
+        <p className="text-xs text-gray-400 mt-1">
+          Synced from GHL automatically every hour.
+        </p>
+      </div>
 
       {/* Generate a copy-paste login link for any email (people not yet in the list) */}
       <div className="mb-4 p-3 sm:p-4 rounded-xl border border-gray-200 bg-gray-50">
