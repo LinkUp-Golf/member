@@ -241,6 +241,16 @@ export const NotificationTemplates = {
     tag:   'payment-ready',
   }),
 
+  // Sent once a round has finished, by the booking-surveys cron. Opening the
+  // app is enough — the survey prompt is already due, so it appears on whatever
+  // screen loads without needing a dedicated page.
+  roundSurvey: (courseName: string, bookingId: string): PushPayload => ({
+    title: 'How was your round?',
+    body:  `Rate your round at ${courseName} — it only takes a moment.`,
+    url:   '/home',
+    tag:   `booking-survey-${bookingId}`,
+  }),
+
   groupChatInvite: (inviterFirstName: string, groupName: string, conversationId: string): PushPayload => ({
     title: `${inviterFirstName} invited you to a group`,
     body:  `You've been invited to join "${groupName}". Tap to accept or decline.`,

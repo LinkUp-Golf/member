@@ -100,7 +100,9 @@ async function attachCourses(rows: Array<Record<string, unknown>>) {
   const admin = createAdminClient()
   const { data: courses } = await admin
     .from('courses')
-    .select('id, name, city, state, payment_url, timezone')
+    // meeting_duration_mins lets the client work out when a round finished —
+    // My Bookings uses it to decide when to offer "Rate round".
+    .select('id, name, city, state, payment_url, timezone, meeting_duration_mins')
     .in('id', courseIds)
 
   const byId = new Map((courses ?? []).map(c => [c.id as string, c]))
@@ -109,7 +111,14 @@ async function attachCourses(rows: Array<Record<string, unknown>>) {
     return {
       ...r,
       course: c
-        ? { name: c.name, city: c.city, state: c.state, payment_url: c.payment_url ?? null, timezone: c.timezone }
+        ? {
+            name: c.name,
+            city: c.city,
+            state: c.state,
+            payment_url: c.payment_url ?? null,
+            timezone: c.timezone,
+            meeting_duration_mins: c.meeting_duration_mins ?? null,
+          }
         : null,
     }
   })

@@ -26,6 +26,7 @@ const NAV_GROUPS = [
       { href: '/admin/guest-access',     label: 'Guest Access',       icon: '▪', badge: true },
       { href: '/admin/referrals',        label: 'Referral Partners',  icon: '▪', badge: true },
       { href: '/admin/hosts',            label: 'Hosts',              icon: '▪', badge: true },
+      { href: '/admin/reviews',          label: 'Member Reviews',     icon: '▪' },
       { href: '/admin/messaging',        label: 'Messaging Controls', icon: '▪' },
     ],
   },

@@ -34,8 +34,9 @@
 | `member_profiles` | Display/business/golf profile; visibility flags | PK = `members.id`, auto-created by trigger |
 | `course_memberships` | Access to a course (`home`/`guest`, status, validity window) | unique `(member_id, course_id, access_type)` |
 | `invite_tokens` | Magic-link/invite tokens (256-bit) | **RLS-exempt**, server-only |
-| `bookings` | Tee-time reservations; `ghl_booking_id`, `players` (1–4), payment fields | → members, courses |
+| `bookings` | Tee-time reservations; `ghl_booking_id`, `players` (1–4), payment fields, `reminder_*_sent` / `survey_prompt_sent` cron flags, `survey_auto_prompt` (false = finished before the survey shipped; rateable by hand, never prompted) | → members, courses (**two** FKs to members: `member_id` and `player_member_id` — embeds must name one) |
 | `play_history` | Past rounds + `played_with` member array | inserted server-side only |
+| `booking_surveys` | Post-round satisfaction response: `rating` 1–5, `attended`, optional `comment` | unique `booking_id` (one per booking); inserted server-side only; prompt time is derived, not stored (`src/lib/surveys/due.ts`) |
 | `referrals` | Referral tracking and rewards | → members, bookings |
 | `conversations` / `conversation_participants` / `messages` | Direct & group messaging | cascade on delete |
 | `announcements` | Community feed, moderated (`moderation_status`) | → courses, members |
