@@ -55,15 +55,24 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     hostId = host.id
   }
 
+  // Optional date window (the calendar view requests a month at a time). Only
+  // well-formed YYYY-MM-DD values are honoured. The lower bound never goes
+  // earlier than today — past events aren't joinable, so they're never listed.
+  const isDate = (v: string | null): v is string => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v)
+  const fromParam = req.nextUrl.searchParams.get('from')
+  const toParam = req.nextUrl.searchParams.get('to')
+  const lowerBound = isDate(fromParam) && fromParam > todayISO() ? fromParam : todayISO()
+
   let query = admin
     .from('hosted_events')
     .select('*, course:courses(id, name, city), host:hosts(id, name, member:members!hosts_member_id_fkey(first_name, last_name))')
     .eq('status', 'upcoming')
-    .gte('event_date', todayISO())
+    .gte('event_date', lowerBound)
     .order('event_date', { ascending: true })
     // Browsing is a read-heavy path; keep the payload bounded.
     .limit(200)
 
+  if (isDate(toParam)) query = query.lte('event_date', toParam)
   if (courseId) query = query.eq('course_id', courseId)
   if (hostId) query = query.eq('host_id', hostId)
 

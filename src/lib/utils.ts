@@ -108,6 +108,31 @@ export function formatEventTeeTime(value: string | null | undefined): string | n
   return `${h12}:${minutes} ${period}`
 }
 
+// Ordering key for the same free-text tee time: minutes since midnight, or
+// MAX_SAFE_INTEGER when no time can be read so blank/vague times sort last.
+// Comparing the raw strings puts "10:00 AM" before "8:30 AM".
+export function eventTeeTimeSortKey(value: string | null | undefined): number {
+  const LAST = Number.MAX_SAFE_INTEGER
+  const t = value?.trim()
+  if (!t) return LAST
+
+  // Prefer an "H:MM" clock; only fall back to a bare hour when it carries
+  // am/pm, so a stray number ("2 groups, tee off soon") isn't read as a time.
+  const hhmm = /(\d{1,2}):([0-5]\d)(?::[0-5]\d)?\s*(am|pm)?/i.exec(t)
+  const hour = hhmm ? null : /(\d{1,2})\s*(am|pm)/i.exec(t)
+  const m = hhmm ?? hour
+  if (!m) return LAST
+
+  let h = parseInt(m[1] ?? '', 10)
+  if (Number.isNaN(h)) return LAST
+  const minutes = hhmm?.[2] ? parseInt(hhmm[2], 10) : 0
+  const period = (hhmm?.[3] ?? hour?.[2])?.toLowerCase()
+  if (h > 23 || (period && h > 12)) return LAST
+  if (period === 'pm' && h < 12) h += 12
+  if (period === 'am' && h === 12) h = 0
+  return h * 60 + minutes
+}
+
 export function formatRelativeTime(dateString: string): string {
   return formatDistanceToNow(new Date(dateString), { addSuffix: true })
 }
