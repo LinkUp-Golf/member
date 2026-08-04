@@ -10,6 +10,7 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { validateHostedEventPayload, sanitiseText } from '@/lib/validation'
 import { enrichHostedEvents, hostCanUseCourse } from '@/lib/hosts/events'
 import { requestPendingCourse } from '@/lib/courses/request-course'
+import { sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
 import type { HostedEvent } from '@/types'
 
@@ -171,21 +172,26 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
 
   // The course must exist and be bookable — except the new_club path, whose
   // course is intentionally pending until an admin approves it.
+  let courseName = 'a course'
   if (!newClub) {
     const { data: course } = await admin
       .from('courses')
-      .select('id, approval_status')
+      .select('id, name, approval_status')
       .eq('id', courseId)
       .maybeSingle()
     if (!course || course.approval_status !== 'active') {
       return NextResponse.json({ error: 'That course is not available for events.' }, { status: 400 })
     }
+    courseName = course.name
   }
 
-  // Publishing takes an event straight live — there's no admin review gate.
-  // A host either saves a draft or publishes to 'upcoming' immediately. A
-  // new_club event is forced to draft; its club isn't approved yet.
-  const publish = !forceDraft && body.publish === true
+  // A new event goes live the moment it's created — there is no approval gate
+  // in front of it. Admins are notified after the fact and can take it back
+  // down (see POST /api/admin/hosted-events/[id], action 'reject'), which is
+  // the inverse of the old flow where an event sat invisible until approved.
+  // An explicit `publish: false` still parks a draft, and a new_club event is
+  // forced to one because its club isn't a bookable course yet.
+  const publish = !forceDraft && body.publish !== false
   const dinner = body.dinner === true
 
   const { data: event, error } = await admin
@@ -211,6 +217,14 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       return NextResponse.json({ error: 'That booking is already listed as an event.' }, { status: 409 })
     }
     return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  // Live already — tell the admins so someone can look at it (best-effort; a
+  // push failure must not fail the creation the host just completed).
+  if (publish) {
+    void sendPushToAdmins(
+      NotificationTemplates.hostedEventNeedsReview(ctx.host.name, courseName, eventDate)
+    ).catch(() => {})
   }
 
   logger.info('Hosted event created', {

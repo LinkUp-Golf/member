@@ -1,6 +1,7 @@
 'use client'
 
-// Host: create and manage hosted events. Draft → publish → (event runs) →
+// Host: create and manage hosted events. A new event goes live as soon as it's
+// created (an admin can unpublish it back to a draft), then: (event runs) →
 // upload proof → pending approval → credits awarded. Cancelling frees any
 // reserved spots.
 
@@ -192,6 +193,13 @@ const EventCard = memo(function EventCard({ event, onChanged, onToast, onEdit }:
 
       {event.status === 'pending_credit_approval' && (
         <p className="text-[11px] text-amber-600 mt-3">Proof submitted — awaiting admin approval for your credit.</p>
+      )}
+      {/* An admin took a live event back down. Say why, so the host knows what
+          to change before publishing again. */}
+      {event.status === 'draft' && event.rejection_reason && (
+        <p className="text-[11px] text-red-600 mt-3">
+          Unpublished by an admin: {event.rejection_reason}
+        </p>
       )}
       {event.source_booking_id && (
         <p className="text-[11px] text-gray-400 mt-2">
@@ -476,7 +484,7 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
     onSaved(
       isEdit ? 'Event updated.'
         : addingClub ? 'Club requested — your event is saved as a draft.'
-        : publish ? 'Submitted for review.'
+        : publish ? 'Published — live for members now.'
         : 'Draft saved.'
     )
   }
@@ -764,7 +772,7 @@ function EventDrawer({ event, onClose, onSaved, onError }: {
             <>
               <button type="button" onClick={() => submit(false)} disabled={isSubmitting} className="btn btn-outline btn-sm flex-1 justify-center">Save draft</button>
               <button type="button" onClick={() => submit(true)} disabled={isSubmitting} className="btn btn-gold btn-sm flex-1 justify-center">
-                {isSubmitting ? <Spinner className="w-4 h-4 text-green-900" /> : 'Submit for review'}
+                {isSubmitting ? <Spinner className="w-4 h-4 text-green-900" /> : 'Publish now'}
               </button>
             </>
           )}

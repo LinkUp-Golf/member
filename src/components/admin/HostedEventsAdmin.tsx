@@ -1,8 +1,12 @@
 'use client'
 
 // Admin: browse all hosted events, review proof, and approve or reject the
-// host's credit. Rendered as a tab on the admin Hosts page. Events publish
-// live without admin review, so the only decision here is credit approval.
+// host's credit. Rendered as a tab on the admin Hosts page.
+//
+// Two decisions live here, one per stage of an event's life:
+//   upcoming                → unpublish a live event that shouldn't be listed
+//                             (hosts publish without waiting for approval)
+//   pending_credit_approval → approve or reject the host's credit after it ran
 
 import { useState, useEffect, useCallback, memo } from 'react'
 import { AdminCard, Badge } from '@/components/admin/AdminUI'
@@ -26,6 +30,7 @@ const STATUS_META: Record<HostedEventStatus, { label: string; colour: 'green' | 
 const FILTERS: { key: string; label: string }[] = [
   { key: 'pending_credit_approval', label: 'Credit approval' },
   { key: 'upcoming', label: 'Upcoming' },
+  { key: 'draft', label: 'Drafts' },
   { key: 'completed', label: 'Completed' },
   { key: 'credits_awarded', label: 'Awarded' },
   { key: 'cancelled', label: 'Cancelled' },
@@ -98,9 +103,11 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
   const meta = STATUS_META[event.status]
   const proofs = event.proofs ?? []
 
-  // The only decision left on this row is approving the host's credit after the
-  // event has run — there's no event-review gate anymore.
+  // Credit decision, once the event has run and proof is in.
   const awaitingCredit = event.status === 'pending_credit_approval'
+  // Listing decision, while the event is live. Hosts publish without waiting
+  // for approval, so this is where an admin takes a bad listing back down.
+  const canUnpublish = event.status === 'upcoming'
 
   async function decide(action: 'approve' | 'reject') {
     if (busy) return
@@ -118,6 +125,28 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
     onToast(action === 'approve'
       ? `Credit of ${fmtMoney(json.amount ?? event.member_guest_rate)} awarded.`
       : 'Credit rejected.')
+    setRejecting(false); setReason('')
+    onChanged()
+  }
+
+  // Takes a live event back to draft and releases anyone who had reserved.
+  async function unpublish() {
+    if (busy) return
+    if (!reason.trim()) { onToast('Enter a reason.', false); return }
+    setBusy(true)
+    const res = await fetch(`/api/admin/hosted-events/${event.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reject', reason: reason.trim() }),
+    })
+    const json = await res.json().catch(() => ({}))
+    setBusy(false)
+    if (!res.ok) { onToast(json.error ?? 'Action failed.', false); return }
+
+    const released = Number(json.released ?? 0)
+    onToast(released > 0
+      ? `Event unpublished — ${released} reserved ${released === 1 ? 'member' : 'members'} released.`
+      : 'Event unpublished.')
     setRejecting(false); setReason('')
     onChanged()
   }
@@ -153,6 +182,39 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
 
       {event.source_booking_id && (
         <p className="text-[11px] text-gray-400 mt-2">Listed from one of the host&apos;s existing bookings.</p>
+      )}
+
+      {event.status === 'draft' && event.rejection_reason && (
+        <p className="text-[11px] text-red-600 mt-2">Unpublished: {event.rejection_reason}</p>
+      )}
+
+      {canUnpublish && (
+        <div className="mt-4">
+          {!rejecting ? (
+            <button onClick={() => setRejecting(true)} disabled={busy} className="btn btn-outline btn-sm text-red-600 border-red-200">
+              Unpublish
+            </button>
+          ) : (
+            <div className="p-3 rounded-xl bg-red-50 border border-red-100 space-y-2">
+              <p className="text-[11px] text-red-700">
+                Takes the event off the member list and releases anyone who reserved.
+                The host can fix it and publish again.
+              </p>
+              <input
+                className="input text-sm"
+                placeholder="Reason (shown to the host)"
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+              />
+              <div className="flex gap-2">
+                <button onClick={() => { setRejecting(false); setReason('') }} disabled={busy} className="btn btn-outline btn-sm flex-1">Back</button>
+                <button onClick={unpublish} disabled={busy} className="btn btn-sm flex-1 bg-red-600 text-white">
+                  Unpublish event
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {awaitingCredit && (

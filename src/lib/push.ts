@@ -308,6 +308,24 @@ export const NotificationTemplates = {
     tag:   'hosted-event-created',
   }),
 
+  // Sent to admins when a host's event goes live. Events publish without
+  // waiting for approval, so this is the after-the-fact heads-up that gives an
+  // admin the chance to reject one that shouldn't have gone out.
+  hostedEventNeedsReview: (hostName: string, courseName: string, date: string): PushPayload => ({
+    title: 'New hosted event is live',
+    body:  `${hostName} published an event at ${courseName} on ${date}. Review it if it shouldn't be listed.`,
+    url:   '/admin/hosts',
+    tag:   'hosted-event-review',
+  }),
+
+  // Sent to the host when an admin takes a published event back down.
+  hostedEventRejected: (courseName: string, date: string, reason: string): PushPayload => ({
+    title: 'Your event was unpublished',
+    body:  `Your ${courseName} event on ${date} was taken down. ${reason} Fix it and publish again.`,
+    url:   '/host/events',
+    tag:   'hosted-event-rejected',
+  }),
+
   hostedEventJoined: (memberName: string, courseName: string, date: string): PushPayload => ({
     title: 'New reservation',
     body:  `${memberName} reserved a spot at your ${courseName} event on ${date}.`,

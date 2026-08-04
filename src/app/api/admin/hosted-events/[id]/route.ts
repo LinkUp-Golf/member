@@ -1,0 +1,119 @@
+export const dynamic = 'force-dynamic'
+
+// POST /api/admin/hosted-events/[id] — admin review of a live hosted event.
+//   action: 'reject' → take a published event back down.
+//
+// Events publish without waiting for approval, so this is the counterweight:
+// an admin who sees an event that shouldn't be listed unpublishes it. The event
+// returns to 'draft' rather than 'cancelled' — the host can fix whatever was
+// wrong and publish again, which is the point of a reason being required.
+// RLS already hides drafts from members, so unpublishing removes it from the
+// member-facing list.
+//
+// Credit approval after the event has run is a separate decision and lives in
+// ./[id]/credits.
+
+import type { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
+import { withAuth } from '@/lib/auth/with-auth'
+import { createAdminClient } from '@/lib/supabase-server'
+import { sanitiseText } from '@/lib/validation'
+import { sendPushToMember, sendPushToMembers, NotificationTemplates } from '@/lib/push'
+import { logger } from '@/lib/logger'
+import type { AuthContext } from '@/lib/auth/types'
+
+// Only a live listing can be taken down. A draft is already invisible, and an
+// event that has run (completed / pending_credit_approval / credits_awarded)
+// happened — unpublishing it would rewrite history rather than prevent it.
+const REJECTABLE_STATUSES = ['upcoming']
+
+export const POST = withAuth(
+  async (req: NextRequest, ctx: AuthContext, routeCtx?: { params: Record<string, string> }) => {
+    const id = routeCtx?.params?.['id']
+    if (!id) return NextResponse.json({ error: 'Missing event id' }, { status: 400 })
+
+    const body = await req.json().catch(() => ({})) as { action?: string; reason?: string }
+    if (body.action !== 'reject') {
+      return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
+    }
+
+    const reason = body.reason?.trim() ?? ''
+    if (!reason) {
+      return NextResponse.json({ error: 'A reason is required — the host sees it.' }, { status: 400 })
+    }
+
+    const admin = createAdminClient()
+
+    const { data: event } = await admin
+      .from('hosted_events')
+      .select('id, status, event_date, course:courses(name), host:hosts(member_id)')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (!event) return NextResponse.json({ error: 'Event not found' }, { status: 404 })
+    if (!REJECTABLE_STATUSES.includes(event.status)) {
+      return NextResponse.json({ error: 'Only a live event can be unpublished.' }, { status: 409 })
+    }
+
+    // Capture who holds a spot before we release them.
+    const { data: reserved } = await admin
+      .from('hosted_event_registrations')
+      .select('member_id')
+      .eq('hosted_event_id', id)
+      .eq('status', 'reserved')
+
+    const { data: rejected, error } = await admin
+      .from('hosted_events')
+      .update({
+        status: 'draft',
+        rejection_reason: sanitiseText(reason),
+        reviewed_by: ctx.userId,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .in('status', REJECTABLE_STATUSES)
+      .select('id')
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    // Another admin (or the host) moved it in the race window.
+    if (!rejected || rejected.length === 0) {
+      return NextResponse.json({ error: 'Only a live event can be unpublished.' }, { status: 409 })
+    }
+
+    // An unpublished event isn't joinable, so nobody may keep a spot in it.
+    await admin
+      .from('hosted_event_registrations')
+      .update({ status: 'cancelled' })
+      .eq('hosted_event_id', id)
+      .eq('status', 'reserved')
+
+    const course = Array.isArray(event.course) ? event.course[0] : event.course
+    const host = Array.isArray(event.host) ? event.host[0] : event.host
+    const courseName = course?.name ?? 'a course'
+
+    if (host?.member_id) {
+      void sendPushToMember(
+        host.member_id,
+        NotificationTemplates.hostedEventRejected(courseName, event.event_date, reason)
+      ).catch(() => {})
+    }
+
+    // Members who had reserved lose their spot — same message the host's own
+    // cancellation sends, because from the member's side it's the same outcome.
+    const memberIds = (reserved ?? []).map(r => r.member_id)
+    if (memberIds.length) {
+      void sendPushToMembers(
+        memberIds,
+        NotificationTemplates.hostedEventCancelled(courseName, event.event_date)
+      ).catch(() => {})
+    }
+
+    logger.info('Hosted event rejected by admin', {
+      action: 'admin.hosted_event.rejected',
+      userId: ctx.userId,
+      metadata: { event_id: id, released: memberIds.length },
+    })
+
+    return NextResponse.json({ ok: true, status: 'draft', released: memberIds.length })
+  },
+  { requireAdmin: true, skipGHLCheck: true }
+)

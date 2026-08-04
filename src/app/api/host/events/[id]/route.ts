@@ -10,7 +10,7 @@ import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateHostedEventPayload, sanitiseText } from '@/lib/validation'
 import { enrichHostedEvents, hostCanUseCourse } from '@/lib/hosts/events'
-import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
+import { sendPushToMembers, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
 import type { HostedEvent } from '@/types'
 
@@ -136,6 +136,14 @@ export const PATCH = withHostAuth(
       if (!published || published.length === 0) {
         return NextResponse.json({ error: 'This event is no longer a draft.' }, { status: 409 })
       }
+
+      // Same heads-up an auto-published event sends: admins hear about it once
+      // it's live, and can take it back down if it shouldn't be listed.
+      void sendPushToAdmins(
+        NotificationTemplates.hostedEventNeedsReview(
+          ctx.host.name, event.course?.name ?? 'a course', event.event_date
+        )
+      ).catch(() => {})
 
       logger.info('Hosted event published', {
         action: 'host.event.published', userId: ctx.userId, metadata: { event_id: id },
