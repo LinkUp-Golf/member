@@ -1,12 +1,16 @@
 // ============================================================
-// LinkUp Golf — Host credits
-// The credit ledger is append-only with signed amounts (earned +, redeemed -,
-// adjusted ±); a host's balance is simply the sum. These helpers derive the
-// earned / redeemed / balance triad and load a host's ledger.
+// LinkUp Golf — Member credit wallet
+// One wallet per member, whatever earned the credit (hosting an event, a
+// referral payout, an admin adjustment). The ledger is append-only with signed
+// amounts (earned +, redeemed -, adjusted ±), so a balance is simply the sum.
+// These helpers derive the earned / redeemed / balance triad and load history.
+//
+// Credit is spendable on golf or membership — including by a host who holds no
+// golf membership of their own — so nothing here gates on membership status.
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { HostCreditEntry, HostCreditSummary } from '@/types'
+import type { CreditEntry, CreditSummary } from '@/types'
 
 type AdminClient = SupabaseClient
 
@@ -23,7 +27,7 @@ const round2 = (n: number) => {
  */
 export function summarizeCredits(
   entries: { amount: number }[]
-): HostCreditSummary {
+): CreditSummary {
   let earned = 0
   let redeemed = 0
   let balance = 0
@@ -42,29 +46,29 @@ export function summarizeCredits(
   }
 }
 
-/** A host's credit summary (earned / redeemed / balance). */
+/** A member's credit summary (earned / redeemed / balance). */
 export async function loadCreditSummary(
   admin: AdminClient,
-  hostId: string
-): Promise<HostCreditSummary> {
+  memberId: string
+): Promise<CreditSummary> {
   const { data } = await admin
-    .from('host_credit_ledger')
+    .from('credit_ledger')
     .select('kind, amount')
-    .eq('host_id', hostId)
+    .eq('member_id', memberId)
 
   return summarizeCredits((data ?? []) as { amount: number }[])
 }
 
-/** A host's full ledger, newest first. */
+/** A member's full ledger, newest first. */
 export async function loadCreditEntries(
   admin: AdminClient,
-  hostId: string
-): Promise<HostCreditEntry[]> {
+  memberId: string
+): Promise<CreditEntry[]> {
   const { data } = await admin
-    .from('host_credit_ledger')
+    .from('credit_ledger')
     .select('*')
-    .eq('host_id', hostId)
+    .eq('member_id', memberId)
     .order('created_at', { ascending: false })
 
-  return (data ?? []) as HostCreditEntry[]
+  return (data ?? []) as CreditEntry[]
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { summarizeCredits } from '@/lib/hosts/credits'
+import { summarizeCredits } from '@/lib/credits'
 import { memberPrice, canUploadProof } from '@/lib/hosts/events'
 import { HOST_MEMBER_PRICE_MARKUP_USD } from '@/lib/constants'
 

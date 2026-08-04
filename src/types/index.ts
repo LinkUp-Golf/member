@@ -519,20 +519,32 @@ export interface HostedEventProof {
   created_at: string
 }
 
-export type HostCreditKind = 'earned' | 'redeemed' | 'adjusted'
+export type CreditKind = 'earned' | 'redeemed' | 'adjusted'
 
-export interface HostCreditEntry {
+/** What a redemption buys. Credit is spendable on either. */
+export type CreditPurpose = 'golf' | 'membership'
+
+/**
+ * One movement in a member's credit wallet. Append-only and signed: the balance
+ * is the sum of `amount` across a member's rows.
+ */
+export interface CreditEntry {
   id: string
-  host_id: string
+  /** Whose wallet. What a balance is summed over. */
+  member_id: string
+  /** Set when the credit was earned by hosting; null for other sources. */
+  host_id: string | null
   event_id: string | null
-  kind: HostCreditKind
+  kind: CreditKind
   amount: number
+  /** Set on redemptions made after the purpose became required. */
+  purpose: CreditPurpose | null
   note: string | null
   created_by: string | null
   created_at: string
 }
 
-export interface HostCreditSummary {
+export interface CreditSummary {
   earned: number
   redeemed: number
   balance: number
@@ -543,7 +555,7 @@ export interface HostStats {
   completedCount: number
   cancelledCount: number
   totalEvents: number
-  credits: HostCreditSummary
+  credits: CreditSummary
 }
 
 export type ReferralPartnerWithStats = ReferralPartner & ReferralPartnerStats

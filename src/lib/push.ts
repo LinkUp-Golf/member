@@ -354,11 +354,24 @@ export const NotificationTemplates = {
     tag:   'host-credit-rejected',
   }),
 
-  hostCreditRedeemed: (amount: number): PushPayload => ({
+  // Credit is spendable on golf or on membership; say which, so the member can
+  // tell two redemptions apart in their history.
+  // The 'host-credit' tag prefix is what types these in the notification log
+  // (see TAG_TYPE_MAP) — keep it even though credit is no longer host-only.
+  creditRedeemed: (amount: number, purpose: 'golf' | 'membership'): PushPayload => ({
     title: 'Credits redeemed',
-    body:  `You redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in host credits.`,
+    body:  `You redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in credits toward ${purpose === 'golf' ? 'golf' : 'your membership'}.`,
     url:   '/host/credits',
     tag:   'host-credit-redeemed',
+  }),
+
+  // Sent to admins — a redemption isn't settled until someone books the round
+  // or applies it to the membership fee.
+  creditRedemptionRequested: (name: string, amount: number, purpose: 'golf' | 'membership'): PushPayload => ({
+    title: 'Credit redemption to settle',
+    body:  `${name} redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} toward ${purpose === 'golf' ? 'golf' : 'membership'}.`,
+    url:   '/admin/hosts',
+    tag:   'host-credit-redemption',
   }),
 
   // Sent to members who had reserved a spot when the host cancels the event.

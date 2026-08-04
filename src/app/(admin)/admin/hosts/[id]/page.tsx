@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { AdminPageHeader, StatCard, AdminCard, Badge } from '@/components/admin/AdminUI'
-import type { HostCreditEntry, HostCreditSummary, HostCreditKind } from '@/types'
+import type { CreditEntry, CreditSummary, CreditKind, CreditPurpose } from '@/types'
 
 const fmtMoney = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -14,10 +14,15 @@ const fmtMoney = (n: number) =>
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
-const KIND_META: Record<HostCreditKind, { label: string; colour: 'green' | 'gray' | 'blue' }> = {
+const KIND_META: Record<CreditKind, { label: string; colour: 'green' | 'gray' | 'blue' }> = {
   earned:   { label: 'Earned',   colour: 'green' },
   redeemed: { label: 'Redeemed', colour: 'gray' },
   adjusted: { label: 'Adjusted', colour: 'blue' },
+}
+
+const PURPOSE_LABEL: Record<CreditPurpose, string> = {
+  golf:       'Toward golf',
+  membership: 'Toward membership',
 }
 
 interface HostDetail {
@@ -32,8 +37,8 @@ export default function AdminHostDetailPage() {
   const id = String(params?.id ?? '')
 
   const [host, setHost] = useState<HostDetail | null>(null)
-  const [summary, setSummary] = useState<HostCreditSummary | null>(null)
-  const [entries, setEntries] = useState<HostCreditEntry[]>([])
+  const [summary, setSummary] = useState<CreditSummary | null>(null)
+  const [entries, setEntries] = useState<CreditEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
@@ -86,6 +91,11 @@ export default function AdminHostDetailPage() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <Badge label={meta.label} colour={meta.colour} />
+                          {/* What a redemption is meant to buy — the admin has
+                              to settle it, so it belongs on the row. */}
+                          {e.purpose && (
+                            <span className="text-xs font-medium text-gray-600">{PURPOSE_LABEL[e.purpose]}</span>
+                          )}
                           <span className="text-xs text-gray-400">{fmtDate(e.created_at)}</span>
                         </div>
                         {e.note && <p className="text-xs text-gray-500 mt-1 truncate">{e.note}</p>}

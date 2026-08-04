@@ -8,7 +8,7 @@ import Link from 'next/link'
 import { AdminPageHeader, AdminTable, AdminTr, AdminTd, Badge } from '@/components/admin/AdminUI'
 import HostApplications from '@/components/admin/HostApplications'
 import HostedEventsAdmin from '@/components/admin/HostedEventsAdmin'
-import type { HostCreditSummary } from '@/types'
+import type { CreditSummary } from '@/types'
 
 const fmtMoney = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 2 })
@@ -28,7 +28,7 @@ interface AdminHostRow {
   status: string
   created_at: string
   member?: { first_name: string; last_name: string; email: string } | null
-  credits: HostCreditSummary
+  credits: CreditSummary
   event_count: number
 }
 
