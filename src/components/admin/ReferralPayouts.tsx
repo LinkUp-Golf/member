@@ -2,11 +2,17 @@
 
 // Recurring commission for one referral partner, on the admin partner detail
 // page. Commission accrues monthly per referred member; a payout settles the
-// outstanding balance once it clears the threshold. Payouts happen outside the
-// app (cash or coupon) — this records them and shows the running balance.
+// outstanding balance once it clears the threshold.
+//
+// The default method is credit: recording the payout puts it straight into the
+// partner's credit wallet, spendable on golf or membership — nothing happens
+// outside the app. Cash and coupon still record a payout made externally, and
+// are the only options for a partner with no LinkUp account to credit.
 
 import { useState, useEffect, useCallback } from 'react'
 import { AdminCard, StatCard, Badge } from '@/components/admin/AdminUI'
+import { PAYOUT_METHODS, PAYOUT_METHOD_LABEL } from '@/lib/constants'
+import type { PayoutMethod } from '@/types'
 
 const fmtMoney = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -42,7 +48,7 @@ interface Balance {
 }
 
 interface PayoutsResponse {
-  partner: { payout_method: 'cash' | 'coupon' }
+  partner: { payout_method: PayoutMethod }
   accruals: MemberAccrual[]
   payouts: Payout[]
   balance: Balance
@@ -165,7 +171,7 @@ export default function ReferralPayouts({
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-gray-800">{fmtDate(p.paid_at)}</p>
                     <p className="text-[11px] text-gray-400">
-                      {p.method === 'coupon' ? 'Coupon' : 'Cash'}{p.reference ? ` · ${p.reference}` : ''}{p.note ? ` · ${p.note}` : ''}
+                      {PAYOUT_METHOD_LABEL[p.method as PayoutMethod] ?? p.method}{p.reference ? ` · ${p.reference}` : ''}{p.note ? ` · ${p.note}` : ''}
                     </p>
                   </div>
                   <span className="text-sm font-medium text-gray-900 flex-shrink-0">{fmtMoney(p.amount)}</span>
@@ -195,13 +201,13 @@ export default function ReferralPayouts({
 function RecordPayoutModal({ partnerId, outstanding, defaultMethod, onClose, onPaid, onError }: {
   partnerId: string
   outstanding: number
-  defaultMethod: 'cash' | 'coupon'
+  defaultMethod: PayoutMethod
   onClose: () => void
   onPaid: (msg: string) => void
   onError: (msg: string) => void
 }) {
   const [amount, setAmount] = useState(outstanding.toFixed(2))
-  const [method, setMethod] = useState<'cash' | 'coupon'>(defaultMethod)
+  const [method, setMethod] = useState<PayoutMethod>(defaultMethod)
   const [reference, setReference] = useState('')
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -256,33 +262,37 @@ function RecordPayoutModal({ partnerId, outstanding, defaultMethod, onClose, onP
           <div>
             <span className={labelCls}>Method</span>
             <div className="flex gap-2 p-1 bg-gray-100 rounded-xl">
-              {(['cash', 'coupon'] as const).map(m => (
+              {PAYOUT_METHODS.map(m => (
                 <button
                   key={m}
                   type="button"
                   onClick={() => setMethod(m)}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium capitalize transition-colors ${
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
                     method === m ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
-                  {m}
+                  {PAYOUT_METHOD_LABEL[m]}
                 </button>
               ))}
             </div>
           </div>
 
-          <div>
-            <label htmlFor="payout-ref" className={labelCls}>
-              {method === 'coupon' ? 'Coupon code' : 'Reference'}
-            </label>
-            <input
-              id="payout-ref"
-              className={field}
-              value={reference}
-              onChange={e => setReference(e.target.value)}
-              placeholder={method === 'coupon' ? 'Coupon code issued' : 'Bank transfer ref'}
-            />
-          </div>
+          {/* Credit needs no external reference — the ledger row IS the record.
+              Cash and coupon are paid outside the app, so they do. */}
+          {method !== 'credit' && (
+            <div>
+              <label htmlFor="payout-ref" className={labelCls}>
+                {method === 'coupon' ? 'Coupon code' : 'Reference'}
+              </label>
+              <input
+                id="payout-ref"
+                className={field}
+                value={reference}
+                onChange={e => setReference(e.target.value)}
+                placeholder={method === 'coupon' ? 'Coupon code issued' : 'Bank transfer ref'}
+              />
+            </div>
+          )}
 
           <div>
             <label htmlFor="payout-note" className={labelCls}>Note</label>
@@ -297,7 +307,9 @@ function RecordPayoutModal({ partnerId, outstanding, defaultMethod, onClose, onP
 
           <div className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-3">
             <p className="text-[11px] text-gray-500">
-              Records a payout made outside the app and notifies the partner. Settles the balance up to the amount entered.
+              {method === 'credit'
+                ? 'Adds the amount to the partner’s credit balance, spendable on golf or membership, and notifies them. Settles the balance up to the amount entered.'
+                : 'Records a payout made outside the app and notifies the partner. Settles the balance up to the amount entered.'}
             </p>
           </div>
         </div>

@@ -302,6 +302,15 @@ export interface Referral {
 
 export type ReferralPartnerLinkStatus = 'linked' | 'converted'
 
+/**
+ * How referral commission is settled.
+ *
+ * 'credit' is the default: the payout lands in the partner's member credit
+ * wallet, spendable on golf or toward membership. cash and coupon remain for a
+ * partner with no LinkUp account — they have no wallet to credit.
+ */
+export type PayoutMethod = 'credit' | 'cash' | 'coupon'
+
 export interface ReferralPartner {
   id: string
   name: string
@@ -309,8 +318,8 @@ export interface ReferralPartner {
   percentage: number
   /** Last day the commission percentage is honoured (YYYY-MM-DD). Null = no expiry. */
   ends_at: string | null
-  /** How commission is paid out: cash or a coupon/account credit. */
-  payout_method: 'cash' | 'coupon'
+  /** How commission is paid out. */
+  payout_method: PayoutMethod
   /** Owning member, when the partner is a member rather than an external affiliate. */
   member_id: string | null
   created_by: string | null

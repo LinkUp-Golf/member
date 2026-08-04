@@ -6,11 +6,11 @@ import { useForm } from 'react-hook-form'
 import {
   AdminPageHeader, AdminTable, AdminTr, AdminTd, StatCard,
 } from '@/components/admin/AdminUI'
-import { DEFAULT_REFERRAL_PERCENTAGE } from '@/lib/constants'
+import { DEFAULT_REFERRAL_PERCENTAGE, PAYOUT_METHODS, PAYOUT_METHOD_LABEL } from '@/lib/constants'
 import { isRateExpired } from '@/lib/referral-rate'
 import ReferralApplications from '@/components/admin/ReferralApplications'
 import ReferralContactPicker, { type ReferralSelection } from '@/components/admin/ReferralContactPicker'
-import type { ReferralPartnerWithStats } from '@/types'
+import type { ReferralPartnerWithStats, PayoutMethod } from '@/types'
 
 function toSlug(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -240,7 +240,7 @@ export default function AdminReferralPartnersPage() {
 
 // ---- Create / edit drawer -----------------------------------
 
-type PartnerFormValues = { name: string; code: string; percentage: number | ''; ends_at: string; payout_method: 'cash' | 'coupon' }
+type PartnerFormValues = { name: string; code: string; percentage: number | ''; ends_at: string; payout_method: PayoutMethod }
 
 function PartnerDrawer({ editing, onClose, onSaved, onError }: {
   editing: ReferralPartnerWithStats | null
@@ -258,7 +258,7 @@ function PartnerDrawer({ editing, onClose, onSaved, onError }: {
       code: editing?.code ?? '',
       percentage: editing?.percentage ?? DEFAULT_REFERRAL_PERCENTAGE,
       ends_at: editing?.ends_at?.slice(0, 10) ?? '',
-      payout_method: editing?.payout_method ?? 'cash',
+      payout_method: editing?.payout_method ?? 'credit',
     },
   })
 
@@ -421,11 +421,14 @@ function PartnerDrawer({ editing, onClose, onSaved, onError }: {
               className={field(false)}
               {...register('payout_method')}
             >
-              <option value="cash">Cash</option>
-              <option value="coupon">Coupon</option>
+              {PAYOUT_METHODS.map(m => (
+                <option key={m} value={m}>{PAYOUT_METHOD_LABEL[m]}</option>
+              ))}
             </select>
             <p className="mt-1 text-[11px] text-gray-400">
-              Default method for this partner&apos;s payouts. Can be overridden per payout.
+              Default method for this partner&apos;s payouts; can be overridden per payout.
+              Credit lands in their LinkUp balance, spendable on golf or membership —
+              a partner with no LinkUp account has to be paid by cash or coupon.
             </p>
           </div>
 

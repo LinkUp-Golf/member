@@ -5,6 +5,8 @@
 // .env.local; these are stable values that live in code.
 // ============================================================
 
+import type { PayoutMethod } from '@/types'
+
 // ---- GHL API ------------------------------------------------
 
 export const GHL_BASE_URL = 'https://services.leadconnectorhq.com'
@@ -35,6 +37,17 @@ export const COMMISSION_TERM_MONTHS = 12
 // A partner is only paid once their unpaid balance reaches this threshold;
 // below it, the balance rolls over to the next payout run.
 export const PAYOUT_THRESHOLD_USD = 100
+
+// Commission is settled as credit by default — it lands in the partner's member
+// credit wallet, spendable on golf or toward membership. Cash and coupon remain
+// for a partner with no LinkUp account, who has no wallet to credit.
+export const PAYOUT_METHODS = ['credit', 'cash', 'coupon'] as const
+
+export const PAYOUT_METHOD_LABEL: Record<PayoutMethod, string> = {
+  credit: 'Credit',
+  cash:   'Cash',
+  coupon: 'Coupon',
+}
 
 // ---- Hosts --------------------------------------------------
 

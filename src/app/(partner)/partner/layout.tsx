@@ -18,7 +18,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
 import { motion } from 'framer-motion'
-import { LayoutDashboard, Users, Upload, Wallet, ChevronLeft } from 'lucide-react'
+import { LayoutDashboard, Users, Upload, Wallet, Coins, ChevronLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FullScreenLoader } from '@/components/ui/Loading'
 import { useMemberRoles } from '@/hooks/useMemberRoles'
@@ -30,6 +30,7 @@ const NAV_ITEMS = [
   { href: '/partner/referrals',   label: 'My Referrals', short: 'Referrals', icon: Users },
   { href: '/partner/submissions', label: 'Submit Referrals', short: 'Submit', icon: Upload },
   { href: '/partner/payments',    label: 'Payments',  short: 'Payments', icon: Wallet },
+  { href: '/partner/credits',     label: 'Credits',   short: 'Credits', icon: Coins },
 ]
 
 // '/partner' is a prefix of every other route, so it only matches exactly.

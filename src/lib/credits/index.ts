@@ -7,6 +7,11 @@
 //
 // Credit is spendable on golf or membership — including by a host who holds no
 // golf membership of their own — so nothing here gates on membership status.
+//
+// Nothing in this file imports server-only code: summarizeCredits is pure and
+// the loaders take a client as a parameter, so a client component can import a
+// sibling of theirs without dragging next/headers into its bundle. Redemption,
+// which does send notifications, lives in ./redeem for that reason.
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'

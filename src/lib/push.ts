@@ -17,6 +17,7 @@ export {
 import { createAdminClient } from '@/lib/supabase-server'
 import { sendToUsers } from './push/pushService'
 import type { PushPayload, SendResult } from './push/types'
+import type { PayoutMethod } from '@/types'
 
 // ---- sendPushToCourse ---------------------------------------
 // Fetches all active member IDs for a course, then dispatches.
@@ -185,12 +186,21 @@ export const NotificationTemplates = {
     tag:   'referral-list-rejected',
   }),
 
-  referralCommissionPaid: (amount: number, method: 'cash' | 'coupon' = 'cash'): PushPayload => ({
-    title: 'Commission paid',
-    body:  `A referral commission payout of ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} has been ${method === 'coupon' ? 'issued as a coupon' : 'paid'}.`,
-    url:   '/partner/payments',
-    tag:   'referral-commission-paid',
-  }),
+  // A credit payout is spendable immediately, so point the partner at the
+  // wallet rather than at the payout history.
+  referralCommissionPaid: (amount: number, method: PayoutMethod = 'credit'): PushPayload => {
+    const formatted = amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+    const settled =
+      method === 'credit' ? 'added to your credit balance — spend it on golf or membership'
+        : method === 'coupon' ? 'issued as a coupon'
+        : 'paid'
+    return {
+      title: 'Commission paid',
+      body:  `A referral commission payout of ${formatted} has been ${settled}.`,
+      url:   method === 'credit' ? '/partner/credits' : '/partner/payments',
+      tag:   'referral-commission-paid',
+    }
+  },
 
   referralPartnerRejected: (reason: string): PushPayload => ({
     title: 'Referral partner application',

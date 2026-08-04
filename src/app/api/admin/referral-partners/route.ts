@@ -8,7 +8,7 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateReferralPartnerPayload } from '@/lib/validation'
-import { DEFAULT_REFERRAL_PERCENTAGE } from '@/lib/constants'
+import { DEFAULT_REFERRAL_PERCENTAGE, PAYOUT_METHODS } from '@/lib/constants'
 import { computeStatsForPartners, emptyStats } from '@/lib/referral-partners'
 import { loadPartnerCommission } from '@/lib/referral-commission'
 import type { AuthContext } from '@/lib/auth/types'
@@ -53,7 +53,8 @@ export const POST = withAuth(
     const percentage = body.percentage ?? DEFAULT_REFERRAL_PERCENTAGE
     // Empty string from the date input means "no expiry", same as omitting it.
     const endsAt = body.ends_at?.trim() || null
-    const payoutMethod = body.payout_method === 'coupon' ? 'coupon' : 'cash'
+    // Credit is the default — commission settles into the partner's wallet.
+    const payoutMethod = PAYOUT_METHODS.find(m => m === body.payout_method) ?? 'credit'
 
     const { valid, errors } = validateReferralPartnerPayload({ name, code, percentage, ends_at: endsAt })
     if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })

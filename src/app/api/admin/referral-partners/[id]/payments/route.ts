@@ -4,8 +4,14 @@ export const dynamic = 'force-dynamic'
 //        balance: what's accrued (recurring, per referred member), what's been
 //        paid, and what's outstanding.
 // POST /api/admin/referral-partners/[id]/payments — record a payout of the
-//        outstanding balance (cash or coupon). Only allowed once the balance
-//        clears the payout threshold; commission is paid outside the app.
+//        outstanding balance. Only allowed once the balance clears the payout
+//        threshold.
+//
+//        The default method is 'credit': the RPC writes the payment and the
+//        partner's credit_ledger row in one transaction, so commission settles
+//        inside the app as credit spendable on golf or membership. 'cash' and
+//        'coupon' record a payout made externally, and are the only options for
+//        a partner with no LinkUp account to credit.
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
@@ -13,7 +19,7 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { loadPartnerCommission } from '@/lib/referral-commission'
 import { monthOf } from '@/lib/referral-rate'
-import { PAYOUT_THRESHOLD_USD } from '@/lib/constants'
+import { PAYOUT_THRESHOLD_USD, PAYOUT_METHODS } from '@/lib/constants'
 import { syncPartnerReferredMembers } from '@/lib/referral-sync'
 import { sendPushToMember, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
@@ -89,8 +95,9 @@ export const POST = withAuth(
       return NextResponse.json({ error: `Amount exceeds the ${fmtMoney(balance.outstanding)} outstanding.` }, { status: 400 })
     }
 
-    const method = body.method === 'coupon' ? 'coupon' : body.method === 'cash' ? 'cash' : partner.payout_method
-    const reference = body.reference?.trim() || null
+    const method = PAYOUT_METHODS.find(m => m === body.method) ?? partner.payout_method
+    // A credit payout has no external reference — the ledger row is the record.
+    const reference = method === 'credit' ? null : body.reference?.trim() || null
 
     const { data: payment, error } = await admin.rpc('record_referral_payout', {
       p_partner_id: id,
@@ -107,6 +114,14 @@ export const POST = withAuth(
       // Raised by the RPC when a concurrent payout already settled this balance.
       if (error.message?.includes('OVERPAY')) {
         return NextResponse.json({ error: 'This balance was just paid out. Refresh to see the latest.' }, { status: 409 })
+      }
+      // Credit needs a wallet, and a wallet needs a LinkUp account. Nothing was
+      // written — the RPC checks this before it records anything.
+      if (error.message?.includes('NO_ACCOUNT')) {
+        return NextResponse.json(
+          { error: 'This partner has no LinkUp account to credit. Create one for them, or pay by cash or coupon.' },
+          { status: 409 }
+        )
       }
       return NextResponse.json({ error: error.message }, { status: 500 })
     }

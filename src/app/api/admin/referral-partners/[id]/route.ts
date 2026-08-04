@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateReferralPartnerPayload } from '@/lib/validation'
+import { PAYOUT_METHODS } from '@/lib/constants'
 import type { AuthContext } from '@/lib/auth/types'
 import type { ReferralPartner } from '@/types'
 
@@ -22,8 +23,11 @@ export const PATCH = withAuth(
     const { valid, errors } = validateReferralPartnerPayload(body, { partial: true })
     if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })
 
-    if (body.payout_method != null && body.payout_method !== 'cash' && body.payout_method !== 'coupon') {
-      return NextResponse.json({ error: 'payout_method must be cash or coupon' }, { status: 400 })
+    if (body.payout_method != null && !PAYOUT_METHODS.some(m => m === body.payout_method)) {
+      return NextResponse.json(
+        { error: `payout_method must be one of: ${PAYOUT_METHODS.join(', ')}` },
+        { status: 400 }
+      )
     }
 
     const admin = createAdminClient()
