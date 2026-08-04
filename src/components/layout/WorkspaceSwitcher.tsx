@@ -14,11 +14,15 @@ import { useProfile } from '@/hooks/useProfile'
 
 export type WorkspaceKey = 'member' | 'admin' | 'partner' | 'host'
 
+// Labels read as the object of "Workspace:" — the prefix the header shows so
+// the control says what it is rather than relying on an icon nobody recognises.
+// "Workspace: Member portal" / "Workspace: Your Referrals" read badly, so these
+// are the plain workspace names.
 const META: Record<WorkspaceKey, { label: string; href: string; icon: LucideIcon }> = {
-  member:  { label: 'Member portal', href: '/home',    icon: Home },
-  admin:   { label: 'Admin',         href: '/admin',   icon: ShieldCheck },
-  partner: { label: 'Your Referrals', href: '/partner', icon: BadgeDollarSign },
-  host:    { label: 'Host',          href: '/host',    icon: Flag },
+  member:  { label: 'Member',           href: '/home',    icon: Home },
+  admin:   { label: 'Admin',            href: '/admin',   icon: ShieldCheck },
+  partner: { label: 'Referral Partner', href: '/partner', icon: BadgeDollarSign },
+  host:    { label: 'Host',             href: '/host',    icon: Flag },
 }
 
 export default function WorkspaceSwitcher({ current }: { current: WorkspaceKey }) {
@@ -53,7 +57,10 @@ export default function WorkspaceSwitcher({ current }: { current: WorkspaceKey }
     return (
       <div className="flex items-center gap-2 px-2.5 py-1.5 text-white">
         <CurrentIcon className="w-4 h-4 flex-shrink-0" strokeWidth={1.9} />
-        <span className="text-sm font-semibold truncate">{META[current].label}</span>
+        <span className="text-sm truncate">
+          <span className="text-white/55">Workspace: </span>
+          <span className="font-semibold">{META[current].label}</span>
+        </span>
       </div>
     )
   }
@@ -68,7 +75,10 @@ export default function WorkspaceSwitcher({ current }: { current: WorkspaceKey }
         className="flex items-center gap-2 w-full rounded-lg px-2.5 py-1.5 text-white hover:bg-white/10 transition-colors"
       >
         <CurrentIcon className="w-4 h-4 flex-shrink-0" strokeWidth={1.9} />
-        <span className="text-sm font-semibold truncate flex-1 text-left">{META[current].label}</span>
+        <span className="text-sm truncate flex-1 text-left">
+          <span className="text-white/55">Workspace: </span>
+          <span className="font-semibold">{META[current].label}</span>
+        </span>
         <ChevronsUpDown className="w-4 h-4 flex-shrink-0 text-white/50" strokeWidth={2} />
       </button>
 
