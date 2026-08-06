@@ -97,7 +97,7 @@ describe('syncProfileFromGhl', () => {
   })
 
   it('writes nothing when GHL already agrees with every column', async () => {
-    // Re-syncs run on every login, every webhook and hourly — an unchanged
+    // Re-syncs run on every login, every webhook and nightly — an unchanged
     // value must not move updated_at or evict the member's cache entry.
     mockedValues.mockResolvedValue({
       'contact.company_name': 'Ridgeline Capital',

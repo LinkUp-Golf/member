@@ -180,8 +180,8 @@ export default function AdminMembersPage() {
     }
   }
 
-  // The hourly cron does this on its own; this is for when an admin has just
-  // changed something in GHL and doesn't want to wait for the next run.
+  // The daily cron does this on its own; this is for when an admin has just
+  // changed something in GHL and isn't waiting until tomorrow to see it.
   async function bulkSyncFromGHL() {
     setSyncing(true);
     setSyncResult(null);
@@ -252,11 +252,12 @@ export default function AdminMembersPage() {
               </span>
             )}
           </p>
-          {/* Both are true: the hourly cron keeps this current on its own, and
+          {/* Both are true: the nightly cron keeps this current on its own, and
               the button is the "I just changed GHL" shortcut. Saying so stops
-              the button reading as the only thing keeping the list fresh. */}
+              the button reading as the only thing keeping the list fresh — and
+              a day is long enough that the shortcut needs pointing at. */}
           <p className="text-xs text-gray-400 mt-1">
-            Synced from GHL automatically every hour — sync now if you&apos;ve
+            Synced from GHL automatically once a day — sync now if you&apos;ve
             just made a change.
           </p>
         </div>

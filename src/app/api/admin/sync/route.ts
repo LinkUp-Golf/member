@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic'
 
-// The same walk the hourly cron does — every access-tagged GHL contact, a
+// The same walk the daily cron does — every access-tagged GHL contact, a
 // handful of GHL + Supabase calls each — so it needs the same budget. 300s is
 // the Vercel ceiling; a run cut short is safe (see bulk.ts).
 export const maxDuration = 300
@@ -9,9 +9,9 @@ export const maxDuration = 300
 // POST /api/admin/sync
 // Runs the GHL → Supabase member reconcile on demand.
 //
-// The hourly cron (/api/cron/ghl-member-sync) does this on its own; this is for
-// when an admin has just changed something in GHL and doesn't want to wait up
-// to an hour to see it. Same function behind both, so the two can't drift.
+// The daily cron (/api/cron/ghl-member-sync) does this on its own; this is for
+// when an admin has just changed something in GHL and isn't waiting until
+// tomorrow to see it. Same function behind both, so the two can't drift.
 //
 // Idempotent, so an admin clicking this while the cron happens to be running
 // costs duplicated GHL calls and nothing else — both runs converge on the same

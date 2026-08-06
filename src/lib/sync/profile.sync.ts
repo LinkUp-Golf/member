@@ -74,7 +74,7 @@ export async function syncProfileFromGhl(params: {
     for (const [key, column] of Object.entries(PROFILE_FIELD_MAP) as [string, ProfileColumn][]) {
       const incoming = values[key]
       // Compare before writing: re-syncs are frequent (every login, every
-      // webhook, hourly), and an unchanged value shouldn't move updated_at or
+      // webhook, nightly), and an unchanged value shouldn't move updated_at or
       // evict the member's cache entry.
       if (incoming && incoming !== (current[column] ?? '')) {
         updates[column] = incoming

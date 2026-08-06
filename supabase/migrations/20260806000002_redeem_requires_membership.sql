@@ -41,7 +41,7 @@ BEGIN
   END IF;
 
   -- 'active' is the app's own record of "holds a course access tag", kept
-  -- current by the hourly GHL sync. Every other status is someone who can't
+  -- current by the GHL sync. Every other status is someone who can't
   -- spend: non_member (role tag only), waitlist and pending (not yet),
   -- suspended and cancelled (not any more).
   IF NOT EXISTS (

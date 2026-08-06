@@ -7,9 +7,15 @@ export const maxDuration = 300
 
 // ============================================================
 // GET /api/cron/ghl-member-sync
-// Runs hourly (vercel.json: "0 * * * *"). Reconciles Supabase members against
-// GHL — imports newly tagged contacts and deactivates members whose access tag
-// was removed — replacing the admin "Sync from GHL" button this used to need.
+// Runs daily at 06:00 UTC (vercel.json: "0 6 * * *") — roughly midnight in
+// Austin, so the reconcile is settled before the business day and doesn't share
+// a slot with the 08:00 hosted-events job. Reconciles Supabase members against
+// GHL: imports newly tagged contacts and deactivates members whose access tag
+// was removed.
+//
+// Daily is the floor, not the whole story. A member is also re-synced when they
+// log in and when GHL fires a contact webhook, and an admin can force a full
+// reconcile from the members page (POST /api/admin/sync) rather than wait.
 //
 // Idempotent, so a retried or overlapping run is harmless.
 //
