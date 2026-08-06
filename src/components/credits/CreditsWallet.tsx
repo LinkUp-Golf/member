@@ -123,10 +123,15 @@ export default function CreditsWallet({ basePath, earnedHint }: Props) {
         </AdminCard>
       ) : (
         <>
-          <div className="grid grid-cols-3 gap-3 mb-6">
+          {/* Three across only has room from sm up. On a phone a third of the
+              width can't hold a formatted amount at this type size, so Available
+              — the largest figure and the biggest text — takes its own row. */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
             <StatCard label="Earned"    value={fmtMoney(summary?.earned ?? 0)}   sub="Approved" colour="green" />
             <StatCard label="Redeemed"  value={fmtMoney(summary?.redeemed ?? 0)} sub="Spent"    colour="gray" />
-            <StatCard label="Available" value={fmtMoney(balance)}                sub="Balance"  colour="gold" large />
+            <div className="col-span-2 sm:col-span-1">
+              <StatCard label="Available" value={fmtMoney(balance)} sub="Balance" colour="gold" large />
+            </div>
           </div>
 
           <AdminCard title="History">

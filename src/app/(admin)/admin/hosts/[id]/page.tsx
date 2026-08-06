@@ -70,10 +70,14 @@ export default function AdminHostDetailPage() {
         <>
           <AdminPageHeader title={host.name} description={memberName ? `${memberName} · ${host.member?.email}` : host.member?.email} />
 
-          <div className="grid grid-cols-3 gap-3 mb-6">
+          {/* Same three cards as the host's own wallet, and the same phone
+              problem — Available takes its own row until there's room. */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
             <StatCard label="Earned"    value={fmtMoney(summary?.earned ?? 0)}   sub="Approved" colour="green" />
             <StatCard label="Redeemed"  value={fmtMoney(summary?.redeemed ?? 0)} sub="Spent"    colour="gray" />
-            <StatCard label="Available" value={fmtMoney(summary?.balance ?? 0)}  sub="Balance"  colour="gold" large />
+            <div className="col-span-2 sm:col-span-1">
+              <StatCard label="Available" value={fmtMoney(summary?.balance ?? 0)} sub="Balance" colour="gold" large />
+            </div>
           </div>
 
           <AdjustCard hostId={id} onDone={(msg) => { showToast(msg); load() }} onError={(msg) => showToast(msg, false)} />
