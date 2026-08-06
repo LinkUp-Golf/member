@@ -17,8 +17,8 @@ const todayISO = () => new Date().toISOString().slice(0, 10)
 export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   const admin = createAdminClient()
 
-  // ?mine=1 — the caller's own reservations (any event status except draft, so
-  // past and cancelled events they hold a spot in still show up). Everything
+  // ?mine=1 — the caller's own reservations, whatever state the event is in, so
+  // past and cancelled events they hold a spot in still show up. Everything
   // else lists the open, browsable events.
   if (req.nextUrl.searchParams.get('mine') === '1') {
     const { data: regs } = await admin
@@ -34,7 +34,6 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
       .from('hosted_events')
       .select('*, course:courses(id, name, city), host:hosts(id, name, member:members!hosts_member_id_fkey(first_name, last_name))')
       .in('id', ids)
-      .neq('status', 'draft')
       .order('event_date', { ascending: true })
 
     if (mineError) return NextResponse.json({ error: mineError.message }, { status: 500 })

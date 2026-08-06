@@ -7,7 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { HOST_MEMBER_PRICE_MARKUP_USD } from '@/lib/constants'
 import type { HostedEvent, HostStats } from '@/types'
-import { loadCreditSummary } from '@/lib/hosts/credits'
+import { loadCreditSummary } from '@/lib/credits'
 
 type AdminClient = SupabaseClient
 
@@ -44,8 +44,8 @@ export const JOINABLE_STATUSES = ['upcoming'] as const
  *   upcoming, date arrived  — it ran today; don't make the host wait for the
  *                             daily completion cron to catch up
  *
- * Never for draft (it hasn't been published, let alone happened),
- * cancelled, or credits_awarded (already settled).
+ * Never for an upcoming event still in the future, cancelled, or
+ * credits_awarded (already settled).
  *
  * Isomorphic on purpose: the route enforces it and the UI decides whether to
  * show the button, and the two must not drift.
@@ -94,11 +94,19 @@ export async function enrichHostedEvents(
   })
 }
 
-/** Event counts by lifecycle bucket plus the credit summary, for a dashboard. */
-export async function loadHostStats(admin: AdminClient, hostId: string): Promise<HostStats> {
+/**
+ * Event counts by lifecycle bucket plus the credit summary, for a dashboard.
+ * Events are the host's; credit belongs to the member behind that host, since
+ * the wallet is member-scoped and can also hold non-hosting credit.
+ */
+export async function loadHostStats(
+  admin: AdminClient,
+  hostId: string,
+  memberId: string
+): Promise<HostStats> {
   const [{ data: events }, credits] = await Promise.all([
     admin.from('hosted_events').select('status').eq('host_id', hostId),
-    loadCreditSummary(admin, hostId),
+    loadCreditSummary(admin, memberId),
   ])
 
   const rows = (events ?? []) as { status: string }[]

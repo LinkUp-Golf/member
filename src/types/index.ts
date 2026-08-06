@@ -195,6 +195,8 @@ export interface MemberProfile {
   value_offered: string | null
   value_sought: string | null
   non_golf_hobbies: string | null
+  /** Non-profits this member supports, max 3. Never null — the column defaults to '{}'. */
+  nonprofits: string[]
   linkedin_url: string | null
   handicap_index: number | null
   preferred_play_times: string | null
@@ -302,6 +304,15 @@ export interface Referral {
 
 export type ReferralPartnerLinkStatus = 'linked' | 'converted'
 
+/**
+ * How referral commission is settled.
+ *
+ * 'credit' is the default: the payout lands in the partner's member credit
+ * wallet, spendable on golf once they hold a membership. cash and coupon remain
+ * for a partner with no LinkUp account — they have no wallet to credit.
+ */
+export type PayoutMethod = 'credit' | 'cash' | 'coupon'
+
 export interface ReferralPartner {
   id: string
   name: string
@@ -309,8 +320,8 @@ export interface ReferralPartner {
   percentage: number
   /** Last day the commission percentage is honoured (YYYY-MM-DD). Null = no expiry. */
   ends_at: string | null
-  /** How commission is paid out: cash or a coupon/account credit. */
-  payout_method: 'cash' | 'coupon'
+  /** How commission is paid out. */
+  payout_method: PayoutMethod
   /** Owning member, when the partner is a member rather than an external affiliate. */
   member_id: string | null
   created_by: string | null
@@ -439,7 +450,6 @@ export interface HostApplication {
 }
 
 export type HostedEventStatus =
-  | 'draft'
   | 'upcoming'
   | 'completed'
   | 'cancelled'
@@ -514,25 +524,42 @@ export interface HostedEventRegistration {
 export interface HostedEventProof {
   id: string
   hosted_event_id: string
+  /** Supabase Storage URL — what the app renders. */
   image_url: string
+  /** GHL's handle for the mirrored copy; null when the mirror didn't land. */
+  ghl_media_id?: string | null
+  /** URL of the GHL copy; null when the mirror didn't land. */
+  ghl_media_url?: string | null
   uploaded_by: string | null
   created_at: string
 }
 
-export type HostCreditKind = 'earned' | 'redeemed' | 'adjusted'
+export type CreditKind = 'earned' | 'redeemed' | 'adjusted'
 
-export interface HostCreditEntry {
+/** What a redemption buys. Credit is spendable on either. */
+export type CreditPurpose = 'golf' | 'membership'
+
+/**
+ * One movement in a member's credit wallet. Append-only and signed: the balance
+ * is the sum of `amount` across a member's rows.
+ */
+export interface CreditEntry {
   id: string
-  host_id: string
+  /** Whose wallet. What a balance is summed over. */
+  member_id: string
+  /** Set when the credit was earned by hosting; null for other sources. */
+  host_id: string | null
   event_id: string | null
-  kind: HostCreditKind
+  kind: CreditKind
   amount: number
+  /** Set on redemptions made after the purpose became required. */
+  purpose: CreditPurpose | null
   note: string | null
   created_by: string | null
   created_at: string
 }
 
-export interface HostCreditSummary {
+export interface CreditSummary {
   earned: number
   redeemed: number
   balance: number
@@ -543,7 +570,7 @@ export interface HostStats {
   completedCount: number
   cancelledCount: number
   totalEvents: number
-  credits: HostCreditSummary
+  credits: CreditSummary
 }
 
 export type ReferralPartnerWithStats = ReferralPartner & ReferralPartnerStats

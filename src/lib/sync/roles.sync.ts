@@ -6,6 +6,13 @@
 // referral_partners.id), so when the tag is present we make sure that row
 // exists. Both helpers are idempotent — an existing row (e.g. one created by an
 // admin-approved application) is left untouched, including its terms.
+//
+// Deliberately including `name`, which is the one exception to GHL being the
+// source of truth across this module. It's seeded from the contact but it isn't
+// the contact's name afterwards: approving a host application takes a name from
+// the admin, and the admin referral UI can rename a partner. Both are usually a
+// business ("Acme Golf Travel"), not a person. Refreshing it from GHL would
+// undo that on the next login.
 // ============================================================
 
 import { logger } from '@/lib/logger'

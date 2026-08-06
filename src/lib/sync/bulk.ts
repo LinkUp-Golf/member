@@ -9,7 +9,8 @@
 // Idempotent: safe to run repeatedly, and safe to be cut short — a truncated
 // run just leaves the remaining contacts for the next one.
 //
-// Called by the hourly cron (/api/cron/ghl-member-sync).
+// Called by the daily cron (/api/cron/ghl-member-sync) and by the admin
+// "Sync from GHL" button (/api/admin/sync), which is the same run on demand.
 // ============================================================
 
 import { randomUUID } from 'crypto'

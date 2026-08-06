@@ -237,6 +237,24 @@ export default function MemberProfilePage() {
           </p>
         </div>
 
+        {/* Non-profits — chips rather than prose: they're discrete names, and
+            shared support for one is exactly the kind of thing this app exists
+            to surface between two members. */}
+        <div className="px-5 py-4 border-b border-green-900/08">
+          <p className="text-xs uppercase tracking-widest text-green-900/40 mb-3">Non-profits</p>
+          {(p?.nonprofits ?? []).length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {(p?.nonprofits ?? []).map(n => (
+                <span key={n} className="text-xs bg-green-50 text-green-900 px-2.5 py-1 rounded-full border border-green-900/10">
+                  {n}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-green-900/25 italic">Not filled in</p>
+          )}
+        </div>
+
         {/* Focus LinkUps groups */}
         <div className="px-5 py-4 border-b border-green-900/08">
           <p className="text-xs uppercase tracking-widest text-green-900/40 mb-3">Focus LinkUps groups</p>

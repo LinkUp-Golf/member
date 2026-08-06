@@ -10,7 +10,7 @@
     },
     {
       "path": "/api/cron/ghl-member-sync",
-      "schedule": "0 * * * *"
+      "schedule": "0 6 * * *"
     },
     {
       "path": "/api/cron/booking-surveys",

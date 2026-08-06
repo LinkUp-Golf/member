@@ -9,6 +9,8 @@ import { Spinner } from '@/components/ui/Loading'
 import AppShell from '@/components/layout/AppShell'
 import { INDUSTRY_CATEGORIES } from '@/types'
 import Select from '@/components/ui/Select'
+import InfoBubble from '@/components/ui/InfoBubble'
+import { parseNonprofits, formatNonprofits, MAX_NONPROFITS } from '@/lib/profile/nonprofits'
 import type { MemberProfile } from '@/types'
 
 export default function MyProfilePage() {
@@ -16,6 +18,10 @@ export default function MyProfilePage() {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState<Partial<MemberProfile>>({})
+  // The textarea holds raw text, not the stored array — keeping it separate
+  // means a half-typed line or a trailing newline survives editing instead of
+  // being normalised away under the cursor.
+  const [nonprofitsText, setNonprofitsText] = useState('')
   const [focusGroups, setFocusGroups] = useState<string[]>([])
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [avatarError, setAvatarError] = useState('')
@@ -25,6 +31,7 @@ export default function MyProfilePage() {
   useEffect(() => {
     if (profile?.profile) {
       setForm(profile.profile)
+      setNonprofitsText(formatNonprofits(profile.profile.nonprofits))
     }
   }, [profile])
 
@@ -96,6 +103,9 @@ export default function MyProfilePage() {
       value_offered: form.value_offered,
       value_sought: form.value_sought,
       non_golf_hobbies: form.non_golf_hobbies,
+      // Raw text — the server parses it, so the split/trim/dedupe rules can't
+      // drift between here and the GHL sync.
+      nonprofits: nonprofitsText,
       linkedin_url: form.linkedin_url ?? null,
       profile_visible: form.profile_visible ?? true,
     })
@@ -111,6 +121,11 @@ export default function MyProfilePage() {
 
   if (!user || !profile) return null
   const m = profile
+
+  // Counted from the parsed result, not the line count — blank lines and
+  // duplicates don't cost the member one of their three.
+  const nonprofits = parseNonprofits(nonprofitsText)
+  const tooManyNonprofits = nonprofits.length > MAX_NONPROFITS
 
   return (
     <AppShell title="Profile" description="Your member details">
@@ -189,7 +204,11 @@ export default function MyProfilePage() {
             )}
             <div className="flex gap-3">
               <button
-                onClick={() => { setEditing(false); setForm(m.profile ?? {}) }}
+                onClick={() => {
+                  setEditing(false)
+                  setForm(m.profile ?? {})
+                  setNonprofitsText(formatNonprofits(m.profile?.nonprofits))
+                }}
                 className="btn btn-outline flex-1 justify-center"
                 disabled={saving}
               >
@@ -198,7 +217,9 @@ export default function MyProfilePage() {
               <button
                 onClick={save}
                 className="btn btn-gold flex-1 justify-center"
-                disabled={saving}
+                // Held back rather than letting the save round-trip and fail:
+                // the field says what's wrong, and the fix is right there.
+                disabled={saving || tooManyNonprofits}
               >
                 {saving ? <Spinner className="w-4 h-4" /> : 'Save changes'}
               </button>
@@ -289,6 +310,13 @@ export default function MyProfilePage() {
           onChange={v => set('non_golf_hobbies', v)}
         />
 
+        <NonprofitsField
+          editing={editing}
+          text={nonprofitsText}
+          parsed={nonprofits}
+          onChange={setNonprofitsText}
+        />
+
         {/* Focus LinkUps groups */}
         <div className="px-5 py-4 border-b border-green-900/08">
           <p className="text-xs uppercase tracking-widest text-green-900/40 mb-3">Focus LinkUps groups</p>
@@ -321,6 +349,64 @@ export default function MyProfilePage() {
 }
 
 // ---- Sub-components -----------------------------------------
+
+// One per line, up to three. A textarea rather than three inputs: most members
+// support one, and three empty boxes ask for more than they have.
+function NonprofitsField({
+  editing, text, parsed, onChange,
+}: {
+  editing: boolean
+  /** Raw textarea contents. */
+  text: string
+  /** Cleaned entries — what will actually be saved and shown. */
+  parsed: string[]
+  onChange: (v: string) => void
+}) {
+  const over = parsed.length > MAX_NONPROFITS
+
+  return (
+    <div className="px-5 py-4 border-b border-green-900/08">
+      <p className="text-xs uppercase tracking-widest text-green-900/40 mb-2 flex items-center gap-1.5">
+        Non-profits
+        <InfoBubble
+          label="non-profits"
+          text="The non-profits in your community you would like LinkUp to support."
+        />
+      </p>
+      {editing ? (
+        <>
+          <textarea
+            className={`input resize-none ${over ? 'border-red-400' : ''}`}
+            rows={3}
+            placeholder={'One per line, e.g.\nBoys & Girls Club\nHabitat for Humanity'}
+            value={text}
+            onChange={e => onChange(e.target.value)}
+            aria-invalid={over}
+            aria-describedby="nonprofits-help"
+          />
+          <p
+            id="nonprofits-help"
+            className={`text-xs mt-1.5 ${over ? 'text-red-500 font-medium' : 'text-green-900/40'}`}
+          >
+            {over
+              ? `That's ${parsed.length}. Please keep it to ${MAX_NONPROFITS} — remove ${parsed.length - MAX_NONPROFITS}.`
+              : `One per line, up to ${MAX_NONPROFITS}. ${parsed.length} of ${MAX_NONPROFITS} used.`}
+          </p>
+        </>
+      ) : parsed.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {parsed.map(n => (
+            <span key={n} className="text-xs bg-green-50 text-green-900 px-2.5 py-1 rounded-full border border-green-900/10">
+              {n}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-green-900/30 italic">Not set — tap Edit to add</p>
+      )}
+    </div>
+  )
+}
 
 function Field({
   label, value, editing, multiline, placeholder, onChange,

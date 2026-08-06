@@ -139,8 +139,8 @@ describe('loadPartnerConversions — conversion is membership', () => {
     }
   })
 
-  it('counts either membership tag variant', async () => {
-    for (const tag of ['avi member', 'avi member - active']) {
+  it('counts every membership tag variant', async () => {
+    for (const tag of ['avi member', 'avi member - active', 'member-active-SD']) {
       const { client } = fakeAdmin({
         links: [link({ email: 'jane@x.com' })],
         members: [member({ id: 'm1', email: 'jane@x.com', ghl_tags: [tag] })],

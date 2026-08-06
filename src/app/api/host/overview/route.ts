@@ -11,6 +11,6 @@ import { loadHostStats } from '@/lib/hosts/events'
 
 export const GET = withHostAuth(async (_req: NextRequest, ctx: HostAuthContext) => {
   const admin = createAdminClient()
-  const stats = await loadHostStats(admin, ctx.host.id)
+  const stats = await loadHostStats(admin, ctx.host.id, ctx.memberId)
   return NextResponse.json({ host: ctx.host, stats })
 })

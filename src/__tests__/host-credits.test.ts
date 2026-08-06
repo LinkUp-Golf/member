@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { summarizeCredits } from '@/lib/hosts/credits'
+import { summarizeCredits } from '@/lib/credits'
 import { memberPrice, canUploadProof } from '@/lib/hosts/events'
 import { HOST_MEMBER_PRICE_MARKUP_USD } from '@/lib/constants'
 
@@ -56,7 +56,6 @@ describe('canUploadProof', () => {
 
   it('refuses it before the event has happened', () => {
     expect(canUploadProof('upcoming', '2026-07-22', TODAY)).toBe(false)
-    expect(canUploadProof('draft', TODAY, TODAY)).toBe(false)
   })
 
   it('refuses it once the event is settled or called off', () => {

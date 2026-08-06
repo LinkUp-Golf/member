@@ -164,7 +164,11 @@ export default function BookPage() {
   // fire near-simultaneously.
   const myBookingsRefreshInFlight = useRef(false);
   const [activeTab, setActiveTab] = useState<"book" | "myBookings">("book");
-  const [viewMode, setViewMode] = useState<"day" | "month">("day");
+  // Month first. The day strip shows about a week at a time and has to be
+  // scrolled to find anything, so opening on it hides how much of the month is
+  // actually bookable; the grid answers that at a glance. Either view can still
+  // be picked from the toggle.
+  const [viewMode, setViewMode] = useState<"day" | "month">("month");
 
   // Who's playing on the selected date
   const [dayPlayers, setDayPlayers] = useState<DayPlayer[]>([]);

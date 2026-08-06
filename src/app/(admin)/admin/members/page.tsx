@@ -13,6 +13,7 @@ import {
 import { format, formatDistanceToNow } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { validateEmail } from "@/lib/validation";
+import { matchesNonprofit } from "@/lib/profile/nonprofits";
 import type { MemberWithProfile } from "@/types";
 
 type FilterStatus =
@@ -44,6 +45,14 @@ export default function AdminMembersPage() {
   const [generatingLink, setGeneratingLink] = useState(false);
   const [generatedLink, setGeneratedLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{
+    total: number;
+    synced: number;
+    skipped: number;
+    deactivated?: number;
+    errors: string[];
+  } | null>(null);
 
   useEffect(() => {
     loadMembers();
@@ -78,7 +87,8 @@ export default function AdminMembersPage() {
           `${m.first_name} ${m.last_name}`.toLowerCase().includes(q) ||
           m.email.toLowerCase().includes(q) ||
           m.profile?.business_name?.toLowerCase().includes(q) ||
-          m.profile?.industry_category?.toLowerCase().includes(q),
+          m.profile?.industry_category?.toLowerCase().includes(q) ||
+          matchesNonprofit(m.profile?.nonprofits, q),
       );
     }
     if (statusFilter !== "all") {
@@ -172,6 +182,39 @@ export default function AdminMembersPage() {
     }
   }
 
+  // The daily cron does this on its own; this is for when an admin has just
+  // changed something in GHL and isn't waiting until tomorrow to see it.
+  async function bulkSyncFromGHL() {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch("/api/admin/sync", { method: "POST" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSyncResult({
+          total: 0,
+          synced: 0,
+          skipped: 0,
+          errors: [json.error ?? "Sync failed"],
+        });
+        return;
+      }
+      setSyncResult(json);
+      await loadMembers();
+    } catch {
+      // A full reconcile can outlast the browser's patience — say that rather
+      // than implying nothing happened, because it probably is still running.
+      setSyncResult({
+        total: 0,
+        synced: 0,
+        skipped: 0,
+        errors: ["Request failed or timed out — the sync may still be running."],
+      });
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   async function toggleAdmin(memberId: string, isAdmin: boolean) {
     setSaving(true);
     const supabase = createClient();
@@ -196,26 +239,65 @@ export default function AdminMembersPage() {
 
   return (
     <div className="p-4 sm:p-8">
-      <div className="mb-6 sm:mb-8">
-        <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">
-          Members
-        </h1>
-        <p className="text-sm text-gray-500 mt-1">
-          {statusCounts.active} active · {statusCounts.waitlist} waitlisted ·{" "}
-          {statusCounts.pending} pending
-          {statusCounts.suspended > 0 && (
-            <span className="text-red-500">
-              {" "}
-              · {statusCounts.suspended} suspended
-            </span>
-          )}
-        </p>
-        {/* The manual "Sync from GHL" button was replaced by an hourly cron
-            (/api/cron/ghl-member-sync) — say so, or the list looks stale. */}
-        <p className="text-xs text-gray-400 mt-1">
-          Synced from GHL automatically every hour.
-        </p>
+      <div className="flex items-start justify-between gap-4 mb-6 sm:mb-8">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">
+            Members
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {statusCounts.active} active · {statusCounts.waitlist} waitlisted ·{" "}
+            {statusCounts.pending} pending
+            {statusCounts.suspended > 0 && (
+              <span className="text-red-500">
+                {" "}
+                · {statusCounts.suspended} suspended
+              </span>
+            )}
+          </p>
+          {/* Both are true: the nightly cron keeps this current on its own, and
+              the button is the "I just changed GHL" shortcut. Saying so stops
+              the button reading as the only thing keeping the list fresh — and
+              a day is long enough that the shortcut needs pointing at. */}
+          <p className="text-xs text-gray-400 mt-1">
+            Synced from GHL automatically once a day — sync now if you&apos;ve
+            just made a change.
+          </p>
+        </div>
+        <button
+          onClick={bulkSyncFromGHL}
+          disabled={syncing}
+          className="flex-shrink-0 px-3 py-2 text-sm font-medium rounded-xl bg-green-900 text-white hover:bg-green-800 disabled:opacity-60 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+        >
+          {syncing ? "Syncing…" : "Sync from GHL"}
+        </button>
       </div>
+
+      {syncing && (
+        <div className="mb-4 p-3 rounded-xl text-sm border bg-gray-50 border-gray-200 text-gray-600">
+          Reconciling every tagged GHL contact — this can take a couple of
+          minutes. You can leave the page; the sync finishes on the server.
+        </div>
+      )}
+
+      {syncResult && (
+        <div
+          className={`mb-4 p-3 rounded-xl text-sm border ${syncResult.errors.length > 0 ? "bg-yellow-50 border-yellow-200 text-yellow-800" : "bg-green-50 border-green-200 text-green-800"}`}
+        >
+          <span className="font-medium">Sync complete:</span>{" "}
+          {syncResult.synced} synced, {syncResult.skipped} skipped
+          {syncResult.deactivated
+            ? `, ${syncResult.deactivated} deactivated`
+            : ""}
+          {syncResult.errors.length > 0 && (
+            <div className="mt-1 text-xs text-yellow-700">
+              {syncResult.errors.slice(0, 3).join(" · ")}
+              {syncResult.errors.length > 3
+                ? ` +${syncResult.errors.length - 3} more`
+                : ""}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Generate a copy-paste login link for any email (people not yet in the list) */}
       <div className="mb-4 p-3 sm:p-4 rounded-xl border border-gray-200 bg-gray-50">
@@ -297,7 +379,7 @@ export default function AdminMembersPage() {
           <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 mb-4 sm:items-center">
             <input
               type="search"
-              placeholder="Search members…"
+              placeholder="Search name, email, business, category, non-profit…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full sm:flex-1 px-4 py-2 text-sm border border-gray-200 rounded-xl outline-none focus:border-green-500"
@@ -510,6 +592,14 @@ export default function AdminMembersPage() {
                     </DetailRow>
                     <DetailRow label="Role">
                       {panelData.profile?.role_title ?? "—"}
+                    </DetailRow>
+                    {/* Shown here so an admin who searched by non-profit can
+                        see which one matched, rather than a row that looks
+                        like an unexplained hit. */}
+                    <DetailRow label="Non-profits">
+                      {(panelData.profile?.nonprofits ?? []).length > 0
+                        ? (panelData.profile?.nonprofits ?? []).join(", ")
+                        : "—"}
                     </DetailRow>
                     <DetailRow label="Last sign in">
                       {panelData.last_sign_in

@@ -2,7 +2,7 @@
 // Owns the course_memberships table only.
 
 import { logger } from '@/lib/logger'
-import { COURSE_TAG_MAP } from '@/lib/ghl/tags'
+import { COURSE_TAG_MAP, courseTagsHeld } from '@/lib/ghl/tags'
 import type { SyncContext } from './types'
 
 export async function syncCourseMemberships(params: {
@@ -14,8 +14,7 @@ export async function syncCourseMemberships(params: {
   const { userId, tags, homeCourseId, ctx } = params
   const log = logger.child({ requestId: ctx.requestId, userId, action: 'membership_sync' })
 
-  const activeTags = (Object.keys(COURSE_TAG_MAP) as (keyof typeof COURSE_TAG_MAP)[])
-    .filter(tag => tags.includes(tag))
+  const activeTags = courseTagsHeld(tags)
 
   if (activeTags.length === 0) {
     log.debug('No active course tags — skipping membership sync')

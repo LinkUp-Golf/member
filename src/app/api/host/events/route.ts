@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 // GET  /api/host/events — the caller's own hosted events, with spot counts.
-// POST /api/host/events — create a hosted event (draft, or published live).
+// POST /api/host/events — create a hosted event. It goes live immediately.
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
@@ -10,6 +10,7 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { validateHostedEventPayload, sanitiseText } from '@/lib/validation'
 import { enrichHostedEvents, hostCanUseCourse } from '@/lib/hosts/events'
 import { requestPendingCourse } from '@/lib/courses/request-course'
+import { sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
 import type { HostedEvent } from '@/types'
 
@@ -45,19 +46,19 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     : null
 
   // A "new club" event: the host proposes a round at a club not yet on LinkUp.
-  // We file it as a pending course and save the event as a draft — it can't go
-  // live until an admin sets the club up and approves it (enforced on publish).
+  // The club is filed as a pending course for an admin to set up properly, but
+  // the event itself lists straight away like any other — the round is real,
+  // it's only our directory entry for the club that's incomplete.
   const newClubRaw = body.new_club
   const newClub = !sourceBookingId && newClubRaw && typeof newClubRaw === 'object'
     ? (newClubRaw as { name?: unknown; website?: unknown })
     : null
 
   let courseId: string
+  let courseName = 'a course'
   let eventDate: string
   let teeTime: string | null
   let seatCap: number | null = null
-  // Forced true for the new_club path — a pending club may only be a draft.
-  let forceDraft = false
 
   if (sourceBookingId) {
     // ---- Listed from an existing booking -------------------------------
@@ -136,7 +137,7 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       return NextResponse.json({ error: result.error ?? 'Could not add the club.' }, { status: result.status ?? 500 })
     }
     courseId = result.course.id
-    forceDraft = true
+    courseName = clubName
   } else {
     // ---- A newly proposed schedule at an existing course ---------------
     const { valid, errors } = validateHostedEventPayload(body)
@@ -174,18 +175,18 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
   if (!newClub) {
     const { data: course } = await admin
       .from('courses')
-      .select('id, approval_status')
+      .select('id, name, approval_status')
       .eq('id', courseId)
       .maybeSingle()
     if (!course || course.approval_status !== 'active') {
       return NextResponse.json({ error: 'That course is not available for events.' }, { status: 400 })
     }
+    courseName = course.name
   }
 
-  // Publishing takes an event straight live — there's no admin review gate.
-  // A host either saves a draft or publishes to 'upcoming' immediately. A
-  // new_club event is forced to draft; its club isn't approved yet.
-  const publish = !forceDraft && body.publish === true
+  // Every event goes live the moment it's created. There is no draft to save
+  // and no approval to wait for; admins are notified after the fact and can
+  // take a listing back down (POST /api/admin/hosted-events/[id]).
   const dinner = body.dinner === true
 
   const { data: event, error } = await admin
@@ -199,7 +200,7 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       member_guest_rate: rate,
       dinner,
       source_booking_id: sourceBookingId,
-      status: publish ? 'upcoming' : 'draft',
+      status: 'upcoming',
     })
     .select()
     .single()
@@ -213,10 +214,16 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  // Live already — tell the admins so someone can look at it (best-effort; a
+  // push failure must not fail the creation the host just completed).
+  void sendPushToAdmins(
+    NotificationTemplates.hostedEventNeedsReview(ctx.host.name, courseName, eventDate)
+  ).catch(() => {})
+
   logger.info('Hosted event created', {
     action: 'host.event.created',
     userId: ctx.userId,
-    metadata: { event_id: event.id, host_id: ctx.host.id, published: publish, from_booking: !!sourceBookingId, new_club: !!newClub },
+    metadata: { event_id: event.id, host_id: ctx.host.id, from_booking: !!sourceBookingId, new_club: !!newClub },
   })
 
   return NextResponse.json({ event }, { status: 201 })

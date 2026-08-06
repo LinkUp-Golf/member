@@ -7,6 +7,7 @@ import { AdminPageHeader, StatCard } from '@/components/admin/AdminUI'
 import Select from '@/components/ui/Select'
 import { format, addDays, subDays, isToday, differenceInCalendarDays } from 'date-fns'
 import { formatTeeTime } from '@/lib/utils'
+import { tagsOverlap } from '@/lib/ghl/tags'
 import type { AdditionalPlayer } from '@/types'
 
 type BookingStatus = 'tentative' | 'availability_confirmed' | 'payment_confirmed' | 'confirmed' | 'pending' | 'cancelled' | 'waitlist' | 'awaiting_approval'
@@ -761,8 +762,12 @@ export default function AdminBookingsPage() {
     [currentCourse]
   )
 
+  // Both sides are free-text: the course's tags were picked by an admin, the
+  // member's were mirrored from GHL. A case difference between them would show
+  // a member as having no access to a course they can already book, inviting
+  // an admin to re-grant a tag they hold.
   const membersWithAccess = useMemo(
-    () => allMembers.filter(m => (m.ghl_tags ?? []).some(t => courseAccessTags.includes(t))),
+    () => allMembers.filter(m => tagsOverlap(m.ghl_tags ?? [], courseAccessTags)),
     [allMembers, courseAccessTags]
   )
   const membersWithAccessIds = useMemo(

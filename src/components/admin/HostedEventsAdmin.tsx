@@ -1,8 +1,12 @@
 'use client'
 
 // Admin: browse all hosted events, review proof, and approve or reject the
-// host's credit. Rendered as a tab on the admin Hosts page. Events publish
-// live without admin review, so the only decision here is credit approval.
+// host's credit. Rendered as a tab on the admin Hosts page.
+//
+// Two decisions live here, one per stage of an event's life:
+//   upcoming                → take down a live event that shouldn't be listed
+//                             (hosts publish without waiting for approval)
+//   pending_credit_approval → approve or reject the host's credit after it ran
 
 import { useState, useEffect, useCallback, memo } from 'react'
 import { AdminCard, Badge } from '@/components/admin/AdminUI'
@@ -15,7 +19,6 @@ const fmtDate = (d: string) =>
   new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
 const STATUS_META: Record<HostedEventStatus, { label: string; colour: 'green' | 'gold' | 'red' | 'blue' | 'gray' }> = {
-  draft:                   { label: 'Draft',            colour: 'gray' },
   upcoming:                { label: 'Upcoming',         colour: 'green' },
   completed:               { label: 'Completed',        colour: 'blue' },
   pending_credit_approval: { label: 'Credit approval',  colour: 'gold' },
@@ -95,21 +98,37 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
   const [busy, setBusy] = useState(false)
   const [rejecting, setRejecting] = useState(false)
   const [reason, setReason] = useState('')
+  // What the host gets credited. Starts at the rate they listed the event at,
+  // which is what approving used to award with no say in it.
+  const [amount, setAmount] = useState(String(event.member_guest_rate))
+  const [note, setNote] = useState('')
   const meta = STATUS_META[event.status]
   const proofs = event.proofs ?? []
 
-  // The only decision left on this row is approving the host's credit after the
-  // event has run — there's no event-review gate anymore.
+  // Only ask why when the figure has actually been changed — at the listed rate
+  // there's nothing to explain.
+  const overridden = Number(amount) !== Number(event.member_guest_rate)
+
+  // Credit decision, once the event has run and proof is in.
   const awaitingCredit = event.status === 'pending_credit_approval'
+  // Listing decision, while the event is live. Hosts publish without waiting
+  // for approval, so this is where an admin takes a bad listing back down.
+  const canTakeDown = event.status === 'upcoming'
 
   async function decide(action: 'approve' | 'reject') {
     if (busy) return
     if (action === 'reject' && !reason.trim()) { onToast('Enter a reason.', false); return }
+    if (action === 'approve' && !(Number(amount) > 0)) {
+      onToast('Enter a credit amount greater than zero.', false)
+      return
+    }
     setBusy(true)
     const res = await fetch(`/api/admin/hosted-events/${event.id}/credits`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(action === 'approve' ? { action } : { action, reason: reason.trim() }),
+      body: JSON.stringify(action === 'approve'
+        ? { action, amount: Number(amount), ...(note.trim() ? { note: note.trim() } : {}) }
+        : { action, reason: reason.trim() }),
     })
     const json = await res.json().catch(() => ({}))
     setBusy(false)
@@ -118,6 +137,29 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
     onToast(action === 'approve'
       ? `Credit of ${fmtMoney(json.amount ?? event.member_guest_rate)} awarded.`
       : 'Credit rejected.')
+    setRejecting(false); setReason(''); setNote('')
+    onChanged()
+  }
+
+  // Cancels a live event and releases anyone who had reserved. There is no
+  // draft to park it in, so this is final — the host would have to list it again.
+  async function takeDown() {
+    if (busy) return
+    if (!reason.trim()) { onToast('Enter a reason.', false); return }
+    setBusy(true)
+    const res = await fetch(`/api/admin/hosted-events/${event.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reject', reason: reason.trim() }),
+    })
+    const json = await res.json().catch(() => ({}))
+    setBusy(false)
+    if (!res.ok) { onToast(json.error ?? 'Action failed.', false); return }
+
+    const released = Number(json.released ?? 0)
+    onToast(released > 0
+      ? `Event taken down — ${released} reserved ${released === 1 ? 'member' : 'members'} released.`
+      : 'Event taken down.')
     setRejecting(false); setReason('')
     onChanged()
   }
@@ -139,14 +181,30 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
         </div>
       </div>
 
-      {/* Proof thumbnails */}
+      {/* Proof thumbnails. The image is always the Supabase copy — that one is
+          guaranteed to exist. The caption says whether the GHL mirror landed,
+          so a silent run of failures is visible instead of only in the logs. */}
       {proofs.length > 0 && (
         <div className="flex gap-2 mt-3 flex-wrap">
           {proofs.map(p => (
-            <a key={p.id} href={p.image_url} target="_blank" rel="noopener noreferrer" className="block">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.image_url} alt="Event proof" className="w-20 h-20 object-cover rounded-lg border border-gray-200" />
-            </a>
+            <div key={p.id} className="w-20">
+              <a href={p.image_url} target="_blank" rel="noopener noreferrer" className="block">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={p.image_url} alt="Event proof" className="w-20 h-20 object-cover rounded-lg border border-gray-200" />
+              </a>
+              {p.ghl_media_url ? (
+                <a
+                  href={p.ghl_media_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block mt-1 text-[10px] font-medium text-green-800 hover:underline"
+                >
+                  In GHL ↗
+                </a>
+              ) : (
+                <span className="block mt-1 text-[10px] text-gray-400">Not in GHL</span>
+              )}
+            </div>
           ))}
         </div>
       )}
@@ -155,19 +213,89 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
         <p className="text-[11px] text-gray-400 mt-2">Listed from one of the host&apos;s existing bookings.</p>
       )}
 
+      {/* rejection_reason on a cancelled event means an admin pulled it, rather
+          than the host calling their own event off. */}
+      {event.status === 'cancelled' && event.rejection_reason && (
+        <p className="text-[11px] text-red-600 mt-2">Taken down: {event.rejection_reason}</p>
+      )}
+
+      {canTakeDown && (
+        <div className="mt-4">
+          {!rejecting ? (
+            <button onClick={() => setRejecting(true)} disabled={busy} className="btn btn-outline btn-sm text-red-600 border-red-200">
+              Take down
+            </button>
+          ) : (
+            <div className="p-3 rounded-xl bg-red-50 border border-red-100 space-y-2">
+              <p className="text-[11px] text-red-700">
+                Cancels the event, takes it off the member list, and releases anyone
+                who reserved. The host would have to list it again from scratch.
+              </p>
+              <input
+                className="input text-sm"
+                placeholder="Reason (shown to the host)"
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+              />
+              <div className="flex gap-2">
+                <button onClick={() => { setRejecting(false); setReason('') }} disabled={busy} className="btn btn-outline btn-sm flex-1">Back</button>
+                <button onClick={takeDown} disabled={busy} className="btn btn-sm flex-1 bg-red-600 text-white">
+                  Take down event
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {awaitingCredit && (
         <div className="mt-4">
           {proofs.length === 0 && (
             <p className="text-[11px] text-amber-600 mb-2">No proof image was uploaded.</p>
           )}
           {!rejecting ? (
-            <div className="flex gap-2">
-              <button onClick={() => decide('approve')} disabled={busy} className="btn btn-sm bg-green-900 text-white">
-                Approve credit
-              </button>
-              <button onClick={() => setRejecting(true)} disabled={busy} className="btn btn-outline btn-sm text-red-600 border-red-200">
-                Reject
-              </button>
+            <div className="space-y-2">
+              {/* Editable before approving, so a round that ran differently to
+                  the listing can be credited for what it was actually worth. */}
+              <div className="flex items-end gap-2 flex-wrap">
+                <div>
+                  <label htmlFor={`credit-${event.id}`} className="block text-[11px] font-medium text-gray-600 mb-1">
+                    Credit to award
+                  </label>
+                  <div className="relative w-32">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">$</span>
+                    <input
+                      id={`credit-${event.id}`}
+                      type="number"
+                      min={0}
+                      step="1"
+                      className="input text-sm pl-7"
+                      value={amount}
+                      onChange={e => setAmount(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <button onClick={() => decide('approve')} disabled={busy} className="btn btn-sm bg-green-900 text-white">
+                  Approve credit
+                </button>
+                <button onClick={() => setRejecting(true)} disabled={busy} className="btn btn-outline btn-sm text-red-600 border-red-200">
+                  Reject
+                </button>
+              </div>
+
+              {overridden && (
+                <div className="space-y-1">
+                  <p className="text-[11px] text-amber-600">
+                    The host listed this event at {fmtMoney(event.member_guest_rate)}.
+                  </p>
+                  <input
+                    className="input text-sm"
+                    placeholder="Why the different amount (optional, saved to the ledger)"
+                    value={note}
+                    onChange={e => setNote(e.target.value)}
+                  />
+                </div>
+              )}
             </div>
           ) : (
             <div className="p-3 rounded-xl bg-red-50 border border-red-100 space-y-2">

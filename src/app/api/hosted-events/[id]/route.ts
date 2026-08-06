@@ -27,11 +27,6 @@ export const GET = withAuth(
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     if (!data) return NextResponse.json({ error: 'Event not found' }, { status: 404 })
 
-    // Members only see published events; drafts are the host's alone.
-    if (data.status === 'draft') {
-      return NextResponse.json({ error: 'Event not found' }, { status: 404 })
-    }
-
     const [event] = await enrichHostedEvents(admin, [data as HostedEvent], { memberId: ctx.memberId })
     return NextResponse.json({ event })
   }

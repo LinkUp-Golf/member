@@ -1,9 +1,11 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { AdminPageHeader, StatCard, AdminCard, Badge } from '@/components/admin/AdminUI'
 import { ContentLoader } from '@/components/ui/Loading'
-import { COMMISSION_TERM_MONTHS } from '@/lib/constants'
+import { COMMISSION_TERM_MONTHS, PAYOUT_METHOD_LABEL } from '@/lib/constants'
+import type { PayoutMethod } from '@/types'
 
 const fmtMoney = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -69,8 +71,17 @@ export default function PartnerPaymentsPage() {
     <div className="p-4 sm:p-8">
       <AdminPageHeader
         title="Payments"
-        description={`You earn ${fmtMoney(monthlyRate)} a month for each referred member, for up to ${COMMISSION_TERM_MONTHS} months. Payouts are made by the LinkUp team once your balance reaches ${fmtMoney(balance.threshold)}.`}
+        description={`You earn ${fmtMoney(monthlyRate)} a month for each referred member, for up to ${COMMISSION_TERM_MONTHS} months. The LinkUp team pays out once your balance reaches ${fmtMoney(balance.threshold)}.`}
       />
+
+      <div className="mb-4 rounded-xl border border-gray-100 bg-white px-4 py-3 flex items-center justify-between gap-3">
+        <p className="text-xs text-gray-600">
+          Commission is paid as LinkUp credit — spend it on golf.
+        </p>
+        <Link href="/partner/credits" className="btn btn-outline btn-sm flex-shrink-0 whitespace-nowrap">
+          View credits
+        </Link>
+      </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
         <StatCard label="Outstanding"  value={fmtMoney(Math.max(0, balance.outstanding))} sub="Awaiting payout"    colour="gold" />
@@ -128,7 +139,7 @@ export default function PartnerPaymentsPage() {
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-gray-800">{fmtDate(p.paid_at)}</p>
                     <p className="text-xs text-gray-400">
-                      {p.method === 'coupon' ? 'Coupon' : 'Cash'}{p.reference ? ` · ${p.reference}` : ''}
+                      {PAYOUT_METHOD_LABEL[p.method as PayoutMethod] ?? p.method}{p.reference ? ` · ${p.reference}` : ''}
                     </p>
                   </div>
                   <span className="text-sm font-medium text-gray-900 flex-shrink-0">{fmtMoney(p.amount)}</span>

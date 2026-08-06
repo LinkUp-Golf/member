@@ -11,7 +11,7 @@ import { formatInTimeZone } from 'date-fns-tz'
 import type { GHLContact, GHLCalendarEvent, GHLBookingSlot } from '@/types'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
 import { logger } from '@/lib/logger'
-import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GHL_BOOKING_REMINDER_WEBHOOK_PATH, GHL_PAYMENT_REMINDER_WEBHOOK_PATH } from '@/lib/constants'
+import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GHL_BOOKING_REMINDER_WEBHOOK_PATH, GHL_PAYMENT_REMINDER_WEBHOOK_PATH, GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH } from '@/lib/constants'
 import { getCache, withCache } from '@/lib/cache'
 import { GHL_CAL_RULES_NS, GHL_CAL_RULES_TTL_MS, ghlCalendarRulesKey } from '@/lib/cache/keys'
 
@@ -260,6 +260,20 @@ export async function getContactCustomFieldValues(
   return out
 }
 
+// Reads one custom-field value straight off the contact by its field id.
+//
+// Unlike getContactCustomFieldValues this needs no network call — the id is
+// what GHL already keys the value under on the contact, so there's no
+// definitions lookup to map through. It's also immune to the field's object
+// key being renamed in GHL, which is why it's worth having as a fallback for
+// fields whose id we know.
+export function getContactCustomFieldValueById(contact: GHLContact, fieldId: string): string {
+  const cfs = (contact.customFields ?? []) as Array<{ id: string; value?: unknown; fieldValue?: unknown }>
+  const match = cfs.find(f => f.id === fieldId)
+  const raw = match?.value ?? match?.fieldValue
+  return typeof raw === 'string' ? raw.trim() : ''
+}
+
 // ---- Conversations -------------------------------------------
 
 // Sends an SMS immediately via the GHL Conversations API — no workflow or
@@ -348,6 +362,134 @@ export async function triggerPaymentReminderWebhook(payload: {
   } catch (err) {
     logger.warn('triggerPaymentReminderWebhook failed', { action: 'ghl_payment_reminder_webhook', errorMessage: String(err) })
     return false
+  }
+}
+
+// Fires the GHL inbound webhook that emails a host when an admin takes their
+// live event down. Same plain-POST pattern as the two above — GHL composes and
+// sends the message; `email` matches the target contact.
+//
+// The workflow doesn't exist yet, so the path constant is empty and this
+// returns false without calling out. Deliberately not a warning: an email
+// nobody has built isn't a failure, and a takedown is rare enough that one
+// info line saying why no email went out is worth having.
+export async function triggerHostedEventTakedownWebhook(payload: {
+  firstName: string
+  email: string
+  courseName: string
+  eventDate: string
+  reason: string
+  releasedCount: number
+}): Promise<boolean> {
+  if (!GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH) {
+    logger.info('Hosted-event takedown email skipped — GHL webhook not configured', {
+      action: 'ghl_hosted_event_takedown_webhook',
+      metadata: { configured: false },
+    })
+    return false
+  }
+
+  try {
+    const res = await fetch(`${GHL_BASE_URL}${GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      logger.warn('triggerHostedEventTakedownWebhook failed', { action: 'ghl_hosted_event_takedown_webhook', metadata: { statusCode: res.status } })
+      return false
+    }
+    return true
+  } catch (err) {
+    logger.warn('triggerHostedEventTakedownWebhook failed', { action: 'ghl_hosted_event_takedown_webhook', errorMessage: String(err) })
+    return false
+  }
+}
+
+// ---- Media library ------------------------------------------
+
+// How long to wait for GHL before giving up on the mirror. The caller is
+// holding a host's upload open, and a copy landing in a second system is not
+// worth making them wait on an unresponsive one.
+const MEDIA_UPLOAD_TIMEOUT_MS = 15_000
+
+export interface GhlMediaUpload {
+  /** GHL's fileId — its handle for the file in the media library. */
+  fileId: string
+  /** Public URL of the stored file. */
+  url: string
+}
+
+/**
+ * Upload a file to the location's GHL media library.
+ *
+ * Deliberately a bare fetch rather than the SDK's medias.uploadMediaContent:
+ * the SDK's axios instance defaults every request to
+ * `Content-Type: application/json`, and a multipart body needs the header left
+ * unset so the runtime can generate the boundary. Path, method and response
+ * shape are still the SDK's — see
+ * node_modules/@gohighlevel/api-client/dist/lib/code/medias.
+ *
+ * Returns null rather than throwing on any failure. Every caller is mirroring
+ * something already stored safely elsewhere, so a GHL problem should cost the
+ * copy and nothing else.
+ */
+export async function uploadMediaToGhl(params: {
+  bytes: ArrayBuffer
+  fileName: string
+  contentType: string
+}): Promise<GhlMediaUpload | null> {
+  if (!GHL_LOCATION_ID) {
+    logger.warn('GHL media upload skipped — GHL_LOCATION_ID is not set', { action: 'ghl_media_upload' })
+    return null
+  }
+
+  try {
+    const form = new FormData()
+    form.append('file', new Blob([params.bytes], { type: params.contentType }), params.fileName)
+    form.append('name', params.fileName)
+    // false = we're sending the bytes; true would mean "fetch it from fileUrl".
+    form.append('hosted', 'false')
+    // Which media library to put it in. The SDK builds no query string for this
+    // call (unlike fetch/delete, where these two are query params), so they go
+    // in the body.
+    form.append('altType', 'location')
+    form.append('altId', GHL_LOCATION_ID)
+
+    const res = await fetch(`${GHL_BASE_URL}/medias/upload-file`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.GHL_API_KEY}`,
+        Version: GHL_API_VERSION,
+        // No Content-Type on purpose — fetch derives it, with the boundary,
+        // from the FormData. Setting it by hand produces a body GHL can't parse.
+      },
+      body: form,
+      signal: AbortSignal.timeout(MEDIA_UPLOAD_TIMEOUT_MS),
+    })
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      logger.warn('GHL media upload failed', {
+        action: 'ghl_media_upload',
+        metadata: { statusCode: res.status, body: body.slice(0, 200) },
+      })
+      return null
+    }
+
+    const json = await res.json().catch(() => null) as { fileId?: string; url?: string } | null
+    if (!json?.fileId || !json.url) {
+      logger.warn('GHL media upload returned an unexpected body', {
+        action: 'ghl_media_upload',
+        metadata: { keys: json ? Object.keys(json) : [] },
+      })
+      return null
+    }
+
+    return { fileId: json.fileId, url: json.url }
+  } catch (err) {
+    logger.warn('GHL media upload failed', { action: 'ghl_media_upload', errorMessage: String(err) })
+    return null
   }
 }
 

@@ -5,6 +5,8 @@
 // .env.local; these are stable values that live in code.
 // ============================================================
 
+import type { PayoutMethod } from '@/types'
+
 // ---- GHL API ------------------------------------------------
 
 export const GHL_BASE_URL = 'https://services.leadconnectorhq.com'
@@ -18,6 +20,14 @@ export const GHL_OPPORTUNITY_FIELDS = {
   BOOKING_STATUS:  'cpkkAiYfAWClcpFZBM9A',
   LOCATION:        'k2BbZ9xILzaomRJwvVv8',
   CANCEL_URL:      'mm1kLkrvLnOTF0VyfS0Q',
+} as const
+
+// Custom field IDs on the contact object. Most contact fields are read by
+// their object key ({{contact.something}}) because that's self-documenting,
+// but the key can be renamed in GHL and the id can't — so where we know the
+// id, it's the fallback that keeps the sync working through a rename.
+export const GHL_CONTACT_FIELDS = {
+  NONPROFITS: '5lciQdYMkGh7nhNBl8UK', // {{contact.nonprofits}}
 } as const
 
 // ---- Referral partners --------------------------------------
@@ -35,6 +45,17 @@ export const COMMISSION_TERM_MONTHS = 12
 // A partner is only paid once their unpaid balance reaches this threshold;
 // below it, the balance rolls over to the next payout run.
 export const PAYOUT_THRESHOLD_USD = 100
+
+// Commission is settled as credit by default — it lands in the partner's member
+// credit wallet, spendable on golf once they hold a membership. Cash and coupon
+// remain for a partner with no LinkUp account, who has no wallet to credit.
+export const PAYOUT_METHODS = ['credit', 'cash', 'coupon'] as const
+
+export const PAYOUT_METHOD_LABEL: Record<PayoutMethod, string> = {
+  credit: 'Credit',
+  cash:   'Cash',
+  coupon: 'Coupon',
+}
 
 // ---- Hosts --------------------------------------------------
 
@@ -58,6 +79,27 @@ export const GHL_BOOKING_REMINDER_WEBHOOK_PATH =
 // GHL_BASE_URL like every other GHL request.
 export const GHL_PAYMENT_REMINDER_WEBHOOK_PATH =
   '/hooks/J3tfnLdEv4WmE3XorQYW/webhook-trigger/819a61da-ce63-4dcc-a608-682c3c0524d7'
+
+// Inbound webhook (GHL workflow trigger) fired when an admin takes a live
+// hosted event down — see POST /api/admin/hosted-events/[id]. The host gets a
+// push immediately; this is the email copy of the same news, composed and sent
+// by the GHL workflow.
+//
+// NOT YET CREATED. Build the workflow in GHL, then paste its webhook-trigger
+// path here — same shape as the two above, path only. Until then
+// triggerHostedEventTakedownWebhook no-ops and logs that it skipped, so a
+// takedown still works and still pushes; only the email is missing.
+//
+// The workflow receives: firstName, email, courseName, eventDate, reason,
+// releasedCount.
+export const GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH = ''
+
+// ---- Membership sign-up (public marketing site) -------------
+// Shown to a host or referral partner who has credit but no membership to
+// spend it against. Two doors on purpose: one for someone ready to pay, one
+// for someone who wants to read first.
+export const MEMBERSHIP_CHECKOUT_URL = 'https://linkup.golf/golf-membership-checkout'
+export const MEMBERSHIP_JOIN_URL     = 'https://linkup.golf/join'
 
 // ---- Aviara course ------------------------------------------
 

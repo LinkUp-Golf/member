@@ -48,7 +48,10 @@ export function StatCard({
   return (
     <div className="bg-white rounded-xl border border-gray-100 p-4 sm:p-5 shadow-sm">
       <p className="text-xs uppercase tracking-wider text-gray-400 mb-1.5">{label}</p>
-      <p className={cn('font-bold', large ? 'text-3xl sm:text-4xl' : 'text-2xl sm:text-3xl', colours[colour])}>
+      {/* break-words so a value with no space to break at — a long formatted
+          amount is the usual one — wraps inside the card instead of spilling
+          over its border. Only bites when it would otherwise overflow. */}
+      <p className={cn('font-bold break-words', large ? 'text-3xl sm:text-4xl' : 'text-2xl sm:text-3xl', colours[colour])}>
         {value}
       </p>
       {sub && <p className="text-xs text-gray-400 mt-1.5 leading-snug">{sub}</p>}

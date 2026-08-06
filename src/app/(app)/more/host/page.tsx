@@ -406,7 +406,7 @@ function AddNewClub({ onRequested }: { onRequested: (name: string) => void }) {
         className="flex w-full items-center gap-2 rounded-xl border border-dashed border-green-900/25 px-3 py-2.5 text-sm text-green-900/70 mb-1.5"
       >
         <Plus className="h-4 w-4" strokeWidth={2} />
-        Add new club
+        Add new venue
       </button>
     );
   }
@@ -445,7 +445,7 @@ function AddNewClub({ onRequested }: { onRequested: (name: string) => void }) {
           {submitting ? (
             <Spinner className="w-4 h-4 text-green-900" />
           ) : (
-            "Request club"
+            "Request venue"
           )}
         </button>
         <button

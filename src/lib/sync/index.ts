@@ -9,12 +9,12 @@
 // ============================================================
 
 import { logger } from '@/lib/logger'
-import { COURSE_TAG_MAP, hasAnyAccessTag, hasCourseAccessTag, hasHostTag, hasPartnerTag } from '@/lib/ghl/tags'
+import { COURSE_TAG_MAP, courseTagsHeld, hasAnyAccessTag, hasCourseAccessTag, hasHostTag, hasPartnerTag } from '@/lib/ghl/tags'
 import { getContactByIdStrict } from '@/lib/ghl/client'
 import { upsertMember, deactivateMember, stampMembershipLifecycle } from './member.sync'
 import { syncCourseMemberships } from './membership.sync'
 import { ensureHostRow, ensurePartnerRow } from './roles.sync'
-import { prefillProfileFromGhl } from './profile.sync'
+import { syncProfileFromGhl } from './profile.sync'
 import type { GHLContact } from '@/types'
 import type { SyncContext, SyncResult } from './types'
 
@@ -43,8 +43,10 @@ export async function syncMember(params: {
   const isMember = hasCourseAccessTag(tags)
   let homeCourseId: string | null = null
 
-  const homeTag = (Object.keys(COURSE_TAG_MAP) as (keyof typeof COURSE_TAG_MAP)[])
-    .find(tag => tags.includes(tag))
+  // First course tag in map order wins the home course. Matched case-
+  // insensitively and returned canonically, so COURSE_TAG_MAP[homeTag] is
+  // always a hit however GHL spelled the tag on the contact.
+  const homeTag = courseTagsHeld(tags)[0]
 
   if (isMember && homeTag) {
     const courseSlug = COURSE_TAG_MAP[homeTag]
@@ -65,9 +67,9 @@ export async function syncMember(params: {
   const memberResult = await upsertMember({ contact, userId, homeCourseId, isMember, ctx })
   if (!memberResult.success) return memberResult
 
-  // Prefill business_name / role_title / linkedin_url from GHL custom fields
-  // (fill-if-blank; never clobbers the member's own edits).
-  await prefillProfileFromGhl({ userId, contact, ctx })
+  // business_name / role_title / linkedin_url from GHL custom fields. GHL wins
+  // where it has a value, so a correction there reaches the app.
+  await syncProfileFromGhl({ userId, contact, ctx })
 
   // Course memberships only apply to golf members.
   if (isMember && homeCourseId) {

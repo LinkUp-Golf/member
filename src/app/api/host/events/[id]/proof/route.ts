@@ -4,12 +4,18 @@ export const dynamic = 'force-dynamic'
 // event must have occurred (completed or already pending approval). Uploading
 // moves it to pending_credit_approval and notifies admins to review. Reuses the
 // existing post-media storage bucket.
+//
+// The photo is also mirrored into the GHL media library, so it sits with the
+// rest of the team's material rather than only inside this app. Supabase stays
+// the copy the app renders and the one credit approval depends on; the GHL
+// upload is best-effort and never blocks the host.
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { canUploadProof } from '@/lib/hosts/events'
+import { uploadMediaToGhl } from '@/lib/ghl/client'
 import { sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
 
@@ -87,6 +93,32 @@ export const POST = withHostAuth(
     // Move to awaiting-approval unless it already is.
     if (event.status !== 'pending_credit_approval') {
       await admin.from('hosted_events').update({ status: 'pending_credit_approval' }).eq('id', id)
+    }
+
+    // Mirror into the GHL media library. Awaited (with its own timeout) rather
+    // than fired and forgotten, because a serverless function can be frozen the
+    // moment it responds — a backgrounded upload would silently not happen.
+    // Everything the host needs is already committed above, so a null here
+    // costs the GHL copy and nothing else.
+    const course0 = Array.isArray(event.course) ? event.course[0] : event.course
+    const ghlName = `linkup-proof-${(course0?.name ?? 'event').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${event.event_date}-${proof.id.slice(0, 8)}.${ext}`
+
+    const media = await uploadMediaToGhl({ bytes, fileName: ghlName, contentType: file.type })
+    if (media) {
+      const { error: linkError } = await admin
+        .from('hosted_event_proofs')
+        .update({ ghl_media_id: media.fileId, ghl_media_url: media.url })
+        .eq('id', proof.id)
+      if (linkError) {
+        // The file is in GHL either way; we've just lost the pointer to it.
+        logger.warn('Could not record the GHL media reference', {
+          action: 'host.event.proof.ghl_link', userId: ctx.userId,
+          metadata: { proof_id: proof.id, ghl_file_id: media.fileId, error: linkError.message },
+        })
+      } else {
+        proof.ghl_media_id = media.fileId
+        proof.ghl_media_url = media.url
+      }
     }
 
     // Supersede prior proof(s): remove the old rows and their blobs (best-effort).

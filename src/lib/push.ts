@@ -17,6 +17,7 @@ export {
 import { createAdminClient } from '@/lib/supabase-server'
 import { sendToUsers } from './push/pushService'
 import type { PushPayload, SendResult } from './push/types'
+import type { PayoutMethod } from '@/types'
 
 // ---- sendPushToCourse ---------------------------------------
 // Fetches all active member IDs for a course, then dispatches.
@@ -185,12 +186,21 @@ export const NotificationTemplates = {
     tag:   'referral-list-rejected',
   }),
 
-  referralCommissionPaid: (amount: number, method: 'cash' | 'coupon' = 'cash'): PushPayload => ({
-    title: 'Commission paid',
-    body:  `A referral commission payout of ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} has been ${method === 'coupon' ? 'issued as a coupon' : 'paid'}.`,
-    url:   '/partner/payments',
-    tag:   'referral-commission-paid',
-  }),
+  // A credit payout is spendable immediately, so point the partner at the
+  // wallet rather than at the payout history.
+  referralCommissionPaid: (amount: number, method: PayoutMethod = 'credit'): PushPayload => {
+    const formatted = amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+    const settled =
+      method === 'credit' ? 'added to your credit balance — spend it on golf'
+        : method === 'coupon' ? 'issued as a coupon'
+        : 'paid'
+    return {
+      title: 'Commission paid',
+      body:  `A referral commission payout of ${formatted} has been ${settled}.`,
+      url:   method === 'credit' ? '/partner/credits' : '/partner/payments',
+      tag:   'referral-commission-paid',
+    }
+  },
 
   referralPartnerRejected: (reason: string): PushPayload => ({
     title: 'Referral partner application',
@@ -308,6 +318,25 @@ export const NotificationTemplates = {
     tag:   'hosted-event-created',
   }),
 
+  // Sent to admins when a host's event goes live. Events publish without
+  // waiting for approval, so this is the after-the-fact heads-up that gives an
+  // admin the chance to reject one that shouldn't have gone out.
+  hostedEventNeedsReview: (hostName: string, courseName: string, date: string): PushPayload => ({
+    title: 'New hosted event is live',
+    body:  `${hostName} published an event at ${courseName} on ${date}. Review it if it shouldn't be listed.`,
+    url:   '/admin/hosts',
+    tag:   'hosted-event-review',
+  }),
+
+  // Sent to the host when an admin takes their live event down. It's cancelled,
+  // not parked — so the host's route back is a new event, not a republish.
+  hostedEventRejected: (courseName: string, date: string, reason: string): PushPayload => ({
+    title: 'Your event was taken down',
+    body:  `Your ${courseName} event on ${date} was taken down and anyone who reserved has been released. ${reason}`,
+    url:   '/host/events',
+    tag:   'hosted-event-rejected',
+  }),
+
   hostedEventJoined: (memberName: string, courseName: string, date: string): PushPayload => ({
     title: 'New reservation',
     body:  `${memberName} reserved a spot at your ${courseName} event on ${date}.`,
@@ -336,11 +365,24 @@ export const NotificationTemplates = {
     tag:   'host-credit-rejected',
   }),
 
-  hostCreditRedeemed: (amount: number): PushPayload => ({
+  // Credit is redeemed toward golf — the membership option went when redeeming
+  // came to require a membership, so there's no longer a "which" to state.
+  // The 'host-credit' tag prefix is what types these in the notification log
+  // (see TAG_TYPE_MAP) — keep it even though credit is no longer host-only.
+  creditRedeemed: (amount: number): PushPayload => ({
     title: 'Credits redeemed',
-    body:  `You redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in host credits.`,
+    body:  `You redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in credits toward golf.`,
     url:   '/host/credits',
     tag:   'host-credit-redeemed',
+  }),
+
+  // Sent to admins — a redemption isn't settled until someone puts it against a
+  // round for them.
+  creditRedemptionRequested: (name: string, amount: number): PushPayload => ({
+    title: 'Credit redemption to settle',
+    body:  `${name} redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} toward golf.`,
+    url:   '/admin/hosts',
+    tag:   'host-credit-redemption',
   }),
 
   // Sent to members who had reserved a spot when the host cancels the event.
