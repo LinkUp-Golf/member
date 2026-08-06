@@ -6,9 +6,16 @@
 
 // ---- Active member tags per course --------------------------
 // Keys are GHL contact tags; values are Supabase course slugs.
+//
+// 'member-active-SD' follows the community-scoped scheme we're moving to:
+// <what>-<state>-<COMMUNITY>, where SD is San Diego. A second community lands
+// as 'member-active-LA' pointing at its own slug, instead of needing another
+// course-specific prefix like 'avi'. The 'avi …' spellings predate the scheme
+// and stay live — this is purely additive, so nobody loses access.
 export const COURSE_TAG_MAP = {
   'avi member':          'aviara',
   'avi member - active': 'aviara', // id to trigger ghl workflow
+  'member-active-SD':    'aviara',
   'nbd client':          'aviara',
 } as const satisfies Record<string, string>
 
@@ -73,7 +80,15 @@ export function hasCourseAccessTag(tags: string[]): boolean {
 // The tags that mean "this person holds a membership" — the signal referral
 // commission is paid on. Narrower than ALL_ACCESS_TAGS on purpose: an access
 // tag like 'nbd client' grants course access without being a membership.
-export const MEMBERSHIP_TAGS = ['avi member', 'avi member - active'] as const
+// 'member-active-SD' belongs here, not just in COURSE_TAG_MAP: it means an
+// active member, so a referral that converts into one has to earn commission
+// the same as 'avi member - active' does. `satisfies` keeps this list honest —
+// a tag named here that isn't a real course tag won't compile.
+export const MEMBERSHIP_TAGS = [
+  'avi member',
+  'avi member - active',
+  'member-active-SD',
+] as const satisfies readonly CourseTag[]
 
 /** Returns true if a tag array marks the person as a member. */
 export function hasMembershipTag(tags: string[]): boolean {
