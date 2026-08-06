@@ -522,7 +522,12 @@ export interface HostedEventRegistration {
 export interface HostedEventProof {
   id: string
   hosted_event_id: string
+  /** Supabase Storage URL — what the app renders. */
   image_url: string
+  /** GHL's handle for the mirrored copy; null when the mirror didn't land. */
+  ghl_media_id?: string | null
+  /** URL of the GHL copy; null when the mirror didn't land. */
+  ghl_media_url?: string | null
   uploaded_by: string | null
   created_at: string
 }

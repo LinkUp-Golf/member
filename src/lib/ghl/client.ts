@@ -392,6 +392,93 @@ export async function triggerHostedEventTakedownWebhook(payload: {
   }
 }
 
+// ---- Media library ------------------------------------------
+
+// How long to wait for GHL before giving up on the mirror. The caller is
+// holding a host's upload open, and a copy landing in a second system is not
+// worth making them wait on an unresponsive one.
+const MEDIA_UPLOAD_TIMEOUT_MS = 15_000
+
+export interface GhlMediaUpload {
+  /** GHL's fileId — its handle for the file in the media library. */
+  fileId: string
+  /** Public URL of the stored file. */
+  url: string
+}
+
+/**
+ * Upload a file to the location's GHL media library.
+ *
+ * Deliberately a bare fetch rather than the SDK's medias.uploadMediaContent:
+ * the SDK's axios instance defaults every request to
+ * `Content-Type: application/json`, and a multipart body needs the header left
+ * unset so the runtime can generate the boundary. Path, method and response
+ * shape are still the SDK's — see
+ * node_modules/@gohighlevel/api-client/dist/lib/code/medias.
+ *
+ * Returns null rather than throwing on any failure. Every caller is mirroring
+ * something already stored safely elsewhere, so a GHL problem should cost the
+ * copy and nothing else.
+ */
+export async function uploadMediaToGhl(params: {
+  bytes: ArrayBuffer
+  fileName: string
+  contentType: string
+}): Promise<GhlMediaUpload | null> {
+  if (!GHL_LOCATION_ID) {
+    logger.warn('GHL media upload skipped — GHL_LOCATION_ID is not set', { action: 'ghl_media_upload' })
+    return null
+  }
+
+  try {
+    const form = new FormData()
+    form.append('file', new Blob([params.bytes], { type: params.contentType }), params.fileName)
+    form.append('name', params.fileName)
+    // false = we're sending the bytes; true would mean "fetch it from fileUrl".
+    form.append('hosted', 'false')
+    // Which media library to put it in. The SDK builds no query string for this
+    // call (unlike fetch/delete, where these two are query params), so they go
+    // in the body.
+    form.append('altType', 'location')
+    form.append('altId', GHL_LOCATION_ID)
+
+    const res = await fetch(`${GHL_BASE_URL}/medias/upload-file`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.GHL_API_KEY}`,
+        Version: GHL_API_VERSION,
+        // No Content-Type on purpose — fetch derives it, with the boundary,
+        // from the FormData. Setting it by hand produces a body GHL can't parse.
+      },
+      body: form,
+      signal: AbortSignal.timeout(MEDIA_UPLOAD_TIMEOUT_MS),
+    })
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      logger.warn('GHL media upload failed', {
+        action: 'ghl_media_upload',
+        metadata: { statusCode: res.status, body: body.slice(0, 200) },
+      })
+      return null
+    }
+
+    const json = await res.json().catch(() => null) as { fileId?: string; url?: string } | null
+    if (!json?.fileId || !json.url) {
+      logger.warn('GHL media upload returned an unexpected body', {
+        action: 'ghl_media_upload',
+        metadata: { keys: json ? Object.keys(json) : [] },
+      })
+      return null
+    }
+
+    return { fileId: json.fileId, url: json.url }
+  } catch (err) {
+    logger.warn('GHL media upload failed', { action: 'ghl_media_upload', errorMessage: String(err) })
+    return null
+  }
+}
+
 // ---- Calendar (raw fetch — not yet in SDK) ------------------
 
 // Cached location timezone — fetched once per process lifetime.

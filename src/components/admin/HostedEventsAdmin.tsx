@@ -181,14 +181,30 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
         </div>
       </div>
 
-      {/* Proof thumbnails */}
+      {/* Proof thumbnails. The image is always the Supabase copy — that one is
+          guaranteed to exist. The caption says whether the GHL mirror landed,
+          so a silent run of failures is visible instead of only in the logs. */}
       {proofs.length > 0 && (
         <div className="flex gap-2 mt-3 flex-wrap">
           {proofs.map(p => (
-            <a key={p.id} href={p.image_url} target="_blank" rel="noopener noreferrer" className="block">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.image_url} alt="Event proof" className="w-20 h-20 object-cover rounded-lg border border-gray-200" />
-            </a>
+            <div key={p.id} className="w-20">
+              <a href={p.image_url} target="_blank" rel="noopener noreferrer" className="block">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={p.image_url} alt="Event proof" className="w-20 h-20 object-cover rounded-lg border border-gray-200" />
+              </a>
+              {p.ghl_media_url ? (
+                <a
+                  href={p.ghl_media_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block mt-1 text-[10px] font-medium text-green-800 hover:underline"
+                >
+                  In GHL ↗
+                </a>
+              ) : (
+                <span className="block mt-1 text-[10px] text-gray-400">Not in GHL</span>
+              )}
+            </div>
           ))}
         </div>
       )}
