@@ -19,6 +19,7 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { sanitiseText } from '@/lib/validation'
 import { sendPushToMember, sendPushToMembers, NotificationTemplates } from '@/lib/push'
+import { triggerHostedEventTakedownWebhook } from '@/lib/ghl/client'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -46,7 +47,10 @@ export const POST = withAuth(
 
     const { data: event } = await admin
       .from('hosted_events')
-      .select('id, status, event_date, course:courses(name), host:hosts(member_id)')
+      // The host's email/name are for the takedown email. The FK is named
+      // because hosts references members twice (member_id, created_by) —
+      // unnamed, PostgREST rejects the embed as ambiguous.
+      .select('id, status, event_date, course:courses(name), host:hosts(member_id, member:members!hosts_member_id_fkey(first_name, email))')
       .eq('id', id)
       .maybeSingle()
 
@@ -91,7 +95,12 @@ export const POST = withAuth(
 
     const course = Array.isArray(event.course) ? event.course[0] : event.course
     const host = Array.isArray(event.host) ? event.host[0] : event.host
+    const hostMember = Array.isArray(host?.member) ? host?.member[0] : host?.member
     const courseName = course?.name ?? 'a course'
+
+    // Members who had reserved lose their spot — same message the host's own
+    // cancellation sends, because from the member's side it's the same outcome.
+    const memberIds = (reserved ?? []).map(r => r.member_id)
 
     if (host?.member_id) {
       void sendPushToMember(
@@ -100,9 +109,25 @@ export const POST = withAuth(
       ).catch(() => {})
     }
 
-    // Members who had reserved lose their spot — same message the host's own
-    // cancellation sends, because from the member's side it's the same outcome.
-    const memberIds = (reserved ?? []).map(r => r.member_id)
+    // The same news by email, via a GHL workflow. A push is easy to miss and
+    // easy to have turned off, and losing your event is not something to find
+    // out about by opening the app. Best-effort and fire-and-forget like the
+    // push: the takedown has already happened, and a GHL hiccup must not turn a
+    // completed action into a failed request.
+    //
+    // No-ops until the GHL workflow exists — see
+    // GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH.
+    if (hostMember?.email) {
+      void triggerHostedEventTakedownWebhook({
+        firstName: hostMember.first_name ?? '',
+        email: hostMember.email,
+        courseName,
+        eventDate: event.event_date,
+        reason,
+        releasedCount: memberIds.length,
+      }).catch(() => {})
+    }
+
     if (memberIds.length) {
       void sendPushToMembers(
         memberIds,

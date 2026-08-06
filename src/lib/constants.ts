@@ -72,6 +72,20 @@ export const GHL_BOOKING_REMINDER_WEBHOOK_PATH =
 export const GHL_PAYMENT_REMINDER_WEBHOOK_PATH =
   '/hooks/J3tfnLdEv4WmE3XorQYW/webhook-trigger/819a61da-ce63-4dcc-a608-682c3c0524d7'
 
+// Inbound webhook (GHL workflow trigger) fired when an admin takes a live
+// hosted event down — see POST /api/admin/hosted-events/[id]. The host gets a
+// push immediately; this is the email copy of the same news, composed and sent
+// by the GHL workflow.
+//
+// NOT YET CREATED. Build the workflow in GHL, then paste its webhook-trigger
+// path here — same shape as the two above, path only. Until then
+// triggerHostedEventTakedownWebhook no-ops and logs that it skipped, so a
+// takedown still works and still pushes; only the email is missing.
+//
+// The workflow receives: firstName, email, courseName, eventDate, reason,
+// releasedCount.
+export const GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH = ''
+
 // ---- Aviara course ------------------------------------------
 
 export const AVIARA_ADDRESS  = 'Aviara Golf Club, 7447 Batiquitos Drive, Carlsbad, CA 92011'

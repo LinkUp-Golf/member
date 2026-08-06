@@ -11,7 +11,7 @@ import { formatInTimeZone } from 'date-fns-tz'
 import type { GHLContact, GHLCalendarEvent, GHLBookingSlot } from '@/types'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
 import { logger } from '@/lib/logger'
-import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GHL_BOOKING_REMINDER_WEBHOOK_PATH, GHL_PAYMENT_REMINDER_WEBHOOK_PATH } from '@/lib/constants'
+import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GHL_BOOKING_REMINDER_WEBHOOK_PATH, GHL_PAYMENT_REMINDER_WEBHOOK_PATH, GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH } from '@/lib/constants'
 import { getCache, withCache } from '@/lib/cache'
 import { GHL_CAL_RULES_NS, GHL_CAL_RULES_TTL_MS, ghlCalendarRulesKey } from '@/lib/cache/keys'
 
@@ -347,6 +347,47 @@ export async function triggerPaymentReminderWebhook(payload: {
     return true
   } catch (err) {
     logger.warn('triggerPaymentReminderWebhook failed', { action: 'ghl_payment_reminder_webhook', errorMessage: String(err) })
+    return false
+  }
+}
+
+// Fires the GHL inbound webhook that emails a host when an admin takes their
+// live event down. Same plain-POST pattern as the two above — GHL composes and
+// sends the message; `email` matches the target contact.
+//
+// The workflow doesn't exist yet, so the path constant is empty and this
+// returns false without calling out. Deliberately not a warning: an email
+// nobody has built isn't a failure, and a takedown is rare enough that one
+// info line saying why no email went out is worth having.
+export async function triggerHostedEventTakedownWebhook(payload: {
+  firstName: string
+  email: string
+  courseName: string
+  eventDate: string
+  reason: string
+  releasedCount: number
+}): Promise<boolean> {
+  if (!GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH) {
+    logger.info('Hosted-event takedown email skipped — GHL webhook not configured', {
+      action: 'ghl_hosted_event_takedown_webhook',
+      metadata: { configured: false },
+    })
+    return false
+  }
+
+  try {
+    const res = await fetch(`${GHL_BASE_URL}${GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      logger.warn('triggerHostedEventTakedownWebhook failed', { action: 'ghl_hosted_event_takedown_webhook', metadata: { statusCode: res.status } })
+      return false
+    }
+    return true
+  } catch (err) {
+    logger.warn('triggerHostedEventTakedownWebhook failed', { action: 'ghl_hosted_event_takedown_webhook', errorMessage: String(err) })
     return false
   }
 }
