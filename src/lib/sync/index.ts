@@ -9,7 +9,7 @@
 // ============================================================
 
 import { logger } from '@/lib/logger'
-import { COURSE_TAG_MAP, hasAnyAccessTag, hasCourseAccessTag, hasHostTag, hasPartnerTag } from '@/lib/ghl/tags'
+import { COURSE_TAG_MAP, courseTagsHeld, hasAnyAccessTag, hasCourseAccessTag, hasHostTag, hasPartnerTag } from '@/lib/ghl/tags'
 import { getContactByIdStrict } from '@/lib/ghl/client'
 import { upsertMember, deactivateMember, stampMembershipLifecycle } from './member.sync'
 import { syncCourseMemberships } from './membership.sync'
@@ -43,8 +43,10 @@ export async function syncMember(params: {
   const isMember = hasCourseAccessTag(tags)
   let homeCourseId: string | null = null
 
-  const homeTag = (Object.keys(COURSE_TAG_MAP) as (keyof typeof COURSE_TAG_MAP)[])
-    .find(tag => tags.includes(tag))
+  // First course tag in map order wins the home course. Matched case-
+  // insensitively and returned canonically, so COURSE_TAG_MAP[homeTag] is
+  // always a hit however GHL spelled the tag on the contact.
+  const homeTag = courseTagsHeld(tags)[0]
 
   if (isMember && homeTag) {
     const courseSlug = COURSE_TAG_MAP[homeTag]

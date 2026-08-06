@@ -13,7 +13,7 @@ import { useProfile } from "@/hooks/useProfile";
 import BookingSurveyPrompt from "@/components/surveys/BookingSurveyPrompt";
 import { getMoreItems } from "@/lib/nav/moreItems";
 import { useMemberRoles } from "@/hooks/useMemberRoles";
-import { PARTNER_ROLE_TAG, HOST_ROLE_TAG } from "@/lib/ghl/tags";
+import { hasPartnerTag, hasHostTag } from "@/lib/ghl/tags";
 
 // Extracted + memoized so a pathname change (i.e. every navigation) only
 // re-renders the one or two nav rows whose `active` flag actually flips,
@@ -125,8 +125,8 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
     if (!isNonMember) return;
     const tags = profile?.ghl_tags ?? [];
     router.replace(
-      tags.includes(PARTNER_ROLE_TAG) ? "/partner"
-      : tags.includes(HOST_ROLE_TAG) ? "/host"
+      hasPartnerTag(tags) ? "/partner"
+      : hasHostTag(tags) ? "/host"
       : "/membership-required"
     );
   }, [isNonMember, profile, router]);

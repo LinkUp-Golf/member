@@ -5,11 +5,13 @@ import {
   COURSE_SLUGS,
   MEMBERSHIP_TAGS,
   courseSlugForTag,
+  courseTagsHeld,
   hasAnyAccessTag,
   hasCourseAccessTag,
   hasHostTag,
   hasMembershipTag,
   hasPartnerTag,
+  tagsOverlap,
 } from '@/lib/ghl/tags'
 
 // The tag map is the gate on login, home course, course_memberships and
@@ -70,6 +72,54 @@ describe('the tags it sits beside', () => {
   it('grants nothing for an unrelated tag', () => {
     expect(hasAnyAccessTag(['newsletter', 'some-other-tag'])).toBe(false)
     expect(courseSlugForTag('newsletter')).toBeNull()
+  })
+})
+
+describe('matching is case-insensitive', () => {
+  // GHL applies its own case rules to a tag name and an admin can retype one by
+  // hand when granting access. Exact matching would put course access — and the
+  // login gate behind it — at the mercy of capitalisation nobody controls.
+  const VARIANTS = ['member-active-sd', 'MEMBER-ACTIVE-SD', 'Member-Active-SD', '  member-active-SD  ']
+
+  it('recognises every casing of a course tag', () => {
+    for (const tag of VARIANTS) {
+      expect(hasAnyAccessTag([tag]), tag).toBe(true)
+      expect(hasCourseAccessTag([tag]), tag).toBe(true)
+      expect(hasMembershipTag([tag]), tag).toBe(true)
+      expect(courseSlugForTag(tag), tag).toBe('aviara')
+    }
+  })
+
+  it('recognises every casing of a role tag', () => {
+    expect(hasHostTag(['HOST'])).toBe(true)
+    expect(hasPartnerTag(['Referral-Partner'])).toBe(true)
+  })
+
+  it('returns the canonical spelling whatever came in', () => {
+    // Callers index COURSE_TAG_MAP with this, so it has to be a real key.
+    expect(courseTagsHeld(['MEMBER-ACTIVE-SD'])).toEqual(['member-active-SD'])
+    expect(courseTagsHeld(['AVI MEMBER'])).toEqual(['avi member'])
+  })
+
+  it('orders held tags by the map, so the home course is stable', () => {
+    // syncMember takes the first entry as the home course. Deriving it from the
+    // order GHL happened to return the contact's tags in would make a member's
+    // home course wobble between syncs.
+    expect(courseTagsHeld(['nbd client', 'MEMBER-ACTIVE-SD', 'avi member'])).toEqual([
+      'avi member', 'member-active-SD', 'nbd client',
+    ])
+  })
+
+  it('overlaps two lists regardless of case', () => {
+    expect(tagsOverlap(['MEMBER-ACTIVE-SD'], ['member-active-SD'])).toBe(true)
+    expect(tagsOverlap(['nbd client'], ['avi member'])).toBe(false)
+    expect(tagsOverlap([], ['avi member'])).toBe(false)
+  })
+
+  it('still rejects a tag that only looks similar', () => {
+    // Case-insensitive, not fuzzy.
+    expect(hasAnyAccessTag(['member-active-LA'])).toBe(false)
+    expect(hasAnyAccessTag(['memberactive-sd'])).toBe(false)
   })
 })
 
