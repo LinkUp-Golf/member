@@ -1,14 +1,14 @@
 export const dynamic = 'force-dynamic'
 
 // POST /api/admin/hosted-events/[id] — admin review of a live hosted event.
-//   action: 'reject' → take a published event back down.
+//   action: 'reject' → take a published event down.
 //
-// Events publish without waiting for approval, so this is the counterweight:
-// an admin who sees an event that shouldn't be listed unpublishes it. The event
-// returns to 'draft' rather than 'cancelled' — the host can fix whatever was
-// wrong and publish again, which is the point of a reason being required.
-// RLS already hides drafts from members, so unpublishing removes it from the
-// member-facing list.
+// Events publish without waiting for approval, so this is the counterweight: an
+// admin who sees an event that shouldn't be listed takes it down. There is no
+// draft to send it back to — the event is cancelled, which is also the honest
+// description of what happened to anyone holding a spot in it. The reason is
+// still required, and still shown to the host: they can't fix this one, but
+// they can create the event again without it.
 //
 // Credit approval after the event has run is a separate decision and lives in
 // ./[id]/credits.
@@ -22,9 +22,9 @@ import { sendPushToMember, sendPushToMembers, NotificationTemplates } from '@/li
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 
-// Only a live listing can be taken down. A draft is already invisible, and an
-// event that has run (completed / pending_credit_approval / credits_awarded)
-// happened — unpublishing it would rewrite history rather than prevent it.
+// Only a live listing can be taken down. An event that has run (completed /
+// pending_credit_approval / credits_awarded) happened — taking it down would
+// rewrite history rather than prevent it.
 const REJECTABLE_STATUSES = ['upcoming']
 
 export const POST = withAuth(
@@ -52,7 +52,7 @@ export const POST = withAuth(
 
     if (!event) return NextResponse.json({ error: 'Event not found' }, { status: 404 })
     if (!REJECTABLE_STATUSES.includes(event.status)) {
-      return NextResponse.json({ error: 'Only a live event can be unpublished.' }, { status: 409 })
+      return NextResponse.json({ error: 'Only a live event can be taken down.' }, { status: 409 })
     }
 
     // Capture who holds a spot before we release them.
@@ -62,10 +62,13 @@ export const POST = withAuth(
       .eq('hosted_event_id', id)
       .eq('status', 'reserved')
 
+    // rejection_reason rather than cancellation_reason: both end at 'cancelled',
+    // and the column is what tells the two apart afterwards — a host calling
+    // their own event off reads very differently from an admin pulling it.
     const { data: rejected, error } = await admin
       .from('hosted_events')
       .update({
-        status: 'draft',
+        status: 'cancelled',
         rejection_reason: sanitiseText(reason),
         reviewed_by: ctx.userId,
         reviewed_at: new Date().toISOString(),
@@ -76,10 +79,10 @@ export const POST = withAuth(
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     // Another admin (or the host) moved it in the race window.
     if (!rejected || rejected.length === 0) {
-      return NextResponse.json({ error: 'Only a live event can be unpublished.' }, { status: 409 })
+      return NextResponse.json({ error: 'Only a live event can be taken down.' }, { status: 409 })
     }
 
-    // An unpublished event isn't joinable, so nobody may keep a spot in it.
+    // A cancelled event isn't joinable, so nobody may keep a spot in it.
     await admin
       .from('hosted_event_registrations')
       .update({ status: 'cancelled' })
@@ -113,7 +116,7 @@ export const POST = withAuth(
       metadata: { event_id: id, released: memberIds.length },
     })
 
-    return NextResponse.json({ ok: true, status: 'draft', released: memberIds.length })
+    return NextResponse.json({ ok: true, status: 'cancelled', released: memberIds.length })
   },
   { requireAdmin: true, skipGHLCheck: true }
 )

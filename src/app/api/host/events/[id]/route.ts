@@ -2,7 +2,10 @@ export const dynamic = 'force-dynamic'
 
 // GET   /api/host/events/[id] — one of the caller's events, with registrations
 //         and proofs.
-// PATCH /api/host/events/[id] — action: 'update' | 'publish' | 'cancel'.
+// PATCH /api/host/events/[id] — action: 'update' | 'cancel'.
+//
+// There is no 'publish' action: an event is live from the moment it's created,
+// so the only states a host can move it to are edited or cancelled.
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
@@ -10,15 +13,15 @@ import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateHostedEventPayload, sanitiseText } from '@/lib/validation'
 import { enrichHostedEvents, hostCanUseCourse } from '@/lib/hosts/events'
-import { sendPushToMembers, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
+import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
 import type { HostedEvent } from '@/types'
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
 // A host may still change an event that hasn't happened yet.
-const EDITABLE_STATUSES = ['draft', 'upcoming']
-const CANCELLABLE_STATUSES = ['draft', 'upcoming']
+const EDITABLE_STATUSES = ['upcoming']
+const CANCELLABLE_STATUSES = ['upcoming']
 
 // Fields that come from the linked booking and therefore can't be edited.
 const BOOKING_LOCKED_FIELDS = ['course_id', 'event_date', 'tee_time']
@@ -97,59 +100,13 @@ export const PATCH = withHostAuth(
 
     const body = await req.json().catch(() => ({})) as Record<string, unknown>
     const action = body.action
-    if (action !== 'update' && action !== 'publish' && action !== 'cancel') {
+    if (action !== 'update' && action !== 'cancel') {
       return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
     }
 
     const admin = createAdminClient()
     const event = await loadOwnEvent(admin, id, ctx.host.id)
     if (!event) return NextResponse.json({ error: 'Event not found' }, { status: 404 })
-
-    // ---- Publish (draft -> upcoming) -------------------------
-    // No admin review gate: publishing takes the event live immediately.
-    if (action === 'publish') {
-      if (event.status !== 'draft') {
-        return NextResponse.json({ error: 'Only a draft can be published.' }, { status: 409 })
-      }
-      if (event.event_date < todayISO()) {
-        return NextResponse.json({ error: 'Set a future date before publishing.' }, { status: 400 })
-      }
-      // A draft created for a not-yet-approved club can't go live until an admin
-      // sets the club up and approves it into a bookable course.
-      const { data: course } = await admin
-        .from('courses')
-        .select('approval_status')
-        .eq('id', event.course_id)
-        .maybeSingle()
-      if (!course || course.approval_status !== 'active') {
-        return NextResponse.json(
-          { error: "This club is still being set up by our team — you can publish once it's approved." },
-          { status: 409 },
-        )
-      }
-      const { data: published, error } = await admin
-        .from('hosted_events')
-        .update({ status: 'upcoming', rejection_reason: null })
-        .eq('id', id).eq('status', 'draft')
-        .select('id')
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-      if (!published || published.length === 0) {
-        return NextResponse.json({ error: 'This event is no longer a draft.' }, { status: 409 })
-      }
-
-      // Same heads-up an auto-published event sends: admins hear about it once
-      // it's live, and can take it back down if it shouldn't be listed.
-      void sendPushToAdmins(
-        NotificationTemplates.hostedEventNeedsReview(
-          ctx.host.name, event.course?.name ?? 'a course', event.event_date
-        )
-      ).catch(() => {})
-
-      logger.info('Hosted event published', {
-        action: 'host.event.published', userId: ctx.userId, metadata: { event_id: id },
-      })
-      return NextResponse.json({ ok: true, status: 'upcoming' })
-    }
 
     // ---- Cancel ----------------------------------------------
     if (action === 'cancel') {

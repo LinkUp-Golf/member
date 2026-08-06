@@ -44,8 +44,8 @@ export const JOINABLE_STATUSES = ['upcoming'] as const
  *   upcoming, date arrived  — it ran today; don't make the host wait for the
  *                             daily completion cron to catch up
  *
- * Never for draft (it hasn't been published, let alone happened),
- * cancelled, or credits_awarded (already settled).
+ * Never for an upcoming event still in the future, cancelled, or
+ * credits_awarded (already settled).
  *
  * Isomorphic on purpose: the route enforces it and the UI decides whether to
  * show the button, and the two must not drift.

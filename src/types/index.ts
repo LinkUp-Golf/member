@@ -448,7 +448,6 @@ export interface HostApplication {
 }
 
 export type HostedEventStatus =
-  | 'draft'
   | 'upcoming'
   | 'completed'
   | 'cancelled'

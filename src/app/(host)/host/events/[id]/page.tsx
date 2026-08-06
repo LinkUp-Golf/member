@@ -1,8 +1,8 @@
 'use client'
 
 // Host event detail: who has reserved a spot, and the proof submitted for
-// credit. The list page handles create/edit/publish/cancel; this is the
-// "who's coming" view a host needs to actually run the event.
+// credit. The list page handles create/edit/cancel; this is the "who's coming"
+// view a host needs to actually run the event.
 
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
@@ -24,7 +24,6 @@ const fmtDateTime = (d: string) =>
 
 
 const STATUS_META: Record<HostedEventStatus, { label: string; colour: 'green' | 'gold' | 'red' | 'blue' | 'gray' }> = {
-  draft:                   { label: 'Draft',            colour: 'gray' },
   upcoming:                { label: 'Upcoming',         colour: 'green' },
   completed:               { label: 'Completed',        colour: 'blue' },
   pending_credit_approval: { label: 'Credit approval',  colour: 'gold' },

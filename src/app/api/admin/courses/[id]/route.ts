@@ -61,9 +61,10 @@ export const PATCH = withAuth(
           .eq('id', id).select().single()
         if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-        // Grant host access to any host who already has an event queued at this
-        // club — e.g. the host who proposed it while creating a draft event —
-        // so they can now publish. Best-effort; never blocks the approval.
+        // Grant host access to any host who already has an event at this club —
+        // e.g. the host who proposed it while creating one — so their next event
+        // here isn't blocked by the venue check. Best-effort; never blocks the
+        // approval.
         try {
           const { data: eventHosts } = await admin
             .from('hosted_events')

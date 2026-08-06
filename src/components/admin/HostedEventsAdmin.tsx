@@ -4,7 +4,7 @@
 // host's credit. Rendered as a tab on the admin Hosts page.
 //
 // Two decisions live here, one per stage of an event's life:
-//   upcoming                → unpublish a live event that shouldn't be listed
+//   upcoming                → take down a live event that shouldn't be listed
 //                             (hosts publish without waiting for approval)
 //   pending_credit_approval → approve or reject the host's credit after it ran
 
@@ -19,7 +19,6 @@ const fmtDate = (d: string) =>
   new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
 const STATUS_META: Record<HostedEventStatus, { label: string; colour: 'green' | 'gold' | 'red' | 'blue' | 'gray' }> = {
-  draft:                   { label: 'Draft',            colour: 'gray' },
   upcoming:                { label: 'Upcoming',         colour: 'green' },
   completed:               { label: 'Completed',        colour: 'blue' },
   pending_credit_approval: { label: 'Credit approval',  colour: 'gold' },
@@ -30,7 +29,6 @@ const STATUS_META: Record<HostedEventStatus, { label: string; colour: 'green' | 
 const FILTERS: { key: string; label: string }[] = [
   { key: 'pending_credit_approval', label: 'Credit approval' },
   { key: 'upcoming', label: 'Upcoming' },
-  { key: 'draft', label: 'Drafts' },
   { key: 'completed', label: 'Completed' },
   { key: 'credits_awarded', label: 'Awarded' },
   { key: 'cancelled', label: 'Cancelled' },
@@ -107,7 +105,7 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
   const awaitingCredit = event.status === 'pending_credit_approval'
   // Listing decision, while the event is live. Hosts publish without waiting
   // for approval, so this is where an admin takes a bad listing back down.
-  const canUnpublish = event.status === 'upcoming'
+  const canTakeDown = event.status === 'upcoming'
 
   async function decide(action: 'approve' | 'reject') {
     if (busy) return
@@ -129,8 +127,9 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
     onChanged()
   }
 
-  // Takes a live event back to draft and releases anyone who had reserved.
-  async function unpublish() {
+  // Cancels a live event and releases anyone who had reserved. There is no
+  // draft to park it in, so this is final — the host would have to list it again.
+  async function takeDown() {
     if (busy) return
     if (!reason.trim()) { onToast('Enter a reason.', false); return }
     setBusy(true)
@@ -145,8 +144,8 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
 
     const released = Number(json.released ?? 0)
     onToast(released > 0
-      ? `Event unpublished — ${released} reserved ${released === 1 ? 'member' : 'members'} released.`
-      : 'Event unpublished.')
+      ? `Event taken down — ${released} reserved ${released === 1 ? 'member' : 'members'} released.`
+      : 'Event taken down.')
     setRejecting(false); setReason('')
     onChanged()
   }
@@ -184,21 +183,23 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
         <p className="text-[11px] text-gray-400 mt-2">Listed from one of the host&apos;s existing bookings.</p>
       )}
 
-      {event.status === 'draft' && event.rejection_reason && (
-        <p className="text-[11px] text-red-600 mt-2">Unpublished: {event.rejection_reason}</p>
+      {/* rejection_reason on a cancelled event means an admin pulled it, rather
+          than the host calling their own event off. */}
+      {event.status === 'cancelled' && event.rejection_reason && (
+        <p className="text-[11px] text-red-600 mt-2">Taken down: {event.rejection_reason}</p>
       )}
 
-      {canUnpublish && (
+      {canTakeDown && (
         <div className="mt-4">
           {!rejecting ? (
             <button onClick={() => setRejecting(true)} disabled={busy} className="btn btn-outline btn-sm text-red-600 border-red-200">
-              Unpublish
+              Take down
             </button>
           ) : (
             <div className="p-3 rounded-xl bg-red-50 border border-red-100 space-y-2">
               <p className="text-[11px] text-red-700">
-                Takes the event off the member list and releases anyone who reserved.
-                The host can fix it and publish again.
+                Cancels the event, takes it off the member list, and releases anyone
+                who reserved. The host would have to list it again from scratch.
               </p>
               <input
                 className="input text-sm"
@@ -208,8 +209,8 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
               />
               <div className="flex gap-2">
                 <button onClick={() => { setRejecting(false); setReason('') }} disabled={busy} className="btn btn-outline btn-sm flex-1">Back</button>
-                <button onClick={unpublish} disabled={busy} className="btn btn-sm flex-1 bg-red-600 text-white">
-                  Unpublish event
+                <button onClick={takeDown} disabled={busy} className="btn btn-sm flex-1 bg-red-600 text-white">
+                  Take down event
                 </button>
               </div>
             </div>

@@ -328,10 +328,11 @@ export const NotificationTemplates = {
     tag:   'hosted-event-review',
   }),
 
-  // Sent to the host when an admin takes a published event back down.
+  // Sent to the host when an admin takes their live event down. It's cancelled,
+  // not parked — so the host's route back is a new event, not a republish.
   hostedEventRejected: (courseName: string, date: string, reason: string): PushPayload => ({
-    title: 'Your event was unpublished',
-    body:  `Your ${courseName} event on ${date} was taken down. ${reason} Fix it and publish again.`,
+    title: 'Your event was taken down',
+    body:  `Your ${courseName} event on ${date} was taken down and anyone who reserved has been released. ${reason}`,
     url:   '/host/events',
     tag:   'hosted-event-rejected',
   }),
