@@ -27,6 +27,11 @@ export type RedeemResult =
  * two role-gated routes differ only in who they let in and what name the admin
  * notification carries — not in the money handling, which must not fork.
  *
+ * Requires an active membership, enforced inside the RPC (see
+ * 20260806000002_redeem_requires_membership.sql) so neither workspace can be the
+ * way around it. Earning is not gated — a non-member host or partner accrues a
+ * balance they can spend once they join.
+ *
  * A redemption is a request an admin then settles (book the round, put it
  * against the membership fee), which is why they're notified here.
  */
@@ -68,7 +73,14 @@ export async function redeemCredit(params: {
 
   if (error) {
     // P0001 messages from the function: INSUFFICIENT_BALANCE:<bal>,
-    // INVALID_AMOUNT, INVALID_PURPOSE.
+    // INVALID_AMOUNT, INVALID_PURPOSE, NOT_A_MEMBER.
+    if (error.message?.startsWith('NOT_A_MEMBER')) {
+      return {
+        ok: false,
+        status: 403,
+        error: 'Redeeming credit needs an active LinkUp membership. Your balance keeps building until then.',
+      }
+    }
     if (error.message?.startsWith('INSUFFICIENT_BALANCE')) {
       return { ok: false, status: 409, error: 'That exceeds your available balance.' }
     }

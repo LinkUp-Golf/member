@@ -5,8 +5,9 @@
 // amounts (earned +, redeemed -, adjusted ±), so a balance is simply the sum.
 // These helpers derive the earned / redeemed / balance triad and load history.
 //
-// Credit is spendable on golf or membership — including by a host who holds no
-// golf membership of their own — so nothing here gates on membership status.
+// Earning is open to anyone with a host or partner role; spending it requires an
+// active membership (canRedeemCredit below, enforced for real inside the redeem
+// RPC). A non-member's balance accrues until they join.
 //
 // Nothing in this file imports server-only code: summarizeCredits is pure and
 // the loaders take a client as a parameter, so a client component can import a
@@ -62,6 +63,25 @@ export async function loadCreditSummary(
     .eq('member_id', memberId)
 
   return summarizeCredits((data ?? []) as { amount: number }[])
+}
+
+/**
+ * Whether this member may spend their balance — i.e. holds an active
+ * membership. Read-only mirror of the rule enforced in redeem_member_credit, so
+ * the wallet can explain a disabled button instead of failing the submit. The
+ * RPC is the authority; this must never be the only check.
+ */
+export async function canRedeemCredit(
+  admin: AdminClient,
+  memberId: string
+): Promise<boolean> {
+  const { data } = await admin
+    .from('members')
+    .select('membership_status')
+    .eq('id', memberId)
+    .maybeSingle()
+
+  return data?.membership_status === 'active'
 }
 
 /** A member's full ledger, newest first. */

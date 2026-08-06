@@ -10,13 +10,16 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withPartnerAuth, type PartnerAuthContext } from '@/lib/auth/with-partner-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { loadCreditSummary, loadCreditEntries } from '@/lib/credits'
+import { loadCreditSummary, loadCreditEntries, canRedeemCredit } from '@/lib/credits'
 
 export const GET = withPartnerAuth(async (_req: NextRequest, ctx: PartnerAuthContext) => {
   const admin = createAdminClient()
-  const [summary, entries] = await Promise.all([
+  // Same membership gate the host wallet reports — it's one wallet, so gating
+  // only one of the two workspaces would gate neither.
+  const [summary, entries, canRedeem] = await Promise.all([
     loadCreditSummary(admin, ctx.memberId),
     loadCreditEntries(admin, ctx.memberId),
+    canRedeemCredit(admin, ctx.memberId),
   ])
-  return NextResponse.json({ summary, entries })
+  return NextResponse.json({ summary, entries, canRedeem })
 })

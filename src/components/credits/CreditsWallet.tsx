@@ -7,8 +7,10 @@
 // balance whichever workspace they're standing in — only the API prefix and the
 // "where credit comes from" copy differ.
 //
-// Credit is spendable on golf or toward membership, including by someone with no
-// golf membership of their own, which is why redemption asks which.
+// Credit is spendable on golf or toward membership, which is why redemption asks
+// which. Spending requires an active membership: a host or partner who isn't a
+// member still earns, and still sees their balance, but redeems nothing until
+// they join. canRedeem comes from the API so a disabled button can say why.
 
 import { useState, useEffect, useCallback } from 'react'
 import { AdminPageHeader, StatCard, AdminCard, Badge } from '@/components/admin/AdminUI'
@@ -47,6 +49,9 @@ interface Props {
 export default function CreditsWallet({ basePath, earnedHint }: Props) {
   const [summary, setSummary] = useState<CreditSummary | null>(null)
   const [entries, setEntries] = useState<CreditEntry[]>([])
+  // Assume no until the API says otherwise — a load failure shouldn't open a
+  // form the server is going to refuse.
+  const [canRedeem, setCanRedeem] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [redeeming, setRedeeming] = useState(false)
@@ -63,6 +68,7 @@ export default function CreditsWallet({ basePath, earnedHint }: Props) {
       setError(null)
       setSummary(json.summary)
       setEntries(json.entries ?? [])
+      setCanRedeem(json.canRedeem === true)
     } else {
       // Without this a failed load renders as a confident "$0.00 balance".
       setError(json.error ?? 'Could not load your credits.')
@@ -82,13 +88,29 @@ export default function CreditsWallet({ basePath, earnedHint }: Props) {
         action={
           <button
             onClick={() => setRedeeming(true)}
-            disabled={loading || balance <= 0}
+            disabled={loading || balance <= 0 || !canRedeem}
             className="btn btn-gold btn-sm disabled:opacity-50"
           >
             Redeem credits
           </button>
         }
       />
+
+      {/* Say it before the balance, not after they've tried to spend it. Only
+          once the wallet has actually loaded — mid-load this would flash for
+          everyone, members included. */}
+      {!loading && !error && !canRedeem && (
+        <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3 mb-6">
+          <p className="text-sm font-medium text-amber-900">
+            Redeeming needs a LinkUp membership
+          </p>
+          <p className="text-xs text-amber-800/80 mt-1">
+            Keep earning — your balance is yours and it keeps building. You can
+            spend it on golf or put it toward your membership once you&apos;ve
+            joined. Talk to us when you&apos;re ready.
+          </p>
+        </div>
+      )}
 
       {loading ? (
         <ContentLoader />
@@ -141,7 +163,7 @@ export default function CreditsWallet({ basePath, earnedHint }: Props) {
         </>
       )}
 
-      {redeeming && summary && (
+      {redeeming && summary && canRedeem && (
         <RedeemModal
           basePath={basePath}
           balance={balance}
