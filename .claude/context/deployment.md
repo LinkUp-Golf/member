@@ -63,7 +63,7 @@ Declared in `vercel.json`:
 | `/api/cron/booking-reminders` | `*/15 * * * *` (every 15 min) | push + SMS reminders 7 days, 3 days, and 6 hours before each booking's tee time |
 | `/api/cron/hosted-events-complete` | `0 8 * * *` (daily) | moves past-dated `upcoming` hosted events to `completed` |
 | `/api/cron/booking-surveys` | `*/15 * * * *` (every 15 min) | sends the "how was your round?" push once a booking's round has finished (`surveyDueAt`). Guarded by `bookings.survey_prompt_sent` (no round nudged twice) and `bookings.survey_auto_prompt` (rounds predating the feature are never chased). Covers members whose app was closed at the due moment; `useBookingSurvey` handles those with it open |
-| `/api/cron/ghl-member-sync` | `0 * * * *` (hourly) | full GHL → Supabase member reconcile (`runBulkGhlSync` in `src/lib/sync/bulk.ts`): imports newly access-tagged contacts, deactivates members whose tag was removed. Replaced the admin "Sync from GHL" button; `maxDuration = 300` because it walks every tagged contact |
+| `/api/cron/ghl-member-sync` | `0 * * * *` (hourly) | full GHL → Supabase member reconcile (`runBulkGhlSync` in `src/lib/sync/bulk.ts`): imports newly access-tagged contacts, deactivates members whose tag was removed. The admin "Sync from GHL" button (`POST /api/admin/sync`) runs the same function on demand; both set `maxDuration = 300` because it walks every tagged contact |
 
 - Each handler verifies `Authorization: Bearer ${CRON_SECRET}` before running.
 - Add new cron jobs by adding both the `vercel.json` entry **and** the
