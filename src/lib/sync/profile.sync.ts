@@ -3,9 +3,11 @@
 // member-editable in-app and never touched here.
 
 import { logger } from '@/lib/logger'
-import { getContactCustomFieldValues } from '@/lib/ghl/client'
+import { getContactCustomFieldValues, getContactCustomFieldValueById } from '@/lib/ghl/client'
 import { getCache } from '@/lib/cache'
 import { MEMBER_DETAIL_NS, memberDetailKey } from '@/lib/cache/keys'
+import { GHL_CONTACT_FIELDS } from '@/lib/constants'
+import { parseNonprofits, MAX_NONPROFITS } from '@/lib/profile/nonprofits'
 import type { GHLContact } from '@/types'
 import type { SyncContext } from './types'
 
@@ -23,6 +25,10 @@ const PROFILE_FIELD_MAP = {
 } as const
 
 type ProfileColumn = (typeof PROFILE_FIELD_MAP)[keyof typeof PROFILE_FIELD_MAP]
+
+// Not in PROFILE_FIELD_MAP because it isn't a straight string copy: GHL holds
+// it as one per-line string and the column is a text[], so it needs parsing.
+const NONPROFITS_FIELD_KEY = 'contact.nonprofits'
 
 /**
  * Pull profile attributes from GHL custom fields, with GHL winning.
@@ -55,12 +61,22 @@ export async function syncProfileFromGhl(params: {
   const log = logger.child({ requestId: ctx.requestId, userId, action: 'profile_sync' })
 
   try {
-    const values = await getContactCustomFieldValues(contact, Object.keys(PROFILE_FIELD_MAP))
-    if (Object.keys(values).length === 0) return
+    const values = await getContactCustomFieldValues(contact, [
+      ...Object.keys(PROFILE_FIELD_MAP),
+      NONPROFITS_FIELD_KEY,
+    ])
+
+    // By object key first (self-documenting, and the lookup is already paid
+    // for above), falling back to the field id — the key can be renamed in
+    // GHL and the id can't, so this survives that rename.
+    const rawNonprofits =
+      values[NONPROFITS_FIELD_KEY] || getContactCustomFieldValueById(contact, GHL_CONTACT_FIELDS.NONPROFITS)
+
+    if (Object.keys(values).length === 0 && !rawNonprofits) return
 
     const { data: profile, error: readErr } = await ctx.supabase
       .from('member_profiles')
-      .select('business_name, role_title, linkedin_url')
+      .select('business_name, role_title, linkedin_url, nonprofits')
       .eq('id', userId)
       .single()
 
@@ -69,8 +85,8 @@ export async function syncProfileFromGhl(params: {
       return
     }
 
-    const current = profile as Record<ProfileColumn, string | null>
-    const updates: Partial<Record<ProfileColumn, string>> = {}
+    const current = profile as Record<ProfileColumn, string | null> & { nonprofits: string[] | null }
+    const updates: Partial<Record<ProfileColumn, string>> & { nonprofits?: string[] } = {}
     for (const [key, column] of Object.entries(PROFILE_FIELD_MAP) as [string, ProfileColumn][]) {
       const incoming = values[key]
       // Compare before writing: re-syncs are frequent (every login, every
@@ -78,6 +94,29 @@ export async function syncProfileFromGhl(params: {
       // evict the member's cache entry.
       if (incoming && incoming !== (current[column] ?? '')) {
         updates[column] = incoming
+      }
+    }
+
+    // Same GHL-wins rule as the string columns above, and the same reason for
+    // the `if (rawNonprofits)` guard: an empty value from GHL is
+    // indistinguishable from GHL having no value, so it must not clear a list
+    // the member entered in-app.
+    //
+    // Truncated rather than rejected, unlike the profile form. A GHL contact
+    // carrying four is a value we don't control and can't ask about, and
+    // dropping the sync entirely over it would also block the member's name
+    // and title from updating.
+    if (rawNonprofits) {
+      const parsed = parseNonprofits(rawNonprofits)
+      if (parsed.length > MAX_NONPROFITS) {
+        log.warn('GHL contact lists more non-profits than allowed — keeping the first few', {
+          metadata: { found: parsed.length, kept: MAX_NONPROFITS },
+        })
+      }
+      const next = parsed.slice(0, MAX_NONPROFITS)
+      const stored = current.nonprofits ?? []
+      if (next.length && (next.length !== stored.length || next.some((v, i) => v !== stored[i]))) {
+        updates.nonprofits = next
       }
     }
 

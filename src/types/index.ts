@@ -195,6 +195,8 @@ export interface MemberProfile {
   value_offered: string | null
   value_sought: string | null
   non_golf_hobbies: string | null
+  /** Non-profits this member supports, max 3. Never null — the column defaults to '{}'. */
+  nonprofits: string[]
   linkedin_url: string | null
   handicap_index: number | null
   preferred_play_times: string | null

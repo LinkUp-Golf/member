@@ -260,6 +260,20 @@ export async function getContactCustomFieldValues(
   return out
 }
 
+// Reads one custom-field value straight off the contact by its field id.
+//
+// Unlike getContactCustomFieldValues this needs no network call — the id is
+// what GHL already keys the value under on the contact, so there's no
+// definitions lookup to map through. It's also immune to the field's object
+// key being renamed in GHL, which is why it's worth having as a fallback for
+// fields whose id we know.
+export function getContactCustomFieldValueById(contact: GHLContact, fieldId: string): string {
+  const cfs = (contact.customFields ?? []) as Array<{ id: string; value?: unknown; fieldValue?: unknown }>
+  const match = cfs.find(f => f.id === fieldId)
+  const raw = match?.value ?? match?.fieldValue
+  return typeof raw === 'string' ? raw.trim() : ''
+}
+
 // ---- Conversations -------------------------------------------
 
 // Sends an SMS immediately via the GHL Conversations API — no workflow or

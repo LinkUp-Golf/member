@@ -13,6 +13,7 @@ import {
 import { format, formatDistanceToNow } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { validateEmail } from "@/lib/validation";
+import { matchesNonprofit } from "@/lib/profile/nonprofits";
 import type { MemberWithProfile } from "@/types";
 
 type FilterStatus =
@@ -86,7 +87,8 @@ export default function AdminMembersPage() {
           `${m.first_name} ${m.last_name}`.toLowerCase().includes(q) ||
           m.email.toLowerCase().includes(q) ||
           m.profile?.business_name?.toLowerCase().includes(q) ||
-          m.profile?.industry_category?.toLowerCase().includes(q),
+          m.profile?.industry_category?.toLowerCase().includes(q) ||
+          matchesNonprofit(m.profile?.nonprofits, q),
       );
     }
     if (statusFilter !== "all") {
@@ -377,7 +379,7 @@ export default function AdminMembersPage() {
           <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 mb-4 sm:items-center">
             <input
               type="search"
-              placeholder="Search members…"
+              placeholder="Search name, email, business, category, non-profit…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full sm:flex-1 px-4 py-2 text-sm border border-gray-200 rounded-xl outline-none focus:border-green-500"
@@ -590,6 +592,14 @@ export default function AdminMembersPage() {
                     </DetailRow>
                     <DetailRow label="Role">
                       {panelData.profile?.role_title ?? "—"}
+                    </DetailRow>
+                    {/* Shown here so an admin who searched by non-profit can
+                        see which one matched, rather than a row that looks
+                        like an unexplained hit. */}
+                    <DetailRow label="Non-profits">
+                      {(panelData.profile?.nonprofits ?? []).length > 0
+                        ? (panelData.profile?.nonprofits ?? []).join(", ")
+                        : "—"}
                     </DetailRow>
                     <DetailRow label="Last sign in">
                       {panelData.last_sign_in

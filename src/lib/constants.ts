@@ -22,6 +22,14 @@ export const GHL_OPPORTUNITY_FIELDS = {
   CANCEL_URL:      'mm1kLkrvLnOTF0VyfS0Q',
 } as const
 
+// Custom field IDs on the contact object. Most contact fields are read by
+// their object key ({{contact.something}}) because that's self-documenting,
+// but the key can be renamed in GHL and the id can't — so where we know the
+// id, it's the fallback that keeps the sync working through a rename.
+export const GHL_CONTACT_FIELDS = {
+  NONPROFITS: '5lciQdYMkGh7nhNBl8UK', // {{contact.nonprofits}}
+} as const
+
 // ---- Referral partners --------------------------------------
 
 // Membership fee used to compute referral-partner commission. Commission is

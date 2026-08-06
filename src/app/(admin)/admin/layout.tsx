@@ -27,6 +27,7 @@ const NAV_GROUPS = [
       { href: '/admin/referrals',        label: 'Referral Partners',  icon: '▪', badge: true },
       { href: '/admin/hosts',            label: 'Hosts',              icon: '▪', badge: true },
       { href: '/admin/reviews',          label: 'Member Reviews',     icon: '▪' },
+      { href: '/admin/reports/nonprofits', label: 'Non-profits',      icon: '▪' },
       { href: '/admin/messaging',        label: 'Messaging Controls', icon: '▪' },
     ],
   },

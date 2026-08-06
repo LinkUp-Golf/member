@@ -7,6 +7,7 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createRouteHandlerClient } from '@/lib/supabase-server'
 import { getCache } from '@/lib/cache'
 import { MEMBER_DETAIL_NS, memberDetailKey } from '@/lib/cache/keys'
+import { parseNonprofits, MAX_NONPROFITS } from '@/lib/profile/nonprofits'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
@@ -39,6 +40,23 @@ export const PATCH = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   for (const key of allowed) {
     if (key in body) updates[key] = body[key]
+  }
+
+  // Handled outside the whitelist loop: the client sends the textarea's raw
+  // text and the stored shape is an array, so this is a parse rather than a
+  // copy. Rejecting a fourth entry rather than dropping it — the member typed
+  // it deliberately, and silently deleting a line they can still see in the
+  // box reads as the save having failed. The DB CHECK enforces the same cap;
+  // this exists so the answer is a sentence instead of a constraint violation.
+  if ('nonprofits' in body) {
+    const parsed = parseNonprofits(body.nonprofits as string | string[] | null)
+    if (parsed.length > MAX_NONPROFITS) {
+      return NextResponse.json(
+        { error: `Please list up to ${MAX_NONPROFITS} non-profits — you have ${parsed.length}.` },
+        { status: 400 }
+      )
+    }
+    updates.nonprofits = parsed
   }
 
   const { data, error } = await supabase
