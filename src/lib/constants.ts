@@ -86,6 +86,13 @@ export const GHL_PAYMENT_REMINDER_WEBHOOK_PATH =
 // releasedCount.
 export const GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH = ''
 
+// ---- Membership sign-up (public marketing site) -------------
+// Shown to a host or referral partner who has credit but no membership to
+// spend it against. Two doors on purpose: one for someone ready to pay, one
+// for someone who wants to read first.
+export const MEMBERSHIP_CHECKOUT_URL = 'https://linkup.golf/golf-membership-checkout'
+export const MEMBERSHIP_JOIN_URL     = 'https://linkup.golf/join'
+
 // ---- Aviara course ------------------------------------------
 
 export const AVIARA_ADDRESS  = 'Aviara Golf Club, 7447 Batiquitos Drive, Carlsbad, CA 92011'

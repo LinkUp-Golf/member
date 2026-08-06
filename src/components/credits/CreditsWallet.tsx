@@ -19,6 +19,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { AdminPageHeader, StatCard, AdminCard, Badge } from '@/components/admin/AdminUI'
 import { Spinner, ContentLoader } from '@/components/ui/Loading'
+import { MEMBERSHIP_CHECKOUT_URL, MEMBERSHIP_JOIN_URL } from '@/lib/constants'
 import type { CreditEntry, CreditSummary, CreditKind, CreditPurpose } from '@/types'
 
 const fmtMoney = (n: number) =>
@@ -106,9 +107,30 @@ export default function CreditsWallet({ basePath, earnedHint }: Props) {
           </p>
           <p className="text-xs text-amber-800/80 mt-1">
             Keep earning — your balance is yours and it keeps building. You can
-            spend it on golf once you&apos;ve joined. Talk to us when
-            you&apos;re ready.
+            spend it on golf once you&apos;ve joined.
           </p>
+          {/* Two doors: ready to pay, or wants to read first. Telling someone
+              what they can't do without showing them the way out is the part
+              that reads as a dead end. External marketing site, so new tab —
+              this is a PWA and navigating away loses their place. */}
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            <a
+              href={MEMBERSHIP_CHECKOUT_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-sm bg-amber-900 text-white hover:bg-amber-800"
+            >
+              Get a membership
+            </a>
+            <a
+              href={MEMBERSHIP_JOIN_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-semibold text-amber-900 hover:underline px-1"
+            >
+              How joining works ↗
+            </a>
+          </div>
         </div>
       )}
 
