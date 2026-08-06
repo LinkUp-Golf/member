@@ -76,7 +76,7 @@ export default function PartnerPaymentsPage() {
 
       <div className="mb-4 rounded-xl border border-gray-100 bg-white px-4 py-3 flex items-center justify-between gap-3">
         <p className="text-xs text-gray-600">
-          Commission is paid as LinkUp credit — spend it on golf or toward membership.
+          Commission is paid as LinkUp credit — spend it on golf.
         </p>
         <Link href="/partner/credits" className="btn btn-outline btn-sm flex-shrink-0 whitespace-nowrap">
           View credits

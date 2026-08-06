@@ -191,7 +191,7 @@ export const NotificationTemplates = {
   referralCommissionPaid: (amount: number, method: PayoutMethod = 'credit'): PushPayload => {
     const formatted = amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
     const settled =
-      method === 'credit' ? 'added to your credit balance — spend it on golf or membership'
+      method === 'credit' ? 'added to your credit balance — spend it on golf'
         : method === 'coupon' ? 'issued as a coupon'
         : 'paid'
     return {
@@ -365,22 +365,22 @@ export const NotificationTemplates = {
     tag:   'host-credit-rejected',
   }),
 
-  // Credit is spendable on golf or on membership; say which, so the member can
-  // tell two redemptions apart in their history.
+  // Credit is redeemed toward golf — the membership option went when redeeming
+  // came to require a membership, so there's no longer a "which" to state.
   // The 'host-credit' tag prefix is what types these in the notification log
   // (see TAG_TYPE_MAP) — keep it even though credit is no longer host-only.
-  creditRedeemed: (amount: number, purpose: 'golf' | 'membership'): PushPayload => ({
+  creditRedeemed: (amount: number): PushPayload => ({
     title: 'Credits redeemed',
-    body:  `You redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in credits toward ${purpose === 'golf' ? 'golf' : 'your membership'}.`,
+    body:  `You redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in credits toward golf.`,
     url:   '/host/credits',
     tag:   'host-credit-redeemed',
   }),
 
-  // Sent to admins — a redemption isn't settled until someone books the round
-  // or applies it to the membership fee.
-  creditRedemptionRequested: (name: string, amount: number, purpose: 'golf' | 'membership'): PushPayload => ({
+  // Sent to admins — a redemption isn't settled until someone puts it against a
+  // round for them.
+  creditRedemptionRequested: (name: string, amount: number): PushPayload => ({
     title: 'Credit redemption to settle',
-    body:  `${name} redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} toward ${purpose === 'golf' ? 'golf' : 'membership'}.`,
+    body:  `${name} redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} toward golf.`,
     url:   '/admin/hosts',
     tag:   'host-credit-redemption',
   }),

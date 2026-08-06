@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 //
 //        The default method is 'credit': the RPC writes the payment and the
 //        partner's credit_ledger row in one transaction, so commission settles
-//        inside the app as credit spendable on golf or membership. 'cash' and
+//        inside the app as credit spendable on golf once they're a member. 'cash' and
 //        'coupon' record a payout made externally, and are the only options for
 //        a partner with no LinkUp account to credit.
 

@@ -39,8 +39,8 @@ export const COMMISSION_TERM_MONTHS = 12
 export const PAYOUT_THRESHOLD_USD = 100
 
 // Commission is settled as credit by default — it lands in the partner's member
-// credit wallet, spendable on golf or toward membership. Cash and coupon remain
-// for a partner with no LinkUp account, who has no wallet to credit.
+// credit wallet, spendable on golf once they hold a membership. Cash and coupon
+// remain for a partner with no LinkUp account, who has no wallet to credit.
 export const PAYOUT_METHODS = ['credit', 'cash', 'coupon'] as const
 
 export const PAYOUT_METHOD_LABEL: Record<PayoutMethod, string> = {

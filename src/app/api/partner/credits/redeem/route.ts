@@ -1,8 +1,8 @@
 export const dynamic = 'force-dynamic'
 
-// POST /api/partner/credits/redeem — spend available credit on golf or
-// membership. Shares redeemCredit with the host workspace; all this route
-// decides is who's allowed in.
+// POST /api/partner/credits/redeem — spend available credit toward golf.
+// Shares redeemCredit with the host workspace; all this route decides is who's
+// allowed in.
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'

@@ -427,8 +427,9 @@ function PartnerDrawer({ editing, onClose, onSaved, onError }: {
             </select>
             <p className="mt-1 text-[11px] text-gray-400">
               Default method for this partner&apos;s payouts; can be overridden per payout.
-              Credit lands in their LinkUp balance, spendable on golf or membership —
-              a partner with no LinkUp account has to be paid by cash or coupon.
+              Credit lands in their LinkUp balance, spendable on golf once they hold
+              a membership — a partner with no LinkUp account has to be paid by cash
+              or coupon.
             </p>
           </div>
 

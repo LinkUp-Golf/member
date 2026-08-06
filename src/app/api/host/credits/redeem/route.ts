@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic'
 
-// POST /api/host/credits/redeem — spend available credit on golf or membership.
+// POST /api/host/credits/redeem — spend available credit toward golf.
 // The money handling lives in redeemCredit so this and the partner workspace's
 // equivalent can't drift; all this route decides is who's allowed in.
 

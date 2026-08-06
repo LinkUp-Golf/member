@@ -5,7 +5,7 @@
 // outstanding balance once it clears the threshold.
 //
 // The default method is credit: recording the payout puts it straight into the
-// partner's credit wallet, spendable on golf or membership — nothing happens
+// partner's credit wallet, spendable on golf once they're a member — nothing happens
 // outside the app. Cash and coupon still record a payout made externally, and
 // are the only options for a partner with no LinkUp account to credit.
 
@@ -308,7 +308,7 @@ function RecordPayoutModal({ partnerId, outstanding, defaultMethod, onClose, onP
           <div className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-3">
             <p className="text-[11px] text-gray-500">
               {method === 'credit'
-                ? 'Adds the amount to the partner’s credit balance, spendable on golf or membership, and notifies them. Settles the balance up to the amount entered.'
+                ? 'Adds the amount to the partner’s credit balance, spendable on golf once they hold a membership, and notifies them. Settles the balance up to the amount entered.'
                 : 'Records a payout made outside the app and notifies the partner. Settles the balance up to the amount entered.'}
             </p>
           </div>

@@ -306,8 +306,8 @@ export type ReferralPartnerLinkStatus = 'linked' | 'converted'
  * How referral commission is settled.
  *
  * 'credit' is the default: the payout lands in the partner's member credit
- * wallet, spendable on golf or toward membership. cash and coupon remain for a
- * partner with no LinkUp account — they have no wallet to credit.
+ * wallet, spendable on golf once they hold a membership. cash and coupon remain
+ * for a partner with no LinkUp account — they have no wallet to credit.
  */
 export type PayoutMethod = 'credit' | 'cash' | 'coupon'
 

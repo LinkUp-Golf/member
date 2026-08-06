@@ -14,14 +14,16 @@ import type { CreditSummary, CreditPurpose } from '@/types'
 
 type AdminClient = SupabaseClient
 
-const PURPOSES: readonly CreditPurpose[] = ['golf', 'membership']
+// Only 'golf' can still be written. 'membership' stays in CreditPurpose because
+// past redemptions used it and the history still renders them.
+const REDEEMABLE_PURPOSE: CreditPurpose = 'golf'
 
 export type RedeemResult =
   | { ok: true; summary: CreditSummary }
   | { ok: false; status: number; error: string }
 
 /**
- * Spend credit from a member's wallet on golf or membership.
+ * Spend credit from a member's wallet toward golf.
  *
  * Shared by the host and partner workspaces: the wallet is the member's, so the
  * two role-gated routes differ only in who they let in and what name the admin
@@ -30,10 +32,11 @@ export type RedeemResult =
  * Requires an active membership, enforced inside the RPC (see
  * 20260806000002_redeem_requires_membership.sql) so neither workspace can be the
  * way around it. Earning is not gated — a non-member host or partner accrues a
- * balance they can spend once they join.
+ * balance they can spend once they join. That gate is also why redemption no
+ * longer asks golf-or-membership: everyone who can redeem is already a member.
  *
- * A redemption is a request an admin then settles (book the round, put it
- * against the membership fee), which is why they're notified here.
+ * A redemption is a request an admin then settles by putting it against a round,
+ * which is why they're notified here.
  */
 export async function redeemCredit(params: {
   admin: AdminClient
@@ -54,9 +57,16 @@ export async function redeemCredit(params: {
     return { ok: false, status: 400, error: 'Enter an amount greater than zero.' }
   }
 
-  const purpose = PURPOSES.find(p => p === params.purpose)
-  if (!purpose) {
-    return { ok: false, status: 400, error: 'Choose whether this goes toward golf or membership.' }
+  // Nothing asks any more, so an absent purpose is the normal case. A stale
+  // service-worker cache can still be serving the old two-choice form though,
+  // and "invalid purpose" would be a baffling thing for that person to read.
+  const purpose = params.purpose == null || params.purpose === '' ? REDEEMABLE_PURPOSE : params.purpose
+  if (purpose !== REDEEMABLE_PURPOSE) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Credit is redeemed toward golf. Reload the app if you were offered another option.',
+    }
   }
 
   const note = typeof params.note === 'string' && params.note.trim()
@@ -88,7 +98,7 @@ export async function redeemCredit(params: {
       return { ok: false, status: 400, error: 'Enter an amount greater than zero.' }
     }
     if (error.message?.startsWith('INVALID_PURPOSE')) {
-      return { ok: false, status: 400, error: 'Choose whether this goes toward golf or membership.' }
+      return { ok: false, status: 400, error: 'Credit is redeemed toward golf.' }
     }
     logger.error('Credit redeem failed', {
       action: 'credit.redeemed',
@@ -98,10 +108,10 @@ export async function redeemCredit(params: {
     return { ok: false, status: 500, error: 'Could not redeem your credits.' }
   }
 
-  void sendPushToMember(memberId, NotificationTemplates.creditRedeemed(amount, purpose)).catch(() => {})
+  void sendPushToMember(memberId, NotificationTemplates.creditRedeemed(amount)).catch(() => {})
   // Nothing else tells the admins a redemption is waiting to be settled.
   void sendPushToAdmins(
-    NotificationTemplates.creditRedemptionRequested(actorName, amount, purpose)
+    NotificationTemplates.creditRedemptionRequested(actorName, amount)
   ).catch(() => {})
 
   logger.info('Member credit redeemed', {

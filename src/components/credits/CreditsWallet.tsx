@@ -7,10 +7,14 @@
 // balance whichever workspace they're standing in — only the API prefix and the
 // "where credit comes from" copy differ.
 //
-// Credit is spendable on golf or toward membership, which is why redemption asks
-// which. Spending requires an active membership: a host or partner who isn't a
-// member still earns, and still sees their balance, but redeems nothing until
-// they join. canRedeem comes from the API so a disabled button can say why.
+// Spending requires an active membership: a host or partner who isn't a member
+// still earns, and still sees their balance, but redeems nothing until they
+// join. canRedeem comes from the API so a disabled button can say why.
+//
+// Credit is redeemed toward golf, and redemption doesn't ask — the membership
+// option existed for someone putting credit toward joining, and that person can
+// no longer redeem at all. History still renders 'membership' rows, so the
+// label map keeps both.
 
 import { useState, useEffect, useCallback } from 'react'
 import { AdminPageHeader, StatCard, AdminCard, Badge } from '@/components/admin/AdminUI'
@@ -29,11 +33,7 @@ const KIND_META: Record<CreditKind, { label: string; colour: 'green' | 'gray' | 
   adjusted: { label: 'Adjusted', colour: 'blue' },
 }
 
-const PURPOSES: { key: CreditPurpose; label: string; hint: string }[] = [
-  { key: 'golf',       label: 'Golf',       hint: 'Put toward a round' },
-  { key: 'membership', label: 'Membership', hint: 'Put toward membership' },
-]
-
+// Historical rows only — nothing new is written against 'membership'.
 const PURPOSE_LABEL: Record<CreditPurpose, string> = {
   golf:       'Toward golf',
   membership: 'Toward membership',
@@ -84,7 +84,7 @@ export default function CreditsWallet({ basePath, earnedHint }: Props) {
     <div className="p-4 sm:p-8 max-w-3xl mx-auto">
       <AdminPageHeader
         title="Credits"
-        description="Credits you've earned and what you've redeemed. Spend them on golf or toward membership."
+        description="Credits you've earned and what you've redeemed. Spend them on golf."
         action={
           <button
             onClick={() => setRedeeming(true)}
@@ -106,8 +106,8 @@ export default function CreditsWallet({ basePath, earnedHint }: Props) {
           </p>
           <p className="text-xs text-amber-800/80 mt-1">
             Keep earning — your balance is yours and it keeps building. You can
-            spend it on golf or put it toward your membership once you&apos;ve
-            joined. Talk to us when you&apos;re ready.
+            spend it on golf once you&apos;ve joined. Talk to us when
+            you&apos;re ready.
           </p>
         </div>
       )}
@@ -190,7 +190,6 @@ function RedeemModal({ basePath, balance, onClose, onRedeemed, onError }: {
   onError: (msg: string) => void
 }) {
   const [amount, setAmount] = useState('')
-  const [purpose, setPurpose] = useState<CreditPurpose | null>(null)
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -202,12 +201,11 @@ function RedeemModal({ basePath, balance, onClose, onRedeemed, onError }: {
     const amt = Number(amount)
     if (!Number.isFinite(amt) || amt <= 0) { onError('Enter an amount greater than zero.'); return }
     if (amt > balance) { onError('That exceeds your available balance.'); return }
-    if (!purpose) { onError('Choose what to put the credit toward.'); return }
     setSubmitting(true)
     const res = await fetch(`${basePath}/credits/redeem`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: amt, purpose, note: note.trim() || undefined }),
+      body: JSON.stringify({ amount: amt, note: note.trim() || undefined }),
     })
     const json = await res.json().catch(() => ({}))
     setSubmitting(false)
@@ -220,7 +218,9 @@ function RedeemModal({ basePath, balance, onClose, onRedeemed, onError }: {
       <button type="button" aria-label="Close" className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
         <h2 className="text-lg font-bold text-gray-900 mb-1">Redeem credits</h2>
-        <p className="text-sm text-gray-500 mb-5">Available balance: {fmtMoney(balance)}</p>
+        <p className="text-sm text-gray-500 mb-5">
+          Available balance: {fmtMoney(balance)} — redeemed toward golf.
+        </p>
 
         <div className="space-y-4">
           <div>
@@ -230,34 +230,6 @@ function RedeemModal({ basePath, balance, onClose, onRedeemed, onError }: {
               <input id="redeem-amount" type="number" min={0} step="0.01" className={`${field} pl-7`} value={amount} onChange={e => setAmount(e.target.value)} />
             </div>
           </div>
-          {/* Required: credit buys golf or membership, and which one decides
-              what an admin does to settle it. A native fieldset + radios so the
-              choice is keyboard- and screen-reader-reachable. */}
-          <fieldset>
-            <legend className={labelCls}>Put it toward *</legend>
-            <div className="grid grid-cols-2 gap-2">
-              {PURPOSES.map(p => (
-                <label key={p.key} htmlFor={`redeem-${p.key}`} className="cursor-pointer">
-                  <input
-                    id={`redeem-${p.key}`}
-                    type="radio"
-                    name="redeem-purpose"
-                    value={p.key}
-                    checked={purpose === p.key}
-                    onChange={() => setPurpose(p.key)}
-                    className="peer sr-only"
-                  />
-                  {/* Visual only; the sr-only sibling below is the accessible
-                      name, mirroring the survey sheet's star rating. */}
-                  <span aria-hidden className="block rounded-xl border px-3 py-2.5 text-center transition-colors border-gray-200 peer-checked:border-green-700 peer-checked:bg-green-50 peer-focus-visible:ring-2 peer-focus-visible:ring-green-700">
-                    <span className="block text-sm font-medium text-gray-800">{p.label}</span>
-                    <span className="block text-[11px] text-gray-500 mt-0.5">{p.hint}</span>
-                  </span>
-                  <span className="sr-only">{`${p.label} — ${p.hint}`}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
 
           <div>
             <label htmlFor="redeem-note" className={labelCls}>Note</label>
@@ -267,7 +239,7 @@ function RedeemModal({ basePath, balance, onClose, onRedeemed, onError }: {
 
         <div className="flex gap-3 mt-6">
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
-          <button onClick={submit} disabled={submitting || !amount || !purpose} className="flex-1 py-2.5 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 disabled:opacity-50 transition-colors">
+          <button onClick={submit} disabled={submitting || !amount} className="flex-1 py-2.5 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 disabled:opacity-50 transition-colors">
             {submitting ? <Spinner className="w-4 h-4" /> : 'Redeem'}
           </button>
         </div>
