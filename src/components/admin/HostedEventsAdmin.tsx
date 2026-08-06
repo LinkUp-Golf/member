@@ -98,8 +98,16 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
   const [busy, setBusy] = useState(false)
   const [rejecting, setRejecting] = useState(false)
   const [reason, setReason] = useState('')
+  // What the host gets credited. Starts at the rate they listed the event at,
+  // which is what approving used to award with no say in it.
+  const [amount, setAmount] = useState(String(event.member_guest_rate))
+  const [note, setNote] = useState('')
   const meta = STATUS_META[event.status]
   const proofs = event.proofs ?? []
+
+  // Only ask why when the figure has actually been changed — at the listed rate
+  // there's nothing to explain.
+  const overridden = Number(amount) !== Number(event.member_guest_rate)
 
   // Credit decision, once the event has run and proof is in.
   const awaitingCredit = event.status === 'pending_credit_approval'
@@ -110,11 +118,17 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
   async function decide(action: 'approve' | 'reject') {
     if (busy) return
     if (action === 'reject' && !reason.trim()) { onToast('Enter a reason.', false); return }
+    if (action === 'approve' && !(Number(amount) > 0)) {
+      onToast('Enter a credit amount greater than zero.', false)
+      return
+    }
     setBusy(true)
     const res = await fetch(`/api/admin/hosted-events/${event.id}/credits`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(action === 'approve' ? { action } : { action, reason: reason.trim() }),
+      body: JSON.stringify(action === 'approve'
+        ? { action, amount: Number(amount), ...(note.trim() ? { note: note.trim() } : {}) }
+        : { action, reason: reason.trim() }),
     })
     const json = await res.json().catch(() => ({}))
     setBusy(false)
@@ -123,7 +137,7 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
     onToast(action === 'approve'
       ? `Credit of ${fmtMoney(json.amount ?? event.member_guest_rate)} awarded.`
       : 'Credit rejected.')
-    setRejecting(false); setReason('')
+    setRejecting(false); setReason(''); setNote('')
     onChanged()
   }
 
@@ -224,13 +238,48 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
             <p className="text-[11px] text-amber-600 mb-2">No proof image was uploaded.</p>
           )}
           {!rejecting ? (
-            <div className="flex gap-2">
-              <button onClick={() => decide('approve')} disabled={busy} className="btn btn-sm bg-green-900 text-white">
-                Approve credit
-              </button>
-              <button onClick={() => setRejecting(true)} disabled={busy} className="btn btn-outline btn-sm text-red-600 border-red-200">
-                Reject
-              </button>
+            <div className="space-y-2">
+              {/* Editable before approving, so a round that ran differently to
+                  the listing can be credited for what it was actually worth. */}
+              <div className="flex items-end gap-2 flex-wrap">
+                <div>
+                  <label htmlFor={`credit-${event.id}`} className="block text-[11px] font-medium text-gray-600 mb-1">
+                    Credit to award
+                  </label>
+                  <div className="relative w-32">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">$</span>
+                    <input
+                      id={`credit-${event.id}`}
+                      type="number"
+                      min={0}
+                      step="1"
+                      className="input text-sm pl-7"
+                      value={amount}
+                      onChange={e => setAmount(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <button onClick={() => decide('approve')} disabled={busy} className="btn btn-sm bg-green-900 text-white">
+                  Approve credit
+                </button>
+                <button onClick={() => setRejecting(true)} disabled={busy} className="btn btn-outline btn-sm text-red-600 border-red-200">
+                  Reject
+                </button>
+              </div>
+
+              {overridden && (
+                <div className="space-y-1">
+                  <p className="text-[11px] text-amber-600">
+                    The host listed this event at {fmtMoney(event.member_guest_rate)}.
+                  </p>
+                  <input
+                    className="input text-sm"
+                    placeholder="Why the different amount (optional, saved to the ledger)"
+                    value={note}
+                    onChange={e => setNote(e.target.value)}
+                  />
+                </div>
+              )}
             </div>
           ) : (
             <div className="p-3 rounded-xl bg-red-50 border border-red-100 space-y-2">
