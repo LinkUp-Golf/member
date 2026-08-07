@@ -89,7 +89,7 @@ export default function HostApplicationPage() {
               />
               <Step
                 n={5}
-                text="For each event you host, you receive a LinkUp for $150, which you can apply to either your membership or any LinkUp event."
+                text="For each event you submit proof of hosting with a group pic, you receive LinkUp credit of $150, which you can apply to either your membership or any LinkUp event."
               />
             </div>
 
