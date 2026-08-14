@@ -80,7 +80,9 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })
 
   const name = body.name?.trim() ?? ''
-  const description = body.description?.trim() ?? ''
+  // No longer collected by the form; kept nullable so an older client that
+  // still sends one doesn't lose it.
+  const description = body.description?.trim() || null
   const newVenues = Array.isArray(body.new_venues) ? body.new_venues : []
 
   const admin = createAdminClient()
@@ -162,7 +164,7 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     .insert({
       member_id: ctx.memberId,
       name: sanitiseText(name),
-      description: sanitiseText(description),
+      description: description ? sanitiseText(description) : null,
       requested_course_ids: allVenueIds,
     })
     .select()

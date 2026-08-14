@@ -237,8 +237,13 @@ export function validateHostApplicationPayload(body: unknown): ValidationResult 
   const nameResult = validateString(b.name, 'Host name', { min: 2, max: 120 })
   if (!nameResult.valid) errors.push(...nameResult.errors)
 
-  const descResult = validateString(b.description, 'Description', { min: 20, max: 1000 })
-  if (!descResult.valid) errors.push(...descResult.errors)
+  // The form stopped asking for a description — venues and rounds are what an
+  // admin actually reviews. Older clients may still send one, so it is bounded
+  // if present but never required.
+  if (typeof b.description === 'string' && b.description.trim()) {
+    const descResult = validateString(b.description, 'Description', { max: 1000 })
+    if (!descResult.valid) errors.push(...descResult.errors)
+  }
 
   // Existing venues the applicant picked, and clubs they named that aren't on
   // LinkUp yet. Either list can be empty, but not both.

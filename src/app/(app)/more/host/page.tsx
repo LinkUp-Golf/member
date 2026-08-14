@@ -246,12 +246,15 @@ export default function HostApplicationPage() {
               <ApplicationForm
                 heading={wasRejected ? "Apply again" : "Apply to become a host"}
                 error={error}
-                onSubmit={async ({ name, description, course_ids, events }) => {
+                onSubmit={async ({ name, course_ids, new_venues, events }) => {
                   setError(null);
                   const res = await apiClient.post("/api/host/application", {
                     name,
-                    description,
                     course_ids,
+                    // Clubs named on this form that aren't on LinkUp yet. Left
+                    // out of this body, they never reached the server and an
+                    // application for only a new venue failed as "choose a venue".
+                    new_venues,
                     events,
                   });
                   if (res.error) {
@@ -282,10 +285,8 @@ export default function HostApplicationPage() {
 
 const NAME_MIN = 2;
 const NAME_MAX = 120;
-const DESC_MIN = 20;
-const DESC_MAX = 1000;
 
-type ApplicationValues = { name: string; description: string };
+type ApplicationValues = { name: string };
 
 /** A round as submitted: `venue` is a course id or a `new:<index>` reference. */
 type ProposedRound = Omit<HostApplicationEventInput, "course_id"> & {
@@ -310,20 +311,16 @@ interface CustomVenueDraft {
 }
 
 /**
- * A round being filled in on the application. Strings rather than numbers because
- * these are raw inputs — an empty numeric field is "" and must stay
- * distinguishable from 0, which is a legitimate guest rate.
+ * The round a venue would host. Strings rather than numbers because these are
+ * raw inputs — an empty numeric field is "" and must stay distinguishable from
+ * 0, which is a legitimate guest rate.
  *
- * `dates` is a list: one round entry with several dates becomes one event per
- * date, all sharing the venue, tee time, spots, rate and dinner. That's the
- * "one date or several" model, without retyping the details per date.
- *
- * `venue` is either a real course id or `draft:<key>` for a custom venue that has
- * no id yet. The draft references are rewritten to `new:<index>` at submit time.
+ * `dates` is a list: one round with several dates becomes one event per date,
+ * all sharing the tee time, spots, rate and dinner. That's the "one date or
+ * several" model, without retyping the details per date — and it's why a venue
+ * needs only one round. Two rounds at the same club were always just two dates.
  */
-interface RoundDraft {
-  key: number;
-  venue: string;
+interface VenueRound {
   dates: string[];
   tee_time: string;
   total_spots: string;
@@ -332,20 +329,13 @@ interface RoundDraft {
 }
 
 const DEFAULT_SPOTS = "3";
-const MAX_ROUNDS = 20;
 const MAX_DATES_PER_ROUND = 30;
 const MAX_CUSTOM_VENUES = 10;
 
-/** Prefix for a round pointing at a not-yet-created venue, by draft key. */
+/** Prefix identifying a not-yet-created venue by draft key. */
 const DRAFT_VENUE = "draft:";
 
-const newRound = (
-  key: number,
-  venue = "",
-  overrides: Partial<RoundDraft> = {},
-): RoundDraft => ({
-  key,
-  venue,
+const newRound = (overrides: Partial<VenueRound> = {}): VenueRound => ({
   dates: [""],
   tee_time: "",
   total_spots: DEFAULT_SPOTS,
@@ -353,6 +343,18 @@ const newRound = (
   dinner: false,
   ...overrides,
 });
+
+/**
+ * Has the applicant started filling this round in? Rounds stay optional — you
+ * can name the clubs you want and supply dates later — so an untouched one is
+ * skipped rather than failing validation. total_spots is excluded because it
+ * carries a default nobody chose.
+ */
+const roundStarted = (r: VenueRound): boolean =>
+  r.dates.some((d) => d.trim()) ||
+  r.tee_time.trim() !== "" ||
+  r.member_guest_rate.trim() !== "" ||
+  r.dinner;
 
 function ApplicationForm({
   heading,
@@ -370,17 +372,19 @@ function ApplicationForm({
     reset,
     formState: { errors, isSubmitting },
   } = useForm<ApplicationValues>({
-    defaultValues: { name: "", description: "" },
+    defaultValues: { name: "" },
   });
 
   const [venues, setVenues] = useState<VenueOption[]>([]);
   const [venueIds, setVenueIds] = useState<string[]>([]);
   const [venueError, setVenueError] = useState<string | null>(null);
   const [venuesLoaded, setVenuesLoaded] = useState(false);
-  const [rounds, setRounds] = useState<RoundDraft[]>([]);
-  const [roundErrors, setRoundErrors] = useState<Record<number, string>>({});
+  // Keyed by venue reference — a course id, or `draft:<key>` for a club named
+  // here. One entry per venue is the whole rule: picking a venue twice is not
+  // expressible, so a second round at the same club can't be created.
+  const [rounds, setRounds] = useState<Record<string, VenueRound>>({});
+  const [roundErrors, setRoundErrors] = useState<Record<string, string>>({});
   const [customVenues, setCustomVenues] = useState<CustomVenueDraft[]>([]);
-  const roundKey = useRef(0);
   const venueKey = useRef(0);
 
   useEffect(() => {
@@ -394,90 +398,89 @@ function ApplicationForm({
   }, []);
 
   /**
-   * A club the applicant named that isn't on LinkUp yet, plus the round they said
-   * they'd run at it. Nothing is created here — the draft lives in form state and
-   * becomes a pending course only when the application is submitted, so a form
-   * that's abandoned halfway leaves no orphaned course behind.
+   * A club the applicant named that isn't on LinkUp yet. Nothing is created
+   * here — the draft lives in form state and becomes a pending course only when
+   * the application is submitted, so a form that's abandoned halfway leaves no
+   * orphaned course behind.
    *
-   * The round is seeded from the details they just typed, so nothing is asked for
-   * twice, and it points at the draft by key until submit rewrites it.
+   * It arrives blank and stays editable: the name, the website and the round all
+   * sit in the same card as every other selected venue's.
    */
-  const addCustomVenue = (
-    venue: { name: string; website: string },
-    round: Partial<RoundDraft>,
-  ) => {
+  const addCustomVenue = () => {
     const key = ++venueKey.current;
-    setCustomVenues((prev) => [...prev, { key, ...venue }]);
-    setRounds((prev) => [
-      ...prev,
-      newRound(++roundKey.current, `${DRAFT_VENUE}${key}`, round),
-    ]);
+    setCustomVenues((prev) => [...prev, { key, name: "", website: "" }]);
+    setRounds((prev) => ({ ...prev, [`${DRAFT_VENUE}${key}`]: newRound() }));
     setVenueError(null);
   };
 
+  const updateCustomVenue = (key: number, patch: Partial<CustomVenueDraft>) =>
+    setCustomVenues((prev) =>
+      prev.map((v) => (v.key === key ? { ...v, ...patch } : v)),
+    );
+
   const removeCustomVenue = (key: number) => {
     setCustomVenues((prev) => prev.filter((v) => v.key !== key));
-    // Rounds at a removed venue go with it — leaving them pointing at nothing
-    // would fail validation on a field the applicant can no longer see.
-    setRounds((prev) => prev.filter((r) => r.venue !== `${DRAFT_VENUE}${key}`));
-  };
-
-  const toggleVenue = (id: string) => {
-    setVenueIds((prev) => {
-      const next = prev.includes(id)
-        ? prev.filter((v) => v !== id)
-        : [...prev, id];
-      // Deselecting a venue orphans any round pointing at it — the server would
-      // drop those rounds silently, so clear the field and make it visible.
-      if (!next.includes(id)) {
-        setRounds((rs) =>
-          rs.map((r) => (r.venue === id ? { ...r, venue: "" } : r)),
-        );
-      }
+    // The round goes with the venue — it has nowhere to be held otherwise.
+    setRounds((prev) => {
+      const next = { ...prev };
+      delete next[`${DRAFT_VENUE}${key}`];
       return next;
     });
   };
 
-  // Everything a round may be held at: existing venues that are ticked, plus every
-  // custom venue named on this form.
-  const roundVenueOptions: { value: string; label: string; pending: boolean }[] = [
+  /**
+   * Selecting a venue creates its round; deselecting removes it. There is no
+   * separate "add a round" step, which is what used to make a second round at an
+   * already-chosen venue possible.
+   */
+  const toggleVenue = (id: string) => {
+    const selected = venueIds.includes(id);
+    setVenueIds((prev) =>
+      selected ? prev.filter((v) => v !== id) : [...prev, id],
+    );
+    setRounds((prev) => {
+      if (selected) {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      }
+      return { ...prev, [id]: newRound() };
+    });
+    setVenueError(null);
+  };
+
+  const updateRound = (ref: string, patch: Partial<VenueRound>) =>
+    setRounds((prev) => {
+      const current = prev[ref];
+      if (!current) return prev;
+      return { ...prev, [ref]: { ...current, ...patch } };
+    });
+
+  /** Every venue on this application, in the order they're shown. */
+  const selectedVenues: {
+    ref: string;
+    label: string;
+    pending: boolean;
+    custom?: CustomVenueDraft;
+  }[] = [
     ...venues
       .filter((v) => venueIds.includes(v.id))
       .map((v) => ({
-        value: v.id,
+        ref: v.id,
         label: v.city ? `${v.name} — ${v.city}` : v.name,
         pending: v.approval_status === "pending",
       })),
     ...customVenues.map((v) => ({
-      value: `${DRAFT_VENUE}${v.key}`,
-      label: v.name,
+      ref: `${DRAFT_VENUE}${v.key}`,
+      label: v.name.trim(),
       pending: true,
+      custom: v,
     })),
   ];
 
-  const addRound = () =>
-    setRounds((prev) =>
-      prev.length >= MAX_ROUNDS
-        ? prev
-        : [
-            ...prev,
-            // Default to the only venue when there's no choice to make.
-            newRound(
-              ++roundKey.current,
-              roundVenueOptions.length === 1
-                ? (roundVenueOptions[0]?.value ?? "")
-                : "",
-            ),
-          ],
-    );
-
-  const updateRound = (key: number, patch: Partial<RoundDraft>) =>
-    setRounds((prev) =>
-      prev.map((r) => (r.key === key ? { ...r, ...patch } : r)),
-    );
-
-  const removeRound = (key: number) =>
-    setRounds((prev) => prev.filter((r) => r.key !== key));
+  // Only what's left to pick — anything chosen has moved up into a card, so the
+  // list below never shows the same venue twice.
+  const unselectedVenues = venues.filter((v) => !venueIds.includes(v.id));
 
   const todayISO = new Date().toISOString().slice(0, 10);
 
@@ -487,7 +490,7 @@ function ApplicationForm({
    * these are checked against again on submit and on approval.
    */
   const validateRounds = (): ProposedRound[] | null => {
-    const errs: Record<number, string> = {};
+    const errs: Record<string, string> = {};
     const payload: ProposedRound[] = [];
 
     // Custom venues are sent as a list; a round at one references it by position.
@@ -495,42 +498,43 @@ function ApplicationForm({
       customVenues.map((v, i) => [`${DRAFT_VENUE}${v.key}`, i]),
     );
 
-    for (const r of rounds) {
-      if (!r.venue) {
-        errs[r.key] = "Choose which venue this round is at.";
-        continue;
-      }
+    for (const { ref } of selectedVenues) {
+      const r = rounds[ref];
+      // A venue with an untouched round is requested without a proposed date —
+      // still a valid application.
+      if (!r || !roundStarted(r)) continue;
+
       const dates = r.dates.map((d) => d.trim()).filter(Boolean);
       if (dates.length === 0) {
-        errs[r.key] = "Choose a date.";
+        errs[ref] = "Choose a date.";
         continue;
       }
       if (dates.length !== r.dates.length) {
-        errs[r.key] = "Fill in or remove the empty date.";
+        errs[ref] = "Fill in or remove the empty date.";
         continue;
       }
       if (new Set(dates).size !== dates.length) {
-        errs[r.key] = "Each date can only be added once.";
+        errs[ref] = "Each date can only be added once.";
         continue;
       }
       if (dates.some((d) => d < todayISO)) {
-        errs[r.key] = "Date cannot be in the past.";
+        errs[ref] = "Date cannot be in the past.";
         continue;
       }
       const spots = Number(r.total_spots);
       if (!Number.isInteger(spots) || spots < 1 || spots > 200) {
-        errs[r.key] = "Spots must be a whole number between 1 and 200.";
+        errs[ref] = "Spots must be a whole number between 1 and 200.";
         continue;
       }
       const rate = Number(r.member_guest_rate);
       if (r.member_guest_rate === "" || !Number.isFinite(rate) || rate < 0) {
-        errs[r.key] = "Enter the guest rate.";
+        errs[ref] = "Enter the guest rate.";
         continue;
       }
       // A draft venue has no id yet, so it travels as its position in new_venues.
-      const draftPos = draftIndex.get(r.venue);
+      const draftPos = draftIndex.get(ref);
       const venueRef =
-        draftPos === undefined ? r.venue : `${NEW_VENUE_REF}${draftPos}`;
+        draftPos === undefined ? ref : `${NEW_VENUE_REF}${draftPos}`;
 
       // One event per date, sharing everything else on the round.
       for (const date of dates) {
@@ -560,6 +564,13 @@ function ApplicationForm({
       setVenueError("Give every new venue a name (at least 2 characters).");
       return;
     }
+    const badSite = customVenues.find(
+      (v) => v.website.trim() && !/^https?:\/\/.+/i.test(v.website.trim()),
+    );
+    if (badSite) {
+      setVenueError("Website must be a valid URL (https://…).");
+      return;
+    }
     setVenueError(null);
 
     const events = validateRounds();
@@ -567,7 +578,6 @@ function ApplicationForm({
 
     const ok = await onSubmit({
       name: data.name.trim(),
-      description: data.description.trim(),
       course_ids: venueIds,
       // Order matters: the `new:<index>` refs in `events` point into this list.
       new_venues: customVenues.map((v) => ({
@@ -580,7 +590,7 @@ function ApplicationForm({
       reset();
       setVenueIds([]);
       setCustomVenues([]);
-      setRounds([]);
+      setRounds({});
       setRoundErrors({});
     }
   });
@@ -616,268 +626,219 @@ function ApplicationForm({
       </div>
 
       <div>
-        <label
-          htmlFor="host-description"
-          className="text-xs text-green-900/50 mb-1.5 block"
-        >
-          Description
-        </label>
-        <textarea
-          id="host-description"
-          className="input resize-none"
-          rows={5}
-          maxLength={DESC_MAX}
-          placeholder="Tell us about the events you'd run, how often, and who you'd bring together."
-          {...register("description", {
-            required: "Add a short description",
-            maxLength: {
-              value: DESC_MAX,
-              message: `At most ${DESC_MAX} characters`,
-            },
-            validate: (v) =>
-              v.trim().length >= DESC_MIN || `At least ${DESC_MIN} characters`,
-          })}
-        />
-        {errors.description && (
-          <p className="text-xs text-red-500 mt-1.5">
-            {errors.description.message}
-          </p>
-        )}
-      </div>
-
-      <div>
         <span className="text-xs text-green-900/50 mb-1.5 block">
           Which venues do you want to host at?
         </span>
 
-        <AddNewClub
-          onAdded={addCustomVenue}
-          disabled={customVenues.length >= MAX_CUSTOM_VENUES}
-        />
-
-        {/* Custom venues, still only in this form. They read as selected venues
-            because that's what they are — the course row just doesn't exist until
-            the application is submitted. */}
-        {customVenues.length > 0 && (
-          <div className="space-y-1.5 mb-1.5">
-            {customVenues.map((v) => (
-              <div
-                key={v.key}
-                className="flex items-center gap-3 rounded-xl border border-green-900/15 bg-green-50/40 px-3 py-2.5"
-              >
-                <span className="text-sm text-green-900/80 min-w-0 flex-1 truncate">
-                  {v.name}
-                </span>
-                <span className="text-xs font-medium px-2 py-0.5 rounded-full text-yellow-700 bg-yellow-50">
-                  New
-                </span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${v.name}`}
-                  onClick={() => removeCustomVenue(v.key)}
-                  className="text-green-900/40 hover:text-red-500 p-0.5"
+        {/* Chosen venues, each holding the round it would run. Selecting a venue
+            moves it up here so what's on the application is one list rather than
+            ticks scattered through a long roster — and the round sits with the
+            venue it belongs to instead of in a separate section pointing back at
+            it through a dropdown. */}
+        {selectedVenues.length > 0 && (
+          <div className="space-y-2 mb-2">
+            {selectedVenues.map(({ ref, label, pending, custom }) => {
+              const round = rounds[ref];
+              if (!round) return null;
+              return (
+                <div
+                  key={ref}
+                  className="rounded-xl border border-green-900/20 bg-green-50/40 px-3 py-3 space-y-2"
                 >
-                  <X className="h-4 w-4" strokeWidth={2} />
-                </button>
-              </div>
-            ))}
+                  <div className="flex items-center gap-2">
+                    {custom ? (
+                      <input
+                        className="input flex-1 min-w-0"
+                        placeholder="Golf club name"
+                        maxLength={120}
+                        value={custom.name}
+                        autoFocus={
+                          custom.name === "" && custom.key === venueKey.current
+                        }
+                        onChange={(e) =>
+                          updateCustomVenue(custom.key, { name: e.target.value })
+                        }
+                      />
+                    ) : (
+                      <span className="text-sm font-medium text-green-900 flex-1 min-w-0 truncate">
+                        {label}
+                      </span>
+                    )}
+                    {pending && (
+                      <span className="flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full text-yellow-700 bg-yellow-50">
+                        {custom ? "New" : "Pending"}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${label || "venue"}`}
+                      onClick={() =>
+                        custom ? removeCustomVenue(custom.key) : toggleVenue(ref)
+                      }
+                      className="flex-shrink-0 text-green-900/40 hover:text-red-500 p-0.5"
+                    >
+                      <X className="h-4 w-4" strokeWidth={2} />
+                    </button>
+                  </div>
+
+                  {custom && (
+                    <input
+                      className="input"
+                      placeholder="Website link — https://…"
+                      maxLength={200}
+                      value={custom.website}
+                      onChange={(e) =>
+                        updateCustomVenue(custom.key, {
+                          website: e.target.value,
+                        })
+                      }
+                    />
+                  )}
+
+                  {/* One round per venue. Several dates on it become one event
+                      each — which is what a second round here would have been. */}
+                  {round.dates.map((d, di) => (
+                    <div key={di} className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        className="input"
+                        min={todayISO}
+                        value={d}
+                        onChange={(e) =>
+                          updateRound(ref, {
+                            dates: round.dates.map((v, vi) =>
+                              vi === di ? e.target.value : v,
+                            ),
+                          })
+                        }
+                      />
+                      {round.dates.length > 1 && (
+                        <button
+                          type="button"
+                          aria-label={`Remove date ${di + 1}`}
+                          onClick={() =>
+                            updateRound(ref, {
+                              dates: round.dates.filter((_, vi) => vi !== di),
+                            })
+                          }
+                          className="text-green-900/40 hover:text-red-500 p-0.5"
+                        >
+                          <X className="h-4 w-4" strokeWidth={2} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+
+                  {round.dates.length < MAX_DATES_PER_ROUND && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateRound(ref, { dates: [...round.dates, ""] })
+                      }
+                      className="text-xs font-medium text-green-800"
+                    >
+                      + Add another date
+                    </button>
+                  )}
+
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="e.g. 8:30 AM (optional)"
+                    maxLength={50}
+                    value={round.tee_time}
+                    onChange={(e) =>
+                      updateRound(ref, { tee_time: e.target.value })
+                    }
+                  />
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="number"
+                      className="input"
+                      min={1}
+                      max={200}
+                      placeholder="Available spots"
+                      value={round.total_spots}
+                      onChange={(e) =>
+                        updateRound(ref, { total_spots: e.target.value })
+                      }
+                    />
+                    <input
+                      type="number"
+                      className="input"
+                      min={0}
+                      step="1"
+                      placeholder="Member guest rate"
+                      value={round.member_guest_rate}
+                      onChange={(e) =>
+                        updateRound(ref, { member_guest_rate: e.target.value })
+                      }
+                    />
+                  </div>
+
+                  <label className="flex items-center gap-3 text-sm text-green-900/80 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-green-900/30 text-green-900 focus:ring-green-800"
+                      checked={round.dinner}
+                      onChange={(e) =>
+                        updateRound(ref, { dinner: e.target.checked })
+                      }
+                    />
+                    Dinner included
+                  </label>
+
+                  {roundErrors[ref] && (
+                    <p className="text-xs text-red-500">{roundErrors[ref]}</p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
+
+        <button
+          type="button"
+          onClick={addCustomVenue}
+          disabled={customVenues.length >= MAX_CUSTOM_VENUES}
+          className="flex w-full items-center gap-2 rounded-xl border border-dashed border-green-900/25 px-3 py-2.5 text-sm text-green-900/70 mb-1.5 disabled:opacity-40"
+        >
+          <Plus className="h-4 w-4" strokeWidth={2} />
+          Add new venue
+        </button>
 
         {!venuesLoaded ? (
           <p className="text-xs text-green-900/35">Loading venues…</p>
         ) : (
-          <div className="space-y-1.5">
-            {venues.map((v) => (
-              <label
-                key={v.id}
-                className="flex items-center gap-3 rounded-xl border border-green-900/10 px-3 py-2.5 cursor-pointer"
-              >
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-green-900/30 text-green-900 focus:ring-green-800"
-                  checked={venueIds.includes(v.id)}
-                  onChange={() => toggleVenue(v.id)}
-                />
-                <span className="text-sm text-green-900/80">
-                  {v.city ? `${v.name} — ${v.city}` : v.name}
-                </span>
-                {v.approval_status === "pending" && (
-                  <span className="ml-auto text-xs font-medium px-2 py-0.5 rounded-full text-yellow-700 bg-yellow-50">
-                    Pending
-                  </span>
-                )}
-              </label>
-            ))}
-          </div>
-        )}
-        {venueError && (
-          <p className="text-xs text-red-500 mt-1.5">{venueError}</p>
-        )}
-      </div>
-
-      {/* Proposed rounds — step 2 of "How it works". Same fields as the host
-          event form, because on approval each of these becomes one of those
-          events. Optional: an applicant with no dates yet can still apply. */}
-      <div>
-        <span className="text-xs text-green-900/50 mb-1.5 block">
-          Rounds you&apos;d like to run
-        </span>
-
-        {rounds.length > 0 && (
-          <div className="space-y-2 mb-1.5">
-            {rounds.map((r, i) => (
-              <div
-                key={r.key}
-                className="rounded-xl border border-green-900/15 bg-green-50/40 px-3 py-3 space-y-2"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-green-900/60">
-                    Round {i + 1}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => removeRound(r.key)}
-                    aria-label={`Remove round ${i + 1}`}
-                    className="text-green-900/40 hover:text-red-500 p-0.5"
-                  >
-                    <X className="h-4 w-4" strokeWidth={2} />
-                  </button>
-                </div>
-
-                {/* Only offer venues on this form — ticked existing ones and
-                    custom ones. A round anywhere else can't be granted. Hidden
-                    when there's one venue, since it's pre-filled. */}
-                {roundVenueOptions.length > 1 && (
-                  <select
-                    className="input"
-                    value={r.venue}
-                    onChange={(e) =>
-                      updateRound(r.key, { venue: e.target.value })
-                    }
-                  >
-                    <option value="">Which venue?</option>
-                    {roundVenueOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                        {o.pending ? " (pending)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                )}
-
-                {/* One date per event. Adding dates here beats adding whole
-                    rounds — the venue, time, spots and rate are already right. */}
-                {r.dates.map((d, di) => (
-                  <div key={di} className="flex items-center gap-2">
-                    <input
-                      type="date"
-                      className="input"
-                      min={todayISO}
-                      value={d}
-                      onChange={(e) =>
-                        updateRound(r.key, {
-                          dates: r.dates.map((v, vi) =>
-                            vi === di ? e.target.value : v,
-                          ),
-                        })
-                      }
-                    />
-                    {r.dates.length > 1 && (
-                      <button
-                        type="button"
-                        aria-label={`Remove date ${di + 1}`}
-                        onClick={() =>
-                          updateRound(r.key, {
-                            dates: r.dates.filter((_, vi) => vi !== di),
-                          })
-                        }
-                        className="text-green-900/40 hover:text-red-500 p-0.5"
-                      >
-                        <X className="h-4 w-4" strokeWidth={2} />
-                      </button>
-                    )}
-                  </div>
-                ))}
-
-                {r.dates.length < MAX_DATES_PER_ROUND && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      updateRound(r.key, { dates: [...r.dates, ""] })
-                    }
-                    className="text-xs font-medium text-green-800"
-                  >
-                    + Add another date
-                  </button>
-                )}
-
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="e.g. 8:30 AM (optional)"
-                  maxLength={50}
-                  value={r.tee_time}
-                  onChange={(e) =>
-                    updateRound(r.key, { tee_time: e.target.value })
-                  }
-                />
-
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="number"
-                    className="input"
-                    min={1}
-                    max={200}
-                    placeholder="Available spots"
-                    value={r.total_spots}
-                    onChange={(e) =>
-                      updateRound(r.key, { total_spots: e.target.value })
-                    }
-                  />
-                  <input
-                    type="number"
-                    className="input"
-                    min={0}
-                    step="1"
-                    placeholder="Member guest rate"
-                    value={r.member_guest_rate}
-                    onChange={(e) =>
-                      updateRound(r.key, { member_guest_rate: e.target.value })
-                    }
-                  />
-                </div>
-
-                <label className="flex items-center gap-3 text-sm text-green-900/80 cursor-pointer">
+          unselectedVenues.length > 0 && (
+            <div className="space-y-1.5">
+              {unselectedVenues.map((v) => (
+                <label
+                  key={v.id}
+                  className="flex items-center gap-3 rounded-xl border border-green-900/10 px-3 py-2.5 cursor-pointer"
+                >
                   <input
                     type="checkbox"
                     className="h-4 w-4 rounded border-green-900/30 text-green-900 focus:ring-green-800"
-                    checked={r.dinner}
-                    onChange={(e) =>
-                      updateRound(r.key, { dinner: e.target.checked })
-                    }
+                    checked={false}
+                    onChange={() => toggleVenue(v.id)}
                   />
-                  Dinner included
+                  <span className="text-sm text-green-900/80">
+                    {v.city ? `${v.name} — ${v.city}` : v.name}
+                  </span>
+                  {v.approval_status === "pending" && (
+                    <span className="ml-auto text-xs font-medium px-2 py-0.5 rounded-full text-yellow-700 bg-yellow-50">
+                      Pending
+                    </span>
+                  )}
                 </label>
-
-                {roundErrors[r.key] && (
-                  <p className="text-xs text-red-500">{roundErrors[r.key]}</p>
-                )}
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )
         )}
-
-        {rounds.length < MAX_ROUNDS && (
-          <button
-            type="button"
-            onClick={addRound}
-            disabled={venueIds.length === 0}
-            className="flex w-full items-center gap-2 rounded-xl border border-dashed border-green-900/25 px-3 py-2.5 text-sm text-green-900/70 disabled:opacity-40"
-          >
-            <Plus className="h-4 w-4" strokeWidth={2} />
-            Add a round
-          </button>
+        {venueError && (
+          <p className="text-xs text-red-500 mt-1.5">{venueError}</p>
         )}
       </div>
 
@@ -895,267 +856,6 @@ function ApplicationForm({
         )}
       </button>
     </form>
-  );
-}
-
-// ---- Add a club not yet on LinkUp ---------------------------
-// Collects the club and the round the applicant would run at it, and hands both
-// back to the form. Nothing is sent anywhere: the club used to be filed as a
-// pending course the moment it was named, which meant every abandoned form left a
-// course behind in the admin queue for an application that never arrived. The
-// course is created when the application is submitted instead.
-//
-// Club fields match the hosted-event form's, and the round fields match an
-// existing venue's round, so the same club described from any of those places
-// produces the same row.
-
-function AddNewClub({
-  onAdded,
-  disabled,
-}: {
-  onAdded: (
-    venue: { name: string; website: string },
-    round: Partial<RoundDraft>,
-  ) => void;
-  disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [website, setWebsite] = useState("");
-  const [dates, setDates] = useState<string[]>([""]);
-  const [teeTime, setTeeTime] = useState("");
-  const [spots, setSpots] = useState(DEFAULT_SPOTS);
-  const [rate, setRate] = useState("");
-  const [dinner, setDinner] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const todayISO = new Date().toISOString().slice(0, 10);
-
-  const reset = () => {
-    setName("");
-    setWebsite("");
-    setDates([""]);
-    setTeeTime("");
-    setSpots(DEFAULT_SPOTS);
-    setRate("");
-    setDinner(false);
-  };
-
-  const add = () => {
-    const trimmed = name.trim();
-    const site = website.trim();
-    if (trimmed.length < 2) {
-      setError("Enter the club name (at least 2 characters).");
-      return;
-    }
-    if (site && !/^https?:\/\/.+/i.test(site)) {
-      setError("Website must be a valid URL (https://…).");
-      return;
-    }
-
-    const filled = dates.map((d) => d.trim()).filter(Boolean);
-    if (filled.length === 0) {
-      setError("Choose at least one date.");
-      return;
-    }
-    if (filled.length !== dates.length) {
-      setError("Fill in or remove the empty date.");
-      return;
-    }
-    if (new Set(filled).size !== filled.length) {
-      setError("Each date can only be added once.");
-      return;
-    }
-    if (filled.some((d) => d < todayISO)) {
-      setError("Date cannot be in the past.");
-      return;
-    }
-    const spotsNum = Number(spots);
-    if (!Number.isInteger(spotsNum) || spotsNum < 1 || spotsNum > 200) {
-      setError("Spots must be a whole number between 1 and 200.");
-      return;
-    }
-    const rateNum = Number(rate);
-    if (rate === "" || !Number.isFinite(rateNum) || rateNum < 0) {
-      setError("Enter the guest rate.");
-      return;
-    }
-
-    setError(null);
-    onAdded(
-      { name: trimmed, website: site },
-      {
-        dates: filled,
-        tee_time: teeTime,
-        total_spots: spots,
-        member_guest_rate: rate,
-        dinner,
-      },
-    );
-    reset();
-    setOpen(false);
-  };
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        disabled={disabled}
-        className="flex w-full items-center gap-2 rounded-xl border border-dashed border-green-900/25 px-3 py-2.5 text-sm text-green-900/70 mb-1.5 disabled:opacity-40"
-      >
-        <Plus className="h-4 w-4" strokeWidth={2} />
-        Add new venue
-      </button>
-    );
-  }
-
-  return (
-    <div className="rounded-xl border border-green-900/15 bg-green-50/40 px-3 py-3 mb-1.5 space-y-2">
-      <label
-        htmlFor="new-club-name"
-        className="text-xs text-green-900/50 block"
-      >
-        Golf Club Name
-      </label>
-      <input
-        id="new-club-name"
-        className="input"
-        placeholder="e.g. Torrey Pines Golf Course"
-        value={name}
-        maxLength={120}
-        autoFocus
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            add();
-          }
-        }}
-      />
-      <input
-        id="new-club-website"
-        className="input"
-        placeholder="Website link — https://…"
-        value={website}
-        maxLength={200}
-        onChange={(e) => setWebsite(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            add();
-          }
-        }}
-      />
-
-      {/* The round itself — same fields as an existing venue's round, so adding a
-          club and saying when you'd play there is one step. */}
-      <span className="text-xs text-green-900/50 block pt-1">
-        Rounds you&apos;d run here
-      </span>
-
-      {dates.map((d, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <input
-            type="date"
-            className="input"
-            min={todayISO}
-            value={d}
-            onChange={(e) =>
-              setDates((prev) =>
-                prev.map((v, vi) => (vi === i ? e.target.value : v)),
-              )
-            }
-          />
-          {dates.length > 1 && (
-            <button
-              type="button"
-              aria-label={`Remove date ${i + 1}`}
-              onClick={() =>
-                setDates((prev) => prev.filter((_, vi) => vi !== i))
-              }
-              className="text-green-900/40 hover:text-red-500 p-0.5"
-            >
-              <X className="h-4 w-4" strokeWidth={2} />
-            </button>
-          )}
-        </div>
-      ))}
-
-      {dates.length < MAX_DATES_PER_ROUND && (
-        <button
-          type="button"
-          onClick={() => setDates((prev) => [...prev, ""])}
-          className="text-xs font-medium text-green-800"
-        >
-          + Add another date
-        </button>
-      )}
-
-      <input
-        type="text"
-        className="input"
-        placeholder="e.g. 8:30 AM (optional)"
-        maxLength={50}
-        value={teeTime}
-        onChange={(e) => setTeeTime(e.target.value)}
-      />
-
-      <div className="grid grid-cols-2 gap-2">
-        <input
-          type="number"
-          className="input"
-          min={1}
-          max={200}
-          placeholder="Available spots"
-          value={spots}
-          onChange={(e) => setSpots(e.target.value)}
-        />
-        <input
-          type="number"
-          className="input"
-          min={0}
-          step="1"
-          placeholder="Member guest rate"
-          value={rate}
-          onChange={(e) => setRate(e.target.value)}
-        />
-      </div>
-
-      <label className="flex items-center gap-3 text-sm text-green-900/80 cursor-pointer">
-        <input
-          type="checkbox"
-          className="h-4 w-4 rounded border-green-900/30 text-green-900 focus:ring-green-800"
-          checked={dinner}
-          onChange={(e) => setDinner(e.target.checked)}
-        />
-        Dinner included
-      </label>
-
-      {error && <p className="text-xs text-red-500">{error}</p>}
-      <div className="flex gap-2">
-        {/* Adds the venue to this form only — no request is sent. The club is
-            created when the application is submitted. */}
-        <button
-          type="button"
-          onClick={add}
-          className="btn btn-gold flex-1 justify-center text-sm"
-        >
-          Add venue
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setOpen(false);
-            setError(null);
-            reset();
-          }}
-          className="text-sm text-green-900/60 px-3"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
   );
 }
 

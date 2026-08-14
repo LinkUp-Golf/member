@@ -471,8 +471,12 @@ export interface HostApplication {
   member_id: string
   /** Host name the applicant proposes to operate under. */
   name: string | null
-  /** The applicant's pitch — the kind of events they'd run. */
-  description: string
+  /**
+   * The applicant's pitch. Null on anything submitted after the field was
+   * removed from the form — the venues and proposed rounds are what an admin
+   * reviews. Older applications keep theirs.
+   */
+  description: string | null
   /** The course ids the applicant wants to host at. */
   requested_course_ids: string[]
   status: HostApplicationStatus

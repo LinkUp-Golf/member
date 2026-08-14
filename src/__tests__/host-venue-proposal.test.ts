@@ -67,7 +67,6 @@ describe('validateProposedClub', () => {
 describe('validateHostApplicationPayload', () => {
   const base = {
     name: 'Jane Smith',
-    description: 'x'.repeat(25),
     course_ids: ['3f2504e0-4f89-11d3-9a0c-0305e82c3301'],
   }
 
@@ -90,8 +89,26 @@ describe('validateHostApplicationPayload', () => {
     expect(validateHostApplicationPayload({ ...base, course_ids: many }).valid).toBe(false)
   })
 
-  it('requires a description of at least 20 characters', () => {
-    expect(validateHostApplicationPayload({ ...base, description: 'too short' }).valid).toBe(false)
+  // The form stopped asking for a description — an admin reviews the venues and
+  // the rounds proposed at them. The field is still accepted so a client that
+  // hasn't reloaded doesn't have its submission rejected.
+  describe('description', () => {
+    it('is not required', () => {
+      expect(validateHostApplicationPayload(base).valid).toBe(true)
+    })
+
+    it('accepts one of any length up to the cap', () => {
+      expect(validateHostApplicationPayload({ ...base, description: 'short' }).valid).toBe(true)
+      expect(validateHostApplicationPayload({ ...base, description: 'x'.repeat(1000) }).valid).toBe(true)
+    })
+
+    it('still rejects one over 1000 characters', () => {
+      expect(validateHostApplicationPayload({ ...base, description: 'x'.repeat(1001) }).valid).toBe(false)
+    })
+
+    it('treats a blank description as absent', () => {
+      expect(validateHostApplicationPayload({ ...base, description: '   ' }).valid).toBe(true)
+    })
   })
 
   // Rounds proposed with the application become real hosted_events on approval,
@@ -166,7 +183,6 @@ describe('validateHostApplicationPayload', () => {
   describe('new venues', () => {
     const withNewVenue = {
       name: 'Jane Smith',
-      description: 'x'.repeat(25),
       new_venues: [{ name: 'Torrey Pines', website: 'https://torreypines.com' }],
     }
 
@@ -175,10 +191,7 @@ describe('validateHostApplicationPayload', () => {
     })
 
     it('still requires at least one venue of some kind', () => {
-      const r = validateHostApplicationPayload({
-        name: 'Jane Smith',
-        description: 'x'.repeat(25),
-      })
+      const r = validateHostApplicationPayload({ name: 'Jane Smith' })
       expect(r.valid).toBe(false)
       expect(r.errors.some(e => /venue/i.test(e))).toBe(true)
     })

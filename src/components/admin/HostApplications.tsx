@@ -240,12 +240,15 @@ function ReviewDrawer({ application, memberName, onClose, onReviewed, onError }:
             <p className="text-sm text-gray-800 font-medium">{proposedName}</p>
           </div>
 
-          <div>
-            <p className={labelCls}>Description</p>
-            <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap bg-gray-50 rounded-xl px-4 py-3">
-              {application.description}
-            </p>
-          </div>
+          {/* Only older applications carry one — the form stopped asking. */}
+          {application.description && (
+            <div>
+              <p className={labelCls}>Description</p>
+              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap bg-gray-50 rounded-xl px-4 py-3">
+                {application.description}
+              </p>
+            </div>
+          )}
 
           <div>
             <p className={labelCls}>Requested venues</p>
