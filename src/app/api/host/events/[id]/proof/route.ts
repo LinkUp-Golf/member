@@ -90,8 +90,18 @@ export const POST = withHostAuth(
       return NextResponse.json({ error: insertError.message }, { status: 500 })
     }
 
-    // Move to awaiting-approval unless it already is.
-    if (event.status !== 'pending_credit_approval') {
+    // Move to awaiting-approval — but never out of `upcoming`.
+    //
+    // canUploadProof deliberately allows a same-day upload, so a host can submit
+    // the moment the round finishes rather than waiting for the nightly
+    // completion cron. Flipping the status here used to delist that still-live
+    // event: it dropped out of member browse (which filters status='upcoming'),
+    // new reservations started failing with EVENT_NOT_OPEN, members' cards flipped
+    // to "Finished", and admins lost the ability to take it down (takedown only
+    // accepts `upcoming`). The proof is stored either way, and the completion cron
+    // moves the event to `completed` at 08:00 UTC — the credit queue picks it up
+    // from there.
+    if (event.status === 'completed') {
       await admin.from('hosted_events').update({ status: 'pending_credit_approval' }).eq('id', id)
     }
 

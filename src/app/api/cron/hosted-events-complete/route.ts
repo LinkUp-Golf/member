@@ -42,6 +42,46 @@ export async function GET(request: NextRequest) {
   }
 
   const completed = data?.length ?? 0
-  logger.info('hosted-events-complete cron ran', { action: 'cron.hosted_events_complete', metadata: { completed } })
-  return NextResponse.json({ ok: true, completed })
+
+  // A host may upload proof on the day of the round, while the event is still
+  // `upcoming` — the proof route deliberately leaves the status alone then, so the
+  // live event isn't delisted mid-day. Those events land in `completed` above, so
+  // this is where they enter the credit queue. Without it a same-day proof would
+  // sit in `completed` and never reach an admin.
+  const completedIds = (data ?? []).map(e => e.id)
+  let queuedForCredit = 0
+
+  if (completedIds.length) {
+    const { data: proofed } = await admin
+      .from('hosted_event_proofs')
+      .select('hosted_event_id')
+      .in('hosted_event_id', completedIds)
+
+    const proofedIds = [...new Set((proofed ?? []).map(p => p.hosted_event_id))]
+    if (proofedIds.length) {
+      const { data: queued, error: queueError } = await admin
+        .from('hosted_events')
+        .update({ status: 'pending_credit_approval' })
+        .in('id', proofedIds)
+        .eq('status', 'completed')
+        .select('id')
+
+      if (queueError) {
+        // Non-fatal: the events are correctly `completed`, and the host can
+        // re-upload to queue them. Log so the gap is visible.
+        logger.warn('hosted-events-complete could not queue proofed events', {
+          action: 'cron.hosted_events_complete.queue_failed',
+          metadata: { error: queueError.message, count: proofedIds.length },
+        })
+      } else {
+        queuedForCredit = queued?.length ?? 0
+      }
+    }
+  }
+
+  logger.info('hosted-events-complete cron ran', {
+    action: 'cron.hosted_events_complete',
+    metadata: { completed, queuedForCredit },
+  })
+  return NextResponse.json({ ok: true, completed, queuedForCredit })
 }

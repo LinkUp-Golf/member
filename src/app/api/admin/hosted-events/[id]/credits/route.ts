@@ -56,9 +56,19 @@ export const POST = withAuth(
       const reason = body.reason?.trim() ?? ''
       if (!reason) return NextResponse.json({ error: 'A reason is required' }, { status: 400 })
 
+      // Persist the decision, not just the status rewind. The reason used to live
+      // only inside a best-effort push, so a second admin couldn't see that a
+      // first had already rejected this proof, and the host's re-upload arrived
+      // with no history. The takedown path already records all three fields.
+      const reviewedAt = new Date().toISOString()
       const { data: reverted, error } = await admin
         .from('hosted_events')
-        .update({ status: 'completed' })
+        .update({
+          status: 'completed',
+          rejection_reason: reason,
+          reviewed_by: ctx.userId,
+          reviewed_at: reviewedAt,
+        })
         .eq('id', id)
         .eq('status', 'pending_credit_approval')
         .select('id')
@@ -74,6 +84,17 @@ export const POST = withAuth(
       logger.info('Hosted event credit rejected', {
         action: 'host.event.credit.rejected', userId: ctx.userId, metadata: { event_id: id },
       })
+
+      try {
+        await admin.from('admin_audit_log').insert({
+          admin_id: ctx.userId,
+          action: 'hosted_events.credit.rejected',
+          target_type: 'hosted_event',
+          target_id: id,
+          payload: { reason },
+        })
+      } catch { /* table may not exist yet */ }
+
       return NextResponse.json({ ok: true, status: 'completed' })
     }
 
@@ -137,6 +158,23 @@ export const POST = withAuth(
         overridden: customAmount !== null && customAmount !== Number(event.member_guest_rate),
       },
     })
+
+    // The money-touching admin surfaces were the only ones with no queryable
+    // record of who did what — every other admin action writes admin_audit_log.
+    try {
+      await admin.from('admin_audit_log').insert({
+        admin_id: ctx.userId,
+        action: 'hosted_events.credit.awarded',
+        target_type: 'hosted_event',
+        target_id: id,
+        payload: {
+          amount,
+          listed_rate: Number(event.member_guest_rate),
+          overridden: customAmount !== null && customAmount !== Number(event.member_guest_rate),
+          note,
+        },
+      })
+    } catch { /* table may not exist yet */ }
 
     return NextResponse.json({ ok: true, status: 'credits_awarded', amount })
   },
