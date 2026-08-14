@@ -131,12 +131,14 @@ describe('buildApplicationPayload', () => {
 
   it('keeps the index aligned when an earlier new venue has no round', () => {
     // The dangerous case: skipping a venue's events must not shift the index
-    // of the ones after it, or a round lands at the wrong club.
+    // of the ones after it, or a round lands at the wrong club. The card now
+    // requires a round on a new venue, so this is a regression guard on the
+    // arithmetic rather than a state the form can reach.
     const payload = buildApplicationPayload(
       form({
         custom: [
-          { name: 'No Dates Yet', website: '', round: newRound() },
-          { name: 'Pebble Beach', website: '', round: filled(['2099-07-01']) },
+          { name: 'No Dates Yet', website: 'https://a.com', round: newRound() },
+          { name: 'Pebble Beach', website: 'https://b.com', round: filled(['2099-07-01']) },
         ],
       }),
     )
@@ -196,9 +198,25 @@ describe('buildApplicationPayload', () => {
 
     it('accepts a new-venue-only submission', () => {
       const payload = buildApplicationPayload(
-        form({ custom: [{ name: 'Torrey Pines', website: '', round: filled(['2099-06-01']) }] }),
+        form({
+          custom: [{
+            name: 'Torrey Pines',
+            website: 'https://torreypines.com',
+            round: filled(['2099-06-01']),
+          }],
+        }),
       )
       expect(validateHostApplicationPayload(payload).valid).toBe(true)
+    })
+
+    it('is rejected when a new venue has no website', () => {
+      // The card requires one, so this only happens if the rule is removed from
+      // the form without the server agreeing.
+      const payload = buildApplicationPayload(
+        form({ custom: [{ name: 'Torrey Pines', website: '', round: filled(['2099-06-01']) }] }),
+      )
+      expect(payload.new_venues[0]?.website).toBeNull()
+      expect(validateHostApplicationPayload(payload).valid).toBe(false)
     })
 
     it('is rejected when no venue was chosen', () => {

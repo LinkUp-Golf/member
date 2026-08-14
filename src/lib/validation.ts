@@ -270,9 +270,10 @@ export function validateHostApplicationPayload(body: unknown): ValidationResult 
     errors.push(`At most ${MAX_NEW_VENUES} new venues`)
   } else {
     newVenues.forEach((venue, i) => {
-      // Website stays optional here: an application is read by a human who can
-      // chase the detail, unlike the event form where a round goes live at once.
-      const result = validateProposedClub(venue)
+      // Same bar as the event form: name and website both. An admin has to find
+      // this club and set up a calendar for it, and a name alone can be two
+      // different courses in two different states.
+      const result = validateProposedClub(venue, { requireWebsite: true })
       if (!result.valid) errors.push(`Venue ${i + 1}: ${result.errors[0]}`)
     })
   }
@@ -319,9 +320,10 @@ export function validateHostApplicationPayload(body: unknown): ValidationResult 
 // optional, and the application form had no website field at all — which meant
 // the same club proposed from two places produced two different rows.
 //
-// `requireWebsite` is the one intentional difference: publishing an event at a
-// club we've never seen needs enough for an admin to identify and set it up,
-// whereas an application is reviewed by a human who can chase the detail.
+// `requireWebsite` stays a parameter for /api/courses/request, which has no
+// caller in the app today. Both host paths pass it: a club we've never seen has
+// to carry enough for an admin to identify and set it up, and chasing a missing
+// link by hand was never the good outcome it was assumed to be.
 export function validateProposedClub(
   club: unknown,
   options: { requireWebsite?: boolean } = {}

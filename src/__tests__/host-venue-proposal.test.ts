@@ -235,12 +235,23 @@ describe('validateHostApplicationPayload', () => {
       expect(r.errors[0]).toMatch(/^Venue 1:/)
     })
 
-    it('allows a new venue with no website', () => {
-      // Optional on an application: a human reviews it and can chase the detail.
-      expect(validateHostApplicationPayload({
+    it('requires a website', () => {
+      // Same bar as the hosted-event new-club path. An admin has to find this
+      // club and set up a calendar for it, and a name alone can name two
+      // different courses in two different states.
+      const r = validateHostApplicationPayload({
         ...withNewVenue,
         new_venues: [{ name: 'Torrey Pines' }],
-      }).valid).toBe(true)
+      })
+      expect(r.valid).toBe(false)
+      expect(r.errors[0]).toMatch(/website/i)
+    })
+
+    it('rejects a blank website the same as a missing one', () => {
+      expect(validateHostApplicationPayload({
+        ...withNewVenue,
+        new_venues: [{ name: 'Torrey Pines', website: '   ' }],
+      }).valid).toBe(false)
     })
 
     it('rejects a new venue with a malformed website', () => {

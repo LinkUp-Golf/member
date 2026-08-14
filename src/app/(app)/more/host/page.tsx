@@ -587,6 +587,11 @@ function VenueCard({
     name: `${prefix}.round.dates` as `existing.${number}.round.dates`,
   });
   const isCustom = kind === "custom";
+  // Proposing a club LinkUp doesn't have means committing to a round at it: an
+  // admin has to create the course and a calendar before anyone can book, and
+  // doing that for a club with no date and no price buys nothing. An existing
+  // venue can still be requested on its own and dated later.
+  const roundRequired = isCustom;
 
   return (
     <div className="rounded-xl border border-green-900/20 bg-green-50/40 px-3 py-3 space-y-2">
@@ -636,12 +641,12 @@ function VenueCard({
             className="input"
             placeholder="Website link — https://…"
             {...register(`custom.${index}.website`, {
+              required: "Enter the club website",
               maxLength: {
                 value: WEBSITE_MAX,
                 message: `At most ${WEBSITE_MAX} characters`,
               },
               validate: (v) =>
-                !v.trim() ||
                 /^https?:\/\/.+/i.test(v.trim()) ||
                 "Website must be a valid URL (https://…)",
             })}
@@ -660,15 +665,19 @@ function VenueCard({
           {
             validate: (value: string, values: ApplicationValues) => {
               const round = roundAt(values, kind, index);
-              // Nothing filled in anywhere on this round: it's a venue
+              // Nothing filled in anywhere on an optional round: it's a venue
               // requested without dates, which is allowed.
-              if (!roundStarted(round)) return true;
+              if (!roundRequired && !roundStarted(round)) return true;
               const v = value.trim();
-              if (!v) return "Fill in or remove the empty date.";
-              if (v < todayISO) return "Date cannot be in the past.";
               const all = (round?.dates ?? [])
                 .map((d) => d.value.trim())
                 .filter(Boolean);
+              if (!v) {
+                return all.length === 0
+                  ? "Choose a date."
+                  : "Fill in or remove the empty date.";
+              }
+              if (v < todayISO) return "Date cannot be in the past.";
               return (
                 all.filter((d) => d === v).length === 1 ||
                 "Each date can only be added once."
@@ -750,7 +759,8 @@ function VenueCard({
           placeholder="Available spots"
           {...register(`${prefix}.round.total_spots` as const, {
             validate: (value: string, values: ApplicationValues) => {
-              if (!roundStarted(roundAt(values, kind, index))) return true;
+              if (!roundRequired && !roundStarted(roundAt(values, kind, index)))
+                return true;
               const n = Number(value);
               return (
                 (Number.isInteger(n) && n >= SPOTS_MIN && n <= SPOTS_MAX) ||
@@ -767,7 +777,8 @@ function VenueCard({
           placeholder="Member guest rate"
           {...register(`${prefix}.round.member_guest_rate` as const, {
             validate: (value: string, values: ApplicationValues) => {
-              if (!roundStarted(roundAt(values, kind, index))) return true;
+              if (!roundRequired && !roundStarted(roundAt(values, kind, index)))
+                return true;
               if (value.trim() === "") return "Enter the guest rate.";
               const n = Number(value);
               if (!Number.isFinite(n) || n < 0) return "Enter the guest rate.";
