@@ -47,17 +47,38 @@ export function useMemberRoles(): UseMemberRolesResult {
     let cancelled = false
     const supabase = createClient()
 
-    Promise.all([
-      supabase.from('referral_partners').select('id').eq('member_id', user.id).maybeSingle(),
-      supabase.from('hosts').select('id').eq('member_id', user.id).maybeSingle(),
-    ]).then(([partnerRes, hostRes]) => {
-      if (cancelled) return
-      setIsPartner(!!partnerRes.data)
-      setIsHost(!!hostRes.data)
-      setLoading(false)
-    })
+    const check = () =>
+      Promise.all([
+        supabase.from('referral_partners').select('id').eq('member_id', user.id).maybeSingle(),
+        // status matters: middleware and withHostAuth both require an *active*
+        // host, so surfacing the workspace off the row's mere existence gave a
+        // suspended host a Host entry in the nav that bounced them straight back.
+        supabase.from('hosts').select('id').eq('member_id', user.id).eq('status', 'active').maybeSingle(),
+      ]).then(([partnerRes, hostRes]) => {
+        if (cancelled) return
+        setIsPartner(!!partnerRes.data)
+        setIsHost(!!hostRes.data)
+        setLoading(false)
+      })
 
-    return () => { cancelled = true }
+    check()
+
+    // Roles are granted by someone else (an admin approving an application), so
+    // this has to re-check rather than wait to be told. AppNav is mounted in the
+    // (app) layout and survives client-side navigation, so without this the check
+    // ran once per hard load — an approved host kept seeing "Become a Host" and no
+    // Host Dashboard entry for the rest of their session.
+    const onFocus = () => {
+      if (document.visibilityState === 'visible') check()
+    }
+    window.addEventListener('visibilitychange', onFocus)
+    window.addEventListener('focus', onFocus)
+
+    return () => {
+      cancelled = true
+      window.removeEventListener('visibilitychange', onFocus)
+      window.removeEventListener('focus', onFocus)
+    }
   }, [user, profileLoading])
 
   return { isAdmin, isPartner, isHost, loading }

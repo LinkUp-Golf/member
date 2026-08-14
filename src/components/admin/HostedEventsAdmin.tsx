@@ -8,8 +8,9 @@
 //                             (hosts publish without waiting for approval)
 //   pending_credit_approval → approve or reject the host's credit after it ran
 
-import { useState, useEffect, useCallback, memo } from 'react'
+import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { AdminCard, Badge } from '@/components/admin/AdminUI'
+import { errorMessage } from '@/lib/errors/error-message'
 import type { HostedEvent, HostedEventStatus } from '@/types'
 
 const fmtMoney = (n: number) =>
@@ -45,23 +46,50 @@ export default function HostedEventsAdmin({ onToast }: { onToast: (msg: string, 
   const [events, setEvents] = useState<HostedEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('pending_credit_approval')
+  const [pendingCount, setPendingCount] = useState(0)
+  const [truncated, setTruncated] = useState(false)
+  const [search, setSearch] = useState('')
+  // Bumped on every load; a response from an older request is discarded. Without
+  // it, clicking two filters quickly could leave the slower response rendered
+  // under the newer filter.
+  const requestRef = useRef(0)
 
   const load = useCallback(async () => {
+    const seq = ++requestRef.current
     setLoading(true)
-    const qs = filter ? `?status=${filter}` : ''
-    const res = await fetch(`/api/admin/hosted-events${qs}`)
-    const json = await res.json().catch(() => ({}))
-    if (res.ok) setEvents(Array.isArray(json.events) ? json.events : [])
-    else onToast(json.error ?? 'Failed to load events.', false)
-    setLoading(false)
+    try {
+      const qs = filter ? `?status=${filter}` : ''
+      const res = await fetch(`/api/admin/hosted-events${qs}`)
+      const json = await res.json().catch(() => ({}))
+      if (seq !== requestRef.current) return
+      if (res.ok) {
+        setEvents(Array.isArray(json.events) ? json.events : [])
+        setPendingCount(json.pendingCount ?? 0)
+        setTruncated(json.truncated === true)
+      } else {
+        onToast(errorMessage(json, 'Failed to load events.'), false)
+      }
+    } catch {
+      if (seq === requestRef.current) onToast('Failed to load events.', false)
+    } finally {
+      if (seq === requestRef.current) setLoading(false)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter])
 
   useEffect(() => { load() }, [load])
 
+  const term = search.trim().toLowerCase()
+  const visible = term
+    ? events.filter(e =>
+        [hostLabel(e), e.course?.name ?? '', e.course?.city ?? '']
+          .some(v => v.toLowerCase().includes(term))
+      )
+    : events
+
   return (
     <>
-      <div className="flex gap-1.5 flex-wrap mb-4">
+      <div className="flex gap-1.5 flex-wrap mb-3">
         {FILTERS.map(f => (
           <button
             key={f.key}
@@ -71,17 +99,38 @@ export default function HostedEventsAdmin({ onToast }: { onToast: (msg: string, 
             }`}
           >
             {f.label}
+            {/* The queue count is what says "there is work here", and it's read
+                unfiltered so it's right in every view. */}
+            {f.key === 'pending_credit_approval' && pendingCount > 0 && ` (${pendingCount})`}
           </button>
         ))}
       </div>
 
+      <input
+        type="search"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        placeholder="Search host or course"
+        className="w-full mb-4 px-3 py-2 text-sm rounded-xl border border-gray-200 focus:border-green-700 outline-none transition-colors"
+      />
+
+      {truncated && (
+        <p className="mb-3 text-xs text-amber-700 bg-amber-50 rounded-xl px-3 py-2">
+          Showing the first {events.length} events in this view. Narrow the filter to see the rest.
+        </p>
+      )}
+
       {loading ? (
         <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
-      ) : events.length === 0 ? (
-        <AdminCard><p className="text-sm text-gray-400 italic py-6 text-center">No events in this view.</p></AdminCard>
+      ) : visible.length === 0 ? (
+        <AdminCard>
+          <p className="text-sm text-gray-400 italic py-6 text-center">
+            {events.length === 0 ? 'No events in this view.' : 'No events match that search.'}
+          </p>
+        </AdminCard>
       ) : (
         <div className="space-y-3">
-          {events.map(e => (
+          {visible.map(e => (
             <EventRow key={e.id} event={e} onChanged={load} onToast={onToast} />
           ))}
         </div>
@@ -132,7 +181,7 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
     })
     const json = await res.json().catch(() => ({}))
     setBusy(false)
-    if (!res.ok) { onToast(json.error ?? 'Action failed.', false); return }
+    if (!res.ok) { onToast(errorMessage(json, 'Action failed.'), false); return }
 
     onToast(action === 'approve'
       ? `Credit of ${fmtMoney(json.amount ?? event.member_guest_rate)} awarded.`
@@ -154,7 +203,7 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
     })
     const json = await res.json().catch(() => ({}))
     setBusy(false)
-    if (!res.ok) { onToast(json.error ?? 'Action failed.', false); return }
+    if (!res.ok) { onToast(errorMessage(json, 'Action failed.'), false); return }
 
     const released = Number(json.released ?? 0)
     onToast(released > 0

@@ -18,7 +18,10 @@ export const GET = withAuth(
       .from('hosts')
       // member_id as well as the embed: the credit wallet is keyed on the
       // member, not the host row.
-      .select('id, name, status, created_at, member_id, member:members!hosts_member_id_fkey(first_name, last_name, email)')
+      // `source` and `venues_unrestricted` let the roster show which hosts were
+      // auto-provisioned from the GHL tag rather than reviewed, and which hold
+      // blanket access to every course — both were previously invisible.
+      .select('id, name, status, source, venues_unrestricted, created_at, member_id, member:members!hosts_member_id_fkey(first_name, last_name, email)')
       .order('created_at', { ascending: false })
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
