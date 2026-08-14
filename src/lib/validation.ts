@@ -183,7 +183,49 @@ export function validateReferralPartnerPayload(
 }
 
 // ---- Host application payload --------------------------------
-// A member's application to become a host: a proposed host name and a pitch.
+// A member's application to become a host: a proposed host name, a pitch, the
+// venues they want, and optionally the first rounds they'd run.
+
+/** Bound on rounds proposed in one application — the form is not a bulk importer. */
+export const MAX_PROPOSED_EVENTS = 20
+
+/** Bound on brand-new clubs named in one application. */
+export const MAX_NEW_VENUES = 10
+
+/** Prefix marking an event's venue as one of this payload's `new_venues`. */
+export const NEW_VENUE_REF = 'new:'
+
+/**
+ * The venue an application's proposed round sits at: either an existing course id,
+ * or `new:<index>` pointing into the same payload's `new_venues`.
+ *
+ * A club that isn't on LinkUp yet has no course id at the moment the applicant
+ * fills the form in — the course is created when the application is submitted, not
+ * when they type the name — so rounds at those clubs reference them by position
+ * and the server resolves the reference once the courses exist.
+ */
+export function parseVenueRef(
+  value: unknown,
+  newVenueCount: number
+): { courseId?: string; newVenueIndex?: number; error?: string } {
+  if (typeof value !== 'string' || !value.trim()) {
+    return { error: 'Choose which venue this round is at' }
+  }
+  const ref = value.trim()
+
+  if (ref.startsWith(NEW_VENUE_REF)) {
+    const index = Number(ref.slice(NEW_VENUE_REF.length))
+    if (!Number.isInteger(index) || index < 0 || index >= newVenueCount) {
+      return { error: 'A round points at a venue that was not submitted' }
+    }
+    return { newVenueIndex: index }
+  }
+
+  const uuid = validateUUID(ref, 'Venue')
+  if (!uuid.valid) return { error: uuid.errors[0] }
+  return { courseId: ref }
+}
+
 export function validateHostApplicationPayload(body: unknown): ValidationResult {
   if (typeof body !== 'object' || body === null) {
     return { valid: false, errors: ['Invalid request body'] }
@@ -195,22 +237,150 @@ export function validateHostApplicationPayload(body: unknown): ValidationResult 
   const nameResult = validateString(b.name, 'Host name', { min: 2, max: 120 })
   if (!nameResult.valid) errors.push(...nameResult.errors)
 
-  const descResult = validateString(b.description, 'Description', { min: 20, max: 1000 })
-  if (!descResult.valid) errors.push(...descResult.errors)
+  // The form stopped asking for a description — venues and rounds are what an
+  // admin actually reviews. Older clients may still send one, so it is bounded
+  // if present but never required.
+  if (typeof b.description === 'string' && b.description.trim()) {
+    const descResult = validateString(b.description, 'Description', { max: 1000 })
+    if (!descResult.valid) errors.push(...descResult.errors)
+  }
 
-  // Venues the applicant wants to host at — at least one, each a UUID.
-  if (!Array.isArray(b.course_ids) || b.course_ids.length === 0) {
+  // Existing venues the applicant picked, and clubs they named that aren't on
+  // LinkUp yet. Either list can be empty, but not both.
+  const courseIds = Array.isArray(b.course_ids) ? b.course_ids : []
+  const newVenues = Array.isArray(b.new_venues) ? b.new_venues : []
+
+  if (b.course_ids !== undefined && !Array.isArray(b.course_ids)) {
+    errors.push('Selected venues must be a list')
+  }
+  if (b.new_venues !== undefined && !Array.isArray(b.new_venues)) {
+    errors.push('New venues must be a list')
+  }
+
+  if (courseIds.length === 0 && newVenues.length === 0) {
     errors.push('Choose at least one venue')
-  } else if (b.course_ids.length > 50) {
+  }
+  if (courseIds.length > 50) {
     errors.push('Too many venues selected')
-  } else if (b.course_ids.some(id => !validateUUID(id, 'Venue').valid)) {
+  } else if (courseIds.some(id => !validateUUID(id, 'Venue').valid)) {
     errors.push('One of the selected venues is invalid')
+  }
+
+  if (newVenues.length > MAX_NEW_VENUES) {
+    errors.push(`At most ${MAX_NEW_VENUES} new venues`)
+  } else {
+    newVenues.forEach((venue, i) => {
+      // Same bar as the event form: name and website both. An admin has to find
+      // this club and set up a calendar for it, and a name alone can be two
+      // different courses in two different states.
+      const result = validateProposedClub(venue, { requireWebsite: true })
+      if (!result.valid) errors.push(`Venue ${i + 1}: ${result.errors[0]}`)
+    })
+  }
+
+  // Rounds proposed alongside the application. Optional — an applicant can name
+  // their clubs and fill dates in later — but each one has to be a valid event,
+  // because approval turns these into real hosted_events.
+  if (b.events !== undefined) {
+    if (!Array.isArray(b.events)) {
+      errors.push('Proposed rounds must be a list')
+    } else if (b.events.length > MAX_PROPOSED_EVENTS) {
+      errors.push(`At most ${MAX_PROPOSED_EVENTS} proposed rounds`)
+    } else {
+      b.events.forEach((ev, i) => {
+        const round = (ev ?? {}) as Record<string, unknown>
+
+        // The venue is a course id or a new_venues reference, so course_id can't
+        // be validated as a plain UUID here.
+        const venue = parseVenueRef(round.venue, newVenues.length)
+        if (venue.error) {
+          errors.push(`Round ${i + 1}: ${venue.error}`)
+          return
+        }
+
+        // Everything else follows the real event form's rules, so a proposal that
+        // validates here can't fail when it's created on approval.
+        const result = validateHostedEventPayload(round, { requireCourse: false })
+        if (!result.valid) {
+          // Number the round so a list of them stays actionable.
+          errors.push(`Round ${i + 1}: ${result.errors[0]}`)
+        }
+      })
+    }
+  }
+
+  return { valid: errors.length === 0, errors }
+}
+
+// ---- Proposed club (a venue not yet on LinkUp) ---------------
+// One rule for "the applicant/host is naming a club we don't have yet", shared
+// by the host application form, the hosted-event new-club path and
+// POST /api/courses/request. These three had drifted apart — the event route
+// required a website with no length bound, /api/courses/request treated it as
+// optional, and the application form had no website field at all — which meant
+// the same club proposed from two places produced two different rows.
+//
+// `requireWebsite` stays a parameter for /api/courses/request, which has no
+// caller in the app today. Both host paths pass it: a club we've never seen has
+// to carry enough for an admin to identify and set it up, and chasing a missing
+// link by hand was never the good outcome it was assumed to be.
+export function validateProposedClub(
+  club: unknown,
+  options: { requireWebsite?: boolean } = {}
+): ValidationResult {
+  if (typeof club !== 'object' || club === null) {
+    return { valid: false, errors: ['Enter the golf club name'] }
+  }
+
+  const c = club as Record<string, unknown>
+  const errors: string[] = []
+  const { requireWebsite = false } = options
+
+  const nameResult = validateString(c.name, 'Golf club name', { min: 2, max: 120 })
+  if (!nameResult.valid) errors.push(...nameResult.errors)
+
+  const rawWebsite = typeof c.website === 'string' ? c.website.trim() : ''
+  if (!rawWebsite) {
+    if (requireWebsite) errors.push('Enter the club website')
+  } else if (!/^https?:\/\/.+/i.test(rawWebsite)) {
+    errors.push('Website must be a valid URL (https://…)')
+  } else if (rawWebsite.length > 200) {
+    errors.push('Website must be 200 characters or less')
   }
 
   return { valid: errors.length === 0, errors }
 }
 
 // ---- Hosted event payload -----------------------------------
+
+/** Bound on dates in one submission — several rounds, not a season's schedule. */
+export const MAX_EVENT_DATES = 30
+
+/**
+ * The dates a hosted-event payload is asking for, as a list.
+ *
+ * Accepts `event_dates: string[]` (several events sharing one set of details) or
+ * `event_date: string` (the single-date shorthand). Returns null when neither is
+ * usable, so callers can tell "no dates given" from "one date given".
+ */
+export function normaliseEventDates(body: unknown): string[] | null {
+  if (typeof body !== 'object' || body === null) return null
+  const b = body as Record<string, unknown>
+
+  if (Array.isArray(b.event_dates)) {
+    const dates = b.event_dates
+      .filter((d): d is string => typeof d === 'string' && d.trim() !== '')
+      .map(d => d.trim())
+    return dates.length ? dates : null
+  }
+
+  if (typeof b.event_date === 'string' && b.event_date.trim()) {
+    return [b.event_date.trim()]
+  }
+
+  return null
+}
+
 // The create/edit form for a hosted event. `partial` (PATCH) only validates the
 // fields present. tee_time is optional; total_spots is a small positive int;
 // member_guest_rate is a non-negative amount.
@@ -233,9 +403,27 @@ export function validateHostedEventPayload(
     if (!courseResult.valid) errors.push(...courseResult.errors)
   }
 
-  if (!partial || 'event_date' in b) {
-    const dateResult = validateDate(b.event_date, 'Event date')
-    if (!dateResult.valid) errors.push(...dateResult.errors)
+  // One event or several. `event_dates` is the multi-date form — one date per
+  // event, sharing everything else on the payload — and `event_date` is the
+  // single-date shorthand that predates it. Both go through the same rules so a
+  // one-date submission can't behave differently from the first of many.
+  if (!partial || 'event_date' in b || 'event_dates' in b) {
+    const dates = normaliseEventDates(b)
+    if (dates === null || dates.length === 0) {
+      errors.push('Choose at least one date')
+    } else if (dates.length > MAX_EVENT_DATES) {
+      errors.push(`At most ${MAX_EVENT_DATES} dates`)
+    } else if (new Set(dates).size !== dates.length) {
+      errors.push('Each date can only be entered once')
+    } else {
+      for (const d of dates) {
+        const dateResult = validateDate(d, 'Event date')
+        if (!dateResult.valid) {
+          errors.push(...dateResult.errors)
+          break
+        }
+      }
+    }
   }
 
   // Optional free text in both create and edit — null/'' means no fixed tee

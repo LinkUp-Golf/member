@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { AdminPageHeader, StatCard, AdminCard, Badge } from '@/components/admin/AdminUI'
+import { errorMessage } from '@/lib/errors/error-message'
 import type { CreditEntry, CreditSummary, CreditKind, CreditPurpose } from '@/types'
 
 const fmtMoney = (n: number) =>
@@ -47,14 +48,23 @@ export default function AdminHostDetailPage() {
   }, [])
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/admin/hosts/${id}/credits`)
-    const json = await res.json().catch(() => ({}))
-    if (res.ok) { setHost(json.host); setSummary(json.summary); setEntries(json.entries ?? []) }
-    else showToast(json.error ?? 'Failed to load host.', false)
-    setLoading(false)
+    try {
+      const res = await fetch(`/api/admin/hosts/${id}/credits`)
+      const json = await res.json().catch(() => ({}))
+      if (res.ok) { setHost(json.host); setSummary(json.summary); setEntries(json.entries ?? []) }
+      else showToast(errorMessage(json, 'Failed to load host.'), false)
+    } catch {
+      showToast('Failed to load host.', false)
+    } finally {
+      // Must run even on a throw, or the page stays on "Loading…" forever.
+      setLoading(false)
+    }
   }, [id, showToast])
 
-  useEffect(() => { if (id) load() }, [id, load])
+  useEffect(() => {
+    if (!id) { setLoading(false); return }
+    load()
+  }, [id, load])
 
   const memberName = host?.member ? `${host.member.first_name} ${host.member.last_name}`.trim() : ''
 
@@ -79,6 +89,8 @@ export default function AdminHostDetailPage() {
               <StatCard label="Available" value={fmtMoney(summary?.balance ?? 0)} sub="Balance" colour="gold" large />
             </div>
           </div>
+
+          <VenuesCard hostId={id} onDone={showToast} onError={(msg) => showToast(msg, false)} />
 
           <AdjustCard hostId={id} onDone={(msg) => { showToast(msg); load() }} onError={(msg) => showToast(msg, false)} />
 
@@ -122,6 +134,145 @@ export default function AdminHostDetailPage() {
         </div>
       )}
     </div>
+  )
+}
+
+// ---- Venues -------------------------------------------------
+// The clubs this host may list events at. host_venues was previously write-once
+// (set at approval, silently added to by course approval) with no way for an
+// admin to read it back, let alone change it — so granting a host an extra club
+// meant direct DB access.
+
+interface VenueCourse {
+  id: string
+  name: string
+  city: string | null
+  approval_status: string
+}
+
+function VenuesCard({ hostId, onDone, onError }: {
+  hostId: string
+  onDone: (msg: string) => void
+  onError: (msg: string) => void
+}) {
+  const [granted, setGranted] = useState<string[]>([])
+  const [unrestricted, setUnrestricted] = useState(false)
+  const [courses, setCourses] = useState<VenueCourse[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [search, setSearch] = useState('')
+
+  const load = useCallback(async () => {
+    try {
+      const [venuesRes, coursesRes] = await Promise.all([
+        fetch(`/api/admin/hosts/${hostId}/venues`),
+        // Every status, so a club the host proposed (a pending course) can be
+        // granted before it's been set up.
+        fetch('/api/admin/courses'),
+      ])
+      const venuesJson = await venuesRes.json().catch(() => ({}))
+      const coursesJson = await coursesRes.json().catch(() => ({}))
+
+      if (!venuesRes.ok) { onError(errorMessage(venuesJson, 'Failed to load venues.')); return }
+
+      setGranted((venuesJson.venues ?? []).map((v: VenueCourse) => v.id))
+      setUnrestricted(venuesJson.venues_unrestricted === true)
+      setCourses(
+        ((coursesJson.courses ?? []) as VenueCourse[])
+          .filter(c => c.approval_status === 'active' || c.approval_status === 'pending')
+      )
+    } catch {
+      onError('Failed to load venues.')
+    } finally {
+      setLoading(false)
+    }
+    // onError is recreated each render by the parent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hostId])
+
+  useEffect(() => { load() }, [load])
+
+  const toggle = (courseId: string) =>
+    setGranted(prev => (prev.includes(courseId) ? prev.filter(c => c !== courseId) : [...prev, courseId]))
+
+  const save = async () => {
+    if (saving) return
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/admin/hosts/${hostId}/venues`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ course_ids: granted }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) { onError(errorMessage(json, 'Could not save venues.')); return }
+      onDone('Venues updated.')
+      load()
+    } catch {
+      onError('Could not save venues.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const term = search.trim().toLowerCase()
+  // Granted venues stay visible regardless of the search term, so saving can
+  // never silently drop one the admin simply filtered out of view.
+  const visible = courses.filter(
+    c => granted.includes(c.id) || !term || c.name.toLowerCase().includes(term)
+  )
+
+  return (
+    <AdminCard title="Venues">
+      {loading ? (
+        <p className="text-sm text-gray-400 py-4 text-center">Loading…</p>
+      ) : (
+        <div className="space-y-3">
+          {unrestricted && (
+            <p className="text-xs text-blue-700 bg-blue-50 rounded-xl px-3 py-2">
+              This host may list events at any bookable course. The venues below are ignored while that is set.
+            </p>
+          )}
+
+          <input
+            type="search"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search courses"
+            className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:border-green-700 outline-none transition-colors"
+          />
+
+          <div className="max-h-72 overflow-y-auto divide-y divide-gray-50">
+            {visible.map(c => (
+              <label key={c.id} className="flex items-center gap-2 py-2 text-sm text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300 text-green-800 focus:ring-green-700"
+                  checked={granted.includes(c.id)}
+                  onChange={() => toggle(c.id)}
+                />
+                <span>{c.city ? `${c.name} — ${c.city}` : c.name}</span>
+                {c.approval_status === 'pending' && <Badge label="Pending" colour="gold" />}
+              </label>
+            ))}
+            {visible.length === 0 && (
+              <p className="text-sm text-gray-400 py-4 text-center">No courses match that search.</p>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-400">{granted.length} granted</span>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="px-4 py-2 text-sm font-medium rounded-xl bg-green-900 text-white disabled:opacity-40"
+            >
+              {saving ? 'Saving…' : 'Save venues'}
+            </button>
+          </div>
+        </div>
+      )}
+    </AdminCard>
   )
 }
 

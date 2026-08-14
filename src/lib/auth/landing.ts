@@ -1,8 +1,9 @@
 // Where a signed-in user should land when they have no member app to show.
 //
 // A non-member (a referral partner / host with no golf membership, so no home
-// course) is sent to their workspace instead of /home. Returns null if they
-// own neither workspace (defensive — role sync provisions the row).
+// course) is sent to their workspace instead of the default landing page —
+// there is nothing for them to book. Returns null if they own neither
+// workspace (defensive — role sync provisions the row).
 
 import type { createAdminClient } from '@/lib/supabase-server'
 

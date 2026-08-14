@@ -43,6 +43,10 @@ const fmtDate = (d: string) =>
     year: "numeric",
   });
 
+// One less than the server's MAX_EVENT_DATES, since the form's own date field is
+// the first of the set.
+const MAX_EXTRA_DATES = 29;
+
 const STATUS_META: Record<
   HostedEventStatus,
   { label: string; colour: "green" | "gold" | "red" | "blue" | "gray" }
@@ -448,19 +452,27 @@ function EventDrawer({
 }) {
   const isEdit = !!event;
   const [courses, setCourses] = useState<
-    Pick<Course, "id" | "name" | "city">[]
+    (Pick<Course, "id" | "name" | "city"> & { approval_status?: string })[]
   >([]);
-  // The host's approved venues. Empty means unrestricted (legacy hosts) — the
-  // course dropdown then falls back to every bookable course.
-  const [venues, setVenues] = useState<Pick<Course, "id" | "name" | "city">[]>(
-    [],
-  );
+  // The host's approved venues, and whether they're scoped at all. `unrestricted`
+  // is read from the server rather than inferred from the list being empty — an
+  // empty list used to mean "offer every bookable course", so a failed load or an
+  // empty grant silently widened what the host could pick.
+  const [venues, setVenues] = useState<
+    (Pick<Course, "id" | "name" | "city"> & { approval_status?: string })[]
+  >([]);
+  const [venuesUnrestricted, setVenuesUnrestricted] = useState(false);
   const [bookings, setBookings] = useState<HostBookingOption[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   // New event only: switch the course picker over to "add a club not yet on
   // LinkUp". The event still goes live immediately; it's the club record our
   // team fills in afterwards.
   const [addingClub, setAddingClub] = useState(false);
+  // Additional dates beyond the one in the form. Everything else (course, tee
+  // time, spots, rate, dinner) is shared, so listing a week of rounds is one form
+  // rather than five. Create-only — editing acts on a single existing event.
+  const [extraDates, setExtraDates] = useState<string[]>([]);
+  const [dateError, setDateError] = useState<string | null>(null);
 
   // A new event is either listed from a tee time the host already holds, or
   // proposed from scratch. Editing keeps whichever it was created as.
@@ -533,6 +545,7 @@ function EventDrawer({
         setBookings(bookingsJson.bookings ?? []);
         const vs = venuesJson.venues ?? [];
         setVenues(vs);
+        setVenuesUnrestricted(venuesJson.unrestricted === true);
         // Pre-populate the course for a brand-new event when the host has a
         // single venue — nothing to choose.
         if (!isEdit && vs.length === 1) setValue("course_id", vs[0].id);
@@ -559,13 +572,17 @@ function EventDrawer({
 
   // Select is memoized on its props, so these must be stable across renders —
   // rebuilding the arrays every keystroke would re-render the whole dropdown.
-  // Scope the course list to the host's venues when they have any; otherwise
-  // (legacy hosts with no venue rows) offer every bookable course.
-  const courseChoices = venues.length ? venues : courses;
+  // Only a host the server says is unrestricted gets every bookable course; a
+  // scoped host sees exactly their venues, even if that list is empty.
+  const courseChoices = venuesUnrestricted ? courses : venues;
   const courseOptions: SelectOption[] = useMemo(() => {
     const opts = courseChoices.map((c) => ({
       value: c.id,
-      label: c.city ? `${c.name} — ${c.city}` : c.name,
+      // A venue the host proposed is selectable but not yet set up, and the
+      // label is the only place that distinction can show in a native select.
+      label:
+        (c.city ? `${c.name} — ${c.city}` : c.name) +
+        (c.approval_status === "pending" ? " (pending)" : ""),
     }));
     // When editing an event whose course predates the host's venue list, keep
     // it selectable so the dropdown doesn't render blank.
@@ -598,6 +615,14 @@ function EventDrawer({
     // When listing a booking the server derives course/date/tee time from the
     // booking itself; sending them would be ignored (and is rejected on edit).
     const linked = fromBooking && values.source_booking_id;
+
+    // Every date being listed. On edit this is the one event's date; on create
+    // it's the form's date plus any extras. Sent as `event_dates` so the server
+    // creates one event per date.
+    const allDates = isEdit
+      ? [values.event_date]
+      : [values.event_date, ...extraDates].filter(Boolean);
+
     const payload = linked
       ? {
           source_booking_id: values.source_booking_id,
@@ -611,7 +636,7 @@ function EventDrawer({
               name: values.new_club_name.trim(),
               website: values.new_club_website.trim() || null,
             },
-            event_date: values.event_date,
+            event_dates: allDates,
             tee_time: values.tee_time || null,
             total_spots: Number(values.total_spots),
             member_guest_rate: Number(values.member_guest_rate),
@@ -619,7 +644,10 @@ function EventDrawer({
           }
         : {
             course_id: values.course_id,
-            event_date: values.event_date,
+            // PATCH takes a single date; only create fans out.
+            ...(isEdit
+              ? { event_date: values.event_date }
+              : { event_dates: allDates }),
             tee_time: values.tee_time || null,
             total_spots: Number(values.total_spots),
             member_guest_rate: Number(values.member_guest_rate),
@@ -644,16 +672,38 @@ function EventDrawer({
       onError(json.error ?? "Could not save.");
       return;
     }
+    // Say how many went live when it was more than one — the host chose several
+    // dates, so a bare "Published" would leave them counting.
+    const created = Array.isArray(json.events) ? json.events.length : 1;
+    const published =
+      created > 1 ? `Published ${created} events` : "Published";
     onSaved(
       isEdit
         ? "Event updated."
         : addingClub
-          ? "Published — live for members now. We'll finish setting the club up."
-          : "Published — live for members now.",
+          ? `${published} — live for members now. We'll finish setting the club up.`
+          : `${published} — live for members now.`,
     );
   }
 
-  const submit = () => handleSubmit((v) => save(v))();
+  const submit = () =>
+    handleSubmit((v) => {
+      // Extra dates aren't RHF fields, so they're checked here. Duplicates would
+      // otherwise be rejected server-side after the whole form was filled in.
+      if (!isEdit && !(fromBooking && v.source_booking_id)) {
+        const all = [v.event_date, ...extraDates].filter(Boolean);
+        if (new Set(all).size !== all.length) {
+          setDateError("Each date can only be added once.");
+          return;
+        }
+        if (extraDates.some((d) => !d)) {
+          setDateError("Fill in or remove the empty date.");
+          return;
+        }
+      }
+      setDateError(null);
+      return save(v);
+    })();
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -705,6 +755,10 @@ function EventDrawer({
                     setValue("source_booking_id", "");
                     setValue("course_id", "");
                     setValue("event_date", "");
+                    // Extra dates belong to the date field being cleared, and a
+                    // booking-sourced event is always a single date anyway.
+                    setExtraDates([]);
+                    setDateError(null);
                     setValue("tee_time", NO_TEE_TIME);
                     // Adding a club only applies to the "New linkup" path.
                     setAddingClub(false);
@@ -923,6 +977,54 @@ function EventDrawer({
                 {errors.event_date && (
                   <p className={errCls}>{errors.event_date.message}</p>
                 )}
+
+                {/* Additional dates. Each becomes its own event sharing the
+                    course, tee time, spots, rate and dinner above. */}
+                {!isEdit && extraDates.length > 0 && (
+                  <div className="space-y-2 mt-2">
+                    {extraDates.map((d, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <input
+                          type="date"
+                          className={field}
+                          min={new Date().toISOString().slice(0, 10)}
+                          value={d}
+                          onChange={(e) =>
+                            setExtraDates((prev) =>
+                              prev.map((v, vi) =>
+                                vi === i ? e.target.value : v,
+                              ),
+                            )
+                          }
+                        />
+                        <button
+                          type="button"
+                          aria-label={`Remove date ${i + 2}`}
+                          onClick={() =>
+                            setExtraDates((prev) =>
+                              prev.filter((_, vi) => vi !== i),
+                            )
+                          }
+                          className="text-gray-400 hover:text-red-500 px-1"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {!isEdit && extraDates.length < MAX_EXTRA_DATES && (
+                  <button
+                    type="button"
+                    onClick={() => setExtraDates((prev) => [...prev, ""])}
+                    className="mt-2 text-xs font-medium text-green-800 hover:text-green-900"
+                  >
+                    + Add another date
+                  </button>
+                )}
+
+                {dateError && <p className={errCls}>{dateError}</p>}
               </div>
 
               <div>

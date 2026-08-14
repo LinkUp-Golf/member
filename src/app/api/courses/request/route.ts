@@ -9,7 +9,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { validateString } from '@/lib/validation'
+import { validateProposedClub } from '@/lib/validation'
 import { requestPendingCourse } from '@/lib/courses/request-course'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
@@ -17,18 +17,13 @@ import type { AuthContext } from '@/lib/auth/types'
 export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   const body = (await req.json().catch(() => ({}))) as { name?: string; website?: string }
 
-  const { valid, errors } = validateString(body.name, 'Golf club name', { min: 2, max: 120 })
+  // Shared with the hosted-event new-club path so the same club proposed from
+  // either place is held to the same rule. The website stays optional here: this
+  // endpoint also backs the host application, which a human reviews.
+  const { valid, errors } = validateProposedClub(body)
   if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })
 
-  // Optional club website — validate the shape if one was supplied.
-  let website: string | null = null
-  if (typeof body.website === 'string' && body.website.trim()) {
-    const w = body.website.trim()
-    if (!/^https?:\/\/.+/i.test(w)) {
-      return NextResponse.json({ error: 'Website must be a valid URL (https://…).' }, { status: 400 })
-    }
-    website = w
-  }
+  const website = typeof body.website === 'string' && body.website.trim() ? body.website.trim() : null
 
   const admin = createAdminClient()
   const result = await requestPendingCourse({

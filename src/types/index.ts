@@ -416,12 +416,22 @@ export interface ReferralPartnerStats {
 
 export type HostStatus = 'active' | 'suspended'
 
-/** A member with the host role — the row's existence grants /host. */
+/** How the host role was granted. 'application' is the reviewed path. */
+export type HostSource = 'application' | 'ghl_tag' | 'admin'
+
+/** A member with the host role — an active row's existence grants /host. */
 export interface Host {
   id: string
   member_id: string
   name: string
   status: HostStatus
+  /**
+   * True = may host at any bookable course. False = only their host_venues rows.
+   * Explicit rather than inferred from having no venue rows, which used to mean
+   * an empty grant read as unrestricted access.
+   */
+  venues_unrestricted: boolean
+  source: HostSource
   created_by: string | null
   created_at: string
   updated_at: string
@@ -429,13 +439,44 @@ export interface Host {
 
 export type HostApplicationStatus = 'pending' | 'approved' | 'rejected'
 
+/**
+ * A round proposed on a host application — the dates/spots/pricing half of the
+ * "how it works" flow. Becomes a real HostedEvent on approval.
+ */
+export interface HostApplicationEvent {
+  id: string
+  application_id: string
+  course_id: string
+  event_date: string
+  /** Free text, or null when there's no fixed tee time. */
+  tee_time: string | null
+  total_spots: number
+  member_guest_rate: number
+  dinner: boolean
+  /** Set once approval turned this into a live event. */
+  hosted_event_id: string | null
+  created_at: string
+  // Enriched in API responses
+  course?: { id: string; name: string; city?: string | null; approval_status?: string } | null
+}
+
+/** What the applicant submits per proposed round (no ids yet). */
+export type HostApplicationEventInput = Pick<
+  HostApplicationEvent,
+  'course_id' | 'event_date' | 'tee_time' | 'total_spots' | 'member_guest_rate' | 'dinner'
+>
+
 export interface HostApplication {
   id: string
   member_id: string
   /** Host name the applicant proposes to operate under. */
   name: string | null
-  /** The applicant's pitch — the kind of events they'd run. */
-  description: string
+  /**
+   * The applicant's pitch. Null on anything submitted after the field was
+   * removed from the form — the venues and proposed rounds are what an admin
+   * reviews. Older applications keep theirs.
+   */
+  description: string | null
   /** The course ids the applicant wants to host at. */
   requested_course_ids: string[]
   status: HostApplicationStatus
@@ -447,6 +488,8 @@ export interface HostApplication {
   updated_at: string
   // Enriched (present when joined to the member row in API responses)
   member?: { first_name: string; last_name: string; email: string } | null
+  /** Rounds the applicant proposed alongside the venues. */
+  events?: HostApplicationEvent[]
 }
 
 export type HostedEventStatus =

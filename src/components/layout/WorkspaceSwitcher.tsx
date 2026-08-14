@@ -11,6 +11,7 @@ import Link from 'next/link'
 import { ChevronsUpDown, Check, Home, ShieldCheck, BadgeDollarSign, Flag, type LucideIcon } from 'lucide-react'
 import { useMemberRoles } from '@/hooks/useMemberRoles'
 import { useProfile } from '@/hooks/useProfile'
+import { DEFAULT_LANDING_PATH } from '@/lib/constants'
 
 export type WorkspaceKey = 'member' | 'admin' | 'partner' | 'host'
 
@@ -19,7 +20,7 @@ export type WorkspaceKey = 'member' | 'admin' | 'partner' | 'host'
 // "Workspace: Member portal" / "Workspace: Your Referrals" read badly, so these
 // are the plain workspace names.
 const META: Record<WorkspaceKey, { label: string; href: string; icon: LucideIcon }> = {
-  member:  { label: 'Member',           href: '/home',    icon: Home },
+  member:  { label: 'Member',           href: DEFAULT_LANDING_PATH, icon: Home },
   admin:   { label: 'Admin',            href: '/admin',   icon: ShieldCheck },
   partner: { label: 'Referral Partner', href: '/partner', icon: BadgeDollarSign },
   host:    { label: 'Host',             href: '/host',    icon: Flag },

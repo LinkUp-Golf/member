@@ -6,7 +6,7 @@ import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import { formatDistanceToNow } from 'date-fns'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
-import { AVIARA_TIMEZONE } from '@/lib/constants'
+import { AVIARA_TIMEZONE, DEFAULT_LANDING_PATH } from '@/lib/constants'
 import { getBrowserTimezone } from '@/lib/timezone'
 
 // ---- Class name helper --------------------------------------
@@ -26,7 +26,7 @@ export function getInitials(firstName: string, lastName: string): string {
 // ("//evil.com"), both of which escape the origin via `new URL(next, base)`.
 export function safeRedirectPath(
   next: string | null | undefined,
-  fallback = '/home'
+  fallback = DEFAULT_LANDING_PATH
 ): string {
   if (typeof next !== 'string' || !next.startsWith('/') || next.startsWith('//')) {
     return fallback

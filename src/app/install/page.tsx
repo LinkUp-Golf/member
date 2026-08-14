@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useInstallState } from "@/hooks/useInstallState";
 import { useAndroidInstall } from "@/hooks/useAndroidInstall";
+import { DEFAULT_LANDING_PATH } from "@/lib/constants";
 
 export default function InstallPage() {
   const { platform, isStandalone } = useInstallState();
@@ -21,7 +22,7 @@ export default function InstallPage() {
         style={{ background: "#0a1f0a" }}
       >
         <Link
-          href="/home"
+          href={DEFAULT_LANDING_PATH}
           className="absolute left-4 top-4 flex items-center gap-1.5 text-xs font-medium"
           style={{ color: "rgba(255,255,255,0.5)" }}
         >
@@ -99,7 +100,7 @@ function AlreadyInstalled() {
         LinkUp Golf is already installed on your device.
       </p>
       <a
-        href="/home"
+        href={DEFAULT_LANDING_PATH}
         className="mt-6 inline-block px-6 py-3 rounded-xl text-sm font-semibold text-white"
         style={{ background: "#1A2E1A" }}
       >

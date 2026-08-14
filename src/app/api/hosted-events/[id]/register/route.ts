@@ -19,6 +19,19 @@ export const POST = withAuth(
 
     const admin = createAdminClient()
 
+    // A suspended host's events are hidden from browse, but the id may still be
+    // held in an open tab, a push notification or a bookmark — so the gate has to
+    // be here too, not only in the listing query.
+    const { data: eventHost } = await admin
+      .from('hosted_events')
+      .select('host:hosts!inner(status)')
+      .eq('id', id)
+      .maybeSingle()
+    const hostRow = Array.isArray(eventHost?.host) ? eventHost?.host[0] : eventHost?.host
+    if (hostRow && hostRow.status !== 'active') {
+      return NextResponse.json({ error: 'This event isn\'t open for reservations.' }, { status: 409 })
+    }
+
     const { error } = await admin.rpc('reserve_hosted_event_spot', {
       p_event_id: id,
       p_member_id: ctx.memberId,
