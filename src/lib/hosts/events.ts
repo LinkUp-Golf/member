@@ -17,19 +17,34 @@ export function memberPrice(memberGuestRate: number): number {
 }
 
 /**
- * Whether a host may propose an event at the given course. A host with venue
- * rows is scoped to those; a host with none is unrestricted (legacy hosts
- * granted before venues existed), which mirrors the event form falling back to
- * every bookable course. Booking-sourced events skip this — their course comes
- * from a real tee time the host already holds.
+ * Whether a host may propose an event at the given course.
+ *
+ * Scope is read from hosts.venues_unrestricted, not inferred from the venue rows
+ * being empty. The old rule — "no host_venues rows means every course" — existed
+ * for hosts granted before venue scoping, but it could not be told apart from a
+ * grant that produced nothing, so a failed or empty grant silently promoted a
+ * scoped host to an unscoped one. The column says which is meant.
+ *
+ * Booking-sourced events skip this — their course comes from a real tee time the
+ * host already holds.
  */
 export async function hostCanUseCourse(admin: AdminClient, hostId: string, courseId: string): Promise<boolean> {
+  const { data: host } = await admin
+    .from('hosts')
+    .select('venues_unrestricted')
+    .eq('id', hostId)
+    .maybeSingle()
+
+  if (host?.venues_unrestricted) return true
+
   const { data } = await admin
     .from('host_venues')
     .select('course_id')
     .eq('host_id', hostId)
-  const venueIds = (data ?? []).map(v => v.course_id)
-  return venueIds.length === 0 || venueIds.includes(courseId)
+    .eq('course_id', courseId)
+    .maybeSingle()
+
+  return !!data
 }
 
 /** Statuses in which a member can still reserve a spot. */

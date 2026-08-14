@@ -32,9 +32,19 @@ export async function ensureHostRow(userId: string, contact: GHLContact, ctx: Sy
     .maybeSingle()
   if (existing) return
 
+  // `source` marks this as the unreviewed path so admins can tell an
+  // auto-provisioned host from an approved one. venues_unrestricted stays at its
+  // false default deliberately: the tag grants the role, not access to every
+  // course on LinkUp. An admin grants venues (PUT /api/admin/hosts/[id]/venues),
+  // which is also what the reviewed path does.
   const { error } = await ctx.supabase
     .from('hosts')
-    .insert({ member_id: userId, name: contactName(contact, 'Host'), status: 'active' })
+    .insert({
+      member_id: userId,
+      name: contactName(contact, 'Host'),
+      status: 'active',
+      source: 'ghl_tag',
+    })
   // A concurrent sync may have created it (unique member_id) — not an error.
   if (error && error.code !== '23505') {
     logger.warn('ensureHostRow failed', { requestId: ctx.requestId, userId, errorMessage: error.message })

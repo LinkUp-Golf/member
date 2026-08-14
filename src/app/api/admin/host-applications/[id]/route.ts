@@ -8,10 +8,13 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { validateString } from '@/lib/validation'
+import { validateString, validateUUID } from '@/lib/validation'
 import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { addTagToContact } from '@/lib/ghl/client'
+import { HOST_ROLE_TAG } from '@/lib/ghl/tags'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
+import type { Host, HostApplicationEvent } from '@/types'
 
 interface PatchBody {
   action?: 'approve' | 'reject'
@@ -19,6 +22,11 @@ interface PatchBody {
   name?: string
   // Venues to grant the host. Defaults to what the applicant requested.
   course_ids?: string[]
+  /**
+   * Which proposed rounds to turn into live events. Defaults to all of them at
+   * granted venues; pass a subset to drop individual rounds.
+   */
+  event_ids?: string[]
   rejection_reason?: string
 }
 
@@ -36,7 +44,7 @@ export const PATCH = withAuth(
 
     const { data: application, error: fetchError } = await admin
       .from('host_applications')
-      .select('id, member_id, status, name, requested_course_ids, member:members!host_applications_member_id_fkey(first_name, last_name)')
+      .select('id, member_id, status, name, requested_course_ids, events:host_application_events(*), member:members!host_applications_member_id_fkey(first_name, last_name)')
       .eq('id', id)
       .single()
 
@@ -103,50 +111,162 @@ export const PATCH = withAuth(
     const nameCheck = validateString(hostName, 'Host name', { min: 2, max: 120 })
     if (!nameCheck.valid) return NextResponse.json({ error: nameCheck.errors[0] }, { status: 400 })
 
-    const { data: host, error: hostError } = await admin
+    // The member may already own a hosts row created by the GHL host tag
+    // (ensureHostRow runs on every login). That used to make the insert below
+    // fail with hosts_member_unique on every retry, so the application could
+    // never leave `pending` and sat in the queue forever — the only exit was a
+    // false rejection. Adopt that row instead: this review is the thing that was
+    // missing from it, so it takes the reviewed name, provenance and venues.
+    const { data: existingHost } = await admin
       .from('hosts')
-      .insert({
-        member_id: application.member_id,
-        name: hostName,
-        created_by: ctx.userId,
-      })
-      .select()
-      .single()
+      .select('*')
+      .eq('member_id', application.member_id)
+      .maybeSingle()
 
-    if (hostError) {
-      if (hostError.code === '23505') {
+    let host: Host
+    // The pre-existing row's values, captured before this request overwrites them,
+    // so the rollback path can restore rather than delete a role it didn't grant.
+    const priorHost = existingHost
+      ? {
+          name: existingHost.name as string,
+          status: existingHost.status as string,
+          source: existingHost.source as string,
+          venues_unrestricted: existingHost.venues_unrestricted as boolean,
+        }
+      : null
+    const adopted = !!existingHost
+
+    if (existingHost) {
+      const { data: updatedHost, error: adoptError } = await admin
+        .from('hosts')
+        .update({
+          name: hostName,
+          status: 'active',
+          source: 'application',
+          // The grant below is now the authority on where they may host, so drop
+          // any blanket access the unreviewed row was carrying.
+          venues_unrestricted: false,
+          updated_at: reviewedAt,
+        })
+        .eq('id', existingHost.id)
+        .select()
+        .single()
+
+      if (adoptError || !updatedHost) {
         return NextResponse.json(
-          { error: 'This member is already a host.' },
-          { status: 409 }
+          { error: adoptError?.message ?? 'Could not update the existing host.' },
+          { status: 500 }
         )
       }
-      return NextResponse.json({ error: hostError.message }, { status: 500 })
+      host = updatedHost as Host
+    } else {
+      const { data: created, error: hostError } = await admin
+        .from('hosts')
+        .insert({
+          member_id: application.member_id,
+          name: hostName,
+          created_by: ctx.userId,
+          source: 'application',
+        })
+        .select()
+        .single()
+
+      if (hostError || !created) {
+        return NextResponse.json(
+          { error: hostError?.message ?? 'Could not create the host.' },
+          { status: 500 }
+        )
+      }
+      host = created as Host
+    }
+
+    /**
+     * Undo whatever the host row was, on any later failure. An adopted row
+     * existed before this request, so deleting it would revoke a role the review
+     * didn't grant — restore its previous values instead.
+     */
+    const rollbackHost = async () => {
+      if (!priorHost) {
+        await admin.from('hosts').delete().eq('id', host.id)
+        return
+      }
+      await admin.from('hosts').update(priorHost).eq('id', host.id)
     }
 
     // Grant the host their venues: the admin's override if given, otherwise the
-    // courses the applicant requested. Filter to real, active courses so a stale
-    // id can't produce a dangling host_venues row.
+    // courses the applicant requested. Filter to real courses so a stale id can't
+    // produce a dangling host_venues row — but keep `pending` ones, because a club
+    // the applicant proposed is a pending course and is precisely what they applied
+    // to host at. Must stay in step with the same filter in POST /api/host/application.
     const requestedVenueIds = Array.from(new Set(
       Array.isArray(body.course_ids) && body.course_ids.length
         ? body.course_ids
         : (application.requested_course_ids ?? [])
     ))
+
+    // An override arrives straight off the wire, so it gets the UUID check the
+    // applicant's own ids already went through. Without this a malformed id makes
+    // Postgres reject the whole `.in()` (22P02), which used to surface as an empty
+    // venue set — i.e. as an unrestricted host.
+    if (requestedVenueIds.some(vid => !validateUUID(vid, 'Venue').valid)) {
+      await rollbackHost()
+      return NextResponse.json({ error: 'One of the selected venues is invalid' }, { status: 400 })
+    }
+
+    // The venues the approval actually granted. Proposed rounds are only created
+    // at these — a round at a venue the admin dropped must not become an event.
+    let grantedVenueIds: string[] = []
+
     if (requestedVenueIds.length) {
-      const { data: activeCourses } = await admin
+      const { data: grantableCourses, error: coursesError } = await admin
         .from('courses')
         .select('id')
         .in('id', requestedVenueIds)
         .eq('active', true)
-        .eq('approval_status', 'active')
-      const venueRows = (activeCourses ?? []).map(c => ({ host_id: host.id, course_id: c.id }))
-      if (venueRows.length) {
-        const { error: venuesError } = await admin.from('host_venues').insert(venueRows)
-        if (venuesError) {
-          // Don't leave a host with no venues when the applicant asked for some —
-          // roll the host back and let the admin retry.
-          await admin.from('hosts').delete().eq('id', host.id)
-          return NextResponse.json({ error: venuesError.message }, { status: 500 })
+        .in('approval_status', ['active', 'pending'])
+
+      const venueRows = (grantableCourses ?? []).map(c => ({ host_id: host.id, course_id: c.id }))
+      grantedVenueIds = venueRows.map(v => v.course_id)
+
+      // Fail closed. This grant is the authority on where the host may operate,
+      // so producing no rows must not be treated as success — before
+      // venues_unrestricted became explicit, an empty grant read as access to
+      // every course. Roll back and say why instead.
+      if (coursesError || venueRows.length === 0) {
+        await rollbackHost()
+        return NextResponse.json(
+          {
+            error: coursesError
+              ? coursesError.message
+              : 'None of the requested venues still exist. Set the venues up before approving.',
+          },
+          { status: coursesError ? 500 : 409 }
+        )
+      }
+
+      // An adopted row may already carry venues from the unreviewed path. This
+      // grant replaces them, so keep the old set for the rollback path.
+      let previousVenueIds: string[] = []
+      if (adopted) {
+        const { data: priorVenues } = await admin
+          .from('host_venues')
+          .select('course_id')
+          .eq('host_id', host.id)
+        previousVenueIds = (priorVenues ?? []).map(v => v.course_id)
+        await admin.from('host_venues').delete().eq('host_id', host.id)
+      }
+
+      const { error: venuesError } = await admin.from('host_venues').insert(venueRows)
+      if (venuesError) {
+        // Don't leave a host with no venues when the applicant asked for some —
+        // roll the host back and let the admin retry.
+        if (previousVenueIds.length) {
+          await admin.from('host_venues').insert(
+            previousVenueIds.map(course_id => ({ host_id: host.id, course_id }))
+          )
         }
+        await rollbackHost()
+        return NextResponse.json({ error: venuesError.message }, { status: 500 })
       }
     }
 
@@ -168,9 +288,100 @@ export const PATCH = withAuth(
     // roll it back — the queue and the role must not disagree. host_venues rows
     // cascade-delete with the host.
     if (statusError || !approved || approved.length === 0) {
-      await admin.from('hosts').delete().eq('id', host.id)
+      await rollbackHost()
       if (statusError) return NextResponse.json({ error: statusError.message }, { status: 500 })
       return NextResponse.json({ error: 'This application has already been reviewed.' }, { status: 409 })
+    }
+
+    // ---- Turn the proposed rounds into real events -------------
+    //
+    // Step 3 of the model the member was shown when applying ("we put those events
+    // on the LinkUp calendar") happens here. Only rounds at venues the approval
+    // actually granted, and only ones the admin didn't drop. Created `upcoming`,
+    // exactly as POST /api/host/events would — hosts publish without a second
+    // approval gate, so there is nothing further to wait for.
+    //
+    // Non-fatal on failure: the role and venues are already granted and the
+    // application is approved. A round that didn't make it stays on the
+    // application with a null hosted_event_id, and the host can create it from
+    // their own event form.
+    const proposedRounds = (application.events ?? []) as HostApplicationEvent[]
+    const keepIds = Array.isArray(body.event_ids) ? new Set(body.event_ids.map(String)) : null
+
+    const roundsToCreate = proposedRounds.filter(r =>
+      !r.hosted_event_id &&
+      grantedVenueIds.includes(r.course_id) &&
+      (keepIds === null || keepIds.has(r.id)) &&
+      // A date that has passed while the application sat in the queue can't become
+      // an upcoming event.
+      r.event_date >= new Date().toISOString().slice(0, 10)
+    )
+
+    let createdEvents = 0
+    for (const round of roundsToCreate) {
+      const { data: created, error: eventError } = await admin
+        .from('hosted_events')
+        .insert({
+          host_id: host.id,
+          course_id: round.course_id,
+          event_date: round.event_date,
+          tee_time: round.tee_time,
+          total_spots: round.total_spots,
+          member_guest_rate: round.member_guest_rate,
+          dinner: round.dinner,
+          status: 'upcoming',
+        })
+        .select('id')
+        .single()
+
+      if (eventError || !created) {
+        logger.warn('Could not create event from approved application round', {
+          action: 'host.application.round_create_failed',
+          userId: ctx.userId,
+          metadata: { application_id: id, round_id: round.id, error: eventError?.message },
+        })
+        continue
+      }
+
+      createdEvents += 1
+      // Link back so a retry can't create the same round twice.
+      await admin
+        .from('host_application_events')
+        .update({ hosted_event_id: created.id })
+        .eq('id', round.id)
+    }
+
+    // Carry the role into GHL. The login gate and the nightly reconcile both work
+    // off access tags, so an approved host who later loses their golf-membership
+    // tag was being refused at login and deactivated by the sync — while owning a
+    // live hosts row and published events. HOST_ROLE_TAG is itself a login tag, so
+    // writing it here is what makes the role survive a membership change. Hosts
+    // provisioned from the tag already had this; approved ones did not.
+    const { data: approvedMember } = await admin
+      .from('members')
+      .select('ghl_contact_id, ghl_tags')
+      .eq('id', application.member_id)
+      .maybeSingle()
+
+    if (approvedMember?.ghl_contact_id) {
+      const tagged = await addTagToContact(approvedMember.ghl_contact_id, HOST_ROLE_TAG)
+      if (tagged) {
+        const currentTags: string[] = approvedMember.ghl_tags ?? []
+        if (!currentTags.includes(HOST_ROLE_TAG)) {
+          await admin
+            .from('members')
+            .update({ ghl_tags: [...currentTags, HOST_ROLE_TAG] })
+            .eq('id', application.member_id)
+        }
+      } else {
+        // Non-fatal: the role is the hosts row, not the tag. Log it so the gap is
+        // visible rather than silently costing them access later.
+        logger.warn('Host approved but GHL role tag not applied', {
+          action: 'host.application.tag_failed',
+          userId: ctx.userId,
+          metadata: { member_id: application.member_id, host_id: host.id },
+        })
+      }
     }
 
     void sendPushToMember(
@@ -181,10 +392,22 @@ export const PATCH = withAuth(
     logger.info('Host application approved', {
       action: 'host.application.approved',
       userId: ctx.userId,
-      metadata: { application_id: id, member_id: application.member_id, host_id: host.id },
+      metadata: {
+        application_id: id,
+        member_id: application.member_id,
+        host_id: host.id,
+        adopted_existing_host: adopted,
+        events_created: createdEvents,
+        rounds_proposed: proposedRounds.length,
+      },
     })
 
-    return NextResponse.json({ ok: true, status: 'approved', host })
+    return NextResponse.json({
+      ok: true,
+      status: 'approved',
+      host,
+      events_created: createdEvents,
+    })
   },
   { requireAdmin: true, skipGHLCheck: true }
 )

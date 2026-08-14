@@ -20,7 +20,9 @@ export const GET = withAuth(
       .from('host_applications')
       // The FK must be named: the table points at members twice (member_id and
       // reviewed_by), so a bare members(...) embed is ambiguous.
-      .select('*, member:members!host_applications_member_id_fkey(first_name, last_name, email)')
+      // Proposed rounds come with the application: approving turns them into live
+      // events, so the reviewer has to be able to see them before deciding.
+      .select('*, events:host_application_events(*, course:courses(id, name, city, approval_status)), member:members!host_applications_member_id_fkey(first_name, last_name, email)')
       .order('created_at', { ascending: false })
 
     if (status && VALID_STATUSES.has(status)) query = query.eq('status', status)

@@ -62,10 +62,16 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   const toParam = req.nextUrl.searchParams.get('to')
   const lowerBound = isDate(fromParam) && fromParam > todayISO() ? fromParam : todayISO()
 
+  // `hosts!inner` plus the status filter is what makes suspending a host actually
+  // take their listings down. Without it a suspended host lost their workspace
+  // while their events stayed browsable and joinable — a control that only half
+  // worked. It's a join rather than a write, so reactivating restores the
+  // listings instead of needing them re-created.
   let query = admin
     .from('hosted_events')
-    .select('*, course:courses(id, name, city), host:hosts(id, name, member:members!hosts_member_id_fkey(first_name, last_name))')
+    .select('*, course:courses(id, name, city), host:hosts!inner(id, name, status, member:members!hosts_member_id_fkey(first_name, last_name))')
     .eq('status', 'upcoming')
+    .eq('host.status', 'active')
     .gte('event_date', lowerBound)
     .order('event_date', { ascending: true })
     // Browsing is a read-heavy path; keep the payload bounded.

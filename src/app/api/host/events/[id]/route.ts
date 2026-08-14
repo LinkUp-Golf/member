@@ -243,11 +243,25 @@ export const PATCH = withHostAuth(
     if ('course_id' in body && body.course_id !== event.course_id) {
       const { data: course } = await admin
         .from('courses').select('id, approval_status').eq('id', body.course_id as string).maybeSingle()
-      if (!course || course.approval_status !== 'active') {
+      if (!course) {
         return NextResponse.json({ error: 'That course is not available for events.' }, { status: 400 })
       }
       if (!(await hostCanUseCourse(admin, ctx.host.id, course.id))) {
         return NextResponse.json({ error: 'You can only host events at your approved venues.' }, { status: 400 })
+      }
+      // Same rule as create: a pending course is usable only as an explicitly
+      // granted venue. Otherwise a host could create an event at the club they
+      // proposed but never move an event onto it.
+      if (course.approval_status !== 'active') {
+        const { data: grantedVenue } = await admin
+          .from('host_venues')
+          .select('course_id')
+          .eq('host_id', ctx.host.id)
+          .eq('course_id', course.id)
+          .maybeSingle()
+        if (course.approval_status !== 'pending' || !grantedVenue) {
+          return NextResponse.json({ error: 'That course is not available for events.' }, { status: 400 })
+        }
       }
       patch.course_id = course.id
     }

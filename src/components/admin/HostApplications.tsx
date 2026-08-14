@@ -6,10 +6,12 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { AdminTable, AdminTr, AdminTd, StatCard, Badge } from '@/components/admin/AdminUI'
+import { errorMessage } from '@/lib/errors/error-message'
 import type { HostApplication } from '@/types'
 
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+
 
 const STATUS_COLOURS = {
   pending:  'gold',
@@ -33,7 +35,7 @@ export default function HostApplications({
     setLoading(true)
     const res = await fetch('/api/admin/host-applications')
     const json = await res.json().catch(() => ({}))
-    if (!res.ok) onToast(json.error ?? 'Failed to load applications.', false)
+    if (!res.ok) onToast(errorMessage(json, 'Failed to load applications.'), false)
     setApplications(Array.isArray(json.applications) ? json.applications : [])
     setLoading(false)
     // onToast is recreated each render by the host; depending on it would
@@ -129,22 +131,55 @@ function ReviewDrawer({ application, memberName, onClose, onReviewed, onError }:
   const [mode, setMode] = useState<'approve' | 'reject'>('approve')
   const [submitting, setSubmitting] = useState(false)
 
-  // Resolve the requested venue ids to names for display. Approval grants
-  // exactly these venues (the server reads requested_course_ids).
-  const [venueNames, setVenueNames] = useState<string[]>([])
+  // Resolve the requested venue ids for display. Approval grants exactly these
+  // venues (the server reads requested_course_ids).
+  //
+  // Resolved against /api/admin/courses, not /api/courses: the latter is the
+  // bookable list (active + calendar + payment link), so a club the applicant
+  // proposed — which is a `pending` course by construction — resolved to nothing
+  // and rendered as "Unknown venue" directly above the promise that approving
+  // grants it. The admin list carries every status, so the venue can be named and
+  // its status shown, which is the thing that decides whether it's ready.
+  const [venues, setVenues] = useState<{ id: string; label: string; pending: boolean; known: boolean }[]>([])
   const requestedIds = application.requested_course_ids ?? []
+  // Which venues the approval will actually grant. Defaults to everything the
+  // applicant asked for; the admin can now drop individual ones, which the
+  // approval route has always accepted as `course_ids` but nothing ever sent.
+  const [grantIds, setGrantIds] = useState<string[]>(requestedIds)
   useEffect(() => {
-    if (requestedIds.length === 0) { setVenueNames([]); return }
-    fetch('/api/courses')
+    if (requestedIds.length === 0) { setVenues([]); return }
+    fetch('/api/admin/courses')
       .then(r => r.json())
-      .then((j: { courses?: { id: string; name: string; city: string | null }[] }) => {
-        const byId = new Map((j.courses ?? []).map(c => [c.id, c.city ? `${c.name} — ${c.city}` : c.name]))
-        setVenueNames(requestedIds.map(id => byId.get(id) ?? 'Unknown venue'))
+      .then((j: { courses?: { id: string; name: string; city: string | null; approval_status: string }[] }) => {
+        const byId = new Map((j.courses ?? []).map(c => [c.id, c]))
+        setVenues(requestedIds.map(id => {
+          const c = byId.get(id)
+          if (!c) return { id, label: 'Unknown venue', pending: false, known: false }
+          return {
+            id,
+            label: c.city ? `${c.name} — ${c.city}` : c.name,
+            pending: c.approval_status === 'pending',
+            known: true,
+          }
+        }))
       })
-      .catch(() => setVenueNames(requestedIds.map(() => 'Unknown venue')))
+      .catch(() => setVenues(requestedIds.map(id => ({ id, label: 'Unknown venue', pending: false, known: false }))))
     // requestedIds is derived from the immutable application prop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const toggleGrant = (id: string) =>
+    setGrantIds(prev => (prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]))
+
+  // Rounds the applicant proposed. Approving creates each of these as a live
+  // event, so the admin picks which ones — the same shape as the venue grant.
+  const proposedRounds = application.events ?? []
+  const [roundIds, setRoundIds] = useState<string[]>(proposedRounds.map(r => r.id))
+
+  const toggleRound = (id: string) =>
+    setRoundIds(prev => (prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]))
+
+  const today = new Date().toISOString().slice(0, 10)
 
   const field = 'w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:border-green-700 outline-none transition-colors bg-white'
   const labelCls = 'block text-xs font-medium text-gray-600 mb-1'
@@ -155,20 +190,34 @@ function ReviewDrawer({ application, memberName, onClose, onReviewed, onError }:
       onError('A rejection reason is required.')
       return
     }
+    // The server fails closed on an empty grant (it would otherwise leave the host
+    // with no venue rows), so catch it here where the admin can still fix it.
+    if (mode === 'approve' && requestedIds.length > 0 && grantIds.length === 0) {
+      onError('Select at least one venue to grant.')
+      return
+    }
     setSubmitting(true)
     const res = await fetch(`/api/admin/host-applications/${application.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(
         mode === 'approve'
-          ? { action: 'approve', name: name.trim() }
+          ? { action: 'approve', name: name.trim(), course_ids: grantIds, event_ids: roundIds }
           : { action: 'reject', rejection_reason: reason.trim() }
       ),
     })
     const json = await res.json().catch(() => ({}))
     setSubmitting(false)
-    if (!res.ok) { onError(json.error ?? 'Review failed.'); return }
-    onReviewed(mode === 'approve' ? `${memberName} is now a host.` : 'Application rejected.')
+    if (!res.ok) { onError(errorMessage(json, 'Review failed.')); return }
+    if (mode !== 'approve') { onReviewed('Application rejected.'); return }
+    // Say how many rounds went live — the admin just chose them, so silence about
+    // the outcome would leave them guessing whether it worked.
+    const created = Number(json.events_created ?? 0)
+    onReviewed(
+      created > 0
+        ? `${memberName} is now a host. ${created} ${created === 1 ? 'event' : 'events'} published.`
+        : `${memberName} is now a host.`
+    )
   }
 
   return (
@@ -200,19 +249,89 @@ function ReviewDrawer({ application, memberName, onClose, onReviewed, onError }:
 
           <div>
             <p className={labelCls}>Requested venues</p>
-            {venueNames.length === 0 ? (
+            {venues.length === 0 ? (
               <p className="text-sm text-gray-400">None specified</p>
-            ) : (
+            ) : readOnly ? (
               <ul className="text-sm text-gray-700 space-y-1">
-                {venueNames.map((n, i) => (
-                  <li key={i} className="flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-700 flex-shrink-0" />{n}
+                {venues.map(v => (
+                  <li key={v.id} className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-700 flex-shrink-0" />
+                    <span>{v.label}</span>
+                    {v.pending && <Badge label="Pending" colour="gold" />}
                   </li>
                 ))}
               </ul>
+            ) : (
+              <div className="space-y-1">
+                {venues.map(v => (
+                  <label key={v.id} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-gray-300 text-green-800 focus:ring-green-700"
+                      checked={grantIds.includes(v.id)}
+                      // An id that resolves to nothing can't be granted — the
+                      // course is gone, so offering it would fail server-side.
+                      disabled={!v.known}
+                      onChange={() => toggleGrant(v.id)}
+                    />
+                    <span className={v.known ? undefined : 'text-gray-400 line-through'}>{v.label}</span>
+                    {v.pending && <Badge label="Pending" colour="gold" />}
+                  </label>
+                ))}
+              </div>
             )}
             {!readOnly && <p className="mt-1 text-[11px] text-gray-400">Approving grants the host these venues.</p>}
           </div>
+
+          {proposedRounds.length > 0 && (
+            <div>
+              <p className={labelCls}>Proposed rounds</p>
+              <div className="space-y-1">
+                {proposedRounds.map(r => {
+                  // A round at a dropped venue can't be created, and one whose
+                  // date has passed while the application sat in the queue can't
+                  // become an upcoming event. Both are shown, disabled, so the
+                  // reason is visible rather than the round just missing.
+                  const venueDropped = !grantIds.includes(r.course_id)
+                  const datePassed = r.event_date < today
+                  const blocked = venueDropped || datePassed
+                  const label = `${r.course?.name ?? 'Venue'} · ${r.event_date}${r.tee_time ? ` · ${r.tee_time}` : ''} · ${r.total_spots} spots · $${Number(r.member_guest_rate)}${r.dinner ? ' · dinner' : ''}`
+
+                  if (readOnly) {
+                    return (
+                      <p key={r.id} className="text-sm text-gray-700 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-700 flex-shrink-0" />
+                        <span>{label}</span>
+                        {r.hosted_event_id && <Badge label="Created" colour="green" />}
+                      </p>
+                    )
+                  }
+
+                  return (
+                    <label key={r.id} className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 mt-0.5 rounded border-gray-300 text-green-800 focus:ring-green-700"
+                        checked={roundIds.includes(r.id) && !blocked}
+                        disabled={blocked}
+                        onChange={() => toggleRound(r.id)}
+                      />
+                      <span className={blocked ? 'text-gray-400' : undefined}>
+                        {label}
+                        {datePassed && <span className="text-amber-600"> (date passed)</span>}
+                        {venueDropped && !datePassed && <span className="text-amber-600"> (venue not granted)</span>}
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+              {!readOnly && (
+                <p className="mt-1 text-[11px] text-gray-400">
+                  Approving publishes the selected rounds as live events.
+                </p>
+              )}
+            </div>
+          )}
 
           {readOnly ? (
             <div className="rounded-xl px-4 py-3 bg-gray-50 border border-gray-100">
