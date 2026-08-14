@@ -64,6 +64,15 @@ export default function HostOverviewPage() {
         <>
           <p className="section-label mb-3">Events</p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+            {/* Awaiting approval sits first because it's the only one the host
+                may need to chase. Total was the sum of the other three, so it
+                gave up its slot rather than crowd the row to five. */}
+            <StatCard
+              label="Awaiting approval"
+              value={data.stats.pendingCount}
+              sub="Not published yet"
+              colour="gold"
+            />
             <StatCard
               label="Upcoming"
               value={data.stats.upcomingCount}
@@ -81,12 +90,6 @@ export default function HostOverviewPage() {
               value={data.stats.cancelledCount}
               sub="Called off"
               colour="gray"
-            />
-            <StatCard
-              label="Total"
-              value={data.stats.totalEvents}
-              sub="All time"
-              colour="gold"
             />
           </div>
 

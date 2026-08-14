@@ -7,7 +7,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { enrichHostedEvents } from '@/lib/hosts/events'
+import { enrichHostedEvents, isMemberVisible } from '@/lib/hosts/events'
 import type { AuthContext } from '@/lib/auth/types'
 import type { HostedEvent } from '@/types'
 
@@ -20,12 +20,24 @@ export const GET = withAuth(
 
     const { data, error } = await admin
       .from('hosted_events')
-      .select('*, course:courses(id, name, city), host:hosts(id, name, member:members!hosts_member_id_fkey(first_name, last_name))')
+      .select('*, course:courses(id, name, city), host:hosts(id, name, member_id, member:members!hosts_member_id_fkey(first_name, last_name))')
       .eq('id', id)
       .maybeSingle()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     if (!data) return NextResponse.json({ error: 'Event not found' }, { status: 404 })
+
+    // An event awaiting approval isn't in browse, but the id would still resolve
+    // here — and "invisible to members until approved" has to hold on the direct
+    // route too, or the gate is only a listing filter. Its own host and an admin
+    // can see it; to everyone else it doesn't exist yet.
+    if (!isMemberVisible(data.status)) {
+      const host = Array.isArray(data.host) ? data.host[0] : data.host
+      const ownHost = host?.member_id === ctx.memberId
+      if (!ownHost && !ctx.isAdmin) {
+        return NextResponse.json({ error: 'Event not found' }, { status: 404 })
+      }
+    }
 
     const [event] = await enrichHostedEvents(admin, [data as HostedEvent], { memberId: ctx.memberId })
     return NextResponse.json({ event })

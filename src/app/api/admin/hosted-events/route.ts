@@ -12,7 +12,7 @@ import type { AuthContext } from '@/lib/auth/types'
 import type { HostedEvent } from '@/types'
 
 const VALID_STATUSES = new Set([
-  'upcoming', 'completed', 'cancelled',
+  'pending_approval', 'upcoming', 'completed', 'cancelled',
   'pending_credit_approval', 'credits_awarded',
 ])
 

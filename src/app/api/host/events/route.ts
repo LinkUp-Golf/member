@@ -222,9 +222,10 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     courseName = course.name
   }
 
-  // Every event goes live the moment it's created. There is no draft to save
-  // and no approval to wait for; admins are notified after the fact and can
-  // take a listing back down (POST /api/admin/hosted-events/[id]).
+  // Creating an event does not publish it. It lands in 'pending_approval',
+  // invisible to members, and an admin approves it once the GHL calendar behind
+  // it exists (POST /api/admin/hosted-events/[id], action 'approve'). The push
+  // below is what puts it in front of them.
   const dinner = body.dinner === true
 
   // One row per date, inserted together so a partial failure can't leave half a
@@ -245,7 +246,9 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       // Only the single booking-sourced event carries this; the partial unique
       // index would reject a second row holding the same booking.
       source_booking_id: sourceBookingId,
-      status: 'upcoming',
+      // Not live yet. An admin approves it — which is when the GHL calendar
+      // behind it gets created — and approval is what makes it 'upcoming'.
+      status: 'pending_approval',
     })))
     .select()
 
@@ -264,10 +267,12 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     return NextResponse.json({ error: 'Could not create the event.' }, { status: 500 })
   }
 
-  // Live already — tell the admins so someone can look at it (best-effort; a
-  // push failure must not fail the creation the host just completed). One push for
-  // the batch rather than one per date, keyed on the earliest — a host listing ten
-  // dates shouldn't produce ten identical notifications.
+  // Nothing is live yet — this push is the only thing that tells an admin there's
+  // something waiting to be set up and approved, so the host isn't left sitting in
+  // a queue nobody knows about (best-effort; a push failure must not fail the
+  // creation the host just completed). One push for the batch rather than one per
+  // date, keyed on the earliest — a host listing ten dates shouldn't produce ten
+  // identical notifications.
   void sendPushToAdmins(
     NotificationTemplates.hostedEventNeedsReview(ctx.host.name, courseName, orderedDates[0] ?? '')
   ).catch(() => {})

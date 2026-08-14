@@ -51,6 +51,7 @@ const STATUS_META: Record<
   HostedEventStatus,
   { label: string; colour: "green" | "gold" | "red" | "blue" | "gray" }
 > = {
+  pending_approval: { label: "Awaiting approval", colour: "gold" },
   upcoming: { label: "Upcoming", colour: "green" },
   completed: { label: "Completed", colour: "blue" },
   pending_credit_approval: { label: "Credit approval", colour: "gold" },
@@ -167,8 +168,9 @@ const EventCard = memo(function EventCard({
   const meta = STATUS_META[event.status];
   const filled = event.filled_spots ?? 0;
   // Mirrors the server's editable/cancellable set — a host can still fix an
-  // event that hasn't happened yet.
-  const editable = event.status === "upcoming";
+  // event that hasn't happened yet, including one still waiting on approval.
+  const awaitingApproval = event.status === "pending_approval";
+  const editable = event.status === "upcoming" || awaitingApproval;
   const canProof = canUploadProof(event.status, event.event_date);
 
   async function act(action: string, extra: Record<string, unknown> = {}) {
@@ -264,6 +266,14 @@ const EventCard = memo(function EventCard({
         )}
       </div>
 
+      {/* The host needs to know members can't see this yet, and why — otherwise
+          an empty spots bar reads as "nobody wants it" rather than "not live". */}
+      {awaitingApproval && (
+        <p className="text-[11px] text-amber-600 mt-3">
+          Not visible to members yet — we&apos;re setting up the calendar for
+          this round. You&apos;ll get a notification when it goes live.
+        </p>
+      )}
       {event.status === "pending_credit_approval" && (
         <p className="text-[11px] text-amber-600 mt-3">
           Proof submitted — awaiting admin approval for your credit.
@@ -465,8 +475,8 @@ function EventDrawer({
   const [bookings, setBookings] = useState<HostBookingOption[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   // New event only: switch the course picker over to "add a club not yet on
-  // LinkUp". The event still goes live immediately; it's the club record our
-  // team fills in afterwards.
+  // LinkUp". The club record is ours to fill in, and it happens alongside the
+  // calendar setup the event is already waiting on — so this adds no extra wait.
   const [addingClub, setAddingClub] = useState(false);
   // Additional dates beyond the one in the form. Everything else (course, tee
   // time, spots, rate, dinner) is shared, so listing a week of rounds is one form
@@ -672,17 +682,17 @@ function EventDrawer({
       onError(json.error ?? "Could not save.");
       return;
     }
-    // Say how many went live when it was more than one — the host chose several
-    // dates, so a bare "Published" would leave them counting.
+    // Say how many were submitted when it was more than one — the host chose
+    // several dates, so a bare "Submitted" would leave them counting.
     const created = Array.isArray(json.events) ? json.events.length : 1;
-    const published =
-      created > 1 ? `Published ${created} events` : "Published";
+    const submitted =
+      created > 1 ? `${created} events submitted` : "Event submitted";
     onSaved(
       isEdit
         ? "Event updated."
         : addingClub
-          ? `${published} — live for members now. We'll finish setting the club up.`
-          : `${published} — live for members now.`,
+          ? `${submitted} for approval. We'll set up the calendar and the club, then publish it.`
+          : `${submitted} for approval. We'll set up the calendar, then publish it to members.`,
     );
   }
 
@@ -925,8 +935,9 @@ function EventDrawer({
                       </p>
                     )}
                     <p className="text-[11px] text-gray-400">
-                      Your event goes live straight away. We&apos;ll fill in the
-                      rest of this club&apos;s details behind the scenes.
+                      The name and website are all we need — we&apos;ll fill in
+                      the rest of this club&apos;s details while we set your
+                      event up.
                     </p>
                   </div>
                 ) : (
@@ -1133,9 +1144,15 @@ function EventDrawer({
           </div>
         </form>
 
-        {/* One button either way: a new event publishes on save, so there's no
-            second path to offer. */}
-        <div className="px-6 py-4 border-t border-gray-100 flex gap-3 flex-shrink-0">
+        {/* "Submit", not "Publish" — saving sends the event for approval, and
+            the LinkUp team is what makes it live once the calendar exists. */}
+        <div className="px-6 py-4 border-t border-gray-100 flex flex-col gap-2 flex-shrink-0">
+          {!isEdit && (
+            <p className="text-[11px] text-gray-500">
+              We&apos;ll set up the calendar for this round, then publish it to
+              members.
+            </p>
+          )}
           <button
             type="button"
             onClick={submit}
@@ -1147,7 +1164,7 @@ function EventDrawer({
             ) : isEdit ? (
               "Save changes"
             ) : (
-              "Publish event"
+              "Submit for approval"
             )}
           </button>
         </div>

@@ -24,6 +24,7 @@ const fmtDateTime = (d: string) =>
 
 
 const STATUS_META: Record<HostedEventStatus, { label: string; colour: 'green' | 'gold' | 'red' | 'blue' | 'gray' }> = {
+  pending_approval:        { label: 'Awaiting approval', colour: 'gold' },
   upcoming:                { label: 'Upcoming',         colour: 'green' },
   completed:               { label: 'Completed',        colour: 'blue' },
   pending_credit_approval: { label: 'Credit approval',  colour: 'gold' },
@@ -69,6 +70,10 @@ export default function HostEventDetailPage() {
             action={meta ? <Badge label={meta.label} colour={meta.colour} /> : undefined}
           />
 
+          {/* AdminCard carries no margin of its own — stacked panels need the
+              gap from their container, or they render edge to edge as one
+              undifferentiated block. */}
+          <div className="space-y-6">
           <AdminCard title="Spots">
             <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
               <span>{filled} of {event.total_spots} filled</span>
@@ -133,6 +138,7 @@ export default function HostEventDetailPage() {
               <p className="text-sm text-gray-600">{event.cancellation_reason}</p>
             </AdminCard>
           )}
+          </div>
         </>
       )}
     </div>

@@ -51,6 +51,53 @@ export async function hostCanUseCourse(admin: AdminClient, hostId: string, cours
 export const JOINABLE_STATUSES = ['upcoming'] as const
 
 /**
+ * Only an unpublished event can be published. The gate exists because approving
+ * is also when the LinkUp team creates the GHL calendar the event books against,
+ * so re-approving something already live would mean nothing.
+ */
+export const APPROVABLE_STATUSES = ['pending_approval'] as const
+
+/**
+ * A listing can be taken down while it waits for approval or while it's live. An
+ * event that has run (completed / pending_credit_approval / credits_awarded)
+ * happened — taking it down would rewrite history rather than prevent it.
+ */
+export const REJECTABLE_STATUSES = ['pending_approval', 'upcoming'] as const
+
+/**
+ * Whether an admin can publish this event, and if not, why.
+ *
+ * A past date is refused separately from a wrong status: publishing a round whose
+ * date has gone would put something in member browse nobody can attend, and the
+ * admin's next move is a takedown, not a retry.
+ */
+export function canApproveEvent(
+  status: string,
+  eventDate: string,
+  today = new Date().toISOString().slice(0, 10)
+): { ok: true } | { ok: false; reason: 'status' | 'past_date' } {
+  if (!(APPROVABLE_STATUSES as readonly string[]).includes(status)) return { ok: false, reason: 'status' }
+  if (eventDate < today) return { ok: false, reason: 'past_date' }
+  return { ok: true }
+}
+
+/** Whether an admin can take this event down. */
+export function canRejectEvent(status: string): boolean {
+  return (REJECTABLE_STATUSES as readonly string[]).includes(status)
+}
+
+/**
+ * Whether an event exists as far as an ordinary member is concerned.
+ *
+ * Browse already filters to 'upcoming', but a direct id would still resolve, so
+ * the same rule has to hold on the single-event route — otherwise the gate is a
+ * listing filter rather than a gate. Its own host and admins see everything.
+ */
+export function isMemberVisible(status: string): boolean {
+  return status !== 'pending_approval'
+}
+
+/**
  * Whether a host may upload proof for an event.
  *
  * Proof only makes sense once the event has taken place:
@@ -129,6 +176,10 @@ export async function loadHostStats(
   const OCCURRED = new Set(['completed', 'pending_credit_approval', 'credits_awarded'])
 
   return {
+    // Submitted but not published. Its own bucket because otherwise a host whose
+    // events are all waiting on approval sees zero everywhere and a non-zero
+    // total, which reads as if their events vanished.
+    pendingCount: rows.filter(r => r.status === 'pending_approval').length,
     upcomingCount: rows.filter(r => r.status === 'upcoming').length,
     completedCount: rows.filter(r => OCCURRED.has(r.status)).length,
     cancelledCount: rows.filter(r => r.status === 'cancelled').length,

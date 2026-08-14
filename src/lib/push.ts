@@ -321,14 +321,26 @@ export const NotificationTemplates = {
   // Sent to admins when a host's event goes live. Events publish without
   // waiting for approval, so this is the after-the-fact heads-up that gives an
   // admin the chance to reject one that shouldn't have gone out.
+  // Sent to admins when a host submits an event. It is not live — it sits in
+  // 'pending_approval' until someone sets up the GHL calendar and approves it,
+  // so this is a queue item to action, not an FYI about something already out.
   hostedEventNeedsReview: (hostName: string, courseName: string, date: string): PushPayload => ({
-    title: 'New hosted event is live',
-    body:  `${hostName} published an event at ${courseName} on ${date}. Review it if it shouldn't be listed.`,
+    title: 'Hosted event needs approval',
+    body:  `${hostName} submitted an event at ${courseName} on ${date}. Set up the calendar, then approve it to put it in front of members.`,
     url:   '/admin/hosts',
     tag:   'hosted-event-review',
   }),
 
-  // Sent to the host when an admin takes their live event down. It's cancelled,
+  // Sent to the host when an admin publishes their event. Until this lands the
+  // event exists but no member can see it, so this is the one that matters.
+  hostedEventApproved: (courseName: string, date: string): PushPayload => ({
+    title: 'Your event is live',
+    body:  `Your ${courseName} event on ${date} has been approved — members can reserve a spot now.`,
+    url:   '/host/events',
+    tag:   'hosted-event-approved',
+  }),
+
+  // Sent to the host when an admin takes their event down. It's cancelled,
   // not parked — so the host's route back is a new event, not a republish.
   hostedEventRejected: (courseName: string, date: string, reason: string): PushPayload => ({
     title: 'Your event was taken down',

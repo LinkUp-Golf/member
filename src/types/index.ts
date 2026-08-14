@@ -493,6 +493,11 @@ export interface HostApplication {
 }
 
 export type HostedEventStatus =
+  /**
+   * Created by the host, not yet visible to members. Waiting on an admin to
+   * approve it, which is also when the GHL calendar behind it gets set up.
+   */
+  | 'pending_approval'
   | 'upcoming'
   | 'completed'
   | 'cancelled'
@@ -609,6 +614,7 @@ export interface CreditSummary {
 }
 
 export interface HostStats {
+  pendingCount: number
   upcomingCount: number
   completedCount: number
   cancelledCount: number

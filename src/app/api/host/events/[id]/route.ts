@@ -19,9 +19,10 @@ import type { HostedEvent } from '@/types'
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
-// A host may still change an event that hasn't happened yet.
-const EDITABLE_STATUSES = ['upcoming']
-const CANCELLABLE_STATUSES = ['upcoming']
+// A host may still change an event that hasn't happened yet — including one
+// still waiting on approval, which is exactly when a mistake is cheapest to fix.
+const EDITABLE_STATUSES = ['pending_approval', 'upcoming']
+const CANCELLABLE_STATUSES = ['pending_approval', 'upcoming']
 
 // Fields that come from the linked booking and therefore can't be edited.
 const BOOKING_LOCKED_FIELDS = ['course_id', 'event_date', 'tee_time']

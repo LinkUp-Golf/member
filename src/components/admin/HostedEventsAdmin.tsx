@@ -20,6 +20,7 @@ const fmtDate = (d: string) =>
   new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
 const STATUS_META: Record<HostedEventStatus, { label: string; colour: 'green' | 'gold' | 'red' | 'blue' | 'gray' }> = {
+  pending_approval:        { label: 'Awaiting approval', colour: 'gold' },
   upcoming:                { label: 'Upcoming',         colour: 'green' },
   completed:               { label: 'Completed',        colour: 'blue' },
   pending_credit_approval: { label: 'Credit approval',  colour: 'gold' },
@@ -28,6 +29,9 @@ const STATUS_META: Record<HostedEventStatus, { label: string; colour: 'green' | 
 }
 
 const FILTERS: { key: string; label: string }[] = [
+  // First because it's the queue that blocks a host: nothing they created is
+  // visible to a single member until someone here approves it.
+  { key: 'pending_approval', label: 'Awaiting approval' },
   { key: 'pending_credit_approval', label: 'Credit approval' },
   { key: 'upcoming', label: 'Upcoming' },
   { key: 'completed', label: 'Completed' },
@@ -160,9 +164,12 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
 
   // Credit decision, once the event has run and proof is in.
   const awaitingCredit = event.status === 'pending_credit_approval'
-  // Listing decision, while the event is live. Hosts publish without waiting
-  // for approval, so this is where an admin takes a bad listing back down.
-  const canTakeDown = event.status === 'upcoming'
+  // Publish decision. A host's event isn't visible to anyone until this — and
+  // approving is the statement that its GHL calendar is set up.
+  const awaitingApproval = event.status === 'pending_approval'
+  // Listing decision. A bad listing can be pulled before it's published or
+  // after; the difference is only whether anyone had a spot to lose.
+  const canTakeDown = event.status === 'upcoming' || awaitingApproval
 
   async function decide(action: 'approve' | 'reject') {
     if (busy) return
@@ -190,7 +197,24 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
     onChanged()
   }
 
-  // Cancels a live event and releases anyone who had reserved. There is no
+  // Publishes a pending event. Only press this once the event's GHL calendar
+  // exists — nothing here can check that, so it's the admin's assertion.
+  async function publish() {
+    if (busy) return
+    setBusy(true)
+    const res = await fetch(`/api/admin/hosted-events/${event.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'approve' }),
+    })
+    const json = await res.json().catch(() => ({}))
+    setBusy(false)
+    if (!res.ok) { onToast(errorMessage(json, 'Could not publish.'), false); return }
+    onToast('Published — members can reserve a spot now.')
+    onChanged()
+  }
+
+  // Cancels the event and releases anyone who had reserved. There is no
   // draft to park it in, so this is final — the host would have to list it again.
   async function takeDown() {
     if (busy) return
@@ -268,17 +292,32 @@ const EventRow = memo(function EventRow({ event, onChanged, onToast }: {
         <p className="text-[11px] text-red-600 mt-2">Taken down: {event.rejection_reason}</p>
       )}
 
+      {awaitingApproval && !rejecting && (
+        <div className="mt-4 p-3 rounded-xl bg-amber-50 border border-amber-100">
+          <p className="text-[11px] text-amber-800">
+            Not visible to members yet. Set up this event&apos;s GHL calendar and
+            assign the host first — publishing makes it bookable immediately.
+          </p>
+        </div>
+      )}
+
       {canTakeDown && (
-        <div className="mt-4">
+        <div className="mt-4 flex flex-wrap gap-2">
+          {awaitingApproval && !rejecting && (
+            <button onClick={publish} disabled={busy} className="btn btn-sm bg-green-800 text-white">
+              Publish to members
+            </button>
+          )}
           {!rejecting ? (
             <button onClick={() => setRejecting(true)} disabled={busy} className="btn btn-outline btn-sm text-red-600 border-red-200">
               Take down
             </button>
           ) : (
-            <div className="p-3 rounded-xl bg-red-50 border border-red-100 space-y-2">
+            <div className="w-full p-3 rounded-xl bg-red-50 border border-red-100 space-y-2">
               <p className="text-[11px] text-red-700">
-                Cancels the event, takes it off the member list, and releases anyone
-                who reserved. The host would have to list it again from scratch.
+                {awaitingApproval
+                  ? 'Cancels the event before it is published. Nobody has reserved a spot, but the host would have to create it again from scratch.'
+                  : 'Cancels the event, takes it off the member list, and releases anyone who reserved. The host would have to list it again from scratch.'}
               </p>
               <input
                 className="input text-sm"
