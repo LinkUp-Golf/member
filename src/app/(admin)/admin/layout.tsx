@@ -10,6 +10,7 @@ import { COURSE_SLUGS } from '@/lib/ghl/tags'
 import { cn } from '@/lib/utils'
 import { FullScreenLoader } from '@/components/ui/Loading'
 import { FEATURES } from '@/lib/features'
+import { DEFAULT_LANDING_PATH } from '@/lib/constants'
 
 const NAV_GROUPS = [
   {
@@ -215,7 +216,7 @@ function NavContent({
       <div className="px-5 py-4 border-t border-white/[0.08] flex-shrink-0">
         <p className="text-xs text-white/30 truncate">{user.email}</p>
         <Link
-          href="/home"
+          href={DEFAULT_LANDING_PATH}
           onClick={onNavigate}
           className="text-xs text-white/40 hover:text-white/70 mt-1 block"
         >
@@ -243,11 +244,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   useEffect(() => {
     if (loading) return
     // Not authenticated → always redirect
-    if (!user) { router.push('/home'); return }
+    if (!user) { router.push(DEFAULT_LANDING_PATH); return }
     // Profile loaded and confirmed not admin → redirect.
     // If profile is null (fetch error) we stay put — don't kick valid admins
     // because of a transient DB error.
-    if (profile !== null && !isAdmin) { router.push('/home') }
+    if (profile !== null && !isAdmin) { router.push(DEFAULT_LANDING_PATH) }
   }, [user, profile, loading, isAdmin, router])
 
   const fetchCounts = useCallback(async () => {
@@ -409,7 +410,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             LinkUp Admin
           </div>
 
-          <Link href="/home" className="text-white/40 hover:text-white/70 text-xs">
+          <Link href={DEFAULT_LANDING_PATH} className="text-white/40 hover:text-white/70 text-xs">
             ← App
           </Link>
         </header>

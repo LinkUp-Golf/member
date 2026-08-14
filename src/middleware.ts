@@ -14,6 +14,7 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { decryptOverrides } from 'flags'
+import { DEFAULT_LANDING_PATH } from '@/lib/constants'
 
 const PUBLIC_ROUTES = [
   '/login',
@@ -99,7 +100,7 @@ export async function middleware(request: NextRequest) {
     if (PUBLIC_ROUTES.some(route => pathname.startsWith(route))) {
       // Already authenticated → redirect away from login page
       if (user && pathname === '/login') {
-        const redirectResponse = NextResponse.redirect(new URL('/home', request.url))
+        const redirectResponse = NextResponse.redirect(new URL(DEFAULT_LANDING_PATH, request.url))
         redirectResponse.headers.set('X-Request-Id', requestId)
         return redirectResponse
       }
@@ -107,9 +108,10 @@ export async function middleware(request: NextRequest) {
     }
 
     // ---- Unauthenticated: redirect to login ------------------
+    // No `redirectTo`: signing back in always lands on DEFAULT_LANDING_PATH,
+    // never on the page the session happened to expire on.
     if (!user) {
       const loginUrl = new URL('/login', request.url)
-      loginUrl.searchParams.set('redirectTo', pathname)
       const redirectResponse = NextResponse.redirect(loginUrl)
       redirectResponse.headers.set('X-Request-Id', requestId)
       return redirectResponse
@@ -133,12 +135,12 @@ export async function middleware(request: NextRequest) {
           .single()
 
         if (retryError || !retried?.is_admin) {
-          const redirectResponse = NextResponse.redirect(new URL('/home', request.url))
+          const redirectResponse = NextResponse.redirect(new URL(DEFAULT_LANDING_PATH, request.url))
           redirectResponse.headers.set('X-Request-Id', requestId)
           return redirectResponse
         }
       } else if (!member?.is_admin) {
-        const redirectResponse = NextResponse.redirect(new URL('/home', request.url))
+        const redirectResponse = NextResponse.redirect(new URL(DEFAULT_LANDING_PATH, request.url))
         redirectResponse.headers.set('X-Request-Id', requestId)
         return redirectResponse
       }

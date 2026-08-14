@@ -24,6 +24,7 @@ import { FullScreenLoader } from '@/components/ui/Loading'
 import { useMemberRoles } from '@/hooks/useMemberRoles'
 import { useProfile } from '@/hooks/useProfile'
 import WorkspaceSwitcher from '@/components/layout/WorkspaceSwitcher'
+import { DEFAULT_LANDING_PATH } from '@/lib/constants'
 
 const NAV_ITEMS = [
   { href: '/partner',             label: 'Overview',  short: 'Overview', icon: LayoutDashboard },
@@ -100,7 +101,7 @@ export default function PartnerLayout({ children }: { children: React.ReactNode 
 
         {isMember && (
           <div className="px-4 py-3 border-t border-white/[0.07]">
-            <Link href="/home" className="text-xs text-white/40 hover:text-white/70 transition-colors">
+            <Link href={DEFAULT_LANDING_PATH} className="text-xs text-white/40 hover:text-white/70 transition-colors">
               ← Back to LinkUp
             </Link>
           </div>
@@ -115,7 +116,7 @@ export default function PartnerLayout({ children }: { children: React.ReactNode 
         >
           {isMember && (
             <Link
-              href="/home"
+              href={DEFAULT_LANDING_PATH}
               aria-label="Back to LinkUp"
               className="focus-ring -ml-1 p-1 rounded-lg text-white/50 hover:text-white transition-colors flex-shrink-0"
             >

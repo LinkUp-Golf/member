@@ -7,6 +7,18 @@
 
 import type { PayoutMethod } from '@/types'
 
+// ---- Landing ------------------------------------------------
+
+// Where a signed-in member lands whenever nothing more specific applies:
+// after login, on the bare origin, when bounced out of a workspace they
+// can't access, and as the installed PWA's start_url (public/manifest.json
+// hard-codes the same path — keep the two in step).
+//
+// Deliberately fixed rather than "wherever you were": the app used to send
+// you back to the page your session expired on, so a member whose session
+// died in Settings signed back in to Settings.
+export const DEFAULT_LANDING_PATH = '/book'
+
 // ---- GHL API ------------------------------------------------
 
 export const GHL_BASE_URL = 'https://services.leadconnectorhq.com'

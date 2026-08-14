@@ -108,7 +108,8 @@ export async function GET(request: NextRequest) {
   })
 
   // A non-member (no home course) has no member app to land on — send them to
-  // their workspace instead of /home. An explicit workspace `next` is honoured.
+  // their workspace rather than the default landing page. An explicit workspace
+  // `next` is honoured.
   if (!memberRecord?.home_course_id && !next.startsWith('/partner') && !next.startsWith('/host')) {
     const dest = await workspaceLandingPath(adminClient, user.id)
     if (dest) return NextResponse.redirect(new URL(dest, request.url))

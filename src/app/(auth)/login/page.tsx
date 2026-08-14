@@ -1,12 +1,13 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { MailCheck } from "lucide-react";
 import { Spinner } from "@/components/ui/Loading";
 import Logo from "@/components/ui/Logo";
 import { createClient } from "@/lib/supabase";
+import { DEFAULT_LANDING_PATH } from "@/lib/constants";
 
 const LAST_EMAIL_KEY = "linkup_last_email";
 
@@ -26,7 +27,6 @@ export default function LoginPage() {
 
 function LoginForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [state, setState] = useState<State>("idle");
 
@@ -88,7 +88,7 @@ function LoginForm() {
           setState("error");
           return;
         }
-        router.replace(searchParams.get("redirectTo") ?? "/home");
+        router.replace(DEFAULT_LANDING_PATH);
         return;
       }
 
