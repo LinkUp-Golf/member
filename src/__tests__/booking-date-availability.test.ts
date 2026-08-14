@@ -162,8 +162,9 @@ describe('coursesWithAvailabilityOn', () => {
   it('hides a course whose calendar is unreachable rather than emptying the list', async () => {
     // getAvailableSlots swallows GHL failures into {}, so an outage must not
     // take the other courses down with it.
-    mockedSlots.mockImplementation(async ({ calendarId }) =>
-      calendarId === 'cal-1' ? {} : { [DATE]: [slot(4)] },
+    mockedSlots.mockImplementation(
+      async ({ calendarId }): Promise<Record<string, GHLBookingSlot[]>> =>
+        calendarId === 'cal-1' ? {} : { [DATE]: [slot(4)] },
     )
     const result = await coursesWithAvailabilityOn(
       fakeAdmin({}),

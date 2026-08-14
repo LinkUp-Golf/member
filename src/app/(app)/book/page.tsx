@@ -5012,25 +5012,14 @@ function EventFiltersDrawer({
               >
                 Date
               </p>
-              <div className="flex items-center gap-2">
-                <input
-                  type="date"
-                  className="input flex-1 min-w-0"
-                  min={today}
-                  value={date}
-                  onChange={(e) => onDateChange(e.target.value)}
-                  aria-label="Show venues with tee times on this date"
-                />
-                {date && (
-                  <button
-                    type="button"
-                    onClick={() => onDateChange("")}
-                    className="chip flex-shrink-0"
-                  >
-                    Any date
-                  </button>
-                )}
-              </div>
+              <input
+                type="date"
+                className="input w-full"
+                min={today}
+                value={date}
+                onChange={(e) => onDateChange(e.target.value)}
+                aria-label="Show venues with tee times on this date"
+              />
               <p
                 className="text-xs mt-2"
                 style={{ color: "rgba(0,38,105,0.4)" }}
