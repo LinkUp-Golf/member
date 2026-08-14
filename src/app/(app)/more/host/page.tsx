@@ -1,7 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useForm } from "react-hook-form";
+import { useState, useEffect, useCallback } from "react";
+import {
+  useForm,
+  useFieldArray,
+  type Control,
+  type FieldErrors,
+  type UseFormRegister,
+  type UseFormTrigger,
+} from "react-hook-form";
 import Link from "next/link";
 import { Flag, Plus, X } from "lucide-react";
 import { useProfile } from "@/hooks/useProfile";
@@ -9,13 +16,29 @@ import { apiClient } from "@/lib/api-client";
 import { Spinner } from "@/components/ui/Loading";
 import AppShell from "@/components/layout/AppShell";
 import { formatRelativeTime } from "@/lib/utils";
-import { NEW_VENUE_REF } from "@/lib/validation";
-import type {
-  Host,
-  HostApplication,
-  HostApplicationEventInput,
-  Course,
-} from "@/types";
+import {
+  buildApplicationPayload,
+  newRound,
+  roundAt,
+  roundStarted,
+  CLUB_NAME_MAX,
+  CLUB_NAME_MIN,
+  MAX_CUSTOM_VENUES,
+  MAX_DATES_PER_ROUND,
+  NAME_MAX,
+  NAME_MIN,
+  RATE_MAX,
+  SPOTS_MAX,
+  SPOTS_MIN,
+  TEE_TIME_MAX,
+  WEBSITE_MAX,
+  type ApplicationValues,
+  type CustomVenueField,
+  type RoundFields,
+  type SubmitValues,
+  type VenueKind,
+} from "@/lib/hosts/application-form";
+import type { Host, HostApplication, Course } from "@/types";
 
 type VenueOption = Pick<Course, "id" | "name" | "city"> & {
   /** 'pending' for a club the applicant proposed that an admin hasn't set up yet. */
@@ -282,79 +305,13 @@ export default function HostApplicationPage() {
 }
 
 // ---- Application form ---------------------------------------
-
-const NAME_MIN = 2;
-const NAME_MAX = 120;
-
-type ApplicationValues = { name: string };
-
-/** A round as submitted: `venue` is a course id or a `new:<index>` reference. */
-type ProposedRound = Omit<HostApplicationEventInput, "course_id"> & {
-  venue: string;
-};
-
-type SubmitValues = ApplicationValues & {
-  course_ids: string[];
-  new_venues: { name: string; website: string | null }[];
-  events: ProposedRound[];
-};
-
-/**
- * A club the applicant named that isn't on LinkUp yet. Held in form state only —
- * the pending course is created when the application is submitted, so abandoning
- * the form leaves nothing behind in the admin queue.
- */
-interface CustomVenueDraft {
-  key: number;
-  name: string;
-  website: string;
-}
-
-/**
- * The round a venue would host. Strings rather than numbers because these are
- * raw inputs — an empty numeric field is "" and must stay distinguishable from
- * 0, which is a legitimate guest rate.
- *
- * `dates` is a list: one round with several dates becomes one event per date,
- * all sharing the tee time, spots, rate and dinner. That's the "one date or
- * several" model, without retyping the details per date — and it's why a venue
- * needs only one round. Two rounds at the same club were always just two dates.
- */
-interface VenueRound {
-  dates: string[];
-  tee_time: string;
-  total_spots: string;
-  member_guest_rate: string;
-  dinner: boolean;
-}
-
-const DEFAULT_SPOTS = "3";
-const MAX_DATES_PER_ROUND = 30;
-const MAX_CUSTOM_VENUES = 10;
-
-/** Prefix identifying a not-yet-created venue by draft key. */
-const DRAFT_VENUE = "draft:";
-
-const newRound = (overrides: Partial<VenueRound> = {}): VenueRound => ({
-  dates: [""],
-  tee_time: "",
-  total_spots: DEFAULT_SPOTS,
-  member_guest_rate: "",
-  dinner: false,
-  ...overrides,
-});
-
-/**
- * Has the applicant started filling this round in? Rounds stay optional — you
- * can name the clubs you want and supply dates later — so an untouched one is
- * skipped rather than failing validation. total_spots is excluded because it
- * carries a default nobody chose.
- */
-const roundStarted = (r: VenueRound): boolean =>
-  r.dates.some((d) => d.trim()) ||
-  r.tee_time.trim() !== "" ||
-  r.member_guest_rate.trim() !== "" ||
-  r.dinner;
+//
+// Every field is registered with react-hook-form, including the dynamic ones:
+// the venues you pick and the dates on each round are `useFieldArray`s rather
+// than component state validated by hand at submit. That's what makes an error
+// land on the field that caused it — the old pass produced one message per venue
+// card and stopped at the first problem, so fixing three bad fields took three
+// submits.
 
 function ApplicationForm({
   heading,
@@ -368,24 +325,25 @@ function ApplicationForm({
 }) {
   const {
     register,
+    control,
     handleSubmit,
     reset,
+    setError,
+    clearErrors,
+    trigger,
     formState: { errors, isSubmitting },
   } = useForm<ApplicationValues>({
-    defaultValues: { name: "" },
+    defaultValues: { name: "", existing: [], custom: [] },
+    // Validate a field once it's been touched, so a bad date says so while
+    // you're still looking at it rather than after a submit.
+    mode: "onTouched",
   });
 
+  const existing = useFieldArray({ control, name: "existing" });
+  const custom = useFieldArray({ control, name: "custom" });
+
   const [venues, setVenues] = useState<VenueOption[]>([]);
-  const [venueIds, setVenueIds] = useState<string[]>([]);
-  const [venueError, setVenueError] = useState<string | null>(null);
   const [venuesLoaded, setVenuesLoaded] = useState(false);
-  // Keyed by venue reference — a course id, or `draft:<key>` for a club named
-  // here. One entry per venue is the whole rule: picking a venue twice is not
-  // expressible, so a second round at the same club can't be created.
-  const [rounds, setRounds] = useState<Record<string, VenueRound>>({});
-  const [roundErrors, setRoundErrors] = useState<Record<string, string>>({});
-  const [customVenues, setCustomVenues] = useState<CustomVenueDraft[]>([]);
-  const venueKey = useRef(0);
 
   useEffect(() => {
     apiClient.get<{ courses: VenueOption[] }>("/api/courses").then((res) => {
@@ -397,202 +355,52 @@ function ApplicationForm({
     });
   }, []);
 
-  /**
-   * A club the applicant named that isn't on LinkUp yet. Nothing is created
-   * here — the draft lives in form state and becomes a pending course only when
-   * the application is submitted, so a form that's abandoned halfway leaves no
-   * orphaned course behind.
-   *
-   * It arrives blank and stays editable: the name, the website and the round all
-   * sit in the same card as every other selected venue's.
-   */
-  const addCustomVenue = () => {
-    const key = ++venueKey.current;
-    setCustomVenues((prev) => [...prev, { key, name: "", website: "" }]);
-    setRounds((prev) => ({ ...prev, [`${DRAFT_VENUE}${key}`]: newRound() }));
-    setVenueError(null);
-  };
-
-  const updateCustomVenue = (key: number, patch: Partial<CustomVenueDraft>) =>
-    setCustomVenues((prev) =>
-      prev.map((v) => (v.key === key ? { ...v, ...patch } : v)),
-    );
-
-  const removeCustomVenue = (key: number) => {
-    setCustomVenues((prev) => prev.filter((v) => v.key !== key));
-    // The round goes with the venue — it has nowhere to be held otherwise.
-    setRounds((prev) => {
-      const next = { ...prev };
-      delete next[`${DRAFT_VENUE}${key}`];
-      return next;
-    });
-  };
-
-  /**
-   * Selecting a venue creates its round; deselecting removes it. There is no
-   * separate "add a round" step, which is what used to make a second round at an
-   * already-chosen venue possible.
-   */
-  const toggleVenue = (id: string) => {
-    const selected = venueIds.includes(id);
-    setVenueIds((prev) =>
-      selected ? prev.filter((v) => v !== id) : [...prev, id],
-    );
-    setRounds((prev) => {
-      if (selected) {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      }
-      return { ...prev, [id]: newRound() };
-    });
-    setVenueError(null);
-  };
-
-  const updateRound = (ref: string, patch: Partial<VenueRound>) =>
-    setRounds((prev) => {
-      const current = prev[ref];
-      if (!current) return prev;
-      return { ...prev, [ref]: { ...current, ...patch } };
-    });
-
-  /** Every venue on this application, in the order they're shown. */
-  const selectedVenues: {
-    ref: string;
-    label: string;
-    pending: boolean;
-    custom?: CustomVenueDraft;
-  }[] = [
-    ...venues
-      .filter((v) => venueIds.includes(v.id))
-      .map((v) => ({
-        ref: v.id,
-        label: v.city ? `${v.name} — ${v.city}` : v.name,
-        pending: v.approval_status === "pending",
-      })),
-    ...customVenues.map((v) => ({
-      ref: `${DRAFT_VENUE}${v.key}`,
-      label: v.name.trim(),
-      pending: true,
-      custom: v,
-    })),
-  ];
-
-  // Only what's left to pick — anything chosen has moved up into a card, so the
-  // list below never shows the same venue twice.
-  const unselectedVenues = venues.filter((v) => !venueIds.includes(v.id));
-
   const todayISO = new Date().toISOString().slice(0, 10);
 
   /**
-   * Validate the rounds up front rather than letting the server reject the whole
-   * application over one field. Mirrors validateHostedEventPayload, which is what
-   * these are checked against again on submit and on approval.
+   * Selecting a venue appends its round; deselecting removes both together.
+   * There is no separate "add a round" step, so a second round at a venue that's
+   * already on the application isn't expressible.
    */
-  const validateRounds = (): ProposedRound[] | null => {
-    const errs: Record<string, string> = {};
-    const payload: ProposedRound[] = [];
-
-    // Custom venues are sent as a list; a round at one references it by position.
-    const draftIndex = new Map(
-      customVenues.map((v, i) => [`${DRAFT_VENUE}${v.key}`, i]),
-    );
-
-    for (const { ref } of selectedVenues) {
-      const r = rounds[ref];
-      // A venue with an untouched round is requested without a proposed date —
-      // still a valid application.
-      if (!r || !roundStarted(r)) continue;
-
-      const dates = r.dates.map((d) => d.trim()).filter(Boolean);
-      if (dates.length === 0) {
-        errs[ref] = "Choose a date.";
-        continue;
-      }
-      if (dates.length !== r.dates.length) {
-        errs[ref] = "Fill in or remove the empty date.";
-        continue;
-      }
-      if (new Set(dates).size !== dates.length) {
-        errs[ref] = "Each date can only be added once.";
-        continue;
-      }
-      if (dates.some((d) => d < todayISO)) {
-        errs[ref] = "Date cannot be in the past.";
-        continue;
-      }
-      const spots = Number(r.total_spots);
-      if (!Number.isInteger(spots) || spots < 1 || spots > 200) {
-        errs[ref] = "Spots must be a whole number between 1 and 200.";
-        continue;
-      }
-      const rate = Number(r.member_guest_rate);
-      if (r.member_guest_rate === "" || !Number.isFinite(rate) || rate < 0) {
-        errs[ref] = "Enter the guest rate.";
-        continue;
-      }
-      // A draft venue has no id yet, so it travels as its position in new_venues.
-      const draftPos = draftIndex.get(ref);
-      const venueRef =
-        draftPos === undefined ? ref : `${NEW_VENUE_REF}${draftPos}`;
-
-      // One event per date, sharing everything else on the round.
-      for (const date of dates) {
-        payload.push({
-          venue: venueRef,
-          event_date: date,
-          tee_time: r.tee_time.trim() || null,
-          total_spots: spots,
-          member_guest_rate: rate,
-          dinner: r.dinner,
-        });
-      }
+  const toggleVenue = (v: VenueOption) => {
+    const at = existing.fields.findIndex((f) => f.courseId === v.id);
+    if (at >= 0) {
+      existing.remove(at);
+      return;
     }
-
-    setRoundErrors(errs);
-    return Object.keys(errs).length > 0 ? null : payload;
+    existing.append({
+      courseId: v.id,
+      label: v.city ? `${v.name} — ${v.city}` : v.name,
+      pending: v.approval_status === "pending",
+      round: newRound(),
+    });
+    clearErrors("root.venues");
   };
+
+  const addCustomVenue = () => {
+    custom.append({ name: "", website: "", round: newRound() });
+    clearErrors("root.venues");
+  };
+
+  // Only what's left to pick — anything chosen has moved up into a card, so the
+  // list below never shows the same venue twice.
+  const unselectedVenues = venues.filter(
+    (v) => !existing.fields.some((f) => f.courseId === v.id),
+  );
 
   const submit = handleSubmit(async (data) => {
     // A custom venue counts: it's a venue they want to host at, it just doesn't
-    // exist yet.
-    if (venueIds.length === 0 && customVenues.length === 0) {
-      setVenueError("Choose at least one venue you want to host at.");
+    // exist yet. This is the one rule that isn't a field's own, so it's the one
+    // thing still checked here.
+    if (data.existing.length === 0 && data.custom.length === 0) {
+      setError("root.venues", {
+        message: "Choose at least one venue you want to host at.",
+      });
       return;
     }
-    if (customVenues.some((v) => v.name.trim().length < 2)) {
-      setVenueError("Give every new venue a name (at least 2 characters).");
-      return;
-    }
-    const badSite = customVenues.find(
-      (v) => v.website.trim() && !/^https?:\/\/.+/i.test(v.website.trim()),
-    );
-    if (badSite) {
-      setVenueError("Website must be a valid URL (https://…).");
-      return;
-    }
-    setVenueError(null);
 
-    const events = validateRounds();
-    if (!events) return;
-
-    const ok = await onSubmit({
-      name: data.name.trim(),
-      course_ids: venueIds,
-      // Order matters: the `new:<index>` refs in `events` point into this list.
-      new_venues: customVenues.map((v) => ({
-        name: v.name.trim(),
-        website: v.website.trim() || null,
-      })),
-      events,
-    });
-    if (ok) {
-      reset();
-      setVenueIds([]);
-      setCustomVenues([]);
-      setRounds({});
-      setRoundErrors({});
-    }
+    const ok = await onSubmit(buildApplicationPayload(data));
+    if (ok) reset({ name: "", existing: [], custom: [] });
   });
 
   return (
@@ -635,173 +443,48 @@ function ApplicationForm({
             ticks scattered through a long roster — and the round sits with the
             venue it belongs to instead of in a separate section pointing back at
             it through a dropdown. */}
-        {selectedVenues.length > 0 && (
+        {(existing.fields.length > 0 || custom.fields.length > 0) && (
           <div className="space-y-2 mb-2">
-            {selectedVenues.map(({ ref, label, pending, custom }) => {
-              const round = rounds[ref];
-              if (!round) return null;
-              return (
-                <div
-                  key={ref}
-                  className="rounded-xl border border-green-900/20 bg-green-50/40 px-3 py-3 space-y-2"
-                >
-                  <div className="flex items-center gap-2">
-                    {custom ? (
-                      <input
-                        className="input flex-1 min-w-0"
-                        placeholder="Golf club name"
-                        maxLength={120}
-                        value={custom.name}
-                        autoFocus={
-                          custom.name === "" && custom.key === venueKey.current
-                        }
-                        onChange={(e) =>
-                          updateCustomVenue(custom.key, { name: e.target.value })
-                        }
-                      />
-                    ) : (
-                      <span className="text-sm font-medium text-green-900 flex-1 min-w-0 truncate">
-                        {label}
-                      </span>
-                    )}
-                    {pending && (
-                      <span className="flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full text-yellow-700 bg-yellow-50">
-                        {custom ? "New" : "Pending"}
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      aria-label={`Remove ${label || "venue"}`}
-                      onClick={() =>
-                        custom ? removeCustomVenue(custom.key) : toggleVenue(ref)
-                      }
-                      className="flex-shrink-0 text-green-900/40 hover:text-red-500 p-0.5"
-                    >
-                      <X className="h-4 w-4" strokeWidth={2} />
-                    </button>
-                  </div>
+            {existing.fields.map((field, index) => (
+              <VenueCard
+                key={field.id}
+                kind="existing"
+                index={index}
+                label={field.label}
+                pendingLabel={field.pending ? "Pending" : null}
+                control={control}
+                register={register}
+                trigger={trigger}
+                roundErrors={errors.existing?.[index]?.round}
+                todayISO={todayISO}
+                onRemove={() => existing.remove(index)}
+              />
+            ))}
 
-                  {custom && (
-                    <input
-                      className="input"
-                      placeholder="Website link — https://…"
-                      maxLength={200}
-                      value={custom.website}
-                      onChange={(e) =>
-                        updateCustomVenue(custom.key, {
-                          website: e.target.value,
-                        })
-                      }
-                    />
-                  )}
-
-                  {/* One round per venue. Several dates on it become one event
-                      each — which is what a second round here would have been. */}
-                  {round.dates.map((d, di) => (
-                    <div key={di} className="flex items-center gap-2">
-                      <input
-                        type="date"
-                        className="input"
-                        min={todayISO}
-                        value={d}
-                        onChange={(e) =>
-                          updateRound(ref, {
-                            dates: round.dates.map((v, vi) =>
-                              vi === di ? e.target.value : v,
-                            ),
-                          })
-                        }
-                      />
-                      {round.dates.length > 1 && (
-                        <button
-                          type="button"
-                          aria-label={`Remove date ${di + 1}`}
-                          onClick={() =>
-                            updateRound(ref, {
-                              dates: round.dates.filter((_, vi) => vi !== di),
-                            })
-                          }
-                          className="text-green-900/40 hover:text-red-500 p-0.5"
-                        >
-                          <X className="h-4 w-4" strokeWidth={2} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-
-                  {round.dates.length < MAX_DATES_PER_ROUND && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateRound(ref, { dates: [...round.dates, ""] })
-                      }
-                      className="text-xs font-medium text-green-800"
-                    >
-                      + Add another date
-                    </button>
-                  )}
-
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder="e.g. 8:30 AM (optional)"
-                    maxLength={50}
-                    value={round.tee_time}
-                    onChange={(e) =>
-                      updateRound(ref, { tee_time: e.target.value })
-                    }
-                  />
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="number"
-                      className="input"
-                      min={1}
-                      max={200}
-                      placeholder="Available spots"
-                      value={round.total_spots}
-                      onChange={(e) =>
-                        updateRound(ref, { total_spots: e.target.value })
-                      }
-                    />
-                    <input
-                      type="number"
-                      className="input"
-                      min={0}
-                      step="1"
-                      placeholder="Member guest rate"
-                      value={round.member_guest_rate}
-                      onChange={(e) =>
-                        updateRound(ref, { member_guest_rate: e.target.value })
-                      }
-                    />
-                  </div>
-
-                  <label className="flex items-center gap-3 text-sm text-green-900/80 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-green-900/30 text-green-900 focus:ring-green-800"
-                      checked={round.dinner}
-                      onChange={(e) =>
-                        updateRound(ref, { dinner: e.target.checked })
-                      }
-                    />
-                    Dinner included
-                  </label>
-
-                  {roundErrors[ref] && (
-                    <p className="text-xs text-red-500">{roundErrors[ref]}</p>
-                  )}
-                </div>
-              );
-            })}
+            {custom.fields.map((field, index) => (
+              <VenueCard
+                key={field.id}
+                kind="custom"
+                index={index}
+                label=""
+                pendingLabel="New"
+                control={control}
+                register={register}
+                trigger={trigger}
+                roundErrors={errors.custom?.[index]?.round}
+                clubErrors={errors.custom?.[index]}
+                autoFocusName={index === custom.fields.length - 1}
+                todayISO={todayISO}
+                onRemove={() => custom.remove(index)}
+              />
+            ))}
           </div>
         )}
 
         <button
           type="button"
           onClick={addCustomVenue}
-          disabled={customVenues.length >= MAX_CUSTOM_VENUES}
+          disabled={custom.fields.length >= MAX_CUSTOM_VENUES}
           className="flex w-full items-center gap-2 rounded-xl border border-dashed border-green-900/25 px-3 py-2.5 text-sm text-green-900/70 mb-1.5 disabled:opacity-40"
         >
           <Plus className="h-4 w-4" strokeWidth={2} />
@@ -822,7 +505,7 @@ function ApplicationForm({
                     type="checkbox"
                     className="h-4 w-4 rounded border-green-900/30 text-green-900 focus:ring-green-800"
                     checked={false}
-                    onChange={() => toggleVenue(v.id)}
+                    onChange={() => toggleVenue(v)}
                   />
                   <span className="text-sm text-green-900/80">
                     {v.city ? `${v.name} — ${v.city}` : v.name}
@@ -837,8 +520,10 @@ function ApplicationForm({
             </div>
           )
         )}
-        {venueError && (
-          <p className="text-xs text-red-500 mt-1.5">{venueError}</p>
+        {errors.root?.venues && (
+          <p className="text-xs text-red-500 mt-1.5">
+            {errors.root.venues.message}
+          </p>
         )}
       </div>
 
@@ -856,6 +541,259 @@ function ApplicationForm({
         )}
       </button>
     </form>
+  );
+}
+
+/**
+ * One venue and the round it would host.
+ *
+ * Its own component because the dates are a nested useFieldArray, and a hook
+ * can't be called inside the parent's map. `kind` picks which top-level array
+ * this card sits in, which is all the field paths need to be built.
+ */
+function VenueCard({
+  kind,
+  index,
+  label,
+  pendingLabel,
+  control,
+  register,
+  trigger,
+  roundErrors,
+  clubErrors,
+  autoFocusName,
+  todayISO,
+  onRemove,
+}: {
+  kind: VenueKind;
+  index: number;
+  label: string;
+  pendingLabel: string | null;
+  control: Control<ApplicationValues>;
+  register: UseFormRegister<ApplicationValues>;
+  trigger: UseFormTrigger<ApplicationValues>;
+  roundErrors?: FieldErrors<RoundFields>;
+  clubErrors?: FieldErrors<CustomVenueField>;
+  autoFocusName?: boolean;
+  todayISO: string;
+  onRemove: () => void;
+}) {
+  const prefix = `${kind}.${index}` as const;
+  // The cast picks one arm of the `existing.N | custom.N` union so the path type
+  // resolves; at runtime the name is just the string, and both arms are real
+  // paths of the same shape.
+  const dates = useFieldArray({
+    control,
+    name: `${prefix}.round.dates` as `existing.${number}.round.dates`,
+  });
+  const isCustom = kind === "custom";
+
+  return (
+    <div className="rounded-xl border border-green-900/20 bg-green-50/40 px-3 py-3 space-y-2">
+      <div className="flex items-center gap-2">
+        {isCustom ? (
+          <input
+            className="input flex-1 min-w-0"
+            placeholder="Golf club name"
+            autoFocus={autoFocusName}
+            {...register(`custom.${index}.name`, {
+              required: "Enter the club name",
+              maxLength: {
+                value: CLUB_NAME_MAX,
+                message: `At most ${CLUB_NAME_MAX} characters`,
+              },
+              validate: (v) =>
+                v.trim().length >= CLUB_NAME_MIN ||
+                `At least ${CLUB_NAME_MIN} characters`,
+            })}
+          />
+        ) : (
+          <span className="text-sm font-medium text-green-900 flex-1 min-w-0 truncate">
+            {label}
+          </span>
+        )}
+        {pendingLabel && (
+          <span className="flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full text-yellow-700 bg-yellow-50">
+            {pendingLabel}
+          </span>
+        )}
+        <button
+          type="button"
+          aria-label={`Remove ${label || "venue"}`}
+          onClick={onRemove}
+          className="flex-shrink-0 text-green-900/40 hover:text-red-500 p-0.5"
+        >
+          <X className="h-4 w-4" strokeWidth={2} />
+        </button>
+      </div>
+      {isCustom && clubErrors?.name && (
+        <p className="text-xs text-red-500">{clubErrors.name.message}</p>
+      )}
+
+      {isCustom && (
+        <>
+          <input
+            className="input"
+            placeholder="Website link — https://…"
+            {...register(`custom.${index}.website`, {
+              maxLength: {
+                value: WEBSITE_MAX,
+                message: `At most ${WEBSITE_MAX} characters`,
+              },
+              validate: (v) =>
+                !v.trim() ||
+                /^https?:\/\/.+/i.test(v.trim()) ||
+                "Website must be a valid URL (https://…)",
+            })}
+          />
+          {clubErrors?.website && (
+            <p className="text-xs text-red-500">{clubErrors.website.message}</p>
+          )}
+        </>
+      )}
+
+      {/* One round per venue. Several dates on it become one event each — which
+          is what a second round here would have been. */}
+      {dates.fields.map((field, di) => {
+        const { onChange: onDateChange, ...dateField } = register(
+          `${prefix}.round.dates.${di}.value` as const,
+          {
+            validate: (value: string, values: ApplicationValues) => {
+              const round = roundAt(values, kind, index);
+              // Nothing filled in anywhere on this round: it's a venue
+              // requested without dates, which is allowed.
+              if (!roundStarted(round)) return true;
+              const v = value.trim();
+              if (!v) return "Fill in or remove the empty date.";
+              if (v < todayISO) return "Date cannot be in the past.";
+              const all = (round?.dates ?? [])
+                .map((d) => d.value.trim())
+                .filter(Boolean);
+              return (
+                all.filter((d) => d === v).length === 1 ||
+                "Each date can only be added once."
+              );
+            },
+          },
+        );
+
+        return (
+        <div key={field.id}>
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              className="input"
+              min={todayISO}
+              {...dateField}
+              onChange={(e) => {
+                onDateChange(e);
+                // The duplicate check reads its siblings, so fixing one of a
+                // clashing pair has to clear the error on the other. Without
+                // this, react-hook-form revalidates only the field that
+                // changed and the stale message sits there.
+                if (dates.fields.length > 1) {
+                  void trigger(`${prefix}.round.dates` as const);
+                }
+              }}
+            />
+            {dates.fields.length > 1 && (
+              <button
+                type="button"
+                aria-label={`Remove date ${di + 1}`}
+                onClick={() => dates.remove(di)}
+                className="text-green-900/40 hover:text-red-500 p-0.5"
+              >
+                <X className="h-4 w-4" strokeWidth={2} />
+              </button>
+            )}
+          </div>
+          {roundErrors?.dates?.[di]?.value && (
+            <p className="text-xs text-red-500 mt-1">
+              {roundErrors.dates[di]?.value?.message}
+            </p>
+          )}
+        </div>
+        );
+      })}
+
+      {dates.fields.length < MAX_DATES_PER_ROUND && (
+        <button
+          type="button"
+          onClick={() => dates.append({ value: "" })}
+          className="text-xs font-medium text-green-800"
+        >
+          + Add another date
+        </button>
+      )}
+
+      <input
+        type="text"
+        className="input"
+        placeholder="e.g. 8:30 AM (optional)"
+        {...register(`${prefix}.round.tee_time` as const, {
+          maxLength: {
+            value: TEE_TIME_MAX,
+            message: `At most ${TEE_TIME_MAX} characters`,
+          },
+        })}
+      />
+      {roundErrors?.tee_time && (
+        <p className="text-xs text-red-500">{roundErrors.tee_time.message}</p>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        <input
+          type="number"
+          className="input"
+          min={SPOTS_MIN}
+          max={SPOTS_MAX}
+          placeholder="Available spots"
+          {...register(`${prefix}.round.total_spots` as const, {
+            validate: (value: string, values: ApplicationValues) => {
+              if (!roundStarted(roundAt(values, kind, index))) return true;
+              const n = Number(value);
+              return (
+                (Number.isInteger(n) && n >= SPOTS_MIN && n <= SPOTS_MAX) ||
+                `Spots must be a whole number between ${SPOTS_MIN} and ${SPOTS_MAX}.`
+              );
+            },
+          })}
+        />
+        <input
+          type="number"
+          className="input"
+          min={0}
+          step="1"
+          placeholder="Member guest rate"
+          {...register(`${prefix}.round.member_guest_rate` as const, {
+            validate: (value: string, values: ApplicationValues) => {
+              if (!roundStarted(roundAt(values, kind, index))) return true;
+              if (value.trim() === "") return "Enter the guest rate.";
+              const n = Number(value);
+              if (!Number.isFinite(n) || n < 0) return "Enter the guest rate.";
+              return n <= RATE_MAX || `At most ${RATE_MAX}.`;
+            },
+          })}
+        />
+      </div>
+      {roundErrors?.total_spots && (
+        <p className="text-xs text-red-500">{roundErrors.total_spots.message}</p>
+      )}
+      {roundErrors?.member_guest_rate && (
+        <p className="text-xs text-red-500">
+          {roundErrors.member_guest_rate.message}
+        </p>
+      )}
+
+      <label className="flex items-center gap-3 text-sm text-green-900/80 cursor-pointer">
+        <input
+          type="checkbox"
+          className="h-4 w-4 rounded border-green-900/30 text-green-900 focus:ring-green-800"
+          {...register(`${prefix}.round.dinner` as const)}
+        />
+        Dinner included
+      </label>
+    </div>
   );
 }
 
