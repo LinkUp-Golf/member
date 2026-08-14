@@ -24,10 +24,10 @@ import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { sendPushToMembers, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
+import { buildCustomSlots } from '@/lib/bookings/availability'
 import { format } from 'date-fns'
-import { fromZonedTime, formatInTimeZone } from 'date-fns-tz'
 import { titleCaseName } from '@/lib/utils'
-import type { AdditionalPlayer, GHLBookingSlot } from '@/types'
+import type { AdditionalPlayer } from '@/types'
 
 // Total players per booking is capped at 4 (mirrors validateBookingPayload),
 // so at most 3 additional players may accompany the primary booker.
@@ -129,83 +129,10 @@ export async function GET(request: NextRequest) {
   // curated rows — those dates use the custom tee times instead of GHL's. Every
   // other date is left untouched and keeps its normal GHL availability.
   const slots = customSlotsEnabled && courseId
-    ? { ...ghlSlots, ...(await buildCustomSlots(courseId, startDate, endDate, timezone, durationMins)) }
+    ? { ...ghlSlots, ...(await buildCustomSlots(createAdminClient(), courseId, startDate, endDate, timezone, durationMins)) }
     : ghlSlots
 
   return NextResponse.json({ slots, timezone, durationMins })
-}
-
-// Builds a slot map for ONLY the dates a custom course has curated, keyed by
-// date and matching the shape getAvailableSlots returns so the caller can
-// overlay it onto the GHL slots (curated dates replace GHL; uncurated dates are
-// absent here and so keep their GHL slots). spotsOpen for each curated tee time
-// is its configured seats minus the players already booked at that exact
-// course+date+tee_time (cancelled and waitlisted rows don't hold a seat).
-async function buildCustomSlots(
-  courseId: string,
-  startDate: string,
-  endDate: string,
-  timezone: string,
-  durationMins: number,
-): Promise<Record<string, GHLBookingSlot[]>> {
-  const admin = createAdminClient()
-
-  const [{ data: customRows }, { data: bookingRows }] = await Promise.all([
-    admin
-      .from('course_custom_slots')
-      .select('slot_date, tee_time, seats')
-      .eq('course_id', courseId)
-      .gte('slot_date', startDate)
-      .lte('slot_date', endDate),
-    admin
-      .from('bookings')
-      .select('booking_date, tee_time')
-      .eq('course_id', courseId)
-      .gte('booking_date', startDate)
-      .lte('booking_date', endDate)
-      .not('status', 'in', '(cancelled,waitlist)'),
-  ])
-
-  // How many seats are already taken per (date, tee_time).
-  const booked = new Map<string, number>()
-  for (const row of bookingRows ?? []) {
-    const key = `${row.booking_date}|${normaliseTime(row.tee_time as string)}`
-    booked.set(key, (booked.get(key) ?? 0) + 1)
-  }
-
-  const result: Record<string, GHLBookingSlot[]> = {}
-  for (const row of customRows ?? []) {
-    const time = normaliseTime(row.tee_time as string)
-    const used = booked.get(`${row.slot_date}|${time}`) ?? 0
-    const spotsOpen = Math.max(0, (row.seats as number) - used)
-
-    // Same offset-bearing ISO shape getAvailableSlots emits, in the course's tz.
-    const startUtc = fromZonedTime(`${row.slot_date}T${time}`, timezone)
-    const startMs = startUtc.getTime()
-    const iso = "yyyy-MM-dd'T'HH:mm:ssxxx"
-
-    ;(result[row.slot_date] ??= []).push({
-      startTime: formatInTimeZone(startMs, timezone, iso),
-      endTime: formatInTimeZone(startMs + durationMins * 60 * 1000, timezone, iso),
-      available: spotsOpen > 0,
-      spotsOpen,
-    })
-  }
-
-  for (const arr of Object.values(result)) {
-    arr.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
-  }
-  return result
-}
-
-// Postgres `time` values come back as 'HH:MM:SS'; a curated tee_time stored as
-// 'HH:MM' is normalised to the same so the two match when counting booked seats.
-function normaliseTime(t: string): string {
-  const parts = t.split(':')
-  const hh = (parts[0] ?? '00').padStart(2, '0')
-  const mm = (parts[1] ?? '00').padStart(2, '0')
-  const ss = (parts[2] ?? '00').padStart(2, '0')
-  return `${hh}:${mm}:${ss}`
 }
 
 // ============================================================

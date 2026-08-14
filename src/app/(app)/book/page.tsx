@@ -4635,7 +4635,12 @@ function EventSelectionScreen({
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [locationFilter, setLocationFilter] = useState("all");
+  // "" = any date. A date narrows the list to courses with a tee time open
+  // that day, which the server answers by asking each course's calendar.
+  const [dateFilter, setDateFilter] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const activeFilterCount =
+    (locationFilter !== "all" ? 1 : 0) + (dateFilter ? 1 : 0);
 
   useEffect(() => {
     fetch("/api/courses")
@@ -4678,12 +4683,12 @@ function EventSelectionScreen({
     [locationOptions],
   );
 
-  // Server-side filtering — refetch whenever the debounced search or the
-  // selected location changes. Skipped when neither is active, since the
-  // unfiltered list from the initial load above already covers that case.
+  // Server-side filtering — refetch whenever the debounced search or either
+  // filter changes. Skipped when none is active, since the unfiltered list from
+  // the initial load above already covers that case.
   useEffect(() => {
     if (loading) return;
-    if (!debouncedSearch && locationFilter === "all") {
+    if (!debouncedSearch && locationFilter === "all" && !dateFilter) {
       setFilteredEvents(events);
       return;
     }
@@ -4696,13 +4701,28 @@ function EventSelectionScreen({
       if (parts?.city) params.set("city", parts.city);
       if (parts?.state) params.set("state", parts.state);
     }
+    if (dateFilter) params.set("date", dateFilter);
+
+    // A date filter fans out to every course's calendar, so a stale response
+    // can land after a newer one. Ignore anything but the latest request.
+    let current = true;
     setFiltering(true);
     fetch(`/api/courses?${params.toString()}`)
       .then((r) => r.json())
-      .then((d) => setFilteredEvents(Array.isArray(d.courses) ? d.courses : []))
-      .catch(() => setFilteredEvents([]))
-      .finally(() => setFiltering(false));
-  }, [debouncedSearch, locationFilter, loading, locationOptions, events]);
+      .then((d) => {
+        if (!current) return;
+        setFilteredEvents(Array.isArray(d.courses) ? d.courses : []);
+      })
+      .catch(() => {
+        if (current) setFilteredEvents([]);
+      })
+      .finally(() => {
+        if (current) setFiltering(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [debouncedSearch, locationFilter, dateFilter, loading, locationOptions, events]);
 
   if (loading) {
     return (
@@ -4779,27 +4799,25 @@ function EventSelectionScreen({
               style={{ color: "var(--color-green-900)" }}
             />
           </div>
-          {locations.length > 1 && (
-            <button
-              type="button"
-              onClick={() => setFiltersOpen(true)}
-              aria-label="Filter by location"
-              className="relative flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-xl border transition-colors hover:bg-green-50/60 active:opacity-70"
-              style={{
-                borderColor: "rgba(0,38,105,0.1)",
-                background: "white",
-                color: "rgba(0,38,105,0.5)",
-              }}
-            >
-              <FunnelIcon />
-              {locationFilter !== "all" && (
-                <span
-                  className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 border-white"
-                  style={{ background: "var(--color-gold)" }}
-                />
-              )}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setFiltersOpen(true)}
+            aria-label="Filter events"
+            className="relative flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-xl border transition-colors hover:bg-green-50/60 active:opacity-70"
+            style={{
+              borderColor: "rgba(0,38,105,0.1)",
+              background: "white",
+              color: "rgba(0,38,105,0.5)",
+            }}
+          >
+            <FunnelIcon />
+            {activeFilterCount > 0 && (
+              <span
+                className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 border-white"
+                style={{ background: "var(--color-gold)" }}
+              />
+            )}
+          </button>
         </div>
       )}
 
@@ -4813,7 +4831,11 @@ function EventSelectionScreen({
             compact
             icon="🔍"
             title="No events match your search"
-            description="Try a different name or location."
+            description={
+              dateFilter
+                ? "No venue has a tee time open on that date. Try another day, or clear the date filter."
+                : "Try a different name or location."
+            }
           />
         ) : (
           <div className="card">
@@ -4844,12 +4866,14 @@ function EventSelectionScreen({
         )}
       </div>
 
-      <EventLocationFilterDrawer
+      <EventFiltersDrawer
         open={filtersOpen}
         onClose={() => setFiltersOpen(false)}
         locations={locations}
-        value={locationFilter}
-        onChange={setLocationFilter}
+        location={locationFilter}
+        onLocationChange={setLocationFilter}
+        date={dateFilter}
+        onDateChange={setDateFilter}
       />
     </div>
   );
@@ -4873,18 +4897,22 @@ function FunnelIcon() {
   );
 }
 
-function EventLocationFilterDrawer({
+function EventFiltersDrawer({
   open,
   onClose,
   locations,
-  value,
-  onChange,
+  location,
+  onLocationChange,
+  date,
+  onDateChange,
 }: {
   open: boolean;
   onClose: () => void;
   locations: string[];
-  value: string;
-  onChange: (location: string) => void;
+  location: string;
+  onLocationChange: (location: string) => void;
+  date: string;
+  onDateChange: (date: string) => void;
 }) {
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
@@ -4906,10 +4934,10 @@ function EventLocationFilterDrawer({
 
   if (!mounted) return null;
 
-  function choose(loc: string) {
-    onChange(loc);
-    onClose();
-  }
+  // Selecting a filter no longer closes the sheet — with more than one to set,
+  // closing on the first pick made the second unreachable without reopening.
+  const today = format(new Date(), "yyyy-MM-dd");
+  const hasFilters = location !== "all" || !!date;
 
   const drawer = (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
@@ -4943,7 +4971,7 @@ function EventLocationFilterDrawer({
               className="text-sm font-bold"
               style={{ color: "var(--color-green-900)" }}
             >
-              Filter by location
+              Filters
             </h2>
             <button
               type="button"
@@ -4977,24 +5005,95 @@ function EventLocationFilterDrawer({
               paddingBottom: "max(2rem, calc(2rem + env(safe-area-inset-bottom)))",
             }}
           >
-            <div className="flex flex-wrap gap-2">
+            <div className="mb-6">
+              <p
+                className="text-xs font-semibold mb-2.5"
+                style={{ color: "rgba(0,38,105,0.45)" }}
+              >
+                Date
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  className="input flex-1 min-w-0"
+                  min={today}
+                  value={date}
+                  onChange={(e) => onDateChange(e.target.value)}
+                  aria-label="Show venues with tee times on this date"
+                />
+                {date && (
+                  <button
+                    type="button"
+                    onClick={() => onDateChange("")}
+                    className="chip flex-shrink-0"
+                  >
+                    Any date
+                  </button>
+                )}
+              </div>
+              <p
+                className="text-xs mt-2"
+                style={{ color: "rgba(0,38,105,0.4)" }}
+              >
+                Only venues with a tee time open that day.
+              </p>
+            </div>
+
+            {locations.length > 1 && (
+              <div>
+                <p
+                  className="text-xs font-semibold mb-2.5"
+                  style={{ color: "rgba(0,38,105,0.45)" }}
+                >
+                  Location
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onLocationChange("all")}
+                    className={`chip ${location === "all" ? "active" : ""}`}
+                  >
+                    All locations
+                  </button>
+                  {locations.map((loc) => (
+                    <button
+                      key={loc}
+                      type="button"
+                      onClick={() => onLocationChange(loc)}
+                      className={`chip ${location === loc ? "active" : ""}`}
+                    >
+                      {loc}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 pt-6">
+              {hasFilters && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onLocationChange("all");
+                    onDateChange("");
+                  }}
+                  className="flex-1 py-3 rounded-2xl text-sm font-semibold border"
+                  style={{
+                    borderColor: "rgba(0,38,105,0.12)",
+                    color: "rgba(0,38,105,0.55)",
+                  }}
+                >
+                  Clear all
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => choose("all")}
-                className={`chip ${value === "all" ? "active" : ""}`}
+                onClick={onClose}
+                className="flex-1 py-3 rounded-2xl text-sm font-semibold text-center"
+                style={{ background: "var(--color-green-900)", color: "white" }}
               >
-                All locations
+                Done
               </button>
-              {locations.map((loc) => (
-                <button
-                  key={loc}
-                  type="button"
-                  onClick={() => choose(loc)}
-                  className={`chip ${value === loc ? "active" : ""}`}
-                >
-                  {loc}
-                </button>
-              ))}
             </div>
           </div>
         </div>
