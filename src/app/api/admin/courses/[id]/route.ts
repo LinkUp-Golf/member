@@ -5,8 +5,9 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { createGHLCalendar, deleteGHLCalendar, getCalendarBookingRules } from '@/lib/ghl/client'
-import { validateTimezone } from '@/lib/validation'
+import { validateTimezone, sanitiseText } from '@/lib/validation'
 import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
+import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 import type { Course } from '@/types'
 
@@ -97,12 +98,35 @@ export const PATCH = withAuth(
         return NextResponse.json({ course: data })
       }
 
-      // reject
+      // reject — the reason is required, not optional. A rejected course is one
+      // a member proposed and we turned down; without a note the next admin
+      // seeing it has no idea whether it was a duplicate, out of area, or a
+      // mistake, and the host who proposed it gets no answer either.
+      const rejectionReason = body.rejection_reason?.trim() ?? ''
+      if (!rejectionReason) {
+        return NextResponse.json({ error: 'A reason is required to reject a course.' }, { status: 400 })
+      }
+
       const { data, error } = await admin
         .from('courses')
-        .update({ approval_status: 'rejected', rejection_reason: body.rejection_reason ?? null, reviewed_by: ctx.userId })
+        .update({
+          approval_status: 'rejected',
+          rejection_reason: sanitiseText(rejectionReason),
+          reviewed_by: ctx.userId,
+        })
         .eq('id', id).select().single()
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+      try {
+        await admin.from('admin_audit_log').insert({
+          admin_id: ctx.userId,
+          action: 'courses.rejected',
+          target_type: 'course',
+          target_id: id,
+          payload: { name: data?.name, reason: rejectionReason },
+        })
+      } catch { /* table may not exist yet */ }
+
       return NextResponse.json({ course: data })
     }
 
@@ -235,9 +259,18 @@ export const PATCH = withAuth(
 //
 // Use Archive (approval_status = 'archived') for courses with any booking history.
 export const DELETE = withAuth(
-  async (_req: NextRequest, _ctx: AuthContext, routeCtx?: { params: Record<string, string> }) => {
+  async (req: NextRequest, ctx: AuthContext, routeCtx?: { params: Record<string, string> }) => {
     const id = routeCtx?.params?.['id']
     if (!id) return NextResponse.json({ error: 'Missing course id' }, { status: 400 })
+
+    // Deleting a course removes the row outright, so the only place the "why"
+    // can survive is the audit log — which makes the note the entire record of
+    // this decision. Required for that reason, not as a speed bump.
+    const body = await req.json().catch(() => ({})) as { reason?: string }
+    const reason = body.reason?.trim() ?? ''
+    if (!reason) {
+      return NextResponse.json({ error: 'A reason is required to delete a course.' }, { status: 400 })
+    }
 
     const admin = createAdminClient()
 
@@ -283,8 +316,14 @@ export const DELETE = withAuth(
       )
     }
 
-    // Safe to delete — clean up related content rows first, then the course
-    const { data: course } = await admin.from('courses').select('ghl_calendar_id').eq('id', id).single()
+    // Safe to delete — clean up related content rows first, then the course.
+    // Read the identifying fields before the row goes: the audit entry has to
+    // stand on its own afterwards, and a bare uuid tells nobody anything.
+    const { data: course } = await admin
+      .from('courses')
+      .select('ghl_calendar_id, name, slug, city, state, approval_status')
+      .eq('id', id)
+      .single()
 
     // Delete content records that reference this course (no financial significance)
     await Promise.all([
@@ -297,6 +336,31 @@ export const DELETE = withAuth(
     // Delete the course (course_memberships cascade automatically via FK)
     const { error } = await admin.from('courses').delete().eq('id', id)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+    // Written after the delete succeeds, so the log never claims something that
+    // didn't happen. This entry is now the only record the course ever existed.
+    try {
+      await admin.from('admin_audit_log').insert({
+        admin_id: ctx.userId,
+        action: 'courses.deleted',
+        target_type: 'course',
+        target_id: id,
+        payload: {
+          reason,
+          name: course?.name,
+          slug: course?.slug,
+          city: course?.city,
+          state: course?.state,
+          approval_status: course?.approval_status,
+        },
+      })
+    } catch { /* table may not exist yet */ }
+
+    logger.info('Course deleted by admin', {
+      action: 'admin.course.deleted',
+      userId: ctx.userId,
+      metadata: { course_id: id, name: course?.name },
+    })
 
     // Clean up GHL calendar (best-effort, non-fatal)
     if (course?.ghl_calendar_id) await deleteGHLCalendar(course.ghl_calendar_id)
