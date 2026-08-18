@@ -11,11 +11,11 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Image from 'next/image'
-import { Clock, MapPin, Globe, Phone, Users, X } from 'lucide-react'
-import { format } from 'date-fns'
-import { formatTeeTime } from '@/lib/utils'
+import { ChevronRight, MapPin, Globe, Phone, Users, X } from 'lucide-react'
+import { format, addMinutes, parse } from 'date-fns'
+import { cn, formatTeeTime } from '@/lib/utils'
 import { BOOKING_PRICE_USD } from '@/lib/constants'
-import type { Course } from '@/types'
+import type { Course, GHLBookingSlot } from '@/types'
 
 export interface VenueDayDetail {
   course: Course
@@ -25,11 +25,24 @@ export interface VenueDayDetail {
   openSlots: number
   /** Seats across them, already clamped to the venue's daily cap. */
   openSpots: number
-  /** Earliest few tee times, with the seats left at each. */
-  tees: { time: string; spotsOpen: number }[]
-  /** Rounds of theirs at this venue still awaiting payment, if any. */
+  /**
+   * How many of the member's rounds are still awaiting payment, anywhere. The
+   * FIFO gate is global — one unpaid round blocks a new booking at every
+   * venue — so this isn't scoped to the course in front of them.
+   */
   pendingCount: number
 }
+
+// The month payload only previews a few tee times per venue-day, which is
+// enough to decide whether to open the sheet but not enough to book from. The
+// full day comes from the per-venue month endpoint — the same call the old
+// selection screen made, moved here rather than added.
+function slotEndLabel(startIso: string, durationMins: number): string {
+  const timeStr = startIso.split('T')[1]?.slice(0, 8) ?? '00:00:00'
+  return format(addMinutes(parse(timeStr, 'HH:mm:ss', new Date()), durationMins), 'h:mm a')
+}
+
+const slotTime = (iso: string) => formatTeeTime(iso.split('T')[1]?.slice(0, 8) ?? '')
 
 export default function VenueDayDetailSheet({
   detail,
@@ -39,10 +52,15 @@ export default function VenueDayDetailSheet({
   /** null closes the sheet (kept mounted through the exit transition). */
   detail: VenueDayDetail | null
   onClose: () => void
-  onBook: (course: Course, date: string) => void
+  /** Picking a tee time IS the booking — it goes straight to confirmation. */
+  onBook: (course: Course, date: string, slot: GHLBookingSlot) => void
 }) {
   const [mounted, setMounted] = useState(false)
   const [visible, setVisible] = useState(false)
+  // The day's full tee-time list, fetched when the sheet opens.
+  const [slots, setSlots] = useState<GHLBookingSlot[] | null>(null)
+  const [durationMins, setDurationMins] = useState<number | null>(null)
+  const [slotsError, setSlotsError] = useState(false)
   // Held through the close animation so the sheet still has something to render
   // while it slides out.
   const [shown, setShown] = useState<VenueDayDetail | null>(detail)
@@ -62,6 +80,35 @@ export default function VenueDayDetailSheet({
     return () => clearTimeout(t)
   }, [detail])
 
+  useEffect(() => {
+    if (!detail) return
+    const { course, date } = detail
+    let current = true
+    setSlots(null)
+    setDurationMins(null)
+    setSlotsError(false)
+    fetch(`/api/bookings/create?month=${date.slice(0, 7)}&courseId=${course.id}`)
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(d.error ?? 'Failed to load tee times.')
+        return d
+      })
+      .then((d) => {
+        if (!current) return
+        const all: GHLBookingSlot[] = Array.isArray(d.slots?.[date]) ? d.slots[date] : []
+        setSlots(all.filter(sl => sl.available && (sl.spotsOpen ?? 0) > 0))
+        setDurationMins(typeof d.durationMins === 'number' ? d.durationMins : null)
+      })
+      .catch(() => {
+        if (!current) return
+        setSlots([])
+        setSlotsError(true)
+      })
+    return () => {
+      current = false
+    }
+  }, [detail])
+
   // Escape closes, and the page behind stays put while the sheet is up.
   useEffect(() => {
     if (!detail) return
@@ -77,13 +124,16 @@ export default function VenueDayDetailSheet({
 
   if (!mounted || !shown) return null
 
-  const { course, date, openSlots, openSpots, tees, pendingCount } = shown
+  const { course, date, openSlots, openSpots, pendingCount } = shown
   const location = [course.city, course.state].filter(Boolean).join(', ')
   const longDate = format(new Date(`${date}T12:00:00`), 'EEEE, MMMM d')
   // Courses carry their own rate; BOOKING_PRICE_USD is the house default the
   // confirm screen quotes when one isn't set, so the sheet can always name a
   // price rather than going silent on the question that decides the booking.
   const pricePerPlayer = course.cost_per_player ?? BOOKING_PRICE_USD
+  // The FIFO gate is enforced server-side on POST /api/bookings/create too;
+  // this only keeps the member from walking into a rejection.
+  const blocked = pendingCount > 0
 
   const sheet = (
     <div
@@ -131,7 +181,7 @@ export default function VenueDayDetailSheet({
 
         <div
           className="flex-1 overflow-y-auto px-5 pt-2 md:pt-6"
-          style={{ paddingBottom: '1rem' }}
+          style={{ paddingBottom: 'max(1.5rem, calc(1.5rem + env(safe-area-inset-bottom)))' }}
         >
           {/* Header — logo, name, where */}
           <div className="flex items-start gap-3.5">
@@ -168,44 +218,76 @@ export default function VenueDayDetailSheet({
               </span>
             </div>
 
-            {/* The times themselves, each with the seats left on it — the count
-                of them is the list's own length, so it isn't stated twice. */}
-            <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-              {tees.map(t => (
-                <span
-                  key={t.time}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-full bg-white border border-green-900/10 text-green-900/65"
-                >
-                  <Clock className="w-3 h-3 flex-shrink-0 text-green-900/35" strokeWidth={2} />
-                  {formatTeeTime(t.time)}
-                  <span aria-hidden className="text-green-900/25">·</span>
-                  <span className="text-green-900/45">{t.spotsOpen}</span>
-                </span>
-              ))}
-              {openSlots > tees.length && (
-                <span className="text-[11px] text-green-900/40">
-                  +{openSlots - tees.length} more
-                </span>
-              )}
-            </div>
             <p className="mt-2 text-[11px] text-green-900/40">
-              Times are local to the venue. You&apos;ll pick your exact tee time next.
+              Times are local to the venue.
             </p>
           </div>
 
-          {/* The list row used to badge a venue the member owed money at. The
-              FIFO gate blocks a new booking until it's resolved, so the warning
-              belongs in front of the button rather than after it. */}
-          {pendingCount > 0 && (
-            <div className="mt-4 rounded-2xl px-4 py-3" style={{ background: 'rgba(146,100,10,0.08)' }}>
-              <p className="text-xs font-bold" style={{ color: '#92640a' }}>
-                💳 {pendingCount} payment{pendingCount === 1 ? '' : 's'} due here
+          {/* Tee times — picking one goes straight to confirmation, so this is
+              the booking step rather than a preview of one. */}
+          <div className="mt-4">
+            <p className="text-[10px] uppercase tracking-wider font-medium text-green-900/40 mb-2">
+              Pick a tee time
+            </p>
+
+            {blocked ? (
+              <div className="rounded-2xl px-4 py-3.5" style={{ background: 'rgba(146,100,10,0.08)' }}>
+                <p className="text-xs font-bold" style={{ color: '#92640a' }}>
+                  💳 {pendingCount} payment{pendingCount === 1 ? '' : 's'} due
+                </p>
+                <p className="mt-1 text-[11px]" style={{ color: '#92640a' }}>
+                  Settle {pendingCount === 1 ? 'it' : 'them'} from the banner on the
+                  booking screen before reserving another round.
+                </p>
+              </div>
+            ) : slots === null ? (
+              <div className="space-y-2" aria-hidden>
+                {/* The month payload already told us roughly how many to expect,
+                    so the placeholder matches the shape that's coming. */}
+                {Array.from({ length: Math.min(openSlots || 3, 4) }).map((_, i) => (
+                  <div key={i} className="h-14 rounded-2xl animate-pulse bg-green-900/[0.05]" />
+                ))}
+              </div>
+            ) : slots.length === 0 ? (
+              <p className="text-sm text-green-900/55 px-1 py-3">
+                {slotsError
+                  ? "Couldn't load tee times. Close and try again."
+                  : 'These tee times have just been taken. Try another day.'}
               </p>
-              <p className="mt-1 text-[11px]" style={{ color: '#92640a' }}>
-                Settle it before booking another round — you&apos;ll be shown the link.
-              </p>
-            </div>
-          )}
+            ) : (
+              <div className="space-y-2">
+                {slots.map(sl => (
+                  <button
+                    key={sl.startTime}
+                    type="button"
+                    onClick={() => onBook(course, date, sl)}
+                    className="w-full text-left flex items-center justify-between gap-3 rounded-2xl border border-green-900/10 bg-white px-4 py-3 transition-colors hover:bg-green-50/50 active:opacity-70"
+                  >
+                    <span className="min-w-0">
+                      <span className="block font-sans font-black text-xl text-green-950">
+                        {slotTime(sl.startTime)}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-green-900/45">
+                        {durationMins !== null && (
+                          <>until ~{slotEndLabel(sl.startTime, durationMins)} </>
+                        )}
+                        <span aria-hidden className="text-green-900/25">·</span>{' '}
+                        <span
+                          className={cn(
+                            'font-medium',
+                            (sl.spotsOpen ?? 0) <= 3 ? 'text-amber-700' : 'text-green-900/45',
+                          )}
+                        >
+                          {sl.spotsOpen} spot{sl.spotsOpen === 1 ? '' : 's'} open
+                        </span>
+                      </span>
+                    </span>
+                    <ChevronRight className="w-4 h-4 flex-shrink-0 text-green-900/25" strokeWidth={2} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {course.description && (
             <div className="mt-4">
@@ -270,20 +352,6 @@ export default function VenueDayDetailSheet({
           )}
         </div>
 
-        {/* Action bar — pinned, so the CTA is reachable however long the body
-            runs, and clear of the iOS home indicator. */}
-        <div
-          className="flex-shrink-0 px-5 pt-3 border-t border-green-900/[0.07] bg-white"
-          style={{ paddingBottom: 'max(1rem, calc(1rem + env(safe-area-inset-bottom)))' }}
-        >
-          <button
-            type="button"
-            onClick={() => onBook(course, date)}
-            className="btn btn-primary btn-full"
-          >
-            Book {format(new Date(`${date}T12:00:00`), 'MMM d')} at {course.name}
-          </button>
-        </div>
       </div>
     </div>
   )

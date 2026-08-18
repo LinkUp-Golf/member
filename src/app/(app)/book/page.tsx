@@ -28,15 +28,9 @@ import VenueDayDetailSheet, {
   type VenueDayDetail,
 } from "@/components/calendar/VenueDayDetailSheet";
 import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
-import { formatInTimeZone } from "date-fns-tz";
 import {
   format,
-  parse,
-  addDays,
-  addMinutes,
-  addMonths,
   differenceInHours,
-  getDaysInMonth,
   startOfMonth,
 } from "date-fns";
 import type {
@@ -64,17 +58,6 @@ function isValidGuestPhone(value: string | undefined): boolean {
 
 type Step = "select" | "confirm" | "success";
 
-interface DayPlayer {
-  member_id: string;
-  first_name: string;
-  last_name: string;
-  avatar_url: string | null;
-  booking_date: string;
-  tee_time: string;
-  players: number;
-  is_self: boolean;
-}
-
 // FIFO payment gate: a member must resolve ALL unresolved (unpaid) bookings
 // before creating another, at any course. A member can already have more
 // than one — LinkUp is adding this rule to an app already in production, so
@@ -95,20 +78,8 @@ interface PendingPayment {
   booker_name: string | null;
 }
 
-const BOOKING_MIN_DAYS = 0;
-
 function formatSlotTime(isoString: string): string {
   return formatTeeTime(isoString.split("T")[1]?.slice(0, 8) ?? "");
-}
-
-// How long a round runs is set on the course's GHL calendar, so the duration is
-// handed to us with the slots rather than assumed here.
-function slotEndTime(startIso: string, durationMins: number): string {
-  const timeStr = startIso.split("T")[1]?.slice(0, 8) ?? "00:00:00";
-  return format(
-    addMinutes(parse(timeStr, "HH:mm:ss", new Date()), durationMins),
-    "h:mm a",
-  );
 }
 
 export default function BookPage() {
@@ -116,34 +87,9 @@ export default function BookPage() {
   const searchParams = useSearchParams();
   const inviteMemberId = searchParams?.get("invite") ?? null;
 
-  const today = useMemo(() => new Date(), []);
-
-  // Month navigation — start at the month containing the first bookable date
-  const [currentMonth, setCurrentMonth] = useState<Date>(() =>
-    startOfMonth(addDays(new Date(), BOOKING_MIN_DAYS)),
-  );
-
-  // Slots keyed by YYYY-MM-DD
-  const [monthSlots, setMonthSlots] = useState<
-    Record<string, GHLBookingSlot[]>
-  >({});
-  const [loadingMonth, setLoadingMonth] = useState(false);
-  // Which (month, course) the current monthSlots were actually fetched for. Used
-  // to treat slots as "not ready" until they match the selected course+month, so
-  // a previous fetch's data (e.g. the no-course mount fetch, which falls back to
-  // the Aviara GHL calendar) never flashes on screen before the right data lands.
-  const [slotsMeta, setSlotsMeta] = useState<{ month: string; courseId: string | null }>({
-    month: "",
-    courseId: null,
-  });
-  // Round length for the selected course, as configured on its GHL calendar.
-  // Returned alongside the slots; null until the first month load answers.
-  const [roundDurationMins, setRoundDurationMins] = useState<number | null>(null);
-
-  // Selection — preselect today on load
-  const [selectedDate, setSelectedDate] = useState<string>(() =>
-    format(new Date(), "yyyy-MM-dd"),
-  );
+  // What the member picked on the calendar. Venue, day and tee time arrive
+  // together, so there is no partial selection to hold between screens.
+  const [selectedDate, setSelectedDate] = useState<string>("");
   const [selectedSlot, setSelectedSlot] = useState<GHLBookingSlot | null>(null);
 
   // Selected course (null = no course chosen yet)
@@ -175,16 +121,6 @@ export default function BookPage() {
   // fire near-simultaneously.
   const myBookingsRefreshInFlight = useRef(false);
   const [activeTab, setActiveTab] = useState<"book" | "myBookings">("book");
-  // Month first. The day strip shows about a week at a time and has to be
-  // scrolled to find anything, so opening on it hides how much of the month is
-  // actually bookable; the grid answers that at a glance. Either view can still
-  // be picked from the toggle.
-  const [viewMode, setViewMode] = useState<"day" | "month">("month");
-
-  // Who's playing on the selected date
-  const [dayPlayers, setDayPlayers] = useState<DayPlayer[]>([]);
-  const [loadingDayPlayers, setLoadingDayPlayers] = useState(false);
-
   // FIFO payment gate — every one of the member's bookings awaiting payment.
   // Starts loading=true (rather than assuming none) so the tee-time slot
   // list doesn't briefly render as bookable before the check resolves.
@@ -200,48 +136,6 @@ export default function BookPage() {
   // know whether that row has already cleared (guards against a double payment).
   const [refreshingPending, setRefreshingPending] = useState(false);
 
-  const fetchMonthSlots = useCallback(async () => {
-    setLoadingMonth(true);
-    setSelectedSlot(null);
-    // When navigating to a different month, default to today if it falls in that
-    // month, otherwise clear so the user picks a new date.
-    const monthStr = format(currentMonth, "yyyy-MM");
-    setSelectedDate((prev) => {
-      if (prev.startsWith(monthStr)) return prev;
-      const todayInThisMonth = format(new Date(), "yyyy-MM-dd").startsWith(
-        monthStr,
-      );
-      return todayInThisMonth ? format(new Date(), "yyyy-MM-dd") : "";
-    });
-    // No course chosen yet: the calendar isn't shown, and a course-less fetch
-    // would resolve to the Aviara GHL calendar — exactly the stale data we don't
-    // want to flash later. Skip it and keep slots empty until a course is picked.
-    if (!selectedEvent) {
-      setMonthSlots({});
-      setSlotsMeta({ month: monthStr, courseId: null });
-      setLoadingMonth(false);
-      return;
-    }
-    try {
-      const res = await fetch(
-        `/api/bookings/create?month=${monthStr}&courseId=${selectedEvent.id}`,
-      );
-      const data = await res.json();
-      setMonthSlots(data.slots ?? {});
-      setRoundDurationMins(
-        typeof data.durationMins === "number" ? data.durationMins : null,
-      );
-      setSlotsMeta({ month: monthStr, courseId: selectedEvent.id });
-    } catch {
-      setMonthSlots({});
-      setSlotsMeta({ month: monthStr, courseId: selectedEvent.id });
-    }
-    setLoadingMonth(false);
-  }, [currentMonth, selectedEvent]);
-
-  useEffect(() => {
-    fetchMonthSlots();
-  }, [fetchMonthSlots]);
   useEffect(() => {
     if (user) loadMyBookings();
   }, [user]);
@@ -295,58 +189,6 @@ export default function BookPage() {
     }, 15000);
     return () => clearInterval(id);
   }, [user, pendingBookings.length]);
-  useEffect(() => {
-    if (!selectedDate || !user) {
-      setDayPlayers([]);
-      return;
-    }
-    setLoadingDayPlayers(true);
-    const courseParam = selectedEvent ? `&courseId=${selectedEvent.id}` : "";
-    fetch(`/api/bookings/day?date=${selectedDate}${courseParam}`)
-      .then((r) => r.json())
-      .then((d) => setDayPlayers(Array.isArray(d.players) ? d.players : []))
-      .catch(() => setDayPlayers([]))
-      .finally(() => setLoadingDayPlayers(false));
-  }, [selectedDate, user, selectedEvent]);
-
-  // These must stay above the early returns to satisfy the rules of hooks
-  const todayStr = useMemo(
-    () => formatInTimeZone(today, timezone, "yyyy-MM-dd"),
-    [today, timezone],
-  );
-  const firstInWindowRef = useRef<HTMLButtonElement>(null);
-  const selectedDateRef = useRef<HTMLButtonElement>(null);
-  const firstInWindowDateStr = useMemo(() => {
-    const y = currentMonth.getFullYear();
-    const m = currentMonth.getMonth();
-    const days = getDaysInMonth(currentMonth);
-    for (let d = 1; d <= days; d++) {
-      const dateStr = format(new Date(y, m, d), "yyyy-MM-dd");
-      if (dateStr >= format(today, "yyyy-MM-dd")) return dateStr;
-    }
-    return null;
-  }, [currentMonth, today]);
-  // Slots are "ready" only once they've been fetched for the currently selected
-  // course + month. Until then (in-flight fetch, or a stale set from a previous
-  // course/month) we render loading UI, never the mismatched data — this is what
-  // stops the brief flash of GHL availability before the custom slots arrive.
-  const monthLoading =
-    loadingMonth ||
-    slotsMeta.month !== format(currentMonth, "yyyy-MM") ||
-    slotsMeta.courseId !== (selectedEvent?.id ?? null);
-
-  useEffect(() => {
-    if (monthLoading || step !== "select" || activeTab !== "book") return;
-    // Prefer scrolling to the selected date; fall back to first bookable date
-    const target = selectedDateRef.current ?? firstInWindowRef.current;
-    target?.scrollIntoView({
-      behavior: "instant",
-      block: "nearest",
-      inline: "start",
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [monthLoading, step, activeTab]);
-
   async function loadMyBookings() {
     if (myBookingsRefreshInFlight.current) return;
     myBookingsRefreshInFlight.current = true;
@@ -416,7 +258,9 @@ export default function BookPage() {
           setMyBookings((prev) => [...(data.bookings as Booking[]), ...prev]);
         }
         setStep("success");
-        fetchMonthSlots();
+        // The calendar remounts when the success screen is dismissed and
+        // refetches the month itself, so availability refreshes without a
+        // second call from here.
         loadPendingPayment();
       } else {
         setError(data.error ?? "Something went wrong. Please try again.");
@@ -467,48 +311,17 @@ export default function BookPage() {
         error={error}
         submitting={submitting}
         onSubmit={submitBooking}
-        onBack={() => setStep("select")}
+        onBack={() => {
+          setStep("select");
+          setSelectedSlot(null);
+          setSelectedEvent(null);
+        }}
         inviteMemberId={inviteMemberId}
         bookerEmail={user?.email ?? ""}
         eventName={selectedEvent?.name ?? null}
       />
     );
   }
-
-  // ---- Calendar helpers ----
-  const year = currentMonth.getFullYear();
-  const month = currentMonth.getMonth();
-  const daysInMonth = getDaysInMonth(currentMonth);
-
-  const minMonthStr = format(
-    startOfMonth(addDays(today, BOOKING_MIN_DAYS)),
-    "yyyy-MM",
-  );
-  const currentMonthStr = format(currentMonth, "yyyy-MM");
-  const canGoPrev = currentMonthStr > minMonthStr;
-  const canGoNext = true;
-
-  function getDateStr(day: number) {
-    return format(new Date(year, month, day), "yyyy-MM-dd");
-  }
-
-  function hasDaySlots(day: number): boolean {
-    return (monthSlots[getDateStr(day)] ?? []).some(
-      (s) => (s.spotsOpen ?? 0) > 0,
-    );
-  }
-
-  // All days of the month as Date objects (for display)
-  const monthDays = Array.from(
-    { length: daysInMonth },
-    (_, i) => new Date(year, month, i + 1),
-  );
-
-  const selectedDateSlots = selectedDate
-    ? (monthSlots[selectedDate] ?? [])
-    : [];
-  const singlePendingBooking =
-    pendingBookings.length === 1 ? pendingBookings[0] : undefined;
 
   return (
     <AppShell
@@ -541,420 +354,20 @@ export default function BookPage() {
       </div>
 
       {activeTab === "book" ? (
-        !selectedEvent ? (
-          <EventSelectionScreen
-            onSelect={(ev, date) => {
-              setSelectedEvent(ev);
-              setSelectedSlot(null);
-              setMonthSlots({});
-              // Arriving from the aggregated calendar, the member has already
-              // chosen a day — carry it through so they land on that date's tee
-              // times instead of on today. Setting the month first keeps
-              // fetchMonthSlots from clearing the date as an out-of-month value.
-              if (date) {
-                setCurrentMonth(startOfMonth(new Date(`${date}T12:00:00`)));
-                setSelectedDate(date);
-              }
-            }}
-            pendingBookings={pendingBookings}
-          />
-        ) : (
-          <div className="pb-8 md:max-w-2xl md:mx-auto">
-            {/* Selected event banner */}
-            <div
-              className="px-5 md:px-8 pt-3 pb-2 flex items-center justify-between"
-              style={{ borderBottom: "1px solid rgba(0,38,105,0.06)" }}
-            >
-              <div>
-                <p
-                  className="text-xs font-semibold"
-                  style={{ color: "var(--color-green-900)" }}
-                >
-                  {selectedEvent.name}
-                </p>
-                {(selectedEvent.city || selectedEvent.state) && (
-                  <p
-                    className="text-[10px] mt-0.5"
-                    style={{ color: "rgba(0,38,105,0.4)" }}
-                  >
-                    {[selectedEvent.city, selectedEvent.state]
-                      .filter(Boolean)
-                      .join(", ")}
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {selectedEvent.map_link && (
-                  <a
-                    href={selectedEvent.map_link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label="View on map"
-                    className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
-                    style={{ color: "rgba(0,38,105,0.35)" }}
-                  >
-                    <svg
-                      className="w-4 h-4 flex-shrink-0"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={1.75}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.159.69.159 1.006 0z"
-                      />
-                    </svg>
-                  </a>
-                )}
-                {selectedEvent.booking_url && (
-                  <a
-                    href={selectedEvent.booking_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label="Visit website"
-                    className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
-                    style={{ color: "rgba(0,38,105,0.35)" }}
-                  >
-                    <svg
-                      className="w-4 h-4 flex-shrink-0"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={1.75}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"
-                      />
-                    </svg>
-                  </a>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedEvent(null);
-                    setMonthSlots({});
-                    setSelectedSlot(null);
-                  }}
-                  className="text-xs px-3 py-1.5 rounded-lg font-medium"
-                  style={{
-                    background: "rgba(0,38,105,0.06)",
-                    color: "rgba(0,38,105,0.55)",
-                  }}
-                >
-                  Change
-                </button>
-              </div>
-            </div>
-
-            {loadingPendingBookings ? (
-              <div
-                className="mx-5 md:mx-8 mt-3 h-16 rounded-2xl animate-pulse"
-                style={{ background: "rgba(0,38,105,0.04)" }}
-              />
-            ) : (
-              pendingBookings.length > 0 && (
-                <PendingPaymentBanner pending={pendingBookings} refreshing={refreshingPending} />
-              )
-            )}
-
-            {/* Month navigation + view toggle */}
-            <div className="px-5 md:px-8 pt-4 pb-2 flex items-center justify-between">
-              <div className="flex-1 flex items-center justify-between mr-3">
-                <button
-                  onClick={() => setCurrentMonth((m) => addMonths(m, -1))}
-                  disabled={!canGoPrev}
-                  className="w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-20"
-                  style={{ background: "rgba(0,38,105,0.05)" }}
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2.5}
-                    style={{ color: "var(--color-green-900)" }}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M15.75 19.5L8.25 12l7.5-7.5"
-                    />
-                  </svg>
-                </button>
-
-                <p
-                  className="font-sans font-black text-lg"
-                  style={{ color: "var(--color-green-900)" }}
-                >
-                  {format(currentMonth, "MMMM yyyy")}
-                </p>
-
-                <button
-                  onClick={() => setCurrentMonth((m) => addMonths(m, 1))}
-                  disabled={!canGoNext}
-                  className="w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-20"
-                  style={{ background: "rgba(0,38,105,0.05)" }}
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2.5}
-                    style={{ color: "var(--color-green-900)" }}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M8.25 4.5l7.5 7.5-7.5 7.5"
-                    />
-                  </svg>
-                </button>
-              </div>
-
-              <div
-                className="flex rounded-lg flex-shrink-0"
-                style={{ background: "rgba(0,38,105,0.06)" }}
-              >
-                {(["day", "month"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setViewMode(mode)}
-                    className="h-9 px-2.5 py-1 text-xs font-semibold rounded-md capitalize transition-all"
-                    style={
-                      viewMode === mode
-                        ? {
-                            background: "white",
-                            color: "var(--color-green-900)",
-                            boxShadow: "0 1px 2px rgba(0,38,105,0.1)",
-                          }
-                        : { color: "rgba(0,38,105,0.45)" }
-                    }
-                  >
-                    {mode}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Date picker — day strip or month grid */}
-            <div className="px-5 md:px-8 pb-3">
-              {viewMode === "day" ? (
-                monthLoading ? (
-                  <div className="flex justify-center py-10">
-                    <Spinner className="text-green-700" />
-                  </div>
-                ) : (
-                  <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
-                    {monthDays.map((date) => {
-                      const day = date.getDate();
-                      const dateStr = getDateStr(day);
-                      const isPast = dateStr < todayStr;
-                      const isToday = dateStr === todayStr;
-                      const inView = !isPast;
-                      const hasSlots = hasDaySlots(day);
-                      const active = selectedDate === dateStr;
-
-                      const canClick = isToday || (inView && hasSlots);
-
-                      return (
-                        <button
-                          key={dateStr}
-                          ref={
-                            dateStr === selectedDate
-                              ? selectedDateRef
-                              : dateStr === firstInWindowDateStr
-                                ? firstInWindowRef
-                                : undefined
-                          }
-                          onClick={
-                            canClick
-                              ? () => {
-                                  setSelectedDate(dateStr);
-                                  setSelectedSlot(null);
-                                }
-                              : undefined
-                          }
-                          disabled={!canClick}
-                          className={cn(
-                            "flex-shrink-0 flex flex-col items-center px-3 py-3 rounded-2xl border min-w-[56px] transition-all duration-150",
-                            !canClick && !isToday && "cursor-not-allowed",
-                            isPast || !inView
-                              ? "opacity-50"
-                              : !hasSlots && "opacity-60",
-                            active
-                              ? "border-green-900"
-                              : "bg-white border-green-900/08",
-                          )}
-                          style={
-                            active
-                              ? {
-                                  background: "var(--color-green-900)",
-                                  opacity: hasSlots ? 1 : 0.45,
-                                }
-                              : {}
-                          }
-                        >
-                          <span
-                            className="text-[10px] uppercase tracking-wider font-medium"
-                            style={{
-                              color: active
-                                ? "rgba(133,187,101,0.8)"
-                                : "rgba(0,38,105,0.38)",
-                            }}
-                          >
-                            {format(date, "EEE")}
-                          </span>
-                          <span
-                            className="font-sans font-black text-2xl mt-0.5"
-                            style={{
-                              color: active
-                                ? "white"
-                                : "var(--color-green-900)",
-                            }}
-                          >
-                            {format(date, "d")}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )
-              ) : (
-                <MonthCalendarGrid
-                  year={year}
-                  month={month}
-                  daysInMonth={daysInMonth}
-                  selectedDate={selectedDate}
-                  todayStr={todayStr}
-                  firstInWindowDateStr={firstInWindowDateStr}
-                  hasDaySlots={hasDaySlots}
-                  getDateStr={getDateStr}
-                  loadingMonth={monthLoading}
-                  onSelectDate={(dateStr) => {
-                    setSelectedDate(dateStr);
-                    setSelectedSlot(null);
-                  }}
-                  selectedDateRef={selectedDateRef}
-                  firstInWindowRef={firstInWindowRef}
-                />
-              )}
-            </div>
-
-            {/* Who's playing on selected date */}
-            {selectedDate &&
-              !monthLoading &&
-              (dayPlayers.length > 0 || loadingDayPlayers) && (
-                <div className="px-5 md:px-8 pb-1">
-                  <p className="section-label mb-2">
-                    {loadingDayPlayers
-                      ? "Who's playing…"
-                      : `Who's playing · ${dayPlayers.length}`}
-                  </p>
-                  {loadingDayPlayers ? (
-                    <div className="flex gap-2">
-                      {[1, 2, 3, 4, 5, 6].map((i) => (
-                        <div
-                          key={i}
-                          className="flex flex-col items-center gap-1.5 animate-pulse flex-1 min-w-0"
-                        >
-                          <div
-                            className="w-10 h-10 rounded-full mx-auto"
-                            style={{ background: "rgba(0,38,105,0.08)" }}
-                          />
-                          <div
-                            className="w-8 h-2 rounded-full mx-auto"
-                            style={{ background: "rgba(0,38,105,0.08)" }}
-                          />
-                          <div
-                            className="w-6 h-1.5 rounded-full mx-auto"
-                            style={{ background: "rgba(0,38,105,0.05)" }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-1">
-                      {dayPlayers.map((p) => (
-                        <DayPlayerBubble key={p.member_id} player={p} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-            {/* Tee time slots for selected date */}
-            {selectedDate && !monthLoading && (
-              <div className="px-5 md:px-8 pt-5">
-                <p className="section-label mb-3">
-                  Tee times —{" "}
-                  {format(new Date(selectedDate + "T12:00:00"), "EEE, MMM d")}
-                </p>
-
-                {loadingPendingBookings ? (
-                  <div className="space-y-2">
-                    {[1, 2, 3].map((i) => (
-                      <div
-                        key={i}
-                        className="h-[68px] rounded-2xl animate-pulse"
-                        style={{ background: "rgba(0,38,105,0.05)" }}
-                      />
-                    ))}
-                  </div>
-                ) : singlePendingBooking || pendingBookings.length > 1 ? (
-                  <EmptyState
-                    compact
-                    icon="💳"
-                    title={
-                      singlePendingBooking
-                        ? "Payment due first"
-                        : `${pendingBookings.length} bookings need resolving`
-                    }
-                    description={
-                      singlePendingBooking
-                        ? `Resolve your round at ${singlePendingBooking.course_name} on ${formatPendingDate(singlePendingBooking.booking_date)} before booking another.`
-                        : "Resolve all of your pending bookings above before booking another round."
-                    }
-                  />
-                ) : selectedDateSlots.length === 0 ? (
-                  <EmptyState
-                    icon="⛳"
-                    title="No tee times"
-                    description="No open slots for this date."
-                  />
-                ) : (
-                  <div className="space-y-2">
-                    {selectedDateSlots.map((slot) => (
-                      <SlotRow
-                        key={slot.startTime}
-                        slot={slot}
-                        selected={selectedSlot?.startTime === slot.startTime}
-                        durationMins={roundDurationMins}
-                        onSelect={() => setSelectedSlot(slot)}
-                        onContinue={() => setStep("confirm")}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <p
-              className="text-xs text-center mt-6 px-5 md:px-8 leading-relaxed"
-              style={{ color: "rgba(0,38,105,0.25)" }}
-            >
-              Select a date and tee time to submit a booking request.
-              <br />
-              Availability is confirmed by the team — payment link sent by
-              email.
-            </p>
-          </div>
-        )
+        <EventSelectionScreen
+          onSelect={(ev, date, slot) => {
+            // Venue, day and tee time were all chosen on the calendar, so
+            // there is nothing left to pick — go straight to confirmation.
+            setSelectedEvent(ev);
+            setSelectedDate(date);
+            setSelectedSlot(slot);
+            setError("");
+            setStep("confirm");
+          }}
+          pendingBookings={pendingBookings}
+          loadingPendingBookings={loadingPendingBookings}
+          refreshingPending={refreshingPending}
+        />
       ) : (
         <MyBookingsTab
           bookings={myBookings}
@@ -971,696 +384,6 @@ export default function BookPage() {
         />
       )}
     </AppShell>
-  );
-}
-
-// ---- Month calendar grid ------------------------------------
-
-function MonthCalendarGrid({
-  year,
-  month,
-  daysInMonth,
-  selectedDate,
-  todayStr,
-  firstInWindowDateStr,
-  hasDaySlots,
-  getDateStr,
-  loadingMonth,
-  onSelectDate,
-  selectedDateRef,
-  firstInWindowRef,
-}: {
-  year: number;
-  month: number;
-  daysInMonth: number;
-  selectedDate: string;
-  todayStr: string;
-  firstInWindowDateStr: string | null;
-  hasDaySlots: (day: number) => boolean;
-  getDateStr: (day: number) => string;
-  loadingMonth: boolean;
-  onSelectDate: (dateStr: string) => void;
-  selectedDateRef: React.RefObject<HTMLButtonElement>;
-  firstInWindowRef: React.RefObject<HTMLButtonElement>;
-}) {
-  if (loadingMonth) {
-    return (
-      <div className="flex justify-center py-10">
-        <Spinner className="text-green-700" />
-      </div>
-    );
-  }
-
-  const DOW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-  const startDow = new Date(year, month, 1).getDay();
-  const totalCells = Math.ceil((startDow + daysInMonth) / 7) * 7;
-  const cells: (number | null)[] = Array.from(
-    { length: totalCells },
-    (_, i) => {
-      const d = i - startDow + 1;
-      return d >= 1 && d <= daysInMonth ? d : null;
-    },
-  );
-
-  return (
-    <div>
-      {/* Day-of-week header */}
-      <div className="grid grid-cols-7 mb-1">
-        {DOW.map((d) => (
-          <div
-            key={d}
-            className="text-center text-[10px] font-medium py-1.5"
-            style={{ color: "rgba(0,38,105,0.35)" }}
-          >
-            {d}
-          </div>
-        ))}
-      </div>
-      {/* Day cells */}
-      <div className="grid grid-cols-7 gap-y-1">
-        {cells.map((day, i) => {
-          if (day === null) return <div key={`e-${i}`} />;
-          const dateStr = getDateStr(day);
-          const isPast = dateStr < todayStr;
-          const isToday = dateStr === todayStr;
-          const hasSlots = hasDaySlots(day);
-          const canClick = isToday || (!isPast && hasSlots);
-          const active = selectedDate === dateStr;
-
-          return (
-            <button
-              key={dateStr}
-              ref={
-                dateStr === selectedDate
-                  ? selectedDateRef
-                  : dateStr === firstInWindowDateStr
-                    ? firstInWindowRef
-                    : undefined
-              }
-              onClick={canClick ? () => onSelectDate(dateStr) : undefined}
-              disabled={!canClick}
-              className={cn(
-                "relative flex flex-col items-center justify-center aspect-square rounded-xl transition-all duration-150",
-                isPast
-                  ? "opacity-40"
-                  : !hasSlots && !isToday
-                    ? "opacity-50"
-                    : "",
-                !canClick
-                  ? "cursor-not-allowed"
-                  : active
-                    ? ""
-                    : "hover:bg-green-50/60",
-              )}
-              style={active ? { background: "var(--color-green-900)" } : {}}
-            >
-              <span
-                className={cn(
-                  "font-sans font-black text-sm leading-none",
-                  isToday && !active ? "underline underline-offset-2" : "",
-                )}
-                style={{ color: active ? "white" : "var(--color-green-900)" }}
-              >
-                {day}
-              </span>
-              {hasSlots && (
-                <span
-                  className="mt-1 w-1 h-1 rounded-full"
-                  style={{
-                    background: active
-                      ? "rgba(133,187,101,0.8)"
-                      : "var(--color-green-600, #16a34a)",
-                  }}
-                />
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ---- Day player bubble + popover ----------------------------
-
-import type { MemberDetail } from "@/components/ui/MemberProfileSheet";
-
-function DayPlayerBubble({ player }: { player: DayPlayer }) {
-  const [detail, setDetail] = useState<MemberDetail | null>(null);
-  const [hasPlayedWith, setHasPlayedWith] = useState(false);
-  const [focusGroups, setFocusGroups] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  const [visible, setVisible] = useState(false);
-
-  function openPopover() {
-    setMounted(true);
-    if (!detail) {
-      setLoading(true);
-      fetch(`/api/members/${player.member_id}`)
-        .then((r) => r.json())
-        .then((d) => {
-          setDetail(d.member ?? null);
-          setHasPlayedWith(!!d.hasPlayedWith);
-          setFocusGroups(
-            Array.isArray(d.focusLinkupGroups) ? d.focusLinkupGroups : [],
-          );
-        })
-        .catch(() => {})
-        .finally(() => setLoading(false));
-    }
-  }
-
-  function closePopover() {
-    setVisible(false);
-    const t = setTimeout(() => setMounted(false), 300);
-    return () => clearTimeout(t);
-  }
-
-  useEffect(() => {
-    if (!mounted) return;
-    const ids: number[] = [];
-    ids[0] = requestAnimationFrame(() => {
-      ids[1] = requestAnimationFrame(() => setVisible(true));
-    });
-    return () => ids.forEach((id) => cancelAnimationFrame(id));
-  }, [mounted]);
-
-  const prof = detail?.profile;
-  const displayName = player.is_self
-    ? "You"
-    : prof?.display_name || `${player.first_name} ${player.last_name}`.trim();
-  const initials =
-    `${player.first_name[0] ?? ""}${player.last_name[0] ?? ""}`.toUpperCase();
-  const avatarUrl = prof?.avatar_url ?? player.avatar_url;
-  // tee_time is stored in course-local timezone; display it directly.
-  const localTeeTime = player.tee_time;
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={player.is_self ? undefined : openPopover}
-        className="flex flex-col items-center gap-1 flex-shrink-0 w-14 transition-opacity active:opacity-60"
-        style={{ cursor: player.is_self ? "default" : undefined }}
-      >
-        {avatarUrl ? (
-          <Image
-            src={avatarUrl}
-            alt=""
-            width={40}
-            height={40}
-            className="w-10 h-10 rounded-full object-cover"
-          />
-        ) : (
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold"
-            style={{
-              background: "rgba(133,187,101,0.15)",
-              color: "var(--color-green-700)",
-            }}
-          >
-            {initials}
-          </div>
-        )}
-        <span
-          className="text-[10px] font-medium text-center leading-tight truncate w-full capitalize"
-          style={{ color: "var(--color-green-900)" }}
-        >
-          {player.first_name}
-        </span>
-        <span
-          className="text-[9px] text-center"
-          style={{ color: "rgba(0,38,105,0.38)" }}
-        >
-          {formatTeeTime(localTeeTime)}
-        </span>
-      </button>
-
-      {mounted && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center md:p-6">
-          <button
-            type="button"
-            aria-label="Close"
-            className="absolute inset-0 w-full h-full"
-            style={{
-              background: "rgba(0,0,0,0.45)",
-              opacity: visible ? 1 : 0,
-              transition: "opacity 200ms ease-out",
-            }}
-            onClick={closePopover}
-          />
-          <div
-            className="relative bg-white rounded-t-3xl md:rounded-3xl pt-5 pb-8 w-full md:max-w-md"
-            style={{
-              boxShadow: "0 -4px 32px rgba(0,0,0,0.12)",
-              transform: visible ? "translateY(0)" : "translateY(100%)",
-              transition: visible
-                ? "transform 340ms cubic-bezier(0.32,0.72,0,1)"
-                : "transform 240ms cubic-bezier(0.4,0,1,1)",
-              willChange: "transform",
-              maxHeight: "85vh",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
-            {/* Drag handle */}
-            <div className="flex justify-center mb-4 flex-shrink-0">
-              <div
-                className="w-10 h-1 rounded-full"
-                style={{ background: "rgba(0,38,105,0.12)" }}
-              />
-            </div>
-
-            {loading ? (
-              <div className="flex flex-col items-center py-10 gap-3 px-5">
-                <div
-                  className="w-16 h-16 rounded-2xl animate-pulse"
-                  style={{ background: "rgba(0,38,105,0.08)" }}
-                />
-                <div
-                  className="w-36 h-3.5 rounded-full animate-pulse"
-                  style={{ background: "rgba(0,38,105,0.08)" }}
-                />
-                <div
-                  className="w-24 h-2.5 rounded-full animate-pulse"
-                  style={{ background: "rgba(0,38,105,0.06)" }}
-                />
-                <div
-                  className="w-full h-16 rounded-2xl animate-pulse mt-2"
-                  style={{ background: "rgba(0,38,105,0.05)" }}
-                />
-              </div>
-            ) : (
-              <div className="overflow-y-auto flex-1 px-5 space-y-4">
-                {/* Header */}
-                <div className="flex items-start gap-4">
-                  {avatarUrl ? (
-                    <Image
-                      src={avatarUrl}
-                      alt=""
-                      width={60}
-                      height={60}
-                      className="w-15 h-15 rounded-2xl object-cover flex-shrink-0"
-                      style={{ width: 60, height: 60 }}
-                    />
-                  ) : (
-                    <div
-                      className="rounded-2xl flex items-center justify-center text-xl font-bold flex-shrink-0"
-                      style={{
-                        width: 60,
-                        height: 60,
-                        background: "rgba(133,187,101,0.15)",
-                        color: "var(--color-green-700)",
-                      }}
-                    >
-                      {initials}
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0 pt-0.5">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p
-                        className="font-sans font-black text-lg leading-tight capitalize"
-                        style={{ color: "var(--color-green-900)" }}
-                      >
-                        {displayName}
-                      </p>
-                      {hasPlayedWith && (
-                        <span
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
-                          style={{
-                            background: "rgba(133,187,101,0.15)",
-                            color: "var(--color-green-700)",
-                          }}
-                        >
-                          Played before
-                        </span>
-                      )}
-                    </div>
-                    {prof?.role_title && (
-                      <p
-                        className="text-sm mt-0.5"
-                        style={{ color: "rgba(0,38,105,0.55)" }}
-                      >
-                        {prof.role_title}
-                      </p>
-                    )}
-                    {prof?.business_name && (
-                      <p
-                        className="text-xs mt-0.5 truncate"
-                        style={{ color: "rgba(0,38,105,0.4)" }}
-                      >
-                        {prof.business_name}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Stats strip */}
-                <div
-                  className="flex rounded-2xl overflow-hidden"
-                  style={{ background: "rgba(0,38,105,0.04)" }}
-                >
-                  <div className="flex-1 py-3 text-center">
-                    <p
-                      className="text-[9px] uppercase tracking-wider mb-0.5"
-                      style={{ color: "rgba(0,38,105,0.38)" }}
-                    >
-                      Tee time
-                    </p>
-                    <p
-                      className="font-sans font-black text-sm"
-                      style={{ color: "var(--color-green-900)" }}
-                    >
-                      {formatTeeTime(localTeeTime)}
-                    </p>
-                  </div>
-                  {player.players > 1 && (
-                    <>
-                      <div
-                        className="w-px my-2.5"
-                        style={{ background: "rgba(0,38,105,0.08)" }}
-                      />
-                      <div className="flex-1 py-3 text-center">
-                        <p
-                          className="text-[9px] uppercase tracking-wider mb-0.5"
-                          style={{ color: "rgba(0,38,105,0.38)" }}
-                        >
-                          Group
-                        </p>
-                        <p
-                          className="font-sans font-black text-sm"
-                          style={{ color: "var(--color-green-900)" }}
-                        >
-                          {player.players} players
-                        </p>
-                      </div>
-                    </>
-                  )}
-                  {prof?.show_handicap && prof?.handicap_index != null && (
-                    <>
-                      <div
-                        className="w-px my-2.5"
-                        style={{ background: "rgba(0,38,105,0.08)" }}
-                      />
-                      <div className="flex-1 py-3 text-center">
-                        <p
-                          className="text-[9px] uppercase tracking-wider mb-0.5"
-                          style={{ color: "rgba(0,38,105,0.38)" }}
-                        >
-                          HCP
-                        </p>
-                        <p
-                          className="font-sans font-black text-sm"
-                          style={{ color: "var(--color-green-900)" }}
-                        >
-                          {prof.handicap_index}
-                        </p>
-                      </div>
-                    </>
-                  )}
-                  {prof?.open_to_golf_travel && (
-                    <>
-                      <div
-                        className="w-px my-2.5"
-                        style={{ background: "rgba(0,38,105,0.08)" }}
-                      />
-                      <div className="flex-1 py-3 text-center">
-                        <p
-                          className="text-[9px] uppercase tracking-wider mb-0.5"
-                          style={{ color: "rgba(0,38,105,0.38)" }}
-                        >
-                          Golf travel
-                        </p>
-                        <p
-                          className="text-sm"
-                          style={{ color: "var(--color-green-700)" }}
-                        >
-                          ✓ Open
-                        </p>
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {/* Value offered */}
-                {prof?.value_offered && (
-                  <div
-                    className="rounded-2xl px-4 py-3.5"
-                    style={{
-                      background: "rgba(0,38,105,0.03)",
-                      border: "1px solid rgba(0,38,105,0.06)",
-                    }}
-                  >
-                    <p
-                      className="text-[10px] uppercase tracking-wider mb-1.5"
-                      style={{ color: "rgba(0,38,105,0.38)" }}
-                    >
-                      What they bring
-                    </p>
-                    <p
-                      className="text-sm leading-relaxed"
-                      style={{ color: "rgba(0,38,105,0.7)" }}
-                    >
-                      {prof.value_offered}
-                    </p>
-                  </div>
-                )}
-
-                {/* Play preferences */}
-                {(prof?.play_frequency || prof?.preferred_play_times) && (
-                  <div
-                    className="rounded-2xl px-4 py-3.5"
-                    style={{
-                      background: "rgba(0,38,105,0.03)",
-                      border: "1px solid rgba(0,38,105,0.06)",
-                    }}
-                  >
-                    <p
-                      className="text-[10px] uppercase tracking-wider mb-2"
-                      style={{ color: "rgba(0,38,105,0.38)" }}
-                    >
-                      Play habits
-                    </p>
-                    <div className="space-y-1.5">
-                      {prof?.play_frequency && (
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="text-xs"
-                            style={{ color: "rgba(0,38,105,0.4)" }}
-                          >
-                            Frequency
-                          </span>
-                          <span
-                            className="text-xs font-medium"
-                            style={{ color: "var(--color-green-900)" }}
-                          >
-                            {prof.play_frequency}
-                          </span>
-                        </div>
-                      )}
-                      {prof?.preferred_play_times && (
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="text-xs"
-                            style={{ color: "rgba(0,38,105,0.4)" }}
-                          >
-                            Prefers
-                          </span>
-                          <span
-                            className="text-xs font-medium"
-                            style={{ color: "var(--color-green-900)" }}
-                          >
-                            {prof.preferred_play_times}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Focus linkup groups */}
-                {focusGroups.length > 0 && (
-                  <div>
-                    <p
-                      className="text-[10px] uppercase tracking-wider mb-2"
-                      style={{ color: "rgba(0,38,105,0.38)" }}
-                    >
-                      Focus groups
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {focusGroups.map((g) => (
-                        <span
-                          key={g}
-                          className="text-xs font-medium px-2.5 py-1 rounded-full"
-                          style={{
-                            background: "rgba(0,38,105,0.06)",
-                            color: "var(--color-green-900)",
-                          }}
-                        >
-                          {g}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Non-golf hobbies */}
-                {prof?.non_golf_hobbies && (
-                  <div
-                    className="rounded-2xl px-4 py-3.5"
-                    style={{
-                      background: "rgba(0,38,105,0.03)",
-                      border: "1px solid rgba(0,38,105,0.06)",
-                    }}
-                  >
-                    <p
-                      className="text-[10px] uppercase tracking-wider mb-1.5"
-                      style={{ color: "rgba(0,38,105,0.38)" }}
-                    >
-                      Beyond the course
-                    </p>
-                    <p
-                      className="text-sm leading-relaxed"
-                      style={{ color: "rgba(0,38,105,0.7)" }}
-                    >
-                      {prof.non_golf_hobbies}
-                    </p>
-                  </div>
-                )}
-
-                {/* CTA */}
-                <a
-                  href={`/members/${player.member_id}`}
-                  className="btn btn-primary btn-full text-center block"
-                >
-                  View profile
-                </a>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-// ---- Slot row -----------------------------------------------
-
-function SlotRow({
-  slot,
-  selected,
-  durationMins,
-  onSelect,
-  onContinue,
-}: {
-  slot: GHLBookingSlot;
-  selected: boolean;
-  durationMins: number | null;
-  onSelect: () => void;
-  onContinue: () => void;
-}) {
-  const full = !slot.available || (slot.spotsOpen ?? 0) === 0;
-
-  return (
-    <button
-      onClick={full ? undefined : selected ? onContinue : onSelect}
-      disabled={full}
-      className={cn(
-        "w-full flex items-center justify-between px-5 py-4 rounded-2xl border transition-all duration-150 text-left",
-        full
-          ? "opacity-40 cursor-not-allowed"
-          : selected
-            ? ""
-            : "bg-white hover:border-green-900/20",
-      )}
-      style={
-        full
-          ? {
-              background: "rgba(0,38,105,0.03)",
-              borderColor: "rgba(0,38,105,0.06)",
-            }
-          : selected
-            ? {
-                background: "rgba(133,187,101,0.06)",
-                borderColor: "var(--color-gold)",
-                boxShadow: "0 0 0 1px var(--color-gold)",
-              }
-            : { borderColor: "rgba(0,38,105,0.09)" }
-      }
-    >
-      <div>
-        <span
-          className="font-sans font-black text-2xl"
-          style={{ color: "var(--color-green-900)" }}
-        >
-          {formatSlotTime(slot.startTime)}
-        </span>
-        <p className="text-xs mt-0.5" style={{ color: "rgba(0,38,105,0.42)" }}>
-          {durationMins !== null && (
-            <>Until ~{slotEndTime(slot.startTime, durationMins)}</>
-          )}
-          {!full && (
-            <span
-              style={{
-                color:
-                  (slot.spotsOpen ?? 0) <= 3
-                    ? "#92640a"
-                    : "rgba(0,38,105,0.42)",
-              }}
-            >
-              {" · "}
-              {slot.spotsOpen} spot{slot.spotsOpen !== 1 ? "s" : ""} open
-            </span>
-          )}
-        </p>
-      </div>
-      <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">
-        {full ? (
-          <span className="text-xs" style={{ color: "rgba(0,38,105,0.35)" }}>
-            Full
-          </span>
-        ) : selected ? (
-          <>
-            <span
-              className="text-sm font-semibold"
-              style={{ color: "var(--color-gold-dark)" }}
-            >
-              Book
-            </span>
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2.5}
-              style={{ color: "var(--color-gold-dark)" }}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"
-              />
-            </svg>
-          </>
-        ) : (
-          <svg
-            className="w-4 h-4 opacity-20"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-            style={{ color: "var(--color-green-900)" }}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M8.25 4.5l7.5 7.5-7.5 7.5"
-            />
-          </svg>
-        )}
-      </div>
-    </button>
   );
 }
 
@@ -4637,11 +3360,14 @@ function AddPlayerModal({
 function EventSelectionScreen({
   onSelect,
   pendingBookings,
+  loadingPendingBookings,
+  refreshingPending,
 }: {
-  // `date` is set only when the member picked a specific day in the calendar
-  // view; the list view selects a venue without committing to a date.
-  onSelect: (course: Course, date?: string) => void;
+  /** Venue, day and tee time all chosen at once — this goes to confirmation. */
+  onSelect: (course: Course, date: string, slot: GHLBookingSlot) => void;
   pendingBookings: PendingPayment[];
+  loadingPendingBookings: boolean;
+  refreshingPending: boolean;
 }) {
   // Every bookable venue, fetched once. The calendar plots availability, but
   // the venue's own details — price, address, rules, links — live on these
@@ -4790,11 +3516,9 @@ function EventSelectionScreen({
         date,
         openSlots: opening.openSlots,
         openSpots: opening.openSpots,
-        tees: opening.tees,
-        // Only ever bookings awaiting payment (status 'availability_confirmed'),
-        // counted for this venue — the same signal the old list row badged.
-        pendingCount: pendingBookings.filter((p) => p.course_id === courseId)
-          .length,
+        // The FIFO gate is global — any unpaid round blocks a new booking at
+        // every venue — so this is the whole pending list, not this course's.
+        pendingCount: pendingBookings.length,
       });
     },
     [events, calDays, pendingBookings],
@@ -4886,6 +3610,22 @@ function EventSelectionScreen({
   return (
     // The month grid needs room for venue names inside its cells.
     <div className="pb-8 md:mx-auto md:max-w-4xl">
+      {/* The FIFO gate blocks booking anywhere, so its "Pay →" links belong on
+          the screen where booking now begins. */}
+      {loadingPendingBookings ? (
+        <div
+          className="mx-5 md:mx-8 mt-3 h-16 rounded-2xl animate-pulse"
+          style={{ background: "rgba(0,38,105,0.04)" }}
+        />
+      ) : (
+        pendingBookings.length > 0 && (
+          <PendingPaymentBanner
+            pending={pendingBookings}
+            refreshing={refreshingPending}
+          />
+        )
+      )}
+
       <div className="px-5 md:px-8 pt-5 pb-1 flex items-center gap-2">
         <div
           className="flex items-center gap-2 flex-1 min-w-0 bg-white rounded-xl px-3 py-2.5 border"
@@ -4968,9 +3708,9 @@ function EventSelectionScreen({
         <VenueDayDetailSheet
           detail={dayDetail}
           onClose={() => setDayDetail(null)}
-          onBook={(course, date) => {
+          onBook={(course, date, slot) => {
             setDayDetail(null);
-            onSelect(course, date);
+            onSelect(course, date, slot);
           }}
         />
       </div>
