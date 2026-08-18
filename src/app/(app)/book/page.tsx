@@ -16,6 +16,13 @@ import { createClient } from "@/lib/supabase";
 import BookingSurveySheet, {
   type SurveyTarget,
 } from "@/components/surveys/BookingSurveySheet";
+import VenueAvailabilityCalendar, {
+  type CalendarVenue,
+  type CalendarOpening,
+} from "@/components/calendar/VenueAvailabilityCalendar";
+import VenueDayDetailSheet, {
+  type VenueDayDetail,
+} from "@/components/calendar/VenueDayDetailSheet";
 import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
 import { formatInTimeZone } from "date-fns-tz";
 import {
@@ -532,10 +539,18 @@ export default function BookPage() {
       {activeTab === "book" ? (
         !selectedEvent ? (
           <EventSelectionScreen
-            onSelect={(ev) => {
+            onSelect={(ev, date) => {
               setSelectedEvent(ev);
               setSelectedSlot(null);
               setMonthSlots({});
+              // Arriving from the aggregated calendar, the member has already
+              // chosen a day — carry it through so they land on that date's tee
+              // times instead of on today. Setting the month first keeps
+              // fetchMonthSlots from clearing the date as an out-of-month value.
+              if (date) {
+                setCurrentMonth(startOfMonth(new Date(`${date}T12:00:00`)));
+                setSelectedDate(date);
+              }
             }}
             pendingBookings={pendingBookings}
           />
@@ -4619,7 +4634,9 @@ function EventSelectionScreen({
   onSelect,
   pendingBookings,
 }: {
-  onSelect: (course: Course) => void;
+  // `date` is set only when the member picked a specific day in the calendar
+  // view; the list view selects a venue without committing to a date.
+  onSelect: (course: Course, date?: string) => void;
   pendingBookings: PendingPayment[];
 }) {
   // `events` is the full, unfiltered list — fetched once, used only to
@@ -4641,6 +4658,78 @@ function EventSelectionScreen({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const activeFilterCount =
     (locationFilter !== "all" ? 1 : 0) + (dateFilter ? 1 : 0);
+
+  // ---- Aggregated month calendar ----
+  // The list answers "which venues exist"; the calendar answers "when can I
+  // play anywhere". List stays the default — it's the cheaper screen, and the
+  // calendar costs a calendar call per venue to build.
+  const [browseMode, setBrowseMode] = useState<"list" | "calendar">("list");
+  const [calMonth, setCalMonth] = useState<Date>(() => startOfMonth(new Date()));
+  const [calVenues, setCalVenues] = useState<CalendarVenue[]>([]);
+  const [calDays, setCalDays] = useState<Record<string, CalendarOpening[]>>({});
+  const [calLoading, setCalLoading] = useState(false);
+  const [calError, setCalError] = useState("");
+  const [calSelectedDate, setCalSelectedDate] = useState<string | null>(null);
+  const [calVenueFilter, setCalVenueFilter] = useState<string | null>(null);
+  const [dayDetail, setDayDetail] = useState<VenueDayDetail | null>(null);
+
+  // Only loaded once the calendar is actually opened, and refetched per month.
+  useEffect(() => {
+    if (browseMode !== "calendar") return;
+    // A month's worth of availability fans out across every venue's calendar,
+    // so a slower earlier month can land after a newer one. Ignore all but the
+    // latest request.
+    let current = true;
+    setCalLoading(true);
+    setCalError("");
+    // The previous month's selection would head the day panel with a date
+    // that's no longer in the grid.
+    setCalSelectedDate(null);
+    fetch(`/api/bookings/availability?month=${format(calMonth, "yyyy-MM")}`)
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error ?? "Failed to load availability.");
+        return d;
+      })
+      .then((d) => {
+        if (!current) return;
+        setCalVenues(Array.isArray(d.venues) ? d.venues : []);
+        setCalDays(
+          d.days && typeof d.days === "object"
+            ? (d.days as Record<string, CalendarOpening[]>)
+            : {},
+        );
+      })
+      .catch(() => {
+        if (!current) return;
+        setCalVenues([]);
+        setCalDays({});
+        setCalError("Couldn't load the calendar. Check your connection and try again.");
+      })
+      .finally(() => {
+        if (current) setCalLoading(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [browseMode, calMonth]);
+
+  // A venue only appears in the calendar if it's bookable, so it's always in
+  // `events` too — but guard anyway rather than open an empty sheet.
+  const openDayDetail = useCallback(
+    (courseId: string, date: string) => {
+      const course = events.find((e) => e.id === courseId);
+      const opening = (calDays[date] ?? []).find((o) => o.courseId === courseId);
+      if (!course || !opening) return;
+      setDayDetail({
+        course,
+        date,
+        openSlots: opening.openSlots,
+        tees: opening.tees,
+      });
+    },
+    [events, calDays],
+  );
 
   useEffect(() => {
     fetch("/api/courses")
@@ -4769,112 +4858,198 @@ function EventSelectionScreen({
   }
 
   return (
-    <div className="pb-8 md:max-w-2xl md:mx-auto">
-      {events.length > 1 && (
-        <div className="px-5 md:px-8 pt-5 pb-1 flex items-center gap-2">
-          <div
-            className="flex items-center gap-2 flex-1 min-w-0 bg-white rounded-xl px-3 py-2.5 border"
-            style={{ borderColor: "rgba(0,38,105,0.1)" }}
-          >
-            <svg
-              className="w-4 h-4 flex-shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-              style={{ color: "rgba(0,38,105,0.32)" }}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
-              />
-            </svg>
-            <input
-              type="search"
-              placeholder="Search by event name…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="flex-1 min-w-0 bg-transparent text-sm outline-none"
-              style={{ color: "var(--color-green-900)" }}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => setFiltersOpen(true)}
-            aria-label="Filter events"
-            className="relative flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-xl border transition-colors hover:bg-green-50/60 active:opacity-70"
-            style={{
-              borderColor: "rgba(0,38,105,0.1)",
-              background: "white",
-              color: "rgba(0,38,105,0.5)",
-            }}
-          >
-            <FunnelIcon />
-            {activeFilterCount > 0 && (
-              <span
-                className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 border-white"
-                style={{ background: "var(--color-gold)" }}
-              />
-            )}
-          </button>
-        </div>
+    <div
+      className={cn(
+        "pb-8 md:mx-auto",
+        // The month grid needs room for venue names inside its cells; the list
+        // reads better kept narrow.
+        browseMode === "calendar" ? "md:max-w-4xl" : "md:max-w-2xl",
       )}
-
-      <div className="px-5 md:px-8 pt-3">
-        {filtering ? (
-          <div className="flex justify-center py-10">
-            <Spinner className="text-green-700 w-5 h-5" />
-          </div>
-        ) : filteredEvents.length === 0 ? (
-          <EmptyState
-            compact
-            icon="🔍"
-            title="No events match your search"
-            description={
-              dateFilter
-                ? "No venue has a tee time open on that date. Try another day, or clear the date filter."
-                : "Try a different name or location."
-            }
-          />
-        ) : (
-          <div className="card">
-            {filteredEvents.map((course, i) => {
-              const borderStyle = {
-                borderBottom:
-                  i < filteredEvents.length - 1
-                    ? "1px solid rgba(0,38,105,0.06)"
-                    : "none",
-              };
-
-              return (
-                <button
-                  key={course.id}
-                  type="button"
-                  onClick={() => onSelect(course)}
-                  className="w-full text-left flex items-stretch gap-3 px-4 py-4 transition-colors hover:bg-green-50/40 active:opacity-70"
-                  style={borderStyle}
-                >
-                  <CourseRowInner
-                    course={course}
-                    pendingBookings={pendingBookings}
-                  />
-                </button>
-              );
-            })}
-          </div>
-        )}
+    >
+      {/* Browse mode — the same venues, listed or plotted across the month. */}
+      <div className="px-5 md:px-8 pt-5 pb-1 flex items-center justify-between gap-2">
+        <p className="section-label">
+          {browseMode === "list" ? "All events" : "Availability this month"}
+        </p>
+        <div
+          className="flex rounded-lg flex-shrink-0"
+          style={{ background: "rgba(0,38,105,0.06)" }}
+        >
+          {(
+            [
+              ["list", "List"],
+              ["calendar", "Calendar"],
+            ] as const
+          ).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={browseMode === mode}
+              onClick={() => setBrowseMode(mode)}
+              className="h-8 px-3 text-xs font-semibold rounded-md transition-all"
+              style={
+                browseMode === mode
+                  ? {
+                      background: "white",
+                      color: "var(--color-green-900)",
+                      boxShadow: "0 1px 2px rgba(0,38,105,0.1)",
+                    }
+                  : { color: "rgba(0,38,105,0.45)" }
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <EventFiltersDrawer
-        open={filtersOpen}
-        onClose={() => setFiltersOpen(false)}
-        locations={locations}
-        location={locationFilter}
-        onLocationChange={setLocationFilter}
-        date={dateFilter}
-        onDateChange={setDateFilter}
-      />
+      {browseMode === "calendar" ? (
+        <div className="px-5 md:px-8 pt-2">
+          {calError ? (
+            <div className="card card-pad text-center py-10">
+              <p className="text-sm text-red-500">{calError}</p>
+              <button
+                type="button"
+                onClick={() => setCalMonth((m) => new Date(m))}
+                className="btn btn-outline btn-sm mt-4 mx-auto"
+              >
+                Try again
+              </button>
+            </div>
+          ) : (
+            <VenueAvailabilityCalendar
+              month={calMonth}
+              venues={calVenues}
+              days={calDays}
+              loading={calLoading}
+              selectedDate={calSelectedDate}
+              onSelectDate={setCalSelectedDate}
+              onMonthChange={setCalMonth}
+              canGoPrev={calMonth > startOfMonth(new Date())}
+              venueFilter={calVenueFilter}
+              onVenueFilterChange={setCalVenueFilter}
+              onPickOpening={openDayDetail}
+            />
+          )}
+
+          <VenueDayDetailSheet
+            detail={dayDetail}
+            onClose={() => setDayDetail(null)}
+            onBook={(course, date) => {
+              setDayDetail(null);
+              onSelect(course, date);
+            }}
+          />
+        </div>
+      ) : (
+        <>
+          {events.length > 1 && (
+            <div className="px-5 md:px-8 pt-2 pb-1 flex items-center gap-2">
+              <div
+                className="flex items-center gap-2 flex-1 min-w-0 bg-white rounded-xl px-3 py-2.5 border"
+                style={{ borderColor: "rgba(0,38,105,0.1)" }}
+              >
+                <svg
+                  className="w-4 h-4 flex-shrink-0"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                  style={{ color: "rgba(0,38,105,0.32)" }}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+                  />
+                </svg>
+                <input
+                  type="search"
+                  placeholder="Search by event name…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="flex-1 min-w-0 bg-transparent text-sm outline-none"
+                  style={{ color: "var(--color-green-900)" }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(true)}
+                aria-label="Filter events"
+                className="relative flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-xl border transition-colors hover:bg-green-50/60 active:opacity-70"
+                style={{
+                  borderColor: "rgba(0,38,105,0.1)",
+                  background: "white",
+                  color: "rgba(0,38,105,0.5)",
+                }}
+              >
+                <FunnelIcon />
+                {activeFilterCount > 0 && (
+                  <span
+                    className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 border-white"
+                    style={{ background: "var(--color-gold)" }}
+                  />
+                )}
+              </button>
+            </div>
+          )}
+
+          <div className="px-5 md:px-8 pt-3">
+            {filtering ? (
+              <div className="flex justify-center py-10">
+                <Spinner className="text-green-700 w-5 h-5" />
+              </div>
+            ) : filteredEvents.length === 0 ? (
+              <EmptyState
+                compact
+                icon="🔍"
+                title="No events match your search"
+                description={
+                  dateFilter
+                    ? "No venue has a tee time open on that date. Try another day, or clear the date filter."
+                    : "Try a different name or location."
+                }
+              />
+            ) : (
+              <div className="card">
+                {filteredEvents.map((course, i) => {
+                  const borderStyle = {
+                    borderBottom:
+                      i < filteredEvents.length - 1
+                        ? "1px solid rgba(0,38,105,0.06)"
+                        : "none",
+                  };
+
+                  return (
+                    <button
+                      key={course.id}
+                      type="button"
+                      onClick={() => onSelect(course)}
+                      className="w-full text-left flex items-stretch gap-3 px-4 py-4 transition-colors hover:bg-green-50/40 active:opacity-70"
+                      style={borderStyle}
+                    >
+                      <CourseRowInner
+                        course={course}
+                        pendingBookings={pendingBookings}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <EventFiltersDrawer
+            open={filtersOpen}
+            onClose={() => setFiltersOpen(false)}
+            locations={locations}
+            location={locationFilter}
+            onLocationChange={setLocationFilter}
+            date={dateFilter}
+            onDateChange={setDateFilter}
+          />
+        </>
+      )}
     </div>
   );
 }
