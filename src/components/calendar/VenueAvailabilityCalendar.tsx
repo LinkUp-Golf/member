@@ -43,11 +43,20 @@ export interface CalendarVenue {
   state: string | null
 }
 
+export interface CalendarTee {
+  /** Wall-clock 'HH:mm:ss' at the venue. */
+  time: string
+  spotsOpen: number
+}
+
 export interface CalendarOpening {
   courseId: string
+  /** Bookable tee times that day. */
   openSlots: number
-  /** Earliest few tee times, wall-clock 'HH:mm:ss' at the venue. */
-  tees: string[]
+  /** Seats across them, already clamped to the venue's daily cap. */
+  openSpots: number
+  /** Earliest few tee times. */
+  tees: CalendarTee[]
 }
 
 const WEEKDAYS = [
@@ -64,8 +73,6 @@ const EMPTY: CalendarOpening[] = []
 
 const venueLocation = (v: CalendarVenue | undefined) =>
   [v?.city, v?.state].filter(Boolean).join(', ')
-
-const teeCountLabel = (n: number) => `${n} tee time${n === 1 ? '' : 's'}`
 
 // ---- One day cell (memoized) --------------------------------
 
@@ -226,14 +233,19 @@ function AgendaDay({
                 <span className="block text-sm font-semibold text-green-950 truncate">
                   {venue?.name ?? 'Venue'}
                 </span>
-                <span className="mt-0.5 flex items-center gap-2.5 text-[11px] text-green-900/45">
+                <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-green-900/45">
                   {o.tees[0] && (
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
-                      from {formatTeeTime(o.tees[0])}
-                    </span>
+                    <>
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
+                        {formatTeeTime(o.tees[0].time)}
+                      </span>
+                      <span aria-hidden className="text-green-900/25">·</span>
+                    </>
                   )}
-                  <span className={cn('font-medium', TEXT[idx])}>{teeCountLabel(o.openSlots)}</span>
+                  <span className={cn('font-medium', TEXT[idx])}>
+                    {o.openSpots} spot{o.openSpots === 1 ? '' : 's'} open
+                  </span>
                 </span>
                 {location && (
                   <span className="mt-0.5 flex items-center gap-1 text-[11px] text-green-900/40">
@@ -265,15 +277,22 @@ interface VenueAvailabilityCalendarProps {
   onSelectDate: (date: string | null) => void
   onMonthChange: (month: Date) => void
   canGoPrev?: boolean
-  venueFilter: string | null
-  onVenueFilterChange: (courseId: string | null) => void
+  /**
+   * Venue ids to plot, or null for all of them. The search box, the location
+   * filter and the venue focus all land here as one already-resolved list, so
+   * the grid has a single rule to apply. Colours still come from `venues` (the
+   * full month), so narrowing the set never re-colours what's left.
+   */
+  allowedVenueIds: string[] | null
+  /** Clears every venue narrowing at once; null when there's nothing to clear. */
+  onClearVenueFilters: (() => void) | null
   /** Booking a specific venue on a specific day. */
   onPickOpening: (courseId: string, date: string) => void
 }
 
 function VenueAvailabilityCalendar({
   month, venues, days, loading, selectedDate, onSelectDate, onMonthChange,
-  canGoPrev = true, venueFilter, onVenueFilterChange, onPickOpening,
+  canGoPrev = true, allowedVenueIds, onClearVenueFilters, onPickOpening,
 }: VenueAvailabilityCalendarProps) {
   const todayIso = useMemo(() => iso(new Date()), [])
 
@@ -287,16 +306,22 @@ function VenueAvailabilityCalendar({
   }, [venues])
 
   // Kept separate from the colour assignment so filtering never re-colours a
-  // venue — the legend has to stay stable while the grid narrows.
+  // venue — a club has to keep its colour while the grid narrows.
+  const allowed = useMemo(
+    () => (allowedVenueIds ? new Set(allowedVenueIds) : null),
+    [allowedVenueIds],
+  )
+
   const visibleDays = useMemo(() => {
-    if (!venueFilter) return days
+    if (!allowed) return days
     const out: Record<string, CalendarOpening[]> = {}
     for (const [day, list] of Object.entries(days)) {
-      const kept = list.filter(o => o.courseId === venueFilter)
+      const kept = list.filter(o => allowed.has(o.courseId))
       if (kept.length) out[day] = kept
     }
     return out
-  }, [days, venueFilter])
+  }, [days, allowed])
+
 
   // A fixed 6-week grid would keep the height stable, but an agenda sits right
   // below it — trailing blank weeks would just push it down, so the grid ends
@@ -322,9 +347,13 @@ function VenueAvailabilityCalendar({
   )
 
   const onCurrentMonth = isSameMonth(month, new Date())
-  const filterable = venues.length > 1
   const selectedOpenings = selectedDate ? (visibleDays[selectedDate] ?? []) : []
-  const filteredVenueName = venueFilter ? nameByVenue.get(venueFilter) : null
+  // Only worth naming the survivor when the filters left exactly one venue —
+  // past that, "your filters" is the honest description of what emptied the
+  // month.
+  const survivingVenues = allowed ? venues.filter(v => allowed.has(v.id)) : venues
+  const soleVenueName = survivingVenues.length === 1 ? survivingVenues[0]?.name ?? null : null
+  const narrowed = onClearVenueFilters !== null
 
   return (
     <div className="space-y-4">
@@ -405,55 +434,6 @@ function VenueAvailabilityCalendar({
           </div>
         </div>
 
-        {/* Legend — doubles as a venue filter */}
-        {venues.length > 0 && (
-          <div className="mt-4 pt-3 border-t border-green-900/10">
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <p className="text-[11px] font-medium text-green-900/50">
-                {filterable ? 'Tap a venue to focus the month' : 'Venue this month'}
-              </p>
-              {venueFilter && (
-                <button
-                  type="button"
-                  onClick={() => onVenueFilterChange(null)}
-                  className="text-[11px] font-semibold text-green-800 hover:underline flex-shrink-0"
-                >
-                  Show all
-                </button>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {venues.map(v => {
-                const on = venueFilter === v.id
-                const idx = colourByVenue.get(v.id) ?? 0
-                const chip = cn(
-                  'flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-full border text-xs max-w-full',
-                  on ? 'bg-green-900 text-white border-green-900' : 'bg-white text-green-900/70 border-green-900/10',
-                )
-                const body = (
-                  <>
-                    <span className={cn('w-2 h-2 rounded-full flex-shrink-0', on ? 'bg-white' : DOT[idx])} />
-                    <span className="truncate">{v.name}</span>
-                  </>
-                )
-                // Filtering to the only venue in the month would change nothing.
-                return filterable ? (
-                  <button
-                    key={v.id}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => onVenueFilterChange(on ? null : v.id)}
-                    className={cn(chip, 'transition-colors', !on && 'hover:bg-green-50')}
-                  >
-                    {body}
-                  </button>
-                ) : (
-                  <span key={v.id} className={chip}>{body}</span>
-                )
-              })}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Agenda — the selected day, or the whole month when none is picked. */}
@@ -484,9 +464,11 @@ function VenueAvailabilityCalendar({
             ) : (
               <div className="card card-pad text-center py-8">
                 <p className="text-sm text-green-900/60">
-                  {filteredVenueName
-                    ? `No tee times at ${filteredVenueName} on this day.`
-                    : 'No tee times open on this day.'}
+                  {soleVenueName
+                    ? `No tee times at ${soleVenueName} on this day.`
+                    : narrowed
+                      ? 'No tee times match your filters on this day.'
+                      : 'No tee times open on this day.'}
                 </p>
                 <p className="text-xs text-green-900/40 mt-1">
                   {monthOpeningCount > 0 ? 'Pick a highlighted day above.' : 'Try another month.'}
@@ -522,17 +504,31 @@ function VenueAvailabilityCalendar({
           <div className="card card-pad text-center py-10">
             <CalendarDays className="w-8 h-8 mx-auto text-green-900/30" strokeWidth={1.5} />
             <p className="text-sm text-green-900/60 mt-3">
-              {filteredVenueName
-                ? `No tee times at ${filteredVenueName} in ${format(month, 'MMMM')}.`
-                : `No tee times open in ${format(month, 'MMMM')}.`}
+              {soleVenueName
+                ? `No tee times at ${soleVenueName} in ${format(month, 'MMMM')}.`
+                : narrowed
+                  ? `Nothing matches your filters in ${format(month, 'MMMM')}.`
+                  : `No tee times open in ${format(month, 'MMMM')}.`}
             </p>
-            <button
-              onClick={() => onMonthChange(addMonths(month, 1))}
-              className="btn btn-outline btn-sm mt-4 mx-auto"
-            >
-              {format(addMonths(month, 1), 'MMMM')}
-              <ChevronRight className="w-3.5 h-3.5" strokeWidth={2} />
-            </button>
+            {/* When filters are what emptied the month, clearing them is the
+                likelier fix than skipping forward. */}
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
+              {narrowed && (
+                <button
+                  onClick={onClearVenueFilters ?? undefined}
+                  className="btn btn-outline btn-sm"
+                >
+                  Clear filters
+                </button>
+              )}
+              <button
+                onClick={() => onMonthChange(addMonths(month, 1))}
+                className="btn btn-outline btn-sm"
+              >
+                {format(addMonths(month, 1), 'MMMM')}
+                <ChevronRight className="w-3.5 h-3.5" strokeWidth={2} />
+              </button>
+            </div>
           </div>
         )
       )}

@@ -184,18 +184,33 @@ export interface CalendarVenue {
   state: string | null
 }
 
+/** One bookable tee time, as the calendar and its detail sheet quote it. */
+export interface CalendarTee {
+  /** Wall-clock 'HH:mm:ss' at the venue. */
+  time: string
+  /** Seats left at this tee time, never more than the day itself has left. */
+  spotsOpen: number
+}
+
 /** One venue's opening on one day. */
 export interface CalendarOpening {
   courseId: string
   /** Bookable tee times left that day — the true total, not tees.length. */
   openSlots: number
   /**
-   * The earliest few bookable tee times, as wall-clock 'HH:mm:ss' at the venue.
-   * Capped: the detail modal previews them, and the member picks an exact time
-   * in the booking flow itself, so sending a whole day's grid per venue per day
-   * would bloat the month payload for nothing.
+   * Seats bookable across those tee times, clamped to what the venue's daily
+   * player cap still allows. Without the clamp a day could advertise more
+   * seats than it can actually sell — the cap is enforced atomically at
+   * booking time, so the surplus would fail with DAY_FULL on submit.
    */
-  tees: string[]
+  openSpots: number
+  /**
+   * The earliest few bookable tee times. Capped: the detail sheet previews
+   * them, and the member picks an exact time in the booking flow itself, so
+   * sending a whole day's grid per venue per day would bloat the month payload
+   * for nothing.
+   */
+  tees: CalendarTee[]
 }
 
 // How many tee times per venue-day ride along in the month payload.
@@ -291,7 +306,10 @@ export async function venueAvailabilityForMonth(
     const openings: Array<{ date: string; opening: CalendarOpening }> = []
     for (const [date, daySlots] of Object.entries(slots)) {
       if (date < todayAtVenue) continue
-      if ((held.get(`${course.id}|${date}`) ?? 0) >= cap) continue
+
+      // What the venue's daily cap still allows, whatever its calendar says.
+      const dayRemaining = cap - (held.get(`${course.id}|${date}`) ?? 0)
+      if (dayRemaining <= 0) continue
 
       const open = (daySlots ?? []).filter(s => s.available && (s.spotsOpen ?? 0) > 0)
       if (open.length === 0) continue
@@ -301,12 +319,20 @@ export async function venueAvailabilityForMonth(
         opening: {
           courseId: course.id,
           openSlots: open.length,
+          openSpots: Math.min(
+            open.reduce((n, s) => n + (s.spotsOpen ?? 0), 0),
+            dayRemaining,
+          ),
           // startTime carries the venue's own offset, so the wall-clock time is
           // readable straight off the string — no re-zoning on the client.
           tees: open
             .slice(0, TEE_PREVIEW_LIMIT)
-            .map(s => s.startTime.split('T')[1]?.slice(0, 8) ?? '')
-            .filter(Boolean),
+            .map(s => ({
+              time: s.startTime.split('T')[1]?.slice(0, 8) ?? '',
+              // No single tee time can seat more than the day has left either.
+              spotsOpen: Math.min(s.spotsOpen ?? 0, dayRemaining),
+            }))
+            .filter(t => t.time),
         },
       })
     }
@@ -328,7 +354,7 @@ export async function venueAvailabilityForMonth(
   // Within a day, the venue teeing off earliest reads first — the same order the
   // grid chips and the agenda render in.
   for (const list of Object.values(days)) {
-    list.sort((a, b) => (a.tees[0] ?? '').localeCompare(b.tees[0] ?? ''))
+    list.sort((a, b) => (a.tees[0]?.time ?? '').localeCompare(b.tees[0]?.time ?? ''))
   }
 
   return { venues, days }

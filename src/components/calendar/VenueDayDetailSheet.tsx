@@ -11,18 +11,24 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Image from 'next/image'
-import { Clock, MapPin, Globe, Phone, X } from 'lucide-react'
+import { Clock, MapPin, Globe, Phone, Users, X } from 'lucide-react'
 import { format } from 'date-fns'
 import { formatTeeTime } from '@/lib/utils'
+import { BOOKING_PRICE_USD } from '@/lib/constants'
 import type { Course } from '@/types'
 
 export interface VenueDayDetail {
   course: Course
   /** YYYY-MM-DD */
   date: string
+  /** Bookable tee times that day. */
   openSlots: number
-  /** Earliest few tee times, wall-clock 'HH:mm:ss' at the venue. */
-  tees: string[]
+  /** Seats across them, already clamped to the venue's daily cap. */
+  openSpots: number
+  /** Earliest few tee times, with the seats left at each. */
+  tees: { time: string; spotsOpen: number }[]
+  /** Rounds of theirs at this venue still awaiting payment, if any. */
+  pendingCount: number
 }
 
 export default function VenueDayDetailSheet({
@@ -71,9 +77,13 @@ export default function VenueDayDetailSheet({
 
   if (!mounted || !shown) return null
 
-  const { course, date, openSlots, tees } = shown
+  const { course, date, openSlots, openSpots, tees, pendingCount } = shown
   const location = [course.city, course.state].filter(Boolean).join(', ')
   const longDate = format(new Date(`${date}T12:00:00`), 'EEEE, MMMM d')
+  // Courses carry their own rate; BOOKING_PRICE_USD is the house default the
+  // confirm screen quotes when one isn't set, so the sheet can always name a
+  // price rather than going silent on the question that decides the booking.
+  const pricePerPlayer = course.cost_per_player ?? BOOKING_PRICE_USD
 
   const sheet = (
     <div
@@ -138,11 +148,9 @@ export default function VenueDayDetailSheet({
                   <span className="truncate">{location}</span>
                 </p>
               )}
-              {course.cost_per_player != null && (
-                <p className="mt-1 text-xs font-bold" style={{ color: 'var(--color-gold-dark, #92640a)' }}>
-                  ${course.cost_per_player}/player
-                </p>
-              )}
+              <p className="mt-1 text-xs font-bold" style={{ color: 'var(--color-gold-dark, #92640a)' }}>
+                ${pricePerPlayer}/player
+              </p>
             </div>
           </div>
 
@@ -155,15 +163,23 @@ export default function VenueDayDetailSheet({
 
             <div className="mt-2.5 flex items-center gap-2 flex-wrap">
               <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                <Clock className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
-                {openSlots} tee time{openSlots === 1 ? '' : 's'} open
+                <Users className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
+                {openSpots} spot{openSpots === 1 ? '' : 's'} open
               </span>
+            </div>
+
+            {/* The times themselves, each with the seats left on it — the count
+                of them is the list's own length, so it isn't stated twice. */}
+            <div className="mt-2 flex items-center gap-1.5 flex-wrap">
               {tees.map(t => (
                 <span
-                  key={t}
-                  className="text-[11px] font-medium px-2 py-1 rounded-full bg-white border border-green-900/10 text-green-900/65"
+                  key={t.time}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-full bg-white border border-green-900/10 text-green-900/65"
                 >
-                  {formatTeeTime(t)}
+                  <Clock className="w-3 h-3 flex-shrink-0 text-green-900/35" strokeWidth={2} />
+                  {formatTeeTime(t.time)}
+                  <span aria-hidden className="text-green-900/25">·</span>
+                  <span className="text-green-900/45">{t.spotsOpen}</span>
                 </span>
               ))}
               {openSlots > tees.length && (
@@ -176,6 +192,20 @@ export default function VenueDayDetailSheet({
               Times are local to the venue. You&apos;ll pick your exact tee time next.
             </p>
           </div>
+
+          {/* The list row used to badge a venue the member owed money at. The
+              FIFO gate blocks a new booking until it's resolved, so the warning
+              belongs in front of the button rather than after it. */}
+          {pendingCount > 0 && (
+            <div className="mt-4 rounded-2xl px-4 py-3" style={{ background: 'rgba(146,100,10,0.08)' }}>
+              <p className="text-xs font-bold" style={{ color: '#92640a' }}>
+                💳 {pendingCount} payment{pendingCount === 1 ? '' : 's'} due here
+              </p>
+              <p className="mt-1 text-[11px]" style={{ color: '#92640a' }}>
+                Settle it before booking another round — you&apos;ll be shown the link.
+              </p>
+            </div>
+          )}
 
           {course.description && (
             <div className="mt-4">
