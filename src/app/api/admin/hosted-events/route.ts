@@ -57,17 +57,24 @@ export const GET = withAuth(
 
     const events = await enrichHostedEvents(admin, (data ?? []) as HostedEvent[])
 
-    // Counted independently of the filters. It used to be derived from the
-    // filtered rows, so it read 0 in every view except the pending one — and
-    // nothing consumed it.
-    const { count: pendingCount } = await admin
-      .from('hosted_events')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'pending_credit_approval')
+    // Both queues, counted independently of the filters so the tabs say how
+    // much work is waiting whichever view is open. These are the only two
+    // states that need an admin to act; everything else is history.
+    const [{ count: creditCount }, { count: approvalCount }] = await Promise.all([
+      admin.from('hosted_events').select('id', { count: 'exact', head: true })
+        .eq('status', 'pending_credit_approval'),
+      admin.from('hosted_events').select('id', { count: 'exact', head: true })
+        .eq('status', 'pending_approval'),
+    ])
 
     return NextResponse.json({
       events,
-      pendingCount: pendingCount ?? 0,
+      // Kept for older clients; `counts` is what the admin screen reads.
+      pendingCount: creditCount ?? 0,
+      counts: {
+        pending_approval: approvalCount ?? 0,
+        pending_credit_approval: creditCount ?? 0,
+      },
       total: count ?? events.length,
       truncated: (count ?? 0) > events.length,
     })
