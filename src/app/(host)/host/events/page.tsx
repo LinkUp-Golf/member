@@ -790,11 +790,12 @@ function EventDrawer({
                 }}
                 single={isEdit}
                 max={isEdit ? 1 : MAX_DATES_PER_EVENT}
+                exceptEventId={event?.id}
               />
               <p className="text-[11px] text-gray-400 mt-1">
                 {isEdit
                   ? "Only days this venue still has open can be chosen."
-                  : "Only days this venue has open are shown; the number is spots left. Each date becomes its own event."}
+                  : "Only days this venue has open and doesn't already have a round on are shown; the number is spots left. Each date becomes its own event."}
               </p>
               {dateError && <p className={errCls}>{dateError}</p>}
             </div>

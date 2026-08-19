@@ -12,6 +12,11 @@ export const dynamic = 'force-dynamic'
 // open: a day counts only if the club's calendar has a tee time AND its daily
 // player cap still has room, both resolved in the venue's own timezone.
 //
+// A day already spoken for by a hosted round at this venue is then dropped.
+// Two rounds at the same club on the same day is not a thing anyone wants, and
+// offering the date again is how it happens — a host who has already submitted
+// a date would see it as free and submit it twice.
+//
 // Member-scoped rather than host-scoped. The applicant filling in a host
 // application isn't a host yet, and this is the same availability /book already
 // shows every member — the rule about which venues a host may actually list at
@@ -68,17 +73,34 @@ export const GET = withAuth(async (
   const startDate = format(new Date(year, monthIdx, 1), 'yyyy-MM-dd')
   const endDate = format(new Date(year, monthIdx + 1, 0), 'yyyy-MM-dd')
 
-  const { days } = await venueAvailabilityForMonth(
-    admin,
-    [course as Course],
-    month,
-    startDate,
-    endDate,
-  )
+  // Days this venue already has a round on. Everything but a cancelled one
+  // holds its date — including a round still waiting on approval, which is
+  // exactly the case where offering the date again produces a duplicate.
+  //
+  // `except` keeps an event's own date selectable while it's being edited;
+  // without it, opening the edit form would show the date it already has as
+  // unavailable and leave nothing selected.
+  const except = req.nextUrl.searchParams.get('except')
+  let takenQuery = admin
+    .from('hosted_events')
+    .select('event_date')
+    .eq('course_id', courseId)
+    .neq('status', 'cancelled')
+    .gte('event_date', startDate)
+    .lte('event_date', endDate)
+  if (except) takenQuery = takenQuery.neq('id', except)
+
+  const [{ days }, { data: takenRows }] = await Promise.all([
+    venueAvailabilityForMonth(admin, [course as Course], month, startDate, endDate),
+    takenQuery,
+  ])
+
+  const taken = new Set((takenRows ?? []).map(r => String(r.event_date).slice(0, 10)))
 
   // One entry per open day, ascending. The counts ride along so a picker can
   // show how much room a day has without a second call.
   const dates = Object.entries(days)
+    .filter(([date]) => !taken.has(date))
     .map(([date, openings]) => ({
       date,
       openSlots: openings[0]?.openSlots ?? 0,

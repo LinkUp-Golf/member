@@ -12,6 +12,9 @@
 // The count on each chip is not decoration: it's the capacity the event created
 // for that date will carry, since a round is listed with the spots its venue
 // actually has that day. Two dates at the same club routinely differ.
+//
+// Days the venue already has a round on don't appear at all — the server drops
+// them, so a date can't be listed twice.
 
 import { useCallback, useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react'
@@ -38,6 +41,7 @@ export default function VenueDateSelector({
   single = false,
   max,
   disabled = false,
+  exceptEventId,
 }: {
   /** null until a venue is chosen — there is nothing to ask about before that. */
   courseId: string | null
@@ -49,6 +53,11 @@ export default function VenueDateSelector({
   /** Cap on how many days can be picked at once. */
   max?: number
   disabled?: boolean
+  /**
+   * The event being edited. A day already carrying a round is dropped from the
+   * list, which would otherwise hide the very date this form is editing.
+   */
+  exceptEventId?: string
 }) {
   const [month, setMonth] = useState<Date>(() => startOfMonth(new Date()))
   const [dates, setDates] = useState<AvailableDate[] | null>(null)
@@ -68,7 +77,8 @@ export default function VenueDateSelector({
     setDates(null)
     setError(null)
     setUnconfigured(false)
-    fetch(`/api/courses/${courseId}/available-dates?month=${monthKey(month)}`)
+    const except = exceptEventId ? `&except=${exceptEventId}` : ''
+    fetch(`/api/courses/${courseId}/available-dates?month=${monthKey(month)}${except}`)
       .then(async r => {
         const d = await r.json().catch(() => ({}))
         if (!r.ok) throw new Error(d.error ?? 'Could not load dates.')
@@ -87,7 +97,7 @@ export default function VenueDateSelector({
     return () => {
       current = false
     }
-  }, [courseId, month])
+  }, [courseId, month, exceptEventId])
 
   const toggle = useCallback(
     (date: string) => {
