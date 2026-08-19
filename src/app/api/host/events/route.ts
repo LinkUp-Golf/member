@@ -7,12 +7,13 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { validateHostedEventPayload, validateProposedClub, normaliseEventDates, sanitiseText } from '@/lib/validation'
+import { validateHostedEventPayload, normaliseEventDates, sanitiseText } from '@/lib/validation'
 import { enrichHostedEvents, hostCanUseCourse } from '@/lib/hosts/events'
-import { requestPendingCourse } from '@/lib/courses/request-course'
+import { openSpotsByDate } from '@/lib/bookings/availability'
 import { sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
-import type { HostedEvent } from '@/types'
+import { HOST_EVENT_GUEST_RATE_USD } from '@/lib/constants'
+import type { Course, HostedEvent } from '@/types'
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
@@ -45,20 +46,14 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     ? body.source_booking_id
     : null
 
-  // A "new club" event: the host proposes a round at a club not yet on LinkUp.
-  // The club is filed as a pending course for an admin to set up properly, but
-  // the event itself lists straight away like any other — the round is real,
-  // it's only our directory entry for the club that's incomplete.
-  const newClubRaw = body.new_club
-  const newClub = !sourceBookingId && newClubRaw && typeof newClubRaw === 'object'
-    ? (newClubRaw as { name?: unknown; website?: unknown })
-    : null
-
+  // Hosting is for venues already on LinkUp. A host proposing a club we don't
+  // have used to file it as a pending course from here, which meant an event
+  // could exist before anyone had confirmed the club did — so the path is gone,
+  // and a club that isn't listed has to be added by an admin first.
   let courseId: string
-  let courseName = 'a course'
   // One event per date. A booking-sourced event is always exactly one (the tee
-  // time it came from); the other two paths accept several dates sharing the same
-  // course, spots, rate and dinner.
+  // time it came from); a proposed schedule accepts several dates sharing the
+  // same course, spots, rate and dinner.
   let eventDates: string[]
   let teeTime: string | null
   let seatCap: number | null = null
@@ -117,45 +112,6 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       .in('status', ACTIVE_BOOKING_STATUSES)
     seatCap = count ?? 1
 
-    if (Number(body.total_spots) > seatCap) {
-      return NextResponse.json(
-        { error: `That booking holds ${seatCap} seat${seatCap === 1 ? '' : 's'} — you can't offer more than that.` },
-        { status: 400 }
-      )
-    }
-  } else if (newClub) {
-    // ---- Proposed at a brand-new club ----------------------------------
-    // Everything but the course is validated; the course is created here.
-    const { valid, errors } = validateHostedEventPayload(body, { requireCourse: false })
-    if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })
-
-    // Shared with POST /api/courses/request and the host application form, so the
-    // same club proposed from any of the three produces the same row. The website
-    // is required on this path only: an event goes live immediately at a club we
-    // have never seen, so an admin needs enough to identify and set it up.
-    const clubCheck = validateProposedClub(newClub, { requireWebsite: true })
-    if (!clubCheck.valid) return NextResponse.json({ error: clubCheck.errors[0] }, { status: 400 })
-
-    const clubName = String(newClub.name).trim()
-    const website = String(newClub.website).trim()
-
-    const resolved = resolveDates()
-    if (resolved.error || !resolved.dates) {
-      return NextResponse.json({ error: resolved.error }, { status: 400 })
-    }
-    eventDates = resolved.dates
-    // Free text the host typed — sanitise like any other free-form field.
-    teeTime = typeof body.tee_time === 'string' && body.tee_time.trim()
-      ? sanitiseText(body.tee_time.trim())
-      : null
-
-    // One pending course for the club, however many dates are being listed at it.
-    const result = await requestPendingCourse({ admin, name: clubName, website, requestedBy: ctx.memberId })
-    if (result.error || !result.course) {
-      return NextResponse.json({ error: result.error ?? 'Could not add the club.' }, { status: result.status ?? 500 })
-    }
-    courseId = result.course.id
-    courseName = clubName
   } else {
     // ---- A newly proposed schedule at an existing course ---------------
     const { valid, errors } = validateHostedEventPayload(body)
@@ -179,48 +135,40 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     }
   }
 
-  // Spots/rate are validated in both paths.
-  const spots = Number(body.total_spots)
-  const rate = Number(body.member_guest_rate)
-  if (!Number.isInteger(spots) || spots < 1 || spots > 200) {
-    return NextResponse.json({ error: 'Available spots must be a whole number between 1 and 200' }, { status: 400 })
-  }
-  if (!Number.isFinite(rate) || rate < 0 || rate > 100000) {
-    return NextResponse.json({ error: 'Member guest rate must be a positive amount' }, { status: 400 })
+  // The rate is a fixed term — two members comparing two hosts' listings can't
+  // find the same round priced differently.
+  const rate = HOST_EVENT_GUEST_RATE_USD
+
+  // The course must exist and be bookable.
+  // The whole row: openSpotsByDate needs the calendar id, timezone, daily cap
+  // and curated-slot flag to work out what the venue actually has open.
+  const { data: course } = await admin
+    .from('courses')
+    .select('*')
+    .eq('id', courseId)
+    .maybeSingle()
+  if (!course) {
+    return NextResponse.json({ error: 'That course is not available for events.' }, { status: 400 })
   }
 
-  // The course must exist and be bookable — except the new_club path, whose
-  // course is intentionally pending until an admin approves it.
-  if (!newClub) {
-    const { data: course } = await admin
-      .from('courses')
-      .select('id, name, approval_status')
-      .eq('id', courseId)
+  // A pending course is allowed only when this host was explicitly granted it as
+  // a venue — a club an admin set them up for but hasn't finished listing.
+  // Refusing it would strand them: the venue sits in their dropdown while every
+  // attempt to use it fails. Checked against an actual host_venues row rather
+  // than hostCanUseCourse, whose empty-set-means-unrestricted rule would
+  // otherwise let an unscoped host pick any pending course.
+  if (course.approval_status !== 'active') {
+    const { data: grantedVenue } = await admin
+      .from('host_venues')
+      .select('course_id')
+      .eq('host_id', ctx.host.id)
+      .eq('course_id', courseId)
       .maybeSingle()
-    if (!course) {
+    if (course.approval_status !== 'pending' || !grantedVenue) {
       return NextResponse.json({ error: 'That course is not available for events.' }, { status: 400 })
     }
-
-    // A pending course is allowed here only when this host was explicitly granted
-    // it as a venue. That's the club they proposed and an admin approved them for,
-    // so refusing it would strand them: the venue sits in their dropdown while
-    // every attempt to use it fails. Checked against an actual host_venues row
-    // rather than hostCanUseCourse, whose empty-set-means-unrestricted rule would
-    // otherwise let an unscoped host pick any pending course.
-    if (course.approval_status !== 'active') {
-      const { data: grantedVenue } = await admin
-        .from('host_venues')
-        .select('course_id')
-        .eq('host_id', ctx.host.id)
-        .eq('course_id', courseId)
-        .maybeSingle()
-      if (course.approval_status !== 'pending' || !grantedVenue) {
-        return NextResponse.json({ error: 'That course is not available for events.' }, { status: 400 })
-      }
-    }
-
-    courseName = course.name
   }
+
 
   // Creating an event does not publish it. It lands in 'pending_approval',
   // invisible to members, and an admin approves it once the GHL calendar behind
@@ -233,6 +181,30 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
   // read in chronological order regardless of what order they were typed in.
   const orderedDates = [...eventDates].sort()
 
+  // Capacity is whatever the venue actually has open that day — two days at the
+  // same club rarely have the same room, so a flat number would either oversell
+  // the thin ones or waste the busy ones. A booking-sourced event is bounded by
+  // the seats the booking itself holds instead.
+  const spotsFor = new Map<string, number>()
+  if (seatCap !== null) {
+    for (const date of orderedDates) spotsFor.set(date, seatCap)
+  } else {
+    const open = await openSpotsByDate(admin, course as Course, orderedDates)
+    for (const date of orderedDates) {
+      const spots = open.get(date)
+      // The host picked from this venue's open days, but a day can fill between
+      // choosing it and submitting. Better to say so than to list a round with
+      // no seats behind it.
+      if (!spots) {
+        return NextResponse.json(
+          { error: `${date} is no longer open at ${course.name}. Remove it and try again.` },
+          { status: 409 }
+        )
+      }
+      spotsFor.set(date, spots)
+    }
+  }
+
   const { data: created, error } = await admin
     .from('hosted_events')
     .insert(orderedDates.map(date => ({
@@ -240,7 +212,7 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       course_id: courseId,
       event_date: date,
       tee_time: teeTime,
-      total_spots: spots,
+      total_spots: spotsFor.get(date) ?? 1,
       member_guest_rate: rate,
       dinner,
       // Only the single booking-sourced event carries this; the partial unique
@@ -274,7 +246,12 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
   // date, keyed on the earliest — a host listing ten dates shouldn't produce ten
   // identical notifications.
   void sendPushToAdmins(
-    NotificationTemplates.hostedEventNeedsReview(ctx.host.name, courseName, orderedDates[0] ?? '')
+    NotificationTemplates.hostedEventNeedsReview(
+      ctx.host.name,
+      course.name,
+      orderedDates[0] ?? '',
+      orderedDates.length,
+    )
   ).catch(() => {})
 
   logger.info('Hosted event created', {
@@ -285,7 +262,6 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       event_count: events.length,
       host_id: ctx.host.id,
       from_booking: !!sourceBookingId,
-      new_club: !!newClub,
     },
   })
 

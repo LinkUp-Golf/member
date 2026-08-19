@@ -324,9 +324,20 @@ export const NotificationTemplates = {
   // Sent to admins when a host submits an event. It is not live — it sits in
   // 'pending_approval' until someone sets up the GHL calendar and approves it,
   // so this is a queue item to action, not an FYI about something already out.
-  hostedEventNeedsReview: (hostName: string, courseName: string, date: string): PushPayload => ({
-    title: 'Hosted event needs approval',
-    body:  `${hostName} submitted an event at ${courseName} on ${date}. Set up the calendar, then approve it to put it in front of members.`,
+  // A host asking to run a round. Nothing is visible to members until an admin
+  // approves it, so this push is the only thing that says there's a queue.
+  // `dateCount` covers the batch case: a host picks their dates in one go, and
+  // naming only the first would understate what's waiting.
+  hostedEventNeedsReview: (
+    hostName: string,
+    courseName: string,
+    date: string,
+    dateCount = 1,
+  ): PushPayload => ({
+    title: 'A host wants to run a round',
+    body: dateCount > 1
+      ? `${hostName} wants to host ${dateCount} rounds at ${courseName}, from ${date}. Set up the calendar, then approve them to put them in front of members.`
+      : `${hostName} wants to host a round at ${courseName} on ${date}. Set up the calendar, then approve it to put it in front of members.`,
     url:   '/admin/hosts',
     tag:   'hosted-event-review',
   }),

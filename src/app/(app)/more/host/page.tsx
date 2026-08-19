@@ -4,13 +4,15 @@ import { useState, useEffect, useCallback } from "react";
 import {
   useForm,
   useFieldArray,
+  Controller,
   type Control,
   type FieldErrors,
   type UseFormRegister,
   type UseFormTrigger,
 } from "react-hook-form";
 import Link from "next/link";
-import { Flag, Plus, X } from "lucide-react";
+import { Flag, X } from "lucide-react";
+import VenueDateSelector from "@/components/host/VenueDateSelector";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
 import { Spinner } from "@/components/ui/Loading";
@@ -21,9 +23,6 @@ import {
   newRound,
   roundAt,
   roundStarted,
-  CLUB_NAME_MAX,
-  CLUB_NAME_MIN,
-  MAX_CUSTOM_VENUES,
   MAX_DATES_PER_ROUND,
   NAME_MAX,
   NAME_MIN,
@@ -31,12 +30,9 @@ import {
   SPOTS_MAX,
   SPOTS_MIN,
   TEE_TIME_MAX,
-  WEBSITE_MAX,
   type ApplicationValues,
-  type CustomVenueField,
   type RoundFields,
   type SubmitValues,
-  type VenueKind,
 } from "@/lib/hosts/application-form";
 import type { Host, HostApplication, Course } from "@/types";
 
@@ -269,15 +265,11 @@ export default function HostApplicationPage() {
               <ApplicationForm
                 heading={wasRejected ? "Apply again" : "Apply to become a host"}
                 error={error}
-                onSubmit={async ({ name, course_ids, new_venues, events }) => {
+                onSubmit={async ({ name, course_ids, events }) => {
                   setError(null);
                   const res = await apiClient.post("/api/host/application", {
                     name,
                     course_ids,
-                    // Clubs named on this form that aren't on LinkUp yet. Left
-                    // out of this body, they never reached the server and an
-                    // application for only a new venue failed as "choose a venue".
-                    new_venues,
                     events,
                   });
                   if (res.error) {
@@ -333,14 +325,13 @@ function ApplicationForm({
     trigger,
     formState: { errors, isSubmitting },
   } = useForm<ApplicationValues>({
-    defaultValues: { name: "", existing: [], custom: [] },
+    defaultValues: { name: "", existing: [] },
     // Validate a field once it's been touched, so a bad date says so while
     // you're still looking at it rather than after a submit.
     mode: "onTouched",
   });
 
   const existing = useFieldArray({ control, name: "existing" });
-  const custom = useFieldArray({ control, name: "custom" });
 
   const [venues, setVenues] = useState<VenueOption[]>([]);
   const [venuesLoaded, setVenuesLoaded] = useState(false);
@@ -348,14 +339,11 @@ function ApplicationForm({
   useEffect(() => {
     apiClient.get<{ courses: VenueOption[] }>("/api/courses").then((res) => {
       if (res.data?.courses) setVenues(res.data.courses);
-      // Distinguish "still loading" from "there genuinely are none" — otherwise a
-      // failed fetch leaves the applicant staring at a loading line forever with
-      // no way to reach "Add new venue".
+      // Distinguish "still loading" from "there genuinely are none" — otherwise
+      // a failed fetch leaves the applicant staring at a loading line forever.
       setVenuesLoaded(true);
     });
   }, []);
-
-  const todayISO = new Date().toISOString().slice(0, 10);
 
   /**
    * Selecting a venue appends its round; deselecting removes both together.
@@ -377,11 +365,6 @@ function ApplicationForm({
     clearErrors("root.venues");
   };
 
-  const addCustomVenue = () => {
-    custom.append({ name: "", website: "", round: newRound() });
-    clearErrors("root.venues");
-  };
-
   // Only what's left to pick — anything chosen has moved up into a card, so the
   // list below never shows the same venue twice.
   const unselectedVenues = venues.filter(
@@ -389,10 +372,9 @@ function ApplicationForm({
   );
 
   const submit = handleSubmit(async (data) => {
-    // A custom venue counts: it's a venue they want to host at, it just doesn't
-    // exist yet. This is the one rule that isn't a field's own, so it's the one
-    // thing still checked here.
-    if (data.existing.length === 0 && data.custom.length === 0) {
+    // The one rule that isn't a field's own, so it's the one thing still
+    // checked here.
+    if (data.existing.length === 0) {
       setError("root.venues", {
         message: "Choose at least one venue you want to host at.",
       });
@@ -400,7 +382,7 @@ function ApplicationForm({
     }
 
     const ok = await onSubmit(buildApplicationPayload(data));
-    if (ok) reset({ name: "", existing: [], custom: [] });
+    if (ok) reset({ name: "", existing: [] });
   });
 
   return (
@@ -443,53 +425,25 @@ function ApplicationForm({
             ticks scattered through a long roster — and the round sits with the
             venue it belongs to instead of in a separate section pointing back at
             it through a dropdown. */}
-        {(existing.fields.length > 0 || custom.fields.length > 0) && (
+        {existing.fields.length > 0 && (
           <div className="space-y-2 mb-2">
             {existing.fields.map((field, index) => (
               <VenueCard
                 key={field.id}
-                kind="existing"
                 index={index}
                 label={field.label}
                 pendingLabel={field.pending ? "Pending" : null}
+                courseId={field.courseId}
                 control={control}
                 register={register}
                 trigger={trigger}
                 roundErrors={errors.existing?.[index]?.round}
-                todayISO={todayISO}
                 onRemove={() => existing.remove(index)}
               />
             ))}
 
-            {custom.fields.map((field, index) => (
-              <VenueCard
-                key={field.id}
-                kind="custom"
-                index={index}
-                label=""
-                pendingLabel="New"
-                control={control}
-                register={register}
-                trigger={trigger}
-                roundErrors={errors.custom?.[index]?.round}
-                clubErrors={errors.custom?.[index]}
-                autoFocusName={index === custom.fields.length - 1}
-                todayISO={todayISO}
-                onRemove={() => custom.remove(index)}
-              />
-            ))}
           </div>
         )}
-
-        <button
-          type="button"
-          onClick={addCustomVenue}
-          disabled={custom.fields.length >= MAX_CUSTOM_VENUES}
-          className="flex w-full items-center gap-2 rounded-xl border border-dashed border-green-900/25 px-3 py-2.5 text-sm text-green-900/70 mb-1.5 disabled:opacity-40"
-        >
-          <Plus className="h-4 w-4" strokeWidth={2} />
-          Add new venue
-        </button>
 
         {!venuesLoaded ? (
           <p className="text-xs text-green-900/35">Loading venues…</p>
@@ -548,75 +502,42 @@ function ApplicationForm({
  * One venue and the round it would host.
  *
  * Its own component because the dates are a nested useFieldArray, and a hook
- * can't be called inside the parent's map. `kind` picks which top-level array
+ * can't be called inside the parent's map. Every card is an existing venue
  * this card sits in, which is all the field paths need to be built.
  */
 function VenueCard({
-  kind,
   index,
   label,
   pendingLabel,
+  courseId,
   control,
   register,
   trigger,
   roundErrors,
-  clubErrors,
-  autoFocusName,
-  todayISO,
   onRemove,
 }: {
-  kind: VenueKind;
   index: number;
   label: string;
   pendingLabel: string | null;
+  /** The venue this card is for — its open dates are what the round picks from. */
+  courseId: string;
   control: Control<ApplicationValues>;
   register: UseFormRegister<ApplicationValues>;
   trigger: UseFormTrigger<ApplicationValues>;
   roundErrors?: FieldErrors<RoundFields>;
-  clubErrors?: FieldErrors<CustomVenueField>;
-  autoFocusName?: boolean;
-  todayISO: string;
   onRemove: () => void;
 }) {
-  const prefix = `${kind}.${index}` as const;
-  // The cast picks one arm of the `existing.N | custom.N` union so the path type
-  // resolves; at runtime the name is just the string, and both arms are real
-  // paths of the same shape.
-  const dates = useFieldArray({
-    control,
-    name: `${prefix}.round.dates` as `existing.${number}.round.dates`,
-  });
-  const isCustom = kind === "custom";
-  // Proposing a club LinkUp doesn't have means committing to a round at it: an
-  // admin has to create the course and a calendar before anyone can book, and
-  // doing that for a club with no date and no price buys nothing. An existing
-  // venue can still be requested on its own and dated later.
-  const roundRequired = isCustom;
+  const prefix = `existing.${index}` as const;
+  // A venue can still be requested on its own and dated later — naming the club
+  // you want to host at is a complete thing to ask for.
+  const roundRequired = false;
 
   return (
     <div className="rounded-xl border border-green-900/20 bg-green-50/40 px-3 py-3 space-y-2">
       <div className="flex items-center gap-2">
-        {isCustom ? (
-          <input
-            className="input flex-1 min-w-0"
-            placeholder="Golf club name"
-            autoFocus={autoFocusName}
-            {...register(`custom.${index}.name`, {
-              required: "Enter the club name",
-              maxLength: {
-                value: CLUB_NAME_MAX,
-                message: `At most ${CLUB_NAME_MAX} characters`,
-              },
-              validate: (v) =>
-                v.trim().length >= CLUB_NAME_MIN ||
-                `At least ${CLUB_NAME_MIN} characters`,
-            })}
-          />
-        ) : (
-          <span className="text-sm font-medium text-green-900 flex-1 min-w-0 truncate">
-            {label}
-          </span>
-        )}
+        <span className="text-sm font-medium text-green-900 flex-1 min-w-0 truncate">
+          {label}
+        </span>
         {pendingLabel && (
           <span className="flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full text-yellow-700 bg-yellow-50">
             {pendingLabel}
@@ -631,108 +552,35 @@ function VenueCard({
           <X className="h-4 w-4" strokeWidth={2} />
         </button>
       </div>
-      {isCustom && clubErrors?.name && (
-        <p className="text-xs text-red-500">{clubErrors.name.message}</p>
-      )}
-
-      {isCustom && (
-        <>
-          <input
-            className="input"
-            placeholder="Website link — https://…"
-            {...register(`custom.${index}.website`, {
-              required: "Enter the club website",
-              maxLength: {
-                value: WEBSITE_MAX,
-                message: `At most ${WEBSITE_MAX} characters`,
-              },
-              validate: (v) =>
-                /^https?:\/\/.+/i.test(v.trim()) ||
-                "Website must be a valid URL (https://…)",
-            })}
-          />
-          {clubErrors?.website && (
-            <p className="text-xs text-red-500">{clubErrors.website.message}</p>
-          )}
-        </>
-      )}
-
-      {/* One round per venue. Several dates on it become one event each — which
-          is what a second round here would have been. */}
-      {dates.fields.map((field, di) => {
-        const { onChange: onDateChange, ...dateField } = register(
-          `${prefix}.round.dates.${di}.value` as const,
-          {
-            validate: (value: string, values: ApplicationValues) => {
-              const round = roundAt(values, kind, index);
-              // Nothing filled in anywhere on an optional round: it's a venue
-              // requested without dates, which is allowed.
-              if (!roundRequired && !roundStarted(round)) return true;
-              const v = value.trim();
-              const all = (round?.dates ?? [])
-                .map((d) => d.value.trim())
-                .filter(Boolean);
-              if (!v) {
-                return all.length === 0
-                  ? "Choose a date."
-                  : "Fill in or remove the empty date.";
-              }
-              if (v < todayISO) return "Date cannot be in the past.";
-              return (
-                all.filter((d) => d === v).length === 1 ||
-                "Each date can only be added once."
-              );
-            },
+      {/* One round per venue, its days picked from what the venue has open.
+          Several dates become one event each — which is what a second round
+          here would have been. A venue can still be requested with no dates and
+          scheduled later. */}
+      <Controller
+        control={control}
+        name={`${prefix}.round.dates` as const}
+        rules={{
+          validate: (value: { value: string }[]) => {
+            const picked = (value ?? []).map(d => d.value).filter(Boolean);
+            if (picked.length > MAX_DATES_PER_ROUND)
+              return `At most ${MAX_DATES_PER_ROUND} dates.`;
+            return true;
           },
-        );
-
-        return (
-        <div key={field.id}>
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              className="input"
-              min={todayISO}
-              {...dateField}
-              onChange={(e) => {
-                onDateChange(e);
-                // The duplicate check reads its siblings, so fixing one of a
-                // clashing pair has to clear the error on the other. Without
-                // this, react-hook-form revalidates only the field that
-                // changed and the stale message sits there.
-                if (dates.fields.length > 1) {
-                  void trigger(`${prefix}.round.dates` as const);
-                }
-              }}
-            />
-            {dates.fields.length > 1 && (
-              <button
-                type="button"
-                aria-label={`Remove date ${di + 1}`}
-                onClick={() => dates.remove(di)}
-                className="text-green-900/40 hover:text-red-500 p-0.5"
-              >
-                <X className="h-4 w-4" strokeWidth={2} />
-              </button>
-            )}
-          </div>
-          {roundErrors?.dates?.[di]?.value && (
-            <p className="text-xs text-red-500 mt-1">
-              {roundErrors.dates[di]?.value?.message}
-            </p>
-          )}
-        </div>
-        );
-      })}
-
-      {dates.fields.length < MAX_DATES_PER_ROUND && (
-        <button
-          type="button"
-          onClick={() => dates.append({ value: "" })}
-          className="text-xs font-medium text-green-800"
-        >
-          + Add another date
-        </button>
+        }}
+        render={({ field: f }: { field: { value: { value: string }[]; onChange: (v: { value: string }[]) => void } }) => (
+          <VenueDateSelector
+            courseId={courseId}
+            value={(f.value ?? []).map((d: { value: string }) => d.value).filter(Boolean)}
+            onChange={(next: string[]) => {
+              f.onChange(next.map(value => ({ value })));
+              void trigger(`${prefix}.round.dates` as const);
+            }}
+            max={MAX_DATES_PER_ROUND}
+          />
+        )}
+      />
+      {roundErrors?.dates && typeof roundErrors.dates.message === "string" && (
+        <p className="text-xs text-red-500">{roundErrors.dates.message}</p>
       )}
 
       <input
@@ -759,7 +607,7 @@ function VenueCard({
           placeholder="Available spots"
           {...register(`${prefix}.round.total_spots` as const, {
             validate: (value: string, values: ApplicationValues) => {
-              if (!roundRequired && !roundStarted(roundAt(values, kind, index)))
+              if (!roundRequired && !roundStarted(roundAt(values, "existing", index)))
                 return true;
               const n = Number(value);
               return (
@@ -777,7 +625,7 @@ function VenueCard({
           placeholder="Member guest rate"
           {...register(`${prefix}.round.member_guest_rate` as const, {
             validate: (value: string, values: ApplicationValues) => {
-              if (!roundRequired && !roundStarted(roundAt(values, kind, index)))
+              if (!roundRequired && !roundStarted(roundAt(values, "existing", index)))
                 return true;
               if (value.trim() === "") return "Enter the guest rate.";
               const n = Number(value);

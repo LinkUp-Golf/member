@@ -76,6 +76,21 @@ export const PAYOUT_METHOD_LABEL: Record<PayoutMethod, string> = {
 // member price directly, and the earned credit is based on the guest rate.
 export const HOST_MEMBER_PRICE_MARKUP_USD = 10
 
+// Every hosted round is listed on the same terms, so a host proposes a venue and
+// dates and nothing else. Two numbers used to be theirs to type, which meant the
+// same round could cost two different things depending on who listed it.
+//
+// The guest rate is also what the host earns back in credits once the round is
+// verified (award_host_event_credit defaults the award to it), which is why the
+// form can promise a flat figure. Keep the invariant below in mind if either
+// number moves: rate + markup is the standard round price members already pay.
+export const HOST_EVENT_GUEST_RATE_USD = 150
+
+// Capacity is deliberately NOT a constant. A round is listed with the spots its
+// venue actually has that day (see openSpotsByDate), because two days at the
+// same club routinely differ — a flat number would oversell the thin ones and
+// waste the busy ones.
+
 export const GHL_CANCEL_BOOKING_URL = 'https://api.leadconnectorhq.com/widget/cancel-booking'
 export const GHL_CALENDAR_PROVIDER_ID = 'bdd10QRepJvC6EYoy32m'
 

@@ -134,6 +134,19 @@ describe('NotificationTemplates for the gate', () => {
     expect(payload.body).toContain('Wren')
     expect(payload.url).toBe('/admin/hosts')
   })
+
+  it('counts the batch when a host submits several dates at once', () => {
+    // A host picks their dates in one go and gets one push for the set. Naming
+    // only the first date would understate what is actually waiting.
+    const one = NotificationTemplates.hostedEventNeedsReview('Wren', 'Aviara Golf Club', '2026-08-20')
+    const many = NotificationTemplates.hostedEventNeedsReview('Wren', 'Aviara Golf Club', '2026-08-20', 4)
+
+    expect(one.body).toContain('a round')
+    expect(many.body).toContain('4 rounds')
+    // Same tag either way, so a second submission replaces the first rather
+    // than stacking notifications an admin has to dismiss one by one.
+    expect(many.tag).toBe(one.tag)
+  })
 })
 
 describe('loadHostStats', () => {

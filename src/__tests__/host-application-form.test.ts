@@ -9,10 +9,10 @@ import {
 } from '@/lib/hosts/application-form'
 import { validateHostApplicationPayload } from '@/lib/validation'
 
-// The form speaks in venue cards; the API speaks in course_ids, new_venues and
-// events that name an unlisted club by its index. This is the translation
-// between them — the seam where new_venues was once assembled correctly and then
-// dropped before the request, with nothing failing to say so.
+// The form speaks in venue cards; the API speaks in course_ids and events that
+// name the venue they sit at. This is the translation between them — the seam
+// where a whole field was once assembled correctly and then dropped before the
+// request, with nothing failing to say so.
 
 const round = (overrides: Partial<RoundFields> = {}): RoundFields => ({
   ...newRound(),
@@ -32,7 +32,6 @@ const COURSE_B = '5f2504e0-4f89-11d3-9a0c-0305e82c3302'
 const form = (overrides: Partial<ApplicationValues> = {}): ApplicationValues => ({
   name: 'Jane Smith',
   existing: [],
-  custom: [],
   ...overrides,
 })
 
@@ -62,9 +61,9 @@ describe('roundStarted', () => {
 describe('roundAt', () => {
   it('reads the round out of whole-form values', () => {
     const values = form({
-      custom: [{ name: 'Torrey Pines', website: '', round: filled(['2099-06-01']) }],
+      existing: [{ courseId: COURSE_A, label: 'Aviara', pending: false, round: filled(['2099-06-01']) }],
     })
-    expect(roundAt(values, 'custom', 0)?.member_guest_rate).toBe('150')
+    expect(roundAt(values, 'existing', 0)?.member_guest_rate).toBe('150')
   })
 
   it('returns undefined for an index that is gone', () => {
@@ -116,61 +115,17 @@ describe('buildApplicationPayload', () => {
     expect(payload.events).toHaveLength(1)
   })
 
-  it('names a new venue by its index in new_venues', () => {
+  it('sends a blank tee time as null, not empty string', () => {
     const payload = buildApplicationPayload(
       form({
-        custom: [
-          { name: 'Torrey Pines', website: 'https://torreypines.com', round: filled(['2099-06-01']) },
-          { name: 'Pebble Beach', website: '', round: filled(['2099-07-01']) },
-        ],
-      }),
-    )
-    expect(payload.new_venues.map(v => v.name)).toEqual(['Torrey Pines', 'Pebble Beach'])
-    expect(payload.events.map(e => e.venue)).toEqual(['new:0', 'new:1'])
-  })
-
-  it('keeps the index aligned when an earlier new venue has no round', () => {
-    // The dangerous case: skipping a venue's events must not shift the index
-    // of the ones after it, or a round lands at the wrong club. The card now
-    // requires a round on a new venue, so this is a regression guard on the
-    // arithmetic rather than a state the form can reach.
-    const payload = buildApplicationPayload(
-      form({
-        custom: [
-          { name: 'No Dates Yet', website: 'https://a.com', round: newRound() },
-          { name: 'Pebble Beach', website: 'https://b.com', round: filled(['2099-07-01']) },
-        ],
-      }),
-    )
-    expect(payload.new_venues).toHaveLength(2)
-    expect(payload.events).toHaveLength(1)
-    expect(payload.events[0]?.venue).toBe('new:1')
-    expect(payload.new_venues[1]?.name).toBe('Pebble Beach')
-  })
-
-  it('carries both kinds of venue in one submission', () => {
-    const payload = buildApplicationPayload(
-      form({
-        existing: [{ courseId: COURSE_A, label: 'Aviara', pending: false, round: filled(['2099-06-01']) }],
-        custom: [{ name: 'Torrey Pines', website: '', round: filled(['2099-07-01']) }],
-      }),
-    )
-    expect(payload.course_ids).toEqual([COURSE_A])
-    expect(payload.new_venues).toHaveLength(1)
-    expect(payload.events.map(e => e.venue)).toEqual([COURSE_A, 'new:0'])
-  })
-
-  it('sends a blank tee time and website as null, not empty string', () => {
-    const payload = buildApplicationPayload(
-      form({
-        custom: [{
-          name: '  Torrey Pines  ',
-          website: '   ',
+        existing: [{
+          courseId: COURSE_A,
+          label: 'Aviara',
+          pending: false,
           round: round({ dates: [{ value: '2099-06-01' }], member_guest_rate: '0' }),
         }],
       }),
     )
-    expect(payload.new_venues[0]).toEqual({ name: 'Torrey Pines', website: null })
     expect(payload.events[0]?.tee_time).toBeNull()
     // 0 is a real rate, not "unset".
     expect(payload.events[0]?.member_guest_rate).toBe(0)
@@ -190,33 +145,19 @@ describe('buildApplicationPayload', () => {
             { courseId: COURSE_A, label: 'Aviara', pending: false, round: filled(['2099-06-01']) },
             { courseId: COURSE_B, label: 'Rancho', pending: false, round: newRound() },
           ],
-          custom: [{ name: 'Torrey Pines', website: 'https://torreypines.com', round: filled(['2099-07-01']) }],
         }),
       )
       expect(validateHostApplicationPayload(payload).valid).toBe(true)
     })
 
-    it('accepts a new-venue-only submission', () => {
+    it('is rejected when a round names a venue that is not a course id', () => {
+      // Hosting is offered at listed venues only. A round pointing anywhere but
+      // a real course id has to fail rather than be quietly created.
       const payload = buildApplicationPayload(
-        form({
-          custom: [{
-            name: 'Torrey Pines',
-            website: 'https://torreypines.com',
-            round: filled(['2099-06-01']),
-          }],
-        }),
+        form({ existing: [{ courseId: COURSE_A, label: 'Aviara', pending: false, round: filled(['2099-06-01']) }] }),
       )
-      expect(validateHostApplicationPayload(payload).valid).toBe(true)
-    })
-
-    it('is rejected when a new venue has no website', () => {
-      // The card requires one, so this only happens if the rule is removed from
-      // the form without the server agreeing.
-      const payload = buildApplicationPayload(
-        form({ custom: [{ name: 'Torrey Pines', website: '', round: filled(['2099-06-01']) }] }),
-      )
-      expect(payload.new_venues[0]?.website).toBeNull()
-      expect(validateHostApplicationPayload(payload).valid).toBe(false)
+      const tampered = { ...payload, events: payload.events.map(e => ({ ...e, venue: 'new:0' })) }
+      expect(validateHostApplicationPayload(tampered).valid).toBe(false)
     })
 
     it('is rejected when no venue was chosen', () => {

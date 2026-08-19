@@ -177,93 +177,24 @@ describe('validateHostApplicationPayload', () => {
     })
   })
 
-  // A club that isn't on LinkUp yet has no course id when the form is filled in —
-  // the course is created on submission. Rounds at one reference it by position in
-  // `new_venues`.
-  describe('new venues', () => {
-    const withNewVenue = {
-      name: 'Jane Smith',
-      new_venues: [{ name: 'Torrey Pines', website: 'https://torreypines.com' }],
-    }
-
-    it('accepts an application with only a new venue and no existing ones', () => {
-      expect(validateHostApplicationPayload(withNewVenue).valid).toBe(true)
+  // Hosting is offered at venues already on LinkUp. An application naming a club
+  // we don't have used to create a pending course on submission; that path is
+  // gone, so a payload carrying one has nothing valid to point a round at.
+  describe('venues must already exist', () => {
+    it('rejects an application with no existing venue chosen', () => {
+      expect(validateHostApplicationPayload({
+        name: 'Jane Smith',
+        new_venues: [{ name: 'Torrey Pines', website: 'https://torreypines.com' }],
+      }).valid).toBe(false)
     })
 
-    it('still requires at least one venue of some kind', () => {
-      const r = validateHostApplicationPayload({ name: 'Jane Smith' })
-      expect(r.valid).toBe(false)
-      expect(r.errors.some(e => /venue/i.test(e))).toBe(true)
-    })
-
-    it('accepts a round pointing at a new venue by index', () => {
+    it('ignores a stray new_venues field rather than honouring it', () => {
       const r = validateHostApplicationPayload({
-        ...withNewVenue,
-        events: [{
-          venue: 'new:0',
-          event_date: '2099-06-01',
-          tee_time: null,
-          total_spots: 4,
-          member_guest_rate: 150,
-          dinner: false,
-        }],
-      })
-      expect(r.valid).toBe(true)
-    })
-
-    it('rejects a round pointing past the end of new_venues', () => {
-      // Guards against a stale reference surviving a removed venue.
-      const r = validateHostApplicationPayload({
-        ...withNewVenue,
-        events: [{
-          venue: 'new:5',
-          event_date: '2099-06-01',
-          total_spots: 4,
-          member_guest_rate: 150,
-        }],
-      })
-      expect(r.valid).toBe(false)
-      expect(r.errors[0]).toMatch(/not submitted/i)
-    })
-
-    it('rejects a new venue with too short a name', () => {
-      const r = validateHostApplicationPayload({
-        ...withNewVenue,
-        new_venues: [{ name: 'A' }],
-      })
-      expect(r.valid).toBe(false)
-      expect(r.errors[0]).toMatch(/^Venue 1:/)
-    })
-
-    it('requires a website', () => {
-      // Same bar as the hosted-event new-club path. An admin has to find this
-      // club and set up a calendar for it, and a name alone can name two
-      // different courses in two different states.
-      const r = validateHostApplicationPayload({
-        ...withNewVenue,
+        name: 'Jane Smith',
+        course_ids: base.course_ids,
         new_venues: [{ name: 'Torrey Pines' }],
       })
-      expect(r.valid).toBe(false)
-      expect(r.errors[0]).toMatch(/website/i)
-    })
-
-    it('rejects a blank website the same as a missing one', () => {
-      expect(validateHostApplicationPayload({
-        ...withNewVenue,
-        new_venues: [{ name: 'Torrey Pines', website: '   ' }],
-      }).valid).toBe(false)
-    })
-
-    it('rejects a new venue with a malformed website', () => {
-      expect(validateHostApplicationPayload({
-        ...withNewVenue,
-        new_venues: [{ name: 'Torrey Pines', website: 'torreypines.com' }],
-      }).valid).toBe(false)
-    })
-
-    it('rejects more than 10 new venues', () => {
-      const many = Array.from({ length: 11 }, (_, i) => ({ name: `Club ${i}` }))
-      expect(validateHostApplicationPayload({ ...withNewVenue, new_venues: many }).valid).toBe(false)
+      expect(r.valid).toBe(true)
     })
   })
 })
@@ -272,26 +203,19 @@ describe('parseVenueRef', () => {
   const uuid = '3f2504e0-4f89-11d3-9a0c-0305e82c3301'
 
   it('reads a UUID as an existing course', () => {
-    expect(parseVenueRef(uuid, 0)).toEqual({ courseId: uuid })
-  })
-
-  it('reads new:<index> as a position in new_venues', () => {
-    expect(parseVenueRef('new:1', 2)).toEqual({ newVenueIndex: 1 })
-  })
-
-  it('rejects an index outside the submitted venues', () => {
-    expect(parseVenueRef('new:2', 2).error).toBeTruthy()
-    expect(parseVenueRef('new:-1', 2).error).toBeTruthy()
-    expect(parseVenueRef('new:x', 2).error).toBeTruthy()
+    expect(parseVenueRef(uuid)).toEqual({ courseId: uuid })
   })
 
   it('rejects a missing or non-string ref', () => {
-    expect(parseVenueRef(undefined, 1).error).toBeTruthy()
-    expect(parseVenueRef('', 1).error).toBeTruthy()
-    expect(parseVenueRef(42, 1).error).toBeTruthy()
+    expect(parseVenueRef(undefined).error).toBeTruthy()
+    expect(parseVenueRef('').error).toBeTruthy()
+    expect(parseVenueRef(42).error).toBeTruthy()
   })
 
-  it('rejects a non-UUID that is not a new-venue ref', () => {
-    expect(parseVenueRef('not-a-uuid', 1).error).toBeTruthy()
+  it('rejects anything that is not a course id', () => {
+    // Hosting is offered at listed venues only, so the `new:<index>` reference
+    // an applicant's unlisted club used to carry is no longer a valid venue.
+    expect(parseVenueRef('not-a-uuid').error).toBeTruthy()
+    expect(parseVenueRef('new:0').error).toBeTruthy()
   })
 })

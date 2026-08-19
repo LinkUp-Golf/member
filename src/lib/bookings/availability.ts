@@ -361,6 +361,57 @@ export async function venueAvailabilityForMonth(
 }
 
 /**
+ * How many spots one course has open on each of an arbitrary set of dates.
+ *
+ * A hosted round is listed with the seats the venue actually has that day — two
+ * days at the same club rarely have the same room — so this is what decides an
+ * event's capacity rather than a number the host types or a flat default.
+ *
+ * Dates are grouped by month because availability is fetched (and cached) a
+ * month at a time; a schedule spanning a month boundary costs one call per
+ * month, not one per date. A date with nothing open is absent from the result,
+ * which the caller must treat as "can't be listed" rather than zero.
+ */
+export async function openSpotsByDate(
+  admin: AdminClient,
+  course: Course,
+  dates: string[],
+): Promise<Map<string, number>> {
+  const byMonth = new Map<string, string[]>()
+  for (const date of dates) {
+    const month = date.slice(0, 7)
+    const list = byMonth.get(month) ?? []
+    list.push(date)
+    byMonth.set(month, list)
+  }
+
+  const out = new Map<string, number>()
+
+  for (const month of byMonth.keys()) {
+    const [yearStr, monthStr] = month.split('-')
+    const year = parseInt(yearStr ?? '0', 10)
+    const monthIdx = parseInt(monthStr ?? '1', 10) - 1
+    const startDate = formatDateOnly(new Date(year, monthIdx, 1))
+    const endDate = formatDateOnly(new Date(year, monthIdx + 1, 0))
+
+    const { days } = await venueAvailabilityForMonth(admin, [course], month, startDate, endDate)
+    for (const [date, openings] of Object.entries(days)) {
+      const spots = openings[0]?.openSpots ?? 0
+      if (spots > 0) out.set(date, spots)
+    }
+  }
+
+  return out
+}
+
+/** Local YYYY-MM-DD, avoiding the UTC shift toISOString would introduce. */
+function formatDateOnly(d: Date): string {
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${mm}-${dd}`
+}
+
+/**
  * Narrows `courses` to those a member could actually book on `date`.
  *
  * Two things can rule a course out, and both matter: its calendar may have
