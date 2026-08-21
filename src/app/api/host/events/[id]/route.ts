@@ -19,9 +19,10 @@ import type { HostedEvent } from '@/types'
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
-// A host may still change an event that hasn't happened yet.
-const EDITABLE_STATUSES = ['upcoming']
-const CANCELLABLE_STATUSES = ['upcoming']
+// A host may still change an event that hasn't happened yet — including one
+// still waiting on approval, which is exactly when a mistake is cheapest to fix.
+const EDITABLE_STATUSES = ['pending_approval', 'upcoming']
+const CANCELLABLE_STATUSES = ['pending_approval', 'upcoming']
 
 // Fields that come from the linked booking and therefore can't be edited.
 const BOOKING_LOCKED_FIELDS = ['course_id', 'event_date', 'tee_time']
@@ -89,7 +90,40 @@ export const GET = withHostAuth(
       .eq('hosted_event_id', id)
       .order('created_at', { ascending: false })
 
-    return NextResponse.json({ event: { ...enriched, proofs: proofs ?? [] }, registrations: registrations ?? [] })
+    // Members who booked the venue that day are at this round too — the same
+    // afternoon at the same club — so the roster is both, not just the people
+    // who happened to come through the event. Anyone holding both is listed
+    // once, as a reservation, since that is the more specific commitment.
+    const reservedIds = new Set(registrations.map(r => r.member_id as string))
+    const alsoBooked = (enriched?.booked_attendees ?? [])
+      .filter(a => !reservedIds.has(a.member_id))
+      .map(a => ({
+        id: `booking:${a.member_id}`,
+        hosted_event_id: id,
+        member_id: a.member_id,
+        status: 'reserved' as const,
+        // Not a reservation row, so it has no created_at of its own. The
+        // client uses `source` to say how they got here.
+        created_at: null,
+        source: 'booking' as const,
+        tee_time: a.tee_time,
+        member: {
+          first_name: a.first_name,
+          last_name: a.last_name,
+          avatar_url: a.avatar_url,
+        },
+      }))
+
+    const roster = [
+      ...registrations.map(r => ({ ...r, source: 'reservation' as const })),
+      ...alsoBooked,
+    ]
+
+    return NextResponse.json({
+      event: { ...enriched, proofs: proofs ?? [] },
+      // `registrations` keeps its name for the client that reads it.
+      registrations: roster,
+    })
   }
 )
 

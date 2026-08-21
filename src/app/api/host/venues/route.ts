@@ -18,7 +18,7 @@ export const GET = withHostAuth(async (_req: NextRequest, ctx: HostAuthContext) 
 
   const { data, error } = await admin
     .from('host_venues')
-    .select('course:courses(id, name, city, approval_status, active)')
+    .select('course:courses(id, name, city, state, address, logo_url, map_link, booking_url, cost_per_player, description, approval_status, active)')
     .eq('host_id', ctx.host.id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -28,10 +28,20 @@ export const GET = withHostAuth(async (_req: NextRequest, ctx: HostAuthContext) 
   // the venue so the form can distinguish a club that's live from one the host
   // proposed and an admin hasn't set up yet — both are legitimately selectable,
   // but they aren't the same thing.
+  // Enough for the event form to show what the venue actually is — a host
+  // picking between clubs shouldn't have to leave the form to remember which
+  // one is which.
   type VenueRow = {
     id: string
     name: string
     city: string | null
+    state: string | null
+    address: string | null
+    logo_url: string | null
+    map_link: string | null
+    booking_url: string | null
+    cost_per_player: number | null
+    description: string | null
     approval_status: string
     active: boolean
   }

@@ -3,18 +3,14 @@
 //
 // Extracted from the page so this seam can be tested. It is where the form's
 // own vocabulary (a list of venue cards, each with a round) is translated into
-// the API's (`course_ids`, `new_venues`, and `events` referencing a new venue by
-// its position) — and a translation nobody can see is how `new_venues` once got
-// dropped between the form and the request without anything failing.
+// the API's (`course_ids` and `events` referencing a venue) — and a translation
+// nobody can see is how a whole field once got dropped between the form and the
+// request without anything failing.
 
-import { NEW_VENUE_REF } from '@/lib/validation'
 import type { HostApplicationEventInput } from '@/types'
 
 export const NAME_MIN = 2
 export const NAME_MAX = 120
-export const CLUB_NAME_MIN = 2
-export const CLUB_NAME_MAX = 120
-export const WEBSITE_MAX = 200
 export const TEE_TIME_MAX = 50
 export const SPOTS_MIN = 1
 export const SPOTS_MAX = 200
@@ -22,9 +18,8 @@ export const SPOTS_MAX = 200
 export const RATE_MAX = 100000
 export const DEFAULT_SPOTS = '3'
 export const MAX_DATES_PER_ROUND = 30
-export const MAX_CUSTOM_VENUES = 10
 
-/** A round as submitted: `venue` is a course id or a `new:<index>` reference. */
+/** A round as submitted: `venue` is the course id it sits at. */
 export type ProposedRound = Omit<HostApplicationEventInput, 'course_id'> & {
   venue: string
 }
@@ -32,7 +27,6 @@ export type ProposedRound = Omit<HostApplicationEventInput, 'course_id'> & {
 export type SubmitValues = {
   name: string
   course_ids: string[]
-  new_venues: { name: string; website: string | null }[]
   events: ProposedRound[]
 }
 
@@ -67,24 +61,18 @@ export interface ExistingVenueField {
   round: RoundFields
 }
 
-/**
- * A club the applicant named that isn't on LinkUp yet. Held in form state only —
- * the pending course is created when the application is submitted, so abandoning
- * the form leaves nothing behind in the admin queue.
- */
-export interface CustomVenueField {
-  name: string
-  website: string
-  round: RoundFields
-}
-
 export interface ApplicationValues {
   name: string
   existing: ExistingVenueField[]
-  custom: CustomVenueField[]
 }
 
-export type VenueKind = 'existing' | 'custom'
+/**
+ * Only one kind of venue now: a course already on LinkUp. Applicants could once
+ * name a club we didn't have, which created a pending course on submission —
+ * hosting is offered at listed venues only, so that kind is gone. The union is
+ * kept so `roundAt` still reads as a lookup by kind rather than a bare field.
+ */
+export type VenueKind = 'existing'
 
 export const newRound = (): RoundFields => ({
   dates: [{ value: '' }],
@@ -121,10 +109,6 @@ export const roundAt = (
 /**
  * Turns validated form values into the request body. No validation happens here:
  * by the time handleSubmit calls this, every field rule has passed.
- *
- * The ordering of `custom` is load-bearing — an event at a club that doesn't
- * exist yet names it by its index in `new_venues`, and the server resolves the
- * two together.
  */
 export function buildApplicationPayload(data: ApplicationValues): SubmitValues {
   const events: ProposedRound[] = []
@@ -145,15 +129,10 @@ export function buildApplicationPayload(data: ApplicationValues): SubmitValues {
   }
 
   data.existing.forEach(v => collect(v.round, v.courseId))
-  data.custom.forEach((v, i) => collect(v.round, `${NEW_VENUE_REF}${i}`))
 
   return {
     name: data.name.trim(),
     course_ids: data.existing.map(v => v.courseId),
-    new_venues: data.custom.map(v => ({
-      name: v.name.trim(),
-      website: v.website.trim() || null,
-    })),
     events,
   }
 }

@@ -76,6 +76,13 @@ export const ghlSlotsKey = (calendarId: string, date: string) =>
 export const ghlSlotsPrefix = (calendarId: string, date: string) =>
   `${GHL_SLOTS_NS}:${calendarId}:${date}`
 
+// A whole month of availability for one calendar, as the aggregated venue
+// calendar reads it. Kept distinct from the per-date key: the month view asks
+// GHL for the full range in one call, and sharing a key with the single-date
+// entries would let one shape overwrite the other.
+export const ghlSlotsMonthKey = (calendarId: string, month: string) =>
+  `${GHL_SLOTS_NS}:${calendarId}:month:${month}`
+
 // Booking rules (slot duration, interval, notice, seats) for a GHL calendar.
 export const ghlCalendarRulesKey = (calendarId: string) =>
   `${GHL_CAL_RULES_NS}:${calendarId}`

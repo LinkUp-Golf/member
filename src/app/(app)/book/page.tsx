@@ -16,16 +16,24 @@ import { createClient } from "@/lib/supabase";
 import BookingSurveySheet, {
   type SurveyTarget,
 } from "@/components/surveys/BookingSurveySheet";
+import VenueAvailabilityCalendar, {
+  type CalendarVenue,
+  type CalendarOpening,
+} from "@/components/calendar/VenueAvailabilityCalendar";
+import {
+  VENUE_DOT,
+  buildVenueColours,
+} from "@/components/calendar/venue-colours";
+import VenueDayDetailSheet, {
+  type VenueDayDetail,
+} from "@/components/calendar/VenueDayDetailSheet";
 import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
-import { formatInTimeZone } from "date-fns-tz";
+import { bookingAmountDue } from "@/lib/bookings/price";
+import CreditCouponModal from "@/components/credits/CreditCouponModal";
+import { useCreditWallet } from "@/hooks/useCreditWallet";
 import {
   format,
-  parse,
-  addDays,
-  addMinutes,
-  addMonths,
   differenceInHours,
-  getDaysInMonth,
   startOfMonth,
 } from "date-fns";
 import type {
@@ -53,17 +61,6 @@ function isValidGuestPhone(value: string | undefined): boolean {
 
 type Step = "select" | "confirm" | "success";
 
-interface DayPlayer {
-  member_id: string;
-  first_name: string;
-  last_name: string;
-  avatar_url: string | null;
-  booking_date: string;
-  tee_time: string;
-  players: number;
-  is_self: boolean;
-}
-
 // FIFO payment gate: a member must resolve ALL unresolved (unpaid) bookings
 // before creating another, at any course. A member can already have more
 // than one — LinkUp is adding this rule to an app already in production, so
@@ -82,22 +79,12 @@ interface PendingPayment {
   target_member_id: string | null;
   invited: boolean;
   booker_name: string | null;
+  // What this row costs — what a credit code would be covering.
+  amount_due: number;
 }
-
-const BOOKING_MIN_DAYS = 0;
 
 function formatSlotTime(isoString: string): string {
   return formatTeeTime(isoString.split("T")[1]?.slice(0, 8) ?? "");
-}
-
-// How long a round runs is set on the course's GHL calendar, so the duration is
-// handed to us with the slots rather than assumed here.
-function slotEndTime(startIso: string, durationMins: number): string {
-  const timeStr = startIso.split("T")[1]?.slice(0, 8) ?? "00:00:00";
-  return format(
-    addMinutes(parse(timeStr, "HH:mm:ss", new Date()), durationMins),
-    "h:mm a",
-  );
 }
 
 export default function BookPage() {
@@ -105,34 +92,10 @@ export default function BookPage() {
   const searchParams = useSearchParams();
   const inviteMemberId = searchParams?.get("invite") ?? null;
 
-  const today = useMemo(() => new Date(), []);
 
-  // Month navigation — start at the month containing the first bookable date
-  const [currentMonth, setCurrentMonth] = useState<Date>(() =>
-    startOfMonth(addDays(new Date(), BOOKING_MIN_DAYS)),
-  );
-
-  // Slots keyed by YYYY-MM-DD
-  const [monthSlots, setMonthSlots] = useState<
-    Record<string, GHLBookingSlot[]>
-  >({});
-  const [loadingMonth, setLoadingMonth] = useState(false);
-  // Which (month, course) the current monthSlots were actually fetched for. Used
-  // to treat slots as "not ready" until they match the selected course+month, so
-  // a previous fetch's data (e.g. the no-course mount fetch, which falls back to
-  // the Aviara GHL calendar) never flashes on screen before the right data lands.
-  const [slotsMeta, setSlotsMeta] = useState<{ month: string; courseId: string | null }>({
-    month: "",
-    courseId: null,
-  });
-  // Round length for the selected course, as configured on its GHL calendar.
-  // Returned alongside the slots; null until the first month load answers.
-  const [roundDurationMins, setRoundDurationMins] = useState<number | null>(null);
-
-  // Selection — preselect today on load
-  const [selectedDate, setSelectedDate] = useState<string>(() =>
-    format(new Date(), "yyyy-MM-dd"),
-  );
+  // What the member picked on the calendar. Venue, day and tee time arrive
+  // together, so there is no partial selection to hold between screens.
+  const [selectedDate, setSelectedDate] = useState<string>("");
   const [selectedSlot, setSelectedSlot] = useState<GHLBookingSlot | null>(null);
 
   // Selected course (null = no course chosen yet)
@@ -164,16 +127,6 @@ export default function BookPage() {
   // fire near-simultaneously.
   const myBookingsRefreshInFlight = useRef(false);
   const [activeTab, setActiveTab] = useState<"book" | "myBookings">("book");
-  // Month first. The day strip shows about a week at a time and has to be
-  // scrolled to find anything, so opening on it hides how much of the month is
-  // actually bookable; the grid answers that at a glance. Either view can still
-  // be picked from the toggle.
-  const [viewMode, setViewMode] = useState<"day" | "month">("month");
-
-  // Who's playing on the selected date
-  const [dayPlayers, setDayPlayers] = useState<DayPlayer[]>([]);
-  const [loadingDayPlayers, setLoadingDayPlayers] = useState(false);
-
   // FIFO payment gate — every one of the member's bookings awaiting payment.
   // Starts loading=true (rather than assuming none) so the tee-time slot
   // list doesn't briefly render as bookable before the check resolves.
@@ -189,48 +142,15 @@ export default function BookPage() {
   // know whether that row has already cleared (guards against a double payment).
   const [refreshingPending, setRefreshingPending] = useState(false);
 
-  const fetchMonthSlots = useCallback(async () => {
-    setLoadingMonth(true);
-    setSelectedSlot(null);
-    // When navigating to a different month, default to today if it falls in that
-    // month, otherwise clear so the user picks a new date.
-    const monthStr = format(currentMonth, "yyyy-MM");
-    setSelectedDate((prev) => {
-      if (prev.startsWith(monthStr)) return prev;
-      const todayInThisMonth = format(new Date(), "yyyy-MM-dd").startsWith(
-        monthStr,
-      );
-      return todayInThisMonth ? format(new Date(), "yyyy-MM-dd") : "";
-    });
-    // No course chosen yet: the calendar isn't shown, and a course-less fetch
-    // would resolve to the Aviara GHL calendar — exactly the stale data we don't
-    // want to flash later. Skip it and keep slots empty until a course is picked.
-    if (!selectedEvent) {
-      setMonthSlots({});
-      setSlotsMeta({ month: monthStr, courseId: null });
-      setLoadingMonth(false);
-      return;
-    }
-    try {
-      const res = await fetch(
-        `/api/bookings/create?month=${monthStr}&courseId=${selectedEvent.id}`,
-      );
-      const data = await res.json();
-      setMonthSlots(data.slots ?? {});
-      setRoundDurationMins(
-        typeof data.durationMins === "number" ? data.durationMins : null,
-      );
-      setSlotsMeta({ month: monthStr, courseId: selectedEvent.id });
-    } catch {
-      setMonthSlots({});
-      setSlotsMeta({ month: monthStr, courseId: selectedEvent.id });
-    }
-    setLoadingMonth(false);
-  }, [currentMonth, selectedEvent]);
+  // Credit a member earned (hosting a round, referring someone) is a way to
+  // settle a tee time, so the payment surfaces need to know about it. Deliberately
+  // not fetched on every visit: most of them are someone browsing the calendar
+  // with nothing to pay, and the wallet is only worth a request once there's a
+  // bill on screen — a pending payment, or the bookings list itself.
+  const creditWallet = useCreditWallet(
+    !!user && (pendingBookings.length > 0 || activeTab === "myBookings"),
+  );
 
-  useEffect(() => {
-    fetchMonthSlots();
-  }, [fetchMonthSlots]);
   useEffect(() => {
     if (user) loadMyBookings();
   }, [user]);
@@ -284,58 +204,6 @@ export default function BookPage() {
     }, 15000);
     return () => clearInterval(id);
   }, [user, pendingBookings.length]);
-  useEffect(() => {
-    if (!selectedDate || !user) {
-      setDayPlayers([]);
-      return;
-    }
-    setLoadingDayPlayers(true);
-    const courseParam = selectedEvent ? `&courseId=${selectedEvent.id}` : "";
-    fetch(`/api/bookings/day?date=${selectedDate}${courseParam}`)
-      .then((r) => r.json())
-      .then((d) => setDayPlayers(Array.isArray(d.players) ? d.players : []))
-      .catch(() => setDayPlayers([]))
-      .finally(() => setLoadingDayPlayers(false));
-  }, [selectedDate, user, selectedEvent]);
-
-  // These must stay above the early returns to satisfy the rules of hooks
-  const todayStr = useMemo(
-    () => formatInTimeZone(today, timezone, "yyyy-MM-dd"),
-    [today, timezone],
-  );
-  const firstInWindowRef = useRef<HTMLButtonElement>(null);
-  const selectedDateRef = useRef<HTMLButtonElement>(null);
-  const firstInWindowDateStr = useMemo(() => {
-    const y = currentMonth.getFullYear();
-    const m = currentMonth.getMonth();
-    const days = getDaysInMonth(currentMonth);
-    for (let d = 1; d <= days; d++) {
-      const dateStr = format(new Date(y, m, d), "yyyy-MM-dd");
-      if (dateStr >= format(today, "yyyy-MM-dd")) return dateStr;
-    }
-    return null;
-  }, [currentMonth, today]);
-  // Slots are "ready" only once they've been fetched for the currently selected
-  // course + month. Until then (in-flight fetch, or a stale set from a previous
-  // course/month) we render loading UI, never the mismatched data — this is what
-  // stops the brief flash of GHL availability before the custom slots arrive.
-  const monthLoading =
-    loadingMonth ||
-    slotsMeta.month !== format(currentMonth, "yyyy-MM") ||
-    slotsMeta.courseId !== (selectedEvent?.id ?? null);
-
-  useEffect(() => {
-    if (monthLoading || step !== "select" || activeTab !== "book") return;
-    // Prefer scrolling to the selected date; fall back to first bookable date
-    const target = selectedDateRef.current ?? firstInWindowRef.current;
-    target?.scrollIntoView({
-      behavior: "instant",
-      block: "nearest",
-      inline: "start",
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [monthLoading, step, activeTab]);
-
   async function loadMyBookings() {
     if (myBookingsRefreshInFlight.current) return;
     myBookingsRefreshInFlight.current = true;
@@ -405,7 +273,9 @@ export default function BookPage() {
           setMyBookings((prev) => [...(data.bookings as Booking[]), ...prev]);
         }
         setStep("success");
-        fetchMonthSlots();
+        // The calendar remounts when the success screen is dismissed and
+        // refetches the month itself, so availability refreshes without a
+        // second call from here.
         loadPendingPayment();
       } else {
         setError(data.error ?? "Something went wrong. Please try again.");
@@ -456,48 +326,17 @@ export default function BookPage() {
         error={error}
         submitting={submitting}
         onSubmit={submitBooking}
-        onBack={() => setStep("select")}
+        onBack={() => {
+          setStep("select");
+          setSelectedSlot(null);
+          setSelectedEvent(null);
+        }}
         inviteMemberId={inviteMemberId}
         bookerEmail={user?.email ?? ""}
         eventName={selectedEvent?.name ?? null}
       />
     );
   }
-
-  // ---- Calendar helpers ----
-  const year = currentMonth.getFullYear();
-  const month = currentMonth.getMonth();
-  const daysInMonth = getDaysInMonth(currentMonth);
-
-  const minMonthStr = format(
-    startOfMonth(addDays(today, BOOKING_MIN_DAYS)),
-    "yyyy-MM",
-  );
-  const currentMonthStr = format(currentMonth, "yyyy-MM");
-  const canGoPrev = currentMonthStr > minMonthStr;
-  const canGoNext = true;
-
-  function getDateStr(day: number) {
-    return format(new Date(year, month, day), "yyyy-MM-dd");
-  }
-
-  function hasDaySlots(day: number): boolean {
-    return (monthSlots[getDateStr(day)] ?? []).some(
-      (s) => (s.spotsOpen ?? 0) > 0,
-    );
-  }
-
-  // All days of the month as Date objects (for display)
-  const monthDays = Array.from(
-    { length: daysInMonth },
-    (_, i) => new Date(year, month, i + 1),
-  );
-
-  const selectedDateSlots = selectedDate
-    ? (monthSlots[selectedDate] ?? [])
-    : [];
-  const singlePendingBooking =
-    pendingBookings.length === 1 ? pendingBookings[0] : undefined;
 
   return (
     <AppShell
@@ -530,412 +369,21 @@ export default function BookPage() {
       </div>
 
       {activeTab === "book" ? (
-        !selectedEvent ? (
-          <EventSelectionScreen
-            onSelect={(ev) => {
-              setSelectedEvent(ev);
-              setSelectedSlot(null);
-              setMonthSlots({});
-            }}
-            pendingBookings={pendingBookings}
-          />
-        ) : (
-          <div className="pb-8 md:max-w-2xl md:mx-auto">
-            {/* Selected event banner */}
-            <div
-              className="px-5 md:px-8 pt-3 pb-2 flex items-center justify-between"
-              style={{ borderBottom: "1px solid rgba(0,38,105,0.06)" }}
-            >
-              <div>
-                <p
-                  className="text-xs font-semibold"
-                  style={{ color: "var(--color-green-900)" }}
-                >
-                  {selectedEvent.name}
-                </p>
-                {(selectedEvent.city || selectedEvent.state) && (
-                  <p
-                    className="text-[10px] mt-0.5"
-                    style={{ color: "rgba(0,38,105,0.4)" }}
-                  >
-                    {[selectedEvent.city, selectedEvent.state]
-                      .filter(Boolean)
-                      .join(", ")}
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {selectedEvent.map_link && (
-                  <a
-                    href={selectedEvent.map_link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label="View on map"
-                    className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
-                    style={{ color: "rgba(0,38,105,0.35)" }}
-                  >
-                    <svg
-                      className="w-4 h-4 flex-shrink-0"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={1.75}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.159.69.159 1.006 0z"
-                      />
-                    </svg>
-                  </a>
-                )}
-                {selectedEvent.booking_url && (
-                  <a
-                    href={selectedEvent.booking_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label="Visit website"
-                    className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
-                    style={{ color: "rgba(0,38,105,0.35)" }}
-                  >
-                    <svg
-                      className="w-4 h-4 flex-shrink-0"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={1.75}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"
-                      />
-                    </svg>
-                  </a>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedEvent(null);
-                    setMonthSlots({});
-                    setSelectedSlot(null);
-                  }}
-                  className="text-xs px-3 py-1.5 rounded-lg font-medium"
-                  style={{
-                    background: "rgba(0,38,105,0.06)",
-                    color: "rgba(0,38,105,0.55)",
-                  }}
-                >
-                  Change
-                </button>
-              </div>
-            </div>
-
-            {loadingPendingBookings ? (
-              <div
-                className="mx-5 md:mx-8 mt-3 h-16 rounded-2xl animate-pulse"
-                style={{ background: "rgba(0,38,105,0.04)" }}
-              />
-            ) : (
-              pendingBookings.length > 0 && (
-                <PendingPaymentBanner pending={pendingBookings} refreshing={refreshingPending} />
-              )
-            )}
-
-            {/* Month navigation + view toggle */}
-            <div className="px-5 md:px-8 pt-4 pb-2 flex items-center justify-between">
-              <div className="flex-1 flex items-center justify-between mr-3">
-                <button
-                  onClick={() => setCurrentMonth((m) => addMonths(m, -1))}
-                  disabled={!canGoPrev}
-                  className="w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-20"
-                  style={{ background: "rgba(0,38,105,0.05)" }}
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2.5}
-                    style={{ color: "var(--color-green-900)" }}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M15.75 19.5L8.25 12l7.5-7.5"
-                    />
-                  </svg>
-                </button>
-
-                <p
-                  className="font-sans font-black text-lg"
-                  style={{ color: "var(--color-green-900)" }}
-                >
-                  {format(currentMonth, "MMMM yyyy")}
-                </p>
-
-                <button
-                  onClick={() => setCurrentMonth((m) => addMonths(m, 1))}
-                  disabled={!canGoNext}
-                  className="w-9 h-9 rounded-xl flex items-center justify-center transition-opacity disabled:opacity-20"
-                  style={{ background: "rgba(0,38,105,0.05)" }}
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2.5}
-                    style={{ color: "var(--color-green-900)" }}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M8.25 4.5l7.5 7.5-7.5 7.5"
-                    />
-                  </svg>
-                </button>
-              </div>
-
-              <div
-                className="flex rounded-lg flex-shrink-0"
-                style={{ background: "rgba(0,38,105,0.06)" }}
-              >
-                {(["day", "month"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setViewMode(mode)}
-                    className="h-9 px-2.5 py-1 text-xs font-semibold rounded-md capitalize transition-all"
-                    style={
-                      viewMode === mode
-                        ? {
-                            background: "white",
-                            color: "var(--color-green-900)",
-                            boxShadow: "0 1px 2px rgba(0,38,105,0.1)",
-                          }
-                        : { color: "rgba(0,38,105,0.45)" }
-                    }
-                  >
-                    {mode}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Date picker — day strip or month grid */}
-            <div className="px-5 md:px-8 pb-3">
-              {viewMode === "day" ? (
-                monthLoading ? (
-                  <div className="flex justify-center py-10">
-                    <Spinner className="text-green-700" />
-                  </div>
-                ) : (
-                  <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
-                    {monthDays.map((date) => {
-                      const day = date.getDate();
-                      const dateStr = getDateStr(day);
-                      const isPast = dateStr < todayStr;
-                      const isToday = dateStr === todayStr;
-                      const inView = !isPast;
-                      const hasSlots = hasDaySlots(day);
-                      const active = selectedDate === dateStr;
-
-                      const canClick = isToday || (inView && hasSlots);
-
-                      return (
-                        <button
-                          key={dateStr}
-                          ref={
-                            dateStr === selectedDate
-                              ? selectedDateRef
-                              : dateStr === firstInWindowDateStr
-                                ? firstInWindowRef
-                                : undefined
-                          }
-                          onClick={
-                            canClick
-                              ? () => {
-                                  setSelectedDate(dateStr);
-                                  setSelectedSlot(null);
-                                }
-                              : undefined
-                          }
-                          disabled={!canClick}
-                          className={cn(
-                            "flex-shrink-0 flex flex-col items-center px-3 py-3 rounded-2xl border min-w-[56px] transition-all duration-150",
-                            !canClick && !isToday && "cursor-not-allowed",
-                            isPast || !inView
-                              ? "opacity-50"
-                              : !hasSlots && "opacity-60",
-                            active
-                              ? "border-green-900"
-                              : "bg-white border-green-900/08",
-                          )}
-                          style={
-                            active
-                              ? {
-                                  background: "var(--color-green-900)",
-                                  opacity: hasSlots ? 1 : 0.45,
-                                }
-                              : {}
-                          }
-                        >
-                          <span
-                            className="text-[10px] uppercase tracking-wider font-medium"
-                            style={{
-                              color: active
-                                ? "rgba(133,187,101,0.8)"
-                                : "rgba(0,38,105,0.38)",
-                            }}
-                          >
-                            {format(date, "EEE")}
-                          </span>
-                          <span
-                            className="font-sans font-black text-2xl mt-0.5"
-                            style={{
-                              color: active
-                                ? "white"
-                                : "var(--color-green-900)",
-                            }}
-                          >
-                            {format(date, "d")}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )
-              ) : (
-                <MonthCalendarGrid
-                  year={year}
-                  month={month}
-                  daysInMonth={daysInMonth}
-                  selectedDate={selectedDate}
-                  todayStr={todayStr}
-                  firstInWindowDateStr={firstInWindowDateStr}
-                  hasDaySlots={hasDaySlots}
-                  getDateStr={getDateStr}
-                  loadingMonth={monthLoading}
-                  onSelectDate={(dateStr) => {
-                    setSelectedDate(dateStr);
-                    setSelectedSlot(null);
-                  }}
-                  selectedDateRef={selectedDateRef}
-                  firstInWindowRef={firstInWindowRef}
-                />
-              )}
-            </div>
-
-            {/* Who's playing on selected date */}
-            {selectedDate &&
-              !monthLoading &&
-              (dayPlayers.length > 0 || loadingDayPlayers) && (
-                <div className="px-5 md:px-8 pb-1">
-                  <p className="section-label mb-2">
-                    {loadingDayPlayers
-                      ? "Who's playing…"
-                      : `Who's playing · ${dayPlayers.length}`}
-                  </p>
-                  {loadingDayPlayers ? (
-                    <div className="flex gap-2">
-                      {[1, 2, 3, 4, 5, 6].map((i) => (
-                        <div
-                          key={i}
-                          className="flex flex-col items-center gap-1.5 animate-pulse flex-1 min-w-0"
-                        >
-                          <div
-                            className="w-10 h-10 rounded-full mx-auto"
-                            style={{ background: "rgba(0,38,105,0.08)" }}
-                          />
-                          <div
-                            className="w-8 h-2 rounded-full mx-auto"
-                            style={{ background: "rgba(0,38,105,0.08)" }}
-                          />
-                          <div
-                            className="w-6 h-1.5 rounded-full mx-auto"
-                            style={{ background: "rgba(0,38,105,0.05)" }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-1">
-                      {dayPlayers.map((p) => (
-                        <DayPlayerBubble key={p.member_id} player={p} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-            {/* Tee time slots for selected date */}
-            {selectedDate && !monthLoading && (
-              <div className="px-5 md:px-8 pt-5">
-                <p className="section-label mb-3">
-                  Tee times —{" "}
-                  {format(new Date(selectedDate + "T12:00:00"), "EEE, MMM d")}
-                </p>
-
-                {loadingPendingBookings ? (
-                  <div className="space-y-2">
-                    {[1, 2, 3].map((i) => (
-                      <div
-                        key={i}
-                        className="h-[68px] rounded-2xl animate-pulse"
-                        style={{ background: "rgba(0,38,105,0.05)" }}
-                      />
-                    ))}
-                  </div>
-                ) : singlePendingBooking || pendingBookings.length > 1 ? (
-                  <EmptyState
-                    compact
-                    icon="💳"
-                    title={
-                      singlePendingBooking
-                        ? "Payment due first"
-                        : `${pendingBookings.length} bookings need resolving`
-                    }
-                    description={
-                      singlePendingBooking
-                        ? `Resolve your round at ${singlePendingBooking.course_name} on ${formatPendingDate(singlePendingBooking.booking_date)} before booking another.`
-                        : "Resolve all of your pending bookings above before booking another round."
-                    }
-                  />
-                ) : selectedDateSlots.length === 0 ? (
-                  <EmptyState
-                    icon="⛳"
-                    title="No tee times"
-                    description="No open slots for this date."
-                  />
-                ) : (
-                  <div className="space-y-2">
-                    {selectedDateSlots.map((slot) => (
-                      <SlotRow
-                        key={slot.startTime}
-                        slot={slot}
-                        selected={selectedSlot?.startTime === slot.startTime}
-                        durationMins={roundDurationMins}
-                        onSelect={() => setSelectedSlot(slot)}
-                        onContinue={() => setStep("confirm")}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <p
-              className="text-xs text-center mt-6 px-5 md:px-8 leading-relaxed"
-              style={{ color: "rgba(0,38,105,0.25)" }}
-            >
-              Select a date and tee time to submit a booking request.
-              <br />
-              Availability is confirmed by the team — payment link sent by
-              email.
-            </p>
-          </div>
-        )
+        <EventSelectionScreen
+          onSelect={(ev, date, slot) => {
+            // Venue, day and tee time were all chosen on the calendar, so
+            // there is nothing left to pick — go straight to confirmation.
+            setSelectedEvent(ev);
+            setSelectedDate(date);
+            setSelectedSlot(slot);
+            setError("");
+            setStep("confirm");
+          }}
+          pendingBookings={pendingBookings}
+          loadingPendingBookings={loadingPendingBookings}
+          refreshingPending={refreshingPending}
+          wallet={creditWallet}
+        />
       ) : (
         <MyBookingsTab
           bookings={myBookings}
@@ -949,699 +397,10 @@ export default function BookPage() {
           onPlayersAdded={(rows) =>
             setMyBookings((prev) => [...rows, ...prev])
           }
+          wallet={creditWallet}
         />
       )}
     </AppShell>
-  );
-}
-
-// ---- Month calendar grid ------------------------------------
-
-function MonthCalendarGrid({
-  year,
-  month,
-  daysInMonth,
-  selectedDate,
-  todayStr,
-  firstInWindowDateStr,
-  hasDaySlots,
-  getDateStr,
-  loadingMonth,
-  onSelectDate,
-  selectedDateRef,
-  firstInWindowRef,
-}: {
-  year: number;
-  month: number;
-  daysInMonth: number;
-  selectedDate: string;
-  todayStr: string;
-  firstInWindowDateStr: string | null;
-  hasDaySlots: (day: number) => boolean;
-  getDateStr: (day: number) => string;
-  loadingMonth: boolean;
-  onSelectDate: (dateStr: string) => void;
-  selectedDateRef: React.RefObject<HTMLButtonElement>;
-  firstInWindowRef: React.RefObject<HTMLButtonElement>;
-}) {
-  if (loadingMonth) {
-    return (
-      <div className="flex justify-center py-10">
-        <Spinner className="text-green-700" />
-      </div>
-    );
-  }
-
-  const DOW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-  const startDow = new Date(year, month, 1).getDay();
-  const totalCells = Math.ceil((startDow + daysInMonth) / 7) * 7;
-  const cells: (number | null)[] = Array.from(
-    { length: totalCells },
-    (_, i) => {
-      const d = i - startDow + 1;
-      return d >= 1 && d <= daysInMonth ? d : null;
-    },
-  );
-
-  return (
-    <div>
-      {/* Day-of-week header */}
-      <div className="grid grid-cols-7 mb-1">
-        {DOW.map((d) => (
-          <div
-            key={d}
-            className="text-center text-[10px] font-medium py-1.5"
-            style={{ color: "rgba(0,38,105,0.35)" }}
-          >
-            {d}
-          </div>
-        ))}
-      </div>
-      {/* Day cells */}
-      <div className="grid grid-cols-7 gap-y-1">
-        {cells.map((day, i) => {
-          if (day === null) return <div key={`e-${i}`} />;
-          const dateStr = getDateStr(day);
-          const isPast = dateStr < todayStr;
-          const isToday = dateStr === todayStr;
-          const hasSlots = hasDaySlots(day);
-          const canClick = isToday || (!isPast && hasSlots);
-          const active = selectedDate === dateStr;
-
-          return (
-            <button
-              key={dateStr}
-              ref={
-                dateStr === selectedDate
-                  ? selectedDateRef
-                  : dateStr === firstInWindowDateStr
-                    ? firstInWindowRef
-                    : undefined
-              }
-              onClick={canClick ? () => onSelectDate(dateStr) : undefined}
-              disabled={!canClick}
-              className={cn(
-                "relative flex flex-col items-center justify-center aspect-square rounded-xl transition-all duration-150",
-                isPast
-                  ? "opacity-40"
-                  : !hasSlots && !isToday
-                    ? "opacity-50"
-                    : "",
-                !canClick
-                  ? "cursor-not-allowed"
-                  : active
-                    ? ""
-                    : "hover:bg-green-50/60",
-              )}
-              style={active ? { background: "var(--color-green-900)" } : {}}
-            >
-              <span
-                className={cn(
-                  "font-sans font-black text-sm leading-none",
-                  isToday && !active ? "underline underline-offset-2" : "",
-                )}
-                style={{ color: active ? "white" : "var(--color-green-900)" }}
-              >
-                {day}
-              </span>
-              {hasSlots && (
-                <span
-                  className="mt-1 w-1 h-1 rounded-full"
-                  style={{
-                    background: active
-                      ? "rgba(133,187,101,0.8)"
-                      : "var(--color-green-600, #16a34a)",
-                  }}
-                />
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ---- Day player bubble + popover ----------------------------
-
-import type { MemberDetail } from "@/components/ui/MemberProfileSheet";
-
-function DayPlayerBubble({ player }: { player: DayPlayer }) {
-  const [detail, setDetail] = useState<MemberDetail | null>(null);
-  const [hasPlayedWith, setHasPlayedWith] = useState(false);
-  const [focusGroups, setFocusGroups] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  const [visible, setVisible] = useState(false);
-
-  function openPopover() {
-    setMounted(true);
-    if (!detail) {
-      setLoading(true);
-      fetch(`/api/members/${player.member_id}`)
-        .then((r) => r.json())
-        .then((d) => {
-          setDetail(d.member ?? null);
-          setHasPlayedWith(!!d.hasPlayedWith);
-          setFocusGroups(
-            Array.isArray(d.focusLinkupGroups) ? d.focusLinkupGroups : [],
-          );
-        })
-        .catch(() => {})
-        .finally(() => setLoading(false));
-    }
-  }
-
-  function closePopover() {
-    setVisible(false);
-    const t = setTimeout(() => setMounted(false), 300);
-    return () => clearTimeout(t);
-  }
-
-  useEffect(() => {
-    if (!mounted) return;
-    const ids: number[] = [];
-    ids[0] = requestAnimationFrame(() => {
-      ids[1] = requestAnimationFrame(() => setVisible(true));
-    });
-    return () => ids.forEach((id) => cancelAnimationFrame(id));
-  }, [mounted]);
-
-  const prof = detail?.profile;
-  const displayName = player.is_self
-    ? "You"
-    : prof?.display_name || `${player.first_name} ${player.last_name}`.trim();
-  const initials =
-    `${player.first_name[0] ?? ""}${player.last_name[0] ?? ""}`.toUpperCase();
-  const avatarUrl = prof?.avatar_url ?? player.avatar_url;
-  // tee_time is stored in course-local timezone; display it directly.
-  const localTeeTime = player.tee_time;
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={player.is_self ? undefined : openPopover}
-        className="flex flex-col items-center gap-1 flex-shrink-0 w-14 transition-opacity active:opacity-60"
-        style={{ cursor: player.is_self ? "default" : undefined }}
-      >
-        {avatarUrl ? (
-          <Image
-            src={avatarUrl}
-            alt=""
-            width={40}
-            height={40}
-            className="w-10 h-10 rounded-full object-cover"
-          />
-        ) : (
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold"
-            style={{
-              background: "rgba(133,187,101,0.15)",
-              color: "var(--color-green-700)",
-            }}
-          >
-            {initials}
-          </div>
-        )}
-        <span
-          className="text-[10px] font-medium text-center leading-tight truncate w-full capitalize"
-          style={{ color: "var(--color-green-900)" }}
-        >
-          {player.first_name}
-        </span>
-        <span
-          className="text-[9px] text-center"
-          style={{ color: "rgba(0,38,105,0.38)" }}
-        >
-          {formatTeeTime(localTeeTime)}
-        </span>
-      </button>
-
-      {mounted && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center md:p-6">
-          <button
-            type="button"
-            aria-label="Close"
-            className="absolute inset-0 w-full h-full"
-            style={{
-              background: "rgba(0,0,0,0.45)",
-              opacity: visible ? 1 : 0,
-              transition: "opacity 200ms ease-out",
-            }}
-            onClick={closePopover}
-          />
-          <div
-            className="relative bg-white rounded-t-3xl md:rounded-3xl pt-5 pb-8 w-full md:max-w-md"
-            style={{
-              boxShadow: "0 -4px 32px rgba(0,0,0,0.12)",
-              transform: visible ? "translateY(0)" : "translateY(100%)",
-              transition: visible
-                ? "transform 340ms cubic-bezier(0.32,0.72,0,1)"
-                : "transform 240ms cubic-bezier(0.4,0,1,1)",
-              willChange: "transform",
-              maxHeight: "85vh",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
-            {/* Drag handle */}
-            <div className="flex justify-center mb-4 flex-shrink-0">
-              <div
-                className="w-10 h-1 rounded-full"
-                style={{ background: "rgba(0,38,105,0.12)" }}
-              />
-            </div>
-
-            {loading ? (
-              <div className="flex flex-col items-center py-10 gap-3 px-5">
-                <div
-                  className="w-16 h-16 rounded-2xl animate-pulse"
-                  style={{ background: "rgba(0,38,105,0.08)" }}
-                />
-                <div
-                  className="w-36 h-3.5 rounded-full animate-pulse"
-                  style={{ background: "rgba(0,38,105,0.08)" }}
-                />
-                <div
-                  className="w-24 h-2.5 rounded-full animate-pulse"
-                  style={{ background: "rgba(0,38,105,0.06)" }}
-                />
-                <div
-                  className="w-full h-16 rounded-2xl animate-pulse mt-2"
-                  style={{ background: "rgba(0,38,105,0.05)" }}
-                />
-              </div>
-            ) : (
-              <div className="overflow-y-auto flex-1 px-5 space-y-4">
-                {/* Header */}
-                <div className="flex items-start gap-4">
-                  {avatarUrl ? (
-                    <Image
-                      src={avatarUrl}
-                      alt=""
-                      width={60}
-                      height={60}
-                      className="w-15 h-15 rounded-2xl object-cover flex-shrink-0"
-                      style={{ width: 60, height: 60 }}
-                    />
-                  ) : (
-                    <div
-                      className="rounded-2xl flex items-center justify-center text-xl font-bold flex-shrink-0"
-                      style={{
-                        width: 60,
-                        height: 60,
-                        background: "rgba(133,187,101,0.15)",
-                        color: "var(--color-green-700)",
-                      }}
-                    >
-                      {initials}
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0 pt-0.5">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p
-                        className="font-sans font-black text-lg leading-tight capitalize"
-                        style={{ color: "var(--color-green-900)" }}
-                      >
-                        {displayName}
-                      </p>
-                      {hasPlayedWith && (
-                        <span
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
-                          style={{
-                            background: "rgba(133,187,101,0.15)",
-                            color: "var(--color-green-700)",
-                          }}
-                        >
-                          Played before
-                        </span>
-                      )}
-                    </div>
-                    {prof?.role_title && (
-                      <p
-                        className="text-sm mt-0.5"
-                        style={{ color: "rgba(0,38,105,0.55)" }}
-                      >
-                        {prof.role_title}
-                      </p>
-                    )}
-                    {prof?.business_name && (
-                      <p
-                        className="text-xs mt-0.5 truncate"
-                        style={{ color: "rgba(0,38,105,0.4)" }}
-                      >
-                        {prof.business_name}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Stats strip */}
-                <div
-                  className="flex rounded-2xl overflow-hidden"
-                  style={{ background: "rgba(0,38,105,0.04)" }}
-                >
-                  <div className="flex-1 py-3 text-center">
-                    <p
-                      className="text-[9px] uppercase tracking-wider mb-0.5"
-                      style={{ color: "rgba(0,38,105,0.38)" }}
-                    >
-                      Tee time
-                    </p>
-                    <p
-                      className="font-sans font-black text-sm"
-                      style={{ color: "var(--color-green-900)" }}
-                    >
-                      {formatTeeTime(localTeeTime)}
-                    </p>
-                  </div>
-                  {player.players > 1 && (
-                    <>
-                      <div
-                        className="w-px my-2.5"
-                        style={{ background: "rgba(0,38,105,0.08)" }}
-                      />
-                      <div className="flex-1 py-3 text-center">
-                        <p
-                          className="text-[9px] uppercase tracking-wider mb-0.5"
-                          style={{ color: "rgba(0,38,105,0.38)" }}
-                        >
-                          Group
-                        </p>
-                        <p
-                          className="font-sans font-black text-sm"
-                          style={{ color: "var(--color-green-900)" }}
-                        >
-                          {player.players} players
-                        </p>
-                      </div>
-                    </>
-                  )}
-                  {prof?.show_handicap && prof?.handicap_index != null && (
-                    <>
-                      <div
-                        className="w-px my-2.5"
-                        style={{ background: "rgba(0,38,105,0.08)" }}
-                      />
-                      <div className="flex-1 py-3 text-center">
-                        <p
-                          className="text-[9px] uppercase tracking-wider mb-0.5"
-                          style={{ color: "rgba(0,38,105,0.38)" }}
-                        >
-                          HCP
-                        </p>
-                        <p
-                          className="font-sans font-black text-sm"
-                          style={{ color: "var(--color-green-900)" }}
-                        >
-                          {prof.handicap_index}
-                        </p>
-                      </div>
-                    </>
-                  )}
-                  {prof?.open_to_golf_travel && (
-                    <>
-                      <div
-                        className="w-px my-2.5"
-                        style={{ background: "rgba(0,38,105,0.08)" }}
-                      />
-                      <div className="flex-1 py-3 text-center">
-                        <p
-                          className="text-[9px] uppercase tracking-wider mb-0.5"
-                          style={{ color: "rgba(0,38,105,0.38)" }}
-                        >
-                          Golf travel
-                        </p>
-                        <p
-                          className="text-sm"
-                          style={{ color: "var(--color-green-700)" }}
-                        >
-                          ✓ Open
-                        </p>
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {/* Value offered */}
-                {prof?.value_offered && (
-                  <div
-                    className="rounded-2xl px-4 py-3.5"
-                    style={{
-                      background: "rgba(0,38,105,0.03)",
-                      border: "1px solid rgba(0,38,105,0.06)",
-                    }}
-                  >
-                    <p
-                      className="text-[10px] uppercase tracking-wider mb-1.5"
-                      style={{ color: "rgba(0,38,105,0.38)" }}
-                    >
-                      What they bring
-                    </p>
-                    <p
-                      className="text-sm leading-relaxed"
-                      style={{ color: "rgba(0,38,105,0.7)" }}
-                    >
-                      {prof.value_offered}
-                    </p>
-                  </div>
-                )}
-
-                {/* Play preferences */}
-                {(prof?.play_frequency || prof?.preferred_play_times) && (
-                  <div
-                    className="rounded-2xl px-4 py-3.5"
-                    style={{
-                      background: "rgba(0,38,105,0.03)",
-                      border: "1px solid rgba(0,38,105,0.06)",
-                    }}
-                  >
-                    <p
-                      className="text-[10px] uppercase tracking-wider mb-2"
-                      style={{ color: "rgba(0,38,105,0.38)" }}
-                    >
-                      Play habits
-                    </p>
-                    <div className="space-y-1.5">
-                      {prof?.play_frequency && (
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="text-xs"
-                            style={{ color: "rgba(0,38,105,0.4)" }}
-                          >
-                            Frequency
-                          </span>
-                          <span
-                            className="text-xs font-medium"
-                            style={{ color: "var(--color-green-900)" }}
-                          >
-                            {prof.play_frequency}
-                          </span>
-                        </div>
-                      )}
-                      {prof?.preferred_play_times && (
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="text-xs"
-                            style={{ color: "rgba(0,38,105,0.4)" }}
-                          >
-                            Prefers
-                          </span>
-                          <span
-                            className="text-xs font-medium"
-                            style={{ color: "var(--color-green-900)" }}
-                          >
-                            {prof.preferred_play_times}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Focus linkup groups */}
-                {focusGroups.length > 0 && (
-                  <div>
-                    <p
-                      className="text-[10px] uppercase tracking-wider mb-2"
-                      style={{ color: "rgba(0,38,105,0.38)" }}
-                    >
-                      Focus groups
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {focusGroups.map((g) => (
-                        <span
-                          key={g}
-                          className="text-xs font-medium px-2.5 py-1 rounded-full"
-                          style={{
-                            background: "rgba(0,38,105,0.06)",
-                            color: "var(--color-green-900)",
-                          }}
-                        >
-                          {g}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Non-golf hobbies */}
-                {prof?.non_golf_hobbies && (
-                  <div
-                    className="rounded-2xl px-4 py-3.5"
-                    style={{
-                      background: "rgba(0,38,105,0.03)",
-                      border: "1px solid rgba(0,38,105,0.06)",
-                    }}
-                  >
-                    <p
-                      className="text-[10px] uppercase tracking-wider mb-1.5"
-                      style={{ color: "rgba(0,38,105,0.38)" }}
-                    >
-                      Beyond the course
-                    </p>
-                    <p
-                      className="text-sm leading-relaxed"
-                      style={{ color: "rgba(0,38,105,0.7)" }}
-                    >
-                      {prof.non_golf_hobbies}
-                    </p>
-                  </div>
-                )}
-
-                {/* CTA */}
-                <a
-                  href={`/members/${player.member_id}`}
-                  className="btn btn-primary btn-full text-center block"
-                >
-                  View profile
-                </a>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-// ---- Slot row -----------------------------------------------
-
-function SlotRow({
-  slot,
-  selected,
-  durationMins,
-  onSelect,
-  onContinue,
-}: {
-  slot: GHLBookingSlot;
-  selected: boolean;
-  durationMins: number | null;
-  onSelect: () => void;
-  onContinue: () => void;
-}) {
-  const full = !slot.available || (slot.spotsOpen ?? 0) === 0;
-
-  return (
-    <button
-      onClick={full ? undefined : selected ? onContinue : onSelect}
-      disabled={full}
-      className={cn(
-        "w-full flex items-center justify-between px-5 py-4 rounded-2xl border transition-all duration-150 text-left",
-        full
-          ? "opacity-40 cursor-not-allowed"
-          : selected
-            ? ""
-            : "bg-white hover:border-green-900/20",
-      )}
-      style={
-        full
-          ? {
-              background: "rgba(0,38,105,0.03)",
-              borderColor: "rgba(0,38,105,0.06)",
-            }
-          : selected
-            ? {
-                background: "rgba(133,187,101,0.06)",
-                borderColor: "var(--color-gold)",
-                boxShadow: "0 0 0 1px var(--color-gold)",
-              }
-            : { borderColor: "rgba(0,38,105,0.09)" }
-      }
-    >
-      <div>
-        <span
-          className="font-sans font-black text-2xl"
-          style={{ color: "var(--color-green-900)" }}
-        >
-          {formatSlotTime(slot.startTime)}
-        </span>
-        <p className="text-xs mt-0.5" style={{ color: "rgba(0,38,105,0.42)" }}>
-          {durationMins !== null && (
-            <>Until ~{slotEndTime(slot.startTime, durationMins)}</>
-          )}
-          {!full && (
-            <span
-              style={{
-                color:
-                  (slot.spotsOpen ?? 0) <= 3
-                    ? "#92640a"
-                    : "rgba(0,38,105,0.42)",
-              }}
-            >
-              {" · "}
-              {slot.spotsOpen} spot{slot.spotsOpen !== 1 ? "s" : ""} open
-            </span>
-          )}
-        </p>
-      </div>
-      <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">
-        {full ? (
-          <span className="text-xs" style={{ color: "rgba(0,38,105,0.35)" }}>
-            Full
-          </span>
-        ) : selected ? (
-          <>
-            <span
-              className="text-sm font-semibold"
-              style={{ color: "var(--color-gold-dark)" }}
-            >
-              Book
-            </span>
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2.5}
-              style={{ color: "var(--color-gold-dark)" }}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"
-              />
-            </svg>
-          </>
-        ) : (
-          <svg
-            className="w-4 h-4 opacity-20"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-            style={{ color: "var(--color-green-900)" }}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M8.25 4.5l7.5 7.5-7.5 7.5"
-            />
-          </svg>
-        )}
-      </div>
-    </button>
   );
 }
 
@@ -1703,15 +462,60 @@ function groupPendingPayments(pending: PendingPayment[]): PendingGroup[] {
   return groups;
 }
 
+// A code already issued for a round. The bare code used to be the whole chip,
+// which told a member nothing: not that it was credit, not what it was worth,
+// and not that there was still a checkout to visit. So the chip carries the
+// meaning — credit, applied, for this much — and the code itself lives one tap
+// away in the modal, where it can be copied and explained.
+function CreditReadyChip({
+  amount,
+  onOpen,
+  compact = false,
+}: {
+  amount: number;
+  onOpen: () => void;
+  /** Drops the word "credit" where the row is tightest. */
+  compact?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title="View your credit code"
+      className="text-xs font-semibold px-2.5 py-1.5 rounded-lg flex-shrink-0 inline-flex items-center gap-1"
+      style={{ background: "rgba(146,100,10,0.1)", color: "#92640a" }}
+    >
+      <span aria-hidden>🎟</span>
+      {formatCredit(amount)}
+      {!compact && " credit"}
+    </button>
+  );
+}
+
+// Whole dollars — these chips sit in a row with several other controls, and the
+// cents are never the interesting part of a round's price.
+function formatCredit(amount: number): string {
+  return Number(amount).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+}
+
 function PendingPaymentBanner({
   pending,
   refreshing = false,
+  wallet,
 }: {
   pending: PendingPayment[];
   // True while the parent is re-checking the pending-payment list (e.g. right
   // after the member returns from the checkout tab). Disables the "Pay →" links
   // so a member can't fire a second payment before we know a row has cleared.
   refreshing?: boolean;
+  // The member's credit, so a host who earned it can settle a round with it
+  // instead of cash. Absent (or empty) simply means no credit option is offered.
+  wallet?: ReturnType<typeof useCreditWallet>;
 }) {
   const router = useRouter();
   const [index, setIndex] = useState(0);
@@ -1719,6 +523,8 @@ function PendingPaymentBanner({
   // shows a disabled/loading state.
   const [messagingId, setMessagingId] = useState<string | null>(null);
   const [messageError, setMessageError] = useState("");
+  // The row whose credit modal is open — one at a time, keyed by booking id.
+  const [creditRow, setCreditRow] = useState<PendingPayment | null>(null);
 
   const groups = groupPendingPayments(pending);
   const current = groups[Math.min(index, groups.length - 1)];
@@ -1856,6 +662,34 @@ function PendingPaymentBanner({
                     <MessageCircle className="w-3.5 h-3.5" strokeWidth={2} />
                   </button>
                 )}
+                {/* Credit is the other way to settle this row. Once a code
+                    exists the chip reports that instead of offering it again. */}
+                {(() => {
+                  const held = wallet?.couponForBooking(row.id) ?? null;
+                  if (held) {
+                    return (
+                      <CreditReadyChip
+                        amount={Number(held.amount)}
+                        onOpen={() => setCreditRow(row)}
+                      />
+                    );
+                  }
+                  // Only when the balance settles this row outright: a code has
+                  // to cover the round in full, so offering it on a balance
+                  // that's short would be an offer we'd refuse.
+                  if (!wallet?.coversBill(row.amount_due)) return null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setCreditRow(row)}
+                      disabled={refreshing}
+                      className="text-xs font-semibold px-2.5 py-1.5 rounded-lg flex-shrink-0 disabled:opacity-50"
+                      style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+                    >
+                      Use credits
+                    </button>
+                  );
+                })()}
                 {row.payment_url ? (
                   <a
                     href={row.payment_url}
@@ -1883,6 +717,23 @@ function PendingPaymentBanner({
               </div>
             ))}
           </div>
+
+          {/* A code on its own is inert until it's typed into the checkout, and
+              nothing else on this screen says so. Shown once for the card
+              rather than per row, since the instruction is the same either
+              way. */}
+          {rows.some((r) => wallet?.couponForBooking(r.id)) && (
+            <p
+              className="text-xs mt-2 pt-2 leading-relaxed"
+              style={{
+                color: "#92640a",
+                borderTop: "1px solid rgba(0,38,105,0.06)",
+              }}
+            >
+              🎟 Tap your credit chip to copy the code, then paste it into the
+              coupon field at checkout — the discount comes off there, not here.
+            </p>
+          )}
 
           {/* When the booker is paying on behalf of additional players, the
               external GHL payment form defaults to the payer's email. Paying
@@ -1916,6 +767,21 @@ function PendingPaymentBanner({
           )}
         </div>
       </div>
+
+      {creditRow && (
+        <CreditCouponModal
+          target={{ kind: "booking", bookingId: creditRow.id }}
+          // The same figure the server sizes the code to (bookingAmountDue),
+          // so what the member is shown and what they get can't disagree.
+          price={creditRow.amount_due}
+          balance={wallet?.balance ?? 0}
+          paymentUrl={creditRow.payment_url}
+          roundLabel={`${creditRow.course_name} on ${formatPendingDate(creditRow.booking_date)}`}
+          existing={wallet?.couponForBooking(creditRow.id) ?? null}
+          onIssued={() => wallet?.refetch()}
+          onClose={() => setCreditRow(null)}
+        />
+      )}
     </div>
   );
 }
@@ -3614,12 +2480,16 @@ function MyBookingsTab({
   onSwitchToBook: _onSwitchToBook,
   onUpdateBooking,
   onPlayersAdded,
+  wallet,
 }: {
   bookings: Booking[];
   onRefresh: () => void;
   onSwitchToBook: () => void;
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
   onPlayersAdded: (rows: Booking[]) => void;
+  // Passed down rather than fetched here: the page already holds the member's
+  // credit for the payment banner, and two copies would mean two requests.
+  wallet?: ReturnType<typeof useCreditWallet>;
 }) {
   const { user } = useProfile();
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
@@ -3745,6 +2615,7 @@ function MyBookingsTab({
                 onCancel={setCancelTarget}
                 onEditGuest={setEditTarget}
                 onAddPlayer={setAddTarget}
+                wallet={wallet}
               />
             ))}
           </div>
@@ -3843,14 +2714,23 @@ function BookingCard({
   onCancel,
   onEditGuest,
   onAddPlayer,
+  wallet,
 }: {
   group: BookingGroup;
   userId: string | undefined;
   onCancel: (target: CancelTarget) => void;
   onEditGuest: (target: EditGuestTarget) => void;
   onAddPlayer: (target: AddPlayerTarget) => void;
+  // Credit, so a payable row here offers the same choice the payment banner
+  // does. Undefined means the member has none and nothing extra is rendered.
+  wallet?: ReturnType<typeof useCreditWallet>;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // The payable row whose credit modal is open, with what it costs.
+  const [creditTarget, setCreditTarget] = useState<{
+    id: string;
+    amountDue: number;
+  } | null>(null);
 
   const iAmBooker = group.primary.member_id === userId;
   const activePlayers = group.players.filter((p) => p.status !== "cancelled");
@@ -3901,6 +2781,7 @@ function BookingCard({
           ghlBookingId: group.primary.ghl_booking_id ?? null,
           canCancel: canCancelPrimary,
           canPay: group.primary.status === "availability_confirmed",
+          amountDue: bookingAmountDue(group.primary),
           isYou: true,
           adminNotes: group.primary.admin_notes ?? null,
           editablePlayer: null as AdditionalPlayer | null,
@@ -3912,6 +2793,7 @@ function BookingCard({
           ghlBookingId: p.ghl_booking_id ?? null,
           canCancel: hoursUntil > 0 && CANCELLABLE.includes(p.status),
           canPay: p.status === "availability_confirmed",
+          amountDue: bookingAmountDue(p),
           isYou: false,
           adminNotes: p.admin_notes ?? null,
           // Only a still-pending non-member guest can be corrected — once an
@@ -3936,6 +2818,7 @@ function BookingCard({
               ? hoursUntil > 0 && CANCELLABLE.includes(myRow.status)
               : false,
             canPay: myRow?.status === "availability_confirmed",
+            amountDue: bookingAmountDue(myRow ?? group.primary),
             isYou: true,
             adminNotes: myRow?.admin_notes ?? null,
             editablePlayer: null as AdditionalPlayer | null,
@@ -3947,6 +2830,7 @@ function BookingCard({
             ghlBookingId: null,
             canCancel: false,
             canPay: false,
+            amountDue: 0,
             isYou: false,
             adminNotes: group.primary.admin_notes ?? null,
             editablePlayer: null as AdditionalPlayer | null,
@@ -3959,6 +2843,7 @@ function BookingCard({
             canCancel: false,
             editablePlayer: null as AdditionalPlayer | null,
             canPay: false,
+            amountDue: 0,
             isYou: false,
             adminNotes: p.admin_notes ?? null,
           })),
@@ -4097,6 +2982,30 @@ function BookingCard({
 
                 {/* Status badge or Pay CTA */}
                 {!canPay && <BookingStatusBadge status={row.status} />}
+                {/* Credit, offered on the same row as the Pay link — or the code
+                    already covering it, which is what the member needs by then. */}
+                {canPay && (() => {
+                  const held = wallet?.couponForBooking(row.id) ?? null;
+                  // Same rule as the payment banner: credit is only offered when
+                  // it covers the row in full.
+                  if (!held && !wallet?.coversBill(row.amountDue)) return null;
+                  const open = () =>
+                    setCreditTarget({ id: row.id, amountDue: row.amountDue });
+                  // A held code reports what it's worth; the offer stays a verb.
+                  // Compact here — this row also carries Edit and Cancel.
+                  return held ? (
+                    <CreditReadyChip amount={Number(held.amount)} onOpen={open} compact />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={open}
+                      className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
+                      style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+                    >
+                      Use credits
+                    </button>
+                  );
+                })()}
                 {canPay &&
                   (group.primary.course?.payment_url ? (
                     <a
@@ -4204,6 +3113,19 @@ function BookingCard({
             </button>
           )}
         </div>
+      )}
+
+      {creditTarget && (
+        <CreditCouponModal
+          target={{ kind: "booking", bookingId: creditTarget.id }}
+          price={creditTarget.amountDue}
+          balance={wallet?.balance ?? 0}
+          paymentUrl={group.primary.course?.payment_url ?? null}
+          roundLabel={`${courseName} on ${format(bookingDate, "EEEE, MMMM d")}`}
+          existing={wallet?.couponForBooking(creditTarget.id) ?? null}
+          onIssued={() => wallet?.refetch()}
+          onClose={() => setCreditTarget(null)}
+        />
       )}
     </div>
   );
@@ -4618,18 +3540,24 @@ function AddPlayerModal({
 function EventSelectionScreen({
   onSelect,
   pendingBookings,
+  loadingPendingBookings,
+  refreshingPending,
+  wallet,
 }: {
-  onSelect: (course: Course) => void;
+  /** Venue, day and tee time all chosen at once — this goes to confirmation. */
+  onSelect: (course: Course, date: string, slot: GHLBookingSlot) => void;
   pendingBookings: PendingPayment[];
+  loadingPendingBookings: boolean;
+  refreshingPending: boolean;
+  /** Credit, for the payment banner's "use credits" option. */
+  wallet?: ReturnType<typeof useCreditWallet>;
 }) {
-  // `events` is the full, unfiltered list — fetched once, used only to
-  // build the location filter's options so they don't shrink as filters
-  // are applied. `filteredEvents` is what's actually displayed, and comes
-  // straight from the server (search/location are applied server-side).
+  // Every bookable venue, fetched once. The calendar plots availability, but
+  // the venue's own details — price, address, rules, links — live on these
+  // rows, so the detail sheet reads them from here rather than bloating the
+  // month payload with a copy of each course.
   const [events, setEvents] = useState<Course[]>([]);
-  const [filteredEvents, setFilteredEvents] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filtering, setFiltering] = useState(false);
   const [error, setError] = useState("");
   const [showCreateFeed, setShowCreateFeed] = useState(false);
   const [search, setSearch] = useState("");
@@ -4639,8 +3567,145 @@ function EventSelectionScreen({
   // that day, which the server answers by asking each course's calendar.
   const [dateFilter, setDateFilter] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // ---- Aggregated month calendar ----
+  // The only way to browse: one month, every bookable venue on the day it has
+  // tee times. It replaced a flat venue list, which could say which clubs
+  // exist but never when any of them were free.
+  const [calMonth, setCalMonth] = useState<Date>(() => startOfMonth(new Date()));
+  const [calVenues, setCalVenues] = useState<CalendarVenue[]>([]);
+  const [calDays, setCalDays] = useState<Record<string, CalendarOpening[]>>({});
+  const [calLoading, setCalLoading] = useState(false);
+  const [calError, setCalError] = useState("");
+  // null = every venue. A list narrows the month to just those clubs.
+  const [calVenueFilters, setCalVenueFilters] = useState<string[] | null>(null);
+  const [dayDetail, setDayDetail] = useState<VenueDayDetail | null>(null);
+
   const activeFilterCount =
-    (locationFilter !== "all" ? 1 : 0) + (dateFilter ? 1 : 0);
+    (locationFilter !== "all" ? 1 : 0) +
+    (dateFilter ? 1 : 0) +
+    (calVenueFilters !== null ? 1 : 0);
+
+  // The day the calendar has open IS the date filter — one state, so the drawer
+  // and the grid can't disagree about which day is showing. A date left over
+  // from another month simply doesn't resolve to a cell in this one.
+  const calSelectedDate =
+    dateFilter && dateFilter.startsWith(format(calMonth, "yyyy-MM"))
+      ? dateFilter
+      : null;
+
+  // Refetched per month.
+  useEffect(() => {
+    // A month's worth of availability fans out across every venue's calendar,
+    // so a slower earlier month can land after a newer one. Ignore all but the
+    // latest request.
+    let current = true;
+    setCalLoading(true);
+    setCalError("");
+    fetch(`/api/bookings/availability?month=${format(calMonth, "yyyy-MM")}`)
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error ?? "Failed to load availability.");
+        return d;
+      })
+      .then((d) => {
+        if (!current) return;
+        setCalVenues(Array.isArray(d.venues) ? d.venues : []);
+        setCalDays(
+          d.days && typeof d.days === "object"
+            ? (d.days as Record<string, CalendarOpening[]>)
+            : {},
+        );
+      })
+      .catch(() => {
+        if (!current) return;
+        setCalVenues([]);
+        setCalDays({});
+        setCalError("Couldn't load the calendar. Check your connection and try again.");
+      })
+      .finally(() => {
+        if (current) setCalLoading(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [calMonth]);
+
+  // Colours are assigned over the whole month's venue list, exactly as the grid
+  // does it, so a chip in the drawer matches its dots on the calendar.
+  //
+  // The chips themselves respect the search and location above them — offering
+  // a club in another city while a location filter is on would list a choice
+  // that resolves to an empty month. The active focus is always kept, so it
+  // never becomes an applied filter with no visible way back.
+  const calVenueOptions = useMemo(() => {
+    const colours = buildVenueColours(calVenues.map((v) => v.id));
+    const q = debouncedSearch.trim().toLowerCase();
+    return calVenues
+      .filter(
+        (v) =>
+          calVenueFilters?.includes(v.id) ||
+          ((!q || v.name.toLowerCase().includes(q)) &&
+            (locationFilter === "all" ||
+              [v.city, v.state].filter(Boolean).join(", ") === locationFilter)),
+      )
+      .map((v) => ({
+        id: v.id,
+        name: v.name,
+        colourIdx: colours.get(v.id) ?? 0,
+      }));
+  }, [calVenues, debouncedSearch, locationFilter, calVenueFilters]);
+
+  // Search, location and venue focus all narrow the same thing — which venues
+  // the month plots — so they're resolved to one allow-list here rather than
+  // three rules inside the grid. null means nothing is narrowing.
+  const calAllowedVenueIds = useMemo(() => {
+    const q = debouncedSearch.trim().toLowerCase();
+    if (!q && locationFilter === "all" && calVenueFilters === null) return null;
+    return calVenues
+      .filter((v) => !q || v.name.toLowerCase().includes(q))
+      .filter(
+        (v) =>
+          locationFilter === "all" ||
+          [v.city, v.state].filter(Boolean).join(", ") === locationFilter,
+      )
+      .filter((v) => calVenueFilters === null || calVenueFilters.includes(v.id))
+      .map((v) => v.id);
+  }, [calVenues, debouncedSearch, locationFilter, calVenueFilters]);
+
+  const clearVenueFilters = useCallback(() => {
+    setSearch("");
+    setDebouncedSearch("");
+    setLocationFilter("all");
+    setCalVenueFilters(null);
+  }, []);
+
+  // The drawer's date field doubles as "jump to this day", so a date outside
+  // the visible month brings its month along with it.
+  const handleDateFilterChange = useCallback((d: string) => {
+    setDateFilter(d);
+    if (d) setCalMonth(startOfMonth(new Date(`${d}T12:00:00`)));
+  }, []);
+
+  // A venue only appears in the calendar if it's bookable, so it's always in
+  // `events` too — but guard anyway rather than open an empty sheet.
+  const openDayDetail = useCallback(
+    (courseId: string, date: string) => {
+      const course = events.find((e) => e.id === courseId);
+      const opening = (calDays[date] ?? []).find((o) => o.courseId === courseId);
+      if (!course || !opening) return;
+      setDayDetail({
+        course,
+        date,
+        openSlots: opening.openSlots,
+        openSpots: opening.openSpots,
+        // The FIFO gate is global — any unpaid round blocks a new booking at
+        // every venue — so this is the whole pending list, not this course's.
+        pendingCount: pendingBookings.length,
+      });
+    },
+    [events, calDays, pendingBookings],
+  );
 
   useEffect(() => {
     fetch("/api/courses")
@@ -4649,9 +3714,7 @@ function EventSelectionScreen({
         return r.json();
       })
       .then((d) => {
-        const list = Array.isArray(d.courses) ? d.courses : [];
-        setEvents(list);
-        setFilteredEvents(list);
+        setEvents(Array.isArray(d.courses) ? d.courses : []);
       })
       .catch(() => setError("Failed to load courses."))
       .finally(() => setLoading(false));
@@ -4682,47 +3745,6 @@ function EventSelectionScreen({
     () => locationOptions.map(([label]) => label),
     [locationOptions],
   );
-
-  // Server-side filtering — refetch whenever the debounced search or either
-  // filter changes. Skipped when none is active, since the unfiltered list from
-  // the initial load above already covers that case.
-  useEffect(() => {
-    if (loading) return;
-    if (!debouncedSearch && locationFilter === "all" && !dateFilter) {
-      setFilteredEvents(events);
-      return;
-    }
-    const params = new URLSearchParams();
-    if (debouncedSearch) params.set("search", debouncedSearch);
-    if (locationFilter !== "all") {
-      const parts = locationOptions.find(
-        ([label]) => label === locationFilter,
-      )?.[1];
-      if (parts?.city) params.set("city", parts.city);
-      if (parts?.state) params.set("state", parts.state);
-    }
-    if (dateFilter) params.set("date", dateFilter);
-
-    // A date filter fans out to every course's calendar, so a stale response
-    // can land after a newer one. Ignore anything but the latest request.
-    let current = true;
-    setFiltering(true);
-    fetch(`/api/courses?${params.toString()}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (!current) return;
-        setFilteredEvents(Array.isArray(d.courses) ? d.courses : []);
-      })
-      .catch(() => {
-        if (current) setFilteredEvents([]);
-      })
-      .finally(() => {
-        if (current) setFiltering(false);
-      });
-    return () => {
-      current = false;
-    };
-  }, [debouncedSearch, locationFilter, dateFilter, loading, locationOptions, events]);
 
   if (loading) {
     return (
@@ -4769,101 +3791,112 @@ function EventSelectionScreen({
   }
 
   return (
-    <div className="pb-8 md:max-w-2xl md:mx-auto">
-      {events.length > 1 && (
-        <div className="px-5 md:px-8 pt-5 pb-1 flex items-center gap-2">
-          <div
-            className="flex items-center gap-2 flex-1 min-w-0 bg-white rounded-xl px-3 py-2.5 border"
-            style={{ borderColor: "rgba(0,38,105,0.1)" }}
-          >
-            <svg
-              className="w-4 h-4 flex-shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-              style={{ color: "rgba(0,38,105,0.32)" }}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
-              />
-            </svg>
-            <input
-              type="search"
-              placeholder="Search by event name…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="flex-1 min-w-0 bg-transparent text-sm outline-none"
-              style={{ color: "var(--color-green-900)" }}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => setFiltersOpen(true)}
-            aria-label="Filter events"
-            className="relative flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-xl border transition-colors hover:bg-green-50/60 active:opacity-70"
-            style={{
-              borderColor: "rgba(0,38,105,0.1)",
-              background: "white",
-              color: "rgba(0,38,105,0.5)",
-            }}
-          >
-            <FunnelIcon />
-            {activeFilterCount > 0 && (
-              <span
-                className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 border-white"
-                style={{ background: "var(--color-gold)" }}
-              />
-            )}
-          </button>
-        </div>
+    // The month grid needs room for venue names inside its cells.
+    <div className="pb-8 md:mx-auto md:max-w-4xl">
+      {/* The FIFO gate blocks booking anywhere, so its "Pay →" links belong on
+          the screen where booking now begins. */}
+      {loadingPendingBookings ? (
+        <div
+          className="mx-5 md:mx-8 mt-3 h-16 rounded-2xl animate-pulse"
+          style={{ background: "rgba(0,38,105,0.04)" }}
+        />
+      ) : (
+        pendingBookings.length > 0 && (
+          <PendingPaymentBanner
+            pending={pendingBookings}
+            refreshing={refreshingPending}
+            wallet={wallet}
+          />
+        )
       )}
 
-      <div className="px-5 md:px-8 pt-3">
-        {filtering ? (
-          <div className="flex justify-center py-10">
-            <Spinner className="text-green-700 w-5 h-5" />
-          </div>
-        ) : filteredEvents.length === 0 ? (
-          <EmptyState
-            compact
-            icon="🔍"
-            title="No events match your search"
-            description={
-              dateFilter
-                ? "No venue has a tee time open on that date. Try another day, or clear the date filter."
-                : "Try a different name or location."
-            }
+      <div className="px-5 md:px-8 pt-5 pb-1 flex items-center gap-2">
+        <div
+          className="flex items-center gap-2 flex-1 min-w-0 bg-white rounded-xl px-3 py-2.5 border"
+          style={{ borderColor: "rgba(0,38,105,0.1)" }}
+        >
+          <svg
+            className="w-4 h-4 flex-shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={1.5}
+            style={{ color: "rgba(0,38,105,0.32)" }}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+            />
+          </svg>
+          <input
+            type="search"
+            placeholder="Search by event name…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="flex-1 min-w-0 bg-transparent text-sm outline-none"
+            style={{ color: "var(--color-green-900)" }}
           />
-        ) : (
-          <div className="card">
-            {filteredEvents.map((course, i) => {
-              const borderStyle = {
-                borderBottom:
-                  i < filteredEvents.length - 1
-                    ? "1px solid rgba(0,38,105,0.06)"
-                    : "none",
-              };
+        </div>
+        <button
+          type="button"
+          onClick={() => setFiltersOpen(true)}
+          aria-label="Filter events"
+          className="relative flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-xl border transition-colors hover:bg-green-50/60 active:opacity-70"
+          style={{
+            borderColor: "rgba(0,38,105,0.1)",
+            background: "white",
+            color: "rgba(0,38,105,0.5)",
+          }}
+        >
+          <FunnelIcon />
+          {activeFilterCount > 0 && (
+            <span
+              className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 border-white"
+              style={{ background: "var(--color-gold)" }}
+            />
+          )}
+        </button>
+      </div>
 
-              return (
-                <button
-                  key={course.id}
-                  type="button"
-                  onClick={() => onSelect(course)}
-                  className="w-full text-left flex items-stretch gap-3 px-4 py-4 transition-colors hover:bg-green-50/40 active:opacity-70"
-                  style={borderStyle}
-                >
-                  <CourseRowInner
-                    course={course}
-                    pendingBookings={pendingBookings}
-                  />
-                </button>
-              );
-            })}
+      <div className="px-5 md:px-8 pt-2">
+        {calError ? (
+          <div className="card card-pad text-center py-10">
+            <p className="text-sm text-red-500">{calError}</p>
+            <button
+              type="button"
+              onClick={() => setCalMonth((m) => new Date(m))}
+              className="btn btn-outline btn-sm mt-4 mx-auto"
+            >
+              Try again
+            </button>
           </div>
+        ) : (
+          <VenueAvailabilityCalendar
+            month={calMonth}
+            venues={calVenues}
+            days={calDays}
+            loading={calLoading}
+            selectedDate={calSelectedDate}
+            onSelectDate={(d) => setDateFilter(d ?? "")}
+            onMonthChange={setCalMonth}
+            canGoPrev={calMonth > startOfMonth(new Date())}
+            allowedVenueIds={calAllowedVenueIds}
+            onClearVenueFilters={
+              calAllowedVenueIds === null ? null : clearVenueFilters
+            }
+            onPickOpening={openDayDetail}
+          />
         )}
+
+        <VenueDayDetailSheet
+          detail={dayDetail}
+          onClose={() => setDayDetail(null)}
+          onBook={(course, date, slot) => {
+            setDayDetail(null);
+            onSelect(course, date, slot);
+          }}
+        />
       </div>
 
       <EventFiltersDrawer
@@ -4873,7 +3906,10 @@ function EventSelectionScreen({
         location={locationFilter}
         onLocationChange={setLocationFilter}
         date={dateFilter}
-        onDateChange={setDateFilter}
+        onDateChange={handleDateFilterChange}
+        venues={calVenueOptions}
+        venueFilters={calVenueFilters}
+        onVenueFiltersChange={setCalVenueFilters}
       />
     </div>
   );
@@ -4905,6 +3941,9 @@ function EventFiltersDrawer({
   onLocationChange,
   date,
   onDateChange,
+  venues = [],
+  venueFilters = null,
+  onVenueFiltersChange,
 }: {
   open: boolean;
   onClose: () => void;
@@ -4913,6 +3952,15 @@ function EventFiltersDrawer({
   onLocationChange: (location: string) => void;
   date: string;
   onDateChange: (date: string) => void;
+  /**
+   * Venues on the calendar this month, with the colour index the grid gave
+   * them, so a chip here reads as the same club as its dots over there.
+   */
+  venues?: { id: string; name: string; colourIdx: number }[];
+  /** Selected venue ids, or null for "all" — the canonical form of everything
+   *  being on, so an untouched filter and a fully-ticked one are one state. */
+  venueFilters?: string[] | null;
+  onVenueFiltersChange?: (courseIds: string[] | null) => void;
 }) {
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
@@ -4937,7 +3985,27 @@ function EventFiltersDrawer({
   // Selecting a filter no longer closes the sheet — with more than one to set,
   // closing on the first pick made the second unreachable without reopening.
   const today = format(new Date(), "yyyy-MM-dd");
-  const hasFilters = location !== "all" || !!date;
+  const hasFilters = location !== "all" || !!date || venueFilters !== null;
+  // Picking among a single venue would change nothing.
+  const venuePickable = venues.length > 1 && !!onVenueFiltersChange;
+
+  // null means every venue is on, so an untouched filter shows every chip lit
+  // rather than every chip dark with only "All venues" selected.
+  const venueOn = (id: string) => venueFilters === null || venueFilters.includes(id);
+  const allVenuesOn = venues.every((v) => venueOn(v.id));
+
+  function toggleVenue(id: string) {
+    const base = venueFilters ?? venues.map((v) => v.id);
+    const next = base.includes(id)
+      ? base.filter((x) => x !== id)
+      : [...base, id];
+    // Ticking the last one back on is "all" again — normalise so the filter
+    // badge clears and the state can't drift into an equivalent-but-different
+    // representation of the same thing.
+    onVenueFiltersChange?.(
+      venues.every((v) => next.includes(v.id)) ? null : next,
+    );
+  }
 
   const drawer = (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
@@ -5024,7 +4092,7 @@ function EventFiltersDrawer({
                 className="text-xs mt-2"
                 style={{ color: "rgba(0,38,105,0.4)" }}
               >
-                Only venues with a tee time open that day.
+                Jumps the calendar to that day and lists what&apos;s open.
               </p>
             </div>
 
@@ -5058,6 +4126,55 @@ function EventFiltersDrawer({
               </div>
             )}
 
+            {venuePickable && (
+              <div className="mt-6">
+                <p
+                  className="text-xs font-semibold mb-2.5"
+                  style={{ color: "rgba(0,38,105,0.45)" }}
+                >
+                  Venue
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    aria-pressed={allVenuesOn}
+                    onClick={() => onVenueFiltersChange?.(null)}
+                    className={`chip ${allVenuesOn ? "active" : ""}`}
+                  >
+                    All venues
+                  </button>
+                  {venues.map((v) => {
+                    const on = venueOn(v.id);
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => toggleVenue(v.id)}
+                        className={`chip ${on ? "active" : ""} flex items-center gap-1.5`}
+                      >
+                        <span
+                          className={cn(
+                            "w-2 h-2 rounded-full flex-shrink-0",
+                            on ? "bg-white" : VENUE_DOT[v.colourIdx],
+                          )}
+                        />
+                        {v.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p
+                  className="text-xs mt-2"
+                  style={{ color: "rgba(0,38,105,0.4)" }}
+                >
+                  {allVenuesOn
+                    ? "Every club is showing. Tap one to narrow the month."
+                    : "Tap to add or remove clubs from the month."}
+                </p>
+              </div>
+            )}
+
             <div className="flex items-center gap-2 pt-6">
               {hasFilters && (
                 <button
@@ -5065,6 +4182,7 @@ function EventFiltersDrawer({
                   onClick={() => {
                     onLocationChange("all");
                     onDateChange("");
+                    onVenueFiltersChange?.(null);
                   }}
                   className="flex-1 py-3 rounded-2xl text-sm font-semibold border"
                   style={{
@@ -5093,145 +4211,6 @@ function EventFiltersDrawer({
   // Portal to document.body so the fixed sheet is never clipped by the
   // .screen-content scroll container (iOS Safari) or trapped behind the nav
   return createPortal(drawer, document.body);
-}
-
-function CourseRowInner({
-  course,
-  pendingBookings,
-}: {
-  course: Course;
-  pendingBookings?: PendingPayment[];
-}) {
-  // pendingBookings only ever contains bookings awaiting payment (status
-  // 'availability_confirmed') — see UNPAID_BOOKING_STATUSES — so a match
-  // here always means "payment due", never "still awaiting confirmation".
-  // Counted per event so the badge can show how many of THIS event's rounds
-  // are due; the banner (PendingPaymentBanner) accumulates them across events.
-  const pendingCount =
-    pendingBookings?.filter((p) => p.course_id === course.id).length ?? 0;
-  const isPendingCourse = pendingCount > 0;
-
-  return (
-    <>
-      {/* Venue logo — fixed square, pinned to the top so it never
-          stretches/shrinks based on how tall the text stack next to
-          it gets (e.g. whether the website icon row is present). */}
-      <div
-        className="relative w-24 h-24 aspect-square self-start rounded-xl overflow-hidden flex-shrink-0"
-        style={{ background: "rgba(0,38,105,0.03)" }}
-      >
-        <Image
-          src={course.logo_url}
-          alt=""
-          fill
-          unoptimized
-          className="object-contain"
-        />
-      </div>
-
-      {/* Row stack: name / location - address / price / access CTA / website icon.
-          Stretched to the full row height (button uses items-stretch) so the
-          icon row can be pinned to the bottom with mt-auto regardless of how
-          little text sits above it. */}
-      <div className="flex-1 min-w-0 flex flex-col gap-1">
-        <p
-          className="font-sans font-black text-base leading-tight truncate"
-          style={{ color: "var(--color-green-900)" }}
-        >
-          {course.name}
-        </p>
-
-        {(course.city || course.state || course.address) && (
-          <p
-            className="text-xs truncate"
-            style={{ color: "rgba(0,38,105,0.45)" }}
-          >
-            📍 {[course.city, course.state].filter(Boolean).join(", ")}
-            {course.address ? ` - ${course.address}` : ""}
-          </p>
-        )}
-
-        {course.cost_per_player != null && (
-          <span
-            className="text-xs font-bold"
-            style={{ color: "var(--color-gold-dark, #92640a)" }}
-          >
-            ${course.cost_per_player}/player
-          </span>
-        )}
-
-        {(isPendingCourse || course.map_link || course.booking_url) && (
-          <div
-            className={cn(
-              "flex items-center gap-2 mt-auto -mb-1",
-              isPendingCourse ? "justify-between" : "justify-end",
-            )}
-          >
-            {isPendingCourse && (
-              <span
-                className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0"
-                style={{ background: "rgba(146,100,10,0.12)", color: "#92640a" }}
-              >
-                💳 {pendingCount} payment{pendingCount === 1 ? "" : "s"} due
-              </span>
-            )}
-            <div className="flex items-center gap-2 flex-shrink-0">
-              {course.map_link && (
-                <a
-                  href={course.map_link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  aria-label="View on map"
-                  className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
-                  style={{ color: "rgba(0,38,105,0.35)" }}
-                >
-                  <svg
-                    className="w-4 h-4 flex-shrink-0"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={1.75}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.159.69.159 1.006 0z"
-                    />
-                  </svg>
-                </a>
-              )}
-              {course.booking_url && (
-                <a
-                  href={course.booking_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  aria-label="Visit website"
-                  className="flex items-center justify-center w-6 h-6 flex-shrink-0 transition-opacity hover:opacity-60"
-                  style={{ color: "rgba(0,38,105,0.35)" }}
-                >
-                  <svg
-                    className="w-4 h-4 flex-shrink-0"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={1.75}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"
-                    />
-                  </svg>
-                </a>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </>
-  );
 }
 
 // ---- Create Feed Dialog ------------------------------------

@@ -7,24 +7,19 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import Image from "next/image";
 import { useForm, Controller } from "react-hook-form";
-import {
-  AdminPageHeader,
-  AdminCard,
-  Badge,
-  ProgressBar,
-} from "@/components/admin/AdminUI";
+import { AdminPageHeader, AdminCard } from "@/components/admin/AdminUI";
 import { Spinner, ContentLoader } from "@/components/ui/Loading";
 import Select, { type SelectOption } from "@/components/ui/Select";
-import { HOST_MEMBER_PRICE_MARKUP_USD } from "@/lib/constants";
-import { memberPrice, canUploadProof } from "@/lib/hosts/events";
+import VenueDateSelector from "@/components/host/VenueDateSelector";
+import { HOST_EVENT_GUEST_RATE_USD } from "@/lib/constants";
+import { canUploadProof } from "@/lib/hosts/events";
 import { formatEventTeeTime as fmtTime } from "@/lib/utils";
 import type {
   HostedEvent,
   HostedEventStatus,
   Course,
-  HostBookingOption,
 } from "@/types";
 
 const fmtMoney = (n: number) =>
@@ -43,20 +38,50 @@ const fmtDate = (d: string) =>
     year: "numeric",
   });
 
-// One less than the server's MAX_EVENT_DATES, since the form's own date field is
-// the first of the set.
-const MAX_EXTRA_DATES = 29;
+// Mirrors the server's MAX_EVENT_DATES — the picker holds the whole set now,
+// rather than one field plus a list of extras.
+const MAX_DATES_PER_EVENT = 30;
 
+// A dot and a word. A pill per row turned a list of dates into a wall of
+// badges; the state matters, but not that much of the row's weight.
 const STATUS_META: Record<
   HostedEventStatus,
-  { label: string; colour: "green" | "gold" | "red" | "blue" | "gray" }
+  { label: string; dot: string; text: string }
 > = {
-  upcoming: { label: "Upcoming", colour: "green" },
-  completed: { label: "Completed", colour: "blue" },
-  pending_credit_approval: { label: "Credit approval", colour: "gold" },
-  credits_awarded: { label: "Credits awarded", colour: "green" },
-  cancelled: { label: "Cancelled", colour: "red" },
+  pending_approval: { label: "Waiting on us", dot: "bg-amber-500", text: "text-amber-700" },
+  upcoming: { label: "Live", dot: "bg-green-600", text: "text-green-700" },
+  completed: { label: "Finished", dot: "bg-blue-500", text: "text-blue-700" },
+  pending_credit_approval: { label: "Credit pending", dot: "bg-amber-500", text: "text-amber-700" },
+  credits_awarded: { label: "Credit paid", dot: "bg-green-600", text: "text-green-700" },
+  cancelled: { label: "Cancelled", dot: "bg-red-500", text: "text-red-600" },
 };
+
+/** One venue's rounds. A host listing several dates at a club sees one card. */
+interface VenueGroup {
+  courseId: string;
+  name: string;
+  city: string | null;
+  events: HostedEvent[];
+}
+
+function groupByVenue(events: HostedEvent[]): VenueGroup[] {
+  const byCourse = new Map<string, VenueGroup>();
+  for (const e of events) {
+    const group = byCourse.get(e.course_id) ?? {
+      courseId: e.course_id,
+      name: e.course?.name ?? "Course",
+      city: e.course?.city ?? null,
+      events: [],
+    };
+    group.events.push(e);
+    byCourse.set(e.course_id, group);
+  }
+  // Soonest first inside a card; the API already orders the events themselves.
+  for (const g of byCourse.values()) {
+    g.events.sort((a, b) => a.event_date.localeCompare(b.event_date));
+  }
+  return Array.from(byCourse.values());
+}
 
 export default function HostEventsPage() {
   const [events, setEvents] = useState<HostedEvent[]>([]);
@@ -86,8 +111,10 @@ export default function HostEventsPage() {
   const handleEdit = useCallback((e: HostedEvent) => setEditing(e), []);
   const handleNew = useCallback(() => setEditing("new"), []);
 
+  const groups = useMemo(() => groupByVenue(events), [events]);
+
   return (
-    <div className="p-4 sm:p-8 max-w-4xl mx-auto">
+    <div className="p-4 sm:p-8 max-w-3xl mx-auto">
       <AdminPageHeader
         title="My Events"
         description="Create rounds members can reserve, then earn credits once they run."
@@ -113,10 +140,10 @@ export default function HostEventsPage() {
         </AdminCard>
       ) : (
         <div className="space-y-3">
-          {events.map((e) => (
-            <EventCard
-              key={e.id}
-              event={e}
+          {groups.map((g) => (
+            <VenueCard
+              key={g.courseId}
+              group={g}
               onChanged={load}
               onToast={showToast}
               onEdit={handleEdit}
@@ -149,9 +176,54 @@ export default function HostEventsPage() {
   );
 }
 
-// ---- Event card ---------------------------------------------
+// ---- Venue card ---------------------------------------------
 
-const EventCard = memo(function EventCard({
+const VenueCard = memo(function VenueCard({
+  group,
+  onChanged,
+  onToast,
+  onEdit,
+}: {
+  group: VenueGroup;
+  onChanged: () => void;
+  onToast: (msg: string, ok?: boolean) => void;
+  onEdit: (event: HostedEvent) => void;
+}) {
+  return (
+    <section className="card overflow-hidden">
+      <header className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-gray-100">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-gray-900 truncate">
+            {group.name}
+          </h2>
+          {group.city && (
+            <p className="text-xs text-gray-400 mt-0.5 truncate">{group.city}</p>
+          )}
+        </div>
+        <span className="text-xs text-gray-400 flex-shrink-0 whitespace-nowrap">
+          {group.events.length}{" "}
+          {group.events.length === 1 ? "date" : "dates"}
+        </span>
+      </header>
+
+      <ul className="divide-y divide-gray-100">
+        {group.events.map((e) => (
+          <EventRow
+            key={e.id}
+            event={e}
+            onChanged={onChanged}
+            onToast={onToast}
+            onEdit={onEdit}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+});
+
+// ---- One date -----------------------------------------------
+
+const EventRow = memo(function EventRow({
   event,
   onChanged,
   onToast,
@@ -164,11 +236,17 @@ const EventCard = memo(function EventCard({
   onEdit: (event: HostedEvent) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const meta = STATUS_META[event.status];
   const filled = event.filled_spots ?? 0;
+  // Members who booked the venue that day are at this round too, so the host's
+  // headcount is both. filled_spots alone is what the reservation RPC enforces
+  // capacity against, which is why the two numbers aren't the same thing.
+  const playing = filled + (event.booked_spots ?? 0);
   // Mirrors the server's editable/cancellable set — a host can still fix an
-  // event that hasn't happened yet.
-  const editable = event.status === "upcoming";
+  // event that hasn't happened yet, including one still waiting on approval.
+  const awaitingApproval = event.status === "pending_approval";
+  const editable = event.status === "upcoming" || awaitingApproval;
   const canProof = canUploadProof(event.status, event.event_date);
 
   async function act(action: string, extra: Record<string, unknown> = {}) {
@@ -189,136 +267,116 @@ const EventCard = memo(function EventCard({
     onChanged();
   }
 
+  // At most one line of explanation, and only where the state needs one — four
+  // possible notes stacked under every row was most of the old card's height.
+  const note =
+    awaitingApproval
+      ? {
+          tone: "text-amber-600",
+          text: "Not visible to members yet — we're setting up the calendar.",
+        }
+      : event.status === "pending_credit_approval"
+        ? { tone: "text-amber-600", text: "Proof sent — waiting on your credit." }
+        : event.status === "cancelled" && event.rejection_reason
+          ? { tone: "text-red-600", text: `Taken down: ${event.rejection_reason}` }
+          : event.status === "cancelled" && event.cancellation_reason
+            ? { tone: "text-gray-400", text: `Cancelled: ${event.cancellation_reason}` }
+            : null;
+
   return (
-    <div className="card card-pad">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+    <li className="px-4 sm:px-5 py-3">
+      {/* Stacked on a phone, one line from sm up: the date and its numbers read
+          left, the things you can do to it read right. */}
+      <div className="sm:flex sm:items-center sm:gap-4">
+        <div className="min-w-0 sm:flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm font-semibold text-gray-900">
-              {event.course?.name ?? "Course"}
+            <p className="text-sm font-medium text-gray-900">
+              {fmtDate(event.event_date)}
             </p>
-            <Badge label={meta.label} colour={meta.colour} />
+            <span className={`inline-flex items-center gap-1.5 text-xs ${meta.text}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
+              {meta.label}
+            </span>
           </div>
-          <p className="text-xs text-gray-500 mt-1">
-            {fmtDate(event.event_date)}
-            {event.tee_time ? ` · ${fmtTime(event.tee_time)}` : ""}
-          </p>
           <p className="text-xs text-gray-500 mt-0.5">
-            {fmtMoney(
-              event.member_price ?? memberPrice(event.member_guest_rate),
-            )}{" "}
-            member
-            <span className="text-gray-300"> · </span>
-            {fmtMoney(event.member_guest_rate)} guest rate
+            {event.tee_time ? `${fmtTime(event.tee_time)} · ` : ""}
+            {playing} of {event.total_spots} spots
+            {event.dinner ? " · dinner" : ""}
           </p>
         </div>
-        <Link
-          href={`/host/events/${event.id}`}
-          className="text-xs font-medium text-gray-500 hover:text-green-800 flex-shrink-0 whitespace-nowrap"
-        >
-          {filled} registered →
-        </Link>
-      </div>
 
-      {/* Spots */}
-      <div className="mt-3">
-        <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
-          <span>
-            {filled} of {event.total_spots} spots filled
-          </span>
-          <span>
-            {event.remaining_spots ?? event.total_spots - filled} left
-          </span>
-        </div>
-        <ProgressBar value={filled} max={event.total_spots} />
-      </div>
-
-      {event.dinner && (
-        <p className="text-xs text-green-800 mt-3 font-medium">
-          🍽 Dinner included
-        </p>
-      )}
-
-      {/* Actions */}
-      <div className="flex flex-wrap gap-2 mt-4">
-        {editable && (
-          <button
-            onClick={() => onEdit(event)}
-            disabled={busy}
-            className="btn btn-outline btn-sm"
+        <div className="flex items-center gap-2 flex-wrap mt-2 sm:mt-0 sm:flex-shrink-0">
+          {editable && (
+            <button
+              onClick={() => onEdit(event)}
+              disabled={busy}
+              className="btn btn-outline btn-sm"
+            >
+              Edit
+            </button>
+          )}
+          {canProof && (
+            <ProofControl event={event} onDone={onChanged} onToast={onToast} />
+          )}
+          {editable && !cancelling && (
+            <button
+              onClick={() => setCancelling(true)}
+              disabled={busy}
+              className="btn btn-outline btn-sm text-red-600 border-red-200"
+            >
+              Cancel
+            </button>
+          )}
+          {/* The registered count is the link — it is the reason to open the
+              round, so it does not need a separate arrow next to it. */}
+          <Link
+            href={`/host/events/${event.id}`}
+            className="text-xs font-medium text-gray-500 hover:text-green-800 whitespace-nowrap ml-auto sm:ml-0"
           >
-            Edit
-          </button>
-        )}
-        {canProof && (
-          <ProofControl event={event} onDone={onChanged} onToast={onToast} />
-        )}
-        {editable && (
-          <CancelButton
-            event={event}
-            busy={busy}
-            onCancelReason={(reason) =>
-              act("cancel", { cancellation_reason: reason })
-            }
-          />
-        )}
+            {playing} {playing === 1 ? "member" : "members"} →
+          </Link>
+        </div>
       </div>
 
-      {event.status === "pending_credit_approval" && (
-        <p className="text-[11px] text-amber-600 mt-3">
-          Proof submitted — awaiting admin approval for your credit.
-        </p>
+      {note && !cancelling && (
+        <p className={`text-[11px] mt-2 ${note.tone}`}>{note.text}</p>
       )}
-      {/* An admin took this live event down. rejection_reason is what separates
-          that from the host cancelling it themselves — say which it was. */}
-      {event.status === "cancelled" && event.rejection_reason && (
-        <p className="text-[11px] text-red-600 mt-3">
-          Taken down by an admin: {event.rejection_reason}
-        </p>
+
+      {/* Under the row rather than in the button column, so the reason field
+          gets the full width on a phone. */}
+      {cancelling && (
+        <CancelPanel
+          event={event}
+          busy={busy}
+          onDismiss={() => setCancelling(false)}
+          onCancelReason={(reason) => {
+            setCancelling(false);
+            act("cancel", { cancellation_reason: reason });
+          }}
+        />
       )}
-      {event.source_booking_id && (
-        <p className="text-[11px] text-gray-400 mt-2">
-          Listed from an existing booking — course, date, and tee time are
-          fixed.
-        </p>
-      )}
-      {event.status === "cancelled" && event.cancellation_reason && (
-        <p className="text-[11px] text-gray-400 mt-3">
-          Reason: {event.cancellation_reason}
-        </p>
-      )}
-    </div>
+    </li>
   );
 });
 
 // ---- Cancel with optional reason ----------------------------
 
-function CancelButton({
+function CancelPanel({
   event,
   onCancelReason,
+  onDismiss,
   busy,
 }: {
   event: HostedEvent;
   onCancelReason: (reason: string) => void;
+  onDismiss: () => void;
   busy: boolean;
 }) {
-  const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState("");
   const hasRegs = (event.filled_spots ?? 0) > 0;
 
-  if (!confirming) {
-    return (
-      <button
-        onClick={() => setConfirming(true)}
-        disabled={busy}
-        className="btn btn-outline btn-sm text-red-600 border-red-200"
-      >
-        Cancel
-      </button>
-    );
-  }
   return (
-    <div className="w-full mt-1 p-3 rounded-xl bg-red-50 border border-red-100 space-y-2">
+    <div className="mt-3 p-3 rounded-xl bg-red-50 border border-red-100 space-y-2">
       <p className="text-xs text-red-700">
         Cancel this event
         {hasRegs
@@ -334,7 +392,7 @@ function CancelButton({
       />
       <div className="flex gap-2">
         <button
-          onClick={() => setConfirming(false)}
+          onClick={onDismiss}
           disabled={busy}
           className="btn btn-outline btn-sm flex-1"
         >
@@ -424,20 +482,28 @@ function ProofControl({
 
 interface EventFormValues {
   course_id: string;
-  /** New-club mode: the club name + website used in place of course_id. */
-  new_club_name: string;
-  new_club_website: string;
-  event_date: string;
   /** '' means "no fixed tee time". */
   tee_time: string;
-  total_spots: number | "";
-  member_guest_rate: number | "";
   dinner: boolean;
-  /** Set when listing one of the host's existing bookings. */
-  source_booking_id: string;
 }
 
 const NO_TEE_TIME = "";
+
+/**
+ * A venue as the form needs it: enough to name it in the dropdown and to show
+ * what it actually is once picked. Both sources — every bookable course, and a
+ * scoped host's own venues — return this shape.
+ */
+type VenueDetail = Pick<Course, "id" | "name" | "city"> & {
+  state?: string | null;
+  address?: string | null;
+  logo_url?: string | null;
+  map_link?: string | null;
+  booking_url?: string | null;
+  cost_per_player?: number | null;
+  description?: string | null;
+  approval_status?: string;
+};
 
 function EventDrawer({
   event,
@@ -451,35 +517,22 @@ function EventDrawer({
   onError: (msg: string) => void;
 }) {
   const isEdit = !!event;
-  const [courses, setCourses] = useState<
-    (Pick<Course, "id" | "name" | "city"> & { approval_status?: string })[]
-  >([]);
+  const [courses, setCourses] = useState<VenueDetail[]>([]);
   // The host's approved venues, and whether they're scoped at all. `unrestricted`
   // is read from the server rather than inferred from the list being empty — an
   // empty list used to mean "offer every bookable course", so a failed load or an
   // empty grant silently widened what the host could pick.
-  const [venues, setVenues] = useState<
-    (Pick<Course, "id" | "name" | "city"> & { approval_status?: string })[]
-  >([]);
+  const [venues, setVenues] = useState<VenueDetail[]>([]);
   const [venuesUnrestricted, setVenuesUnrestricted] = useState(false);
-  const [bookings, setBookings] = useState<HostBookingOption[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // New event only: switch the course picker over to "add a club not yet on
-  // LinkUp". The event still goes live immediately; it's the club record our
-  // team fills in afterwards.
-  const [addingClub, setAddingClub] = useState(false);
-  // Additional dates beyond the one in the form. Everything else (course, tee
-  // time, spots, rate, dinner) is shared, so listing a week of rounds is one form
-  // rather than five. Create-only — editing acts on a single existing event.
-  const [extraDates, setExtraDates] = useState<string[]>([]);
-  const [dateError, setDateError] = useState<string | null>(null);
-
-  // A new event is either listed from a tee time the host already holds, or
-  // proposed from scratch. Editing keeps whichever it was created as.
-  const [mode, setMode] = useState<"booking" | "new">(
-    event?.source_booking_id ? "booking" : "new",
+  // Every day being listed, chosen from what the venue actually has open.
+  // Everything else (course, tee time, spots, rate, dinner) is shared, so
+  // listing a week of rounds is one form rather than five. Editing acts on a
+  // single existing event, so the picker runs in single-select there.
+  const [dates, setDates] = useState<string[]>(
+    event?.event_date ? [event.event_date.slice(0, 10)] : [],
   );
-  const fromBooking = mode === "booking";
+  const [dateError, setDateError] = useState<string | null>(null);
 
   const {
     register,
@@ -487,41 +540,18 @@ function EventDrawer({
     handleSubmit,
     watch,
     setValue,
-    clearErrors,
     formState: { errors, isSubmitting },
   } = useForm<EventFormValues>({
     defaultValues: {
       course_id: event?.course_id ?? "",
-      new_club_name: "",
-      new_club_website: "",
-      event_date: event?.event_date?.slice(0, 10) ?? "",
       tee_time: event?.tee_time ?? NO_TEE_TIME,
-      // A linkup defaults to the host + 3 players; the host can still change it.
-      total_spots: event?.total_spots ?? 3,
-      member_guest_rate: event?.member_guest_rate ?? "",
       dinner: event?.dinner ?? false,
-      source_booking_id: event?.source_booking_id ?? "",
     },
   });
 
-  // Switch the course field between "pick existing" and "add new venue",
-  // clearing whichever side's value/errors no longer apply.
-  const toggleAddingClub = (next: boolean) => {
-    setAddingClub(next);
-    clearErrors(["course_id", "new_club_name", "new_club_website"]);
-    if (next) {
-      setValue("course_id", "");
-    } else {
-      setValue("new_club_name", "");
-      setValue("new_club_website", "");
-    }
-  };
-
-  const rate = watch("member_guest_rate");
-  const bookingId = watch("source_booking_id");
-  const selectedBooking = bookings.find((b) => b.id === bookingId) ?? null;
-  // Spots offered can never exceed the seats the linked booking holds.
-  const spotCap = selectedBooking?.seats ?? 200;
+  // The date picker asks this venue what it has open, so changing the venue
+  // invalidates whatever was picked at the previous one.
+  const courseId = watch("course_id");
 
   // A failed load leaves an empty dropdown with no explanation, so surface it
   // rather than swallowing the error.
@@ -532,17 +562,13 @@ function EventDrawer({
       fetch("/api/courses").then((r) =>
         r.ok ? r.json() : Promise.reject(new Error("courses")),
       ),
-      fetch("/api/host/bookings").then((r) =>
-        r.ok ? r.json() : Promise.reject(new Error("bookings")),
-      ),
       fetch("/api/host/venues").then((r) =>
         r.ok ? r.json() : Promise.reject(new Error("venues")),
       ),
     ])
-      .then(([coursesJson, bookingsJson, venuesJson]) => {
+      .then(([coursesJson, venuesJson]) => {
         if (cancelled) return;
         setCourses(coursesJson.courses ?? []);
-        setBookings(bookingsJson.bookings ?? []);
         const vs = venuesJson.venues ?? [];
         setVenues(vs);
         setVenuesUnrestricted(venuesJson.unrestricted === true);
@@ -552,9 +578,7 @@ function EventDrawer({
       })
       .catch(() => {
         if (!cancelled)
-          setLoadError(
-            "Could not load courses and bookings. Close and reopen to retry.",
-          );
+          setLoadError("Could not load venues. Close and reopen to retry.");
       });
 
     return () => {
@@ -564,11 +588,6 @@ function EventDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Same helper the server uses, so the preview can't drift from the real price.
-  const previewPrice =
-    rate !== "" && Number.isFinite(Number(rate))
-      ? memberPrice(Number(rate))
-      : null;
 
   // Select is memoized on its props, so these must be stable across renders —
   // rebuilding the arrays every keystroke would re-render the whole dropdown.
@@ -595,16 +614,10 @@ function EventDrawer({
     return opts;
   }, [courseChoices, event?.course_id, event?.course?.name]);
 
-  const bookingOptions: SelectOption[] = useMemo(
-    () =>
-      bookings
-        // An already-listed booking can't be listed again (the DB enforces it too).
-        .filter((b) => !b.already_listed || b.id === bookingId)
-        .map((b) => ({
-          value: b.id,
-          label: `${b.course_name ?? "Course"} · ${fmtDate(b.booking_date)} · ${fmtTime(b.tee_time) ?? b.tee_time} · ${b.seats} seat${b.seats === 1 ? "" : "s"}${b.booked_by ? ` · ${b.booked_by}` : ""}`,
-        })),
-    [bookings, bookingId],
+  // The venue behind the current selection, for the detail panel below it.
+  const selectedVenue = useMemo(
+    () => courseChoices.find((c) => c.id === courseId) ?? null,
+    [courseChoices, courseId],
   );
 
   const field = "input text-sm";
@@ -612,47 +625,18 @@ function EventDrawer({
   const errCls = "text-xs text-red-500 mt-1";
 
   async function save(values: EventFormValues) {
-    // When listing a booking the server derives course/date/tee time from the
-    // booking itself; sending them would be ignored (and is rejected on edit).
-    const linked = fromBooking && values.source_booking_id;
+    // Every date being listed, all picked from the venue's own availability.
+    const allDates = [...dates].sort();
 
-    // Every date being listed. On edit this is the one event's date; on create
-    // it's the form's date plus any extras. Sent as `event_dates` so the server
-    // creates one event per date.
-    const allDates = isEdit
-      ? [values.event_date]
-      : [values.event_date, ...extraDates].filter(Boolean);
-
-    const payload = linked
-      ? {
-          source_booking_id: values.source_booking_id,
-          total_spots: Number(values.total_spots),
-          member_guest_rate: Number(values.member_guest_rate),
-          dinner: values.dinner,
-        }
-      : addingClub
-        ? {
-            new_club: {
-              name: values.new_club_name.trim(),
-              website: values.new_club_website.trim() || null,
-            },
-            event_dates: allDates,
-            tee_time: values.tee_time || null,
-            total_spots: Number(values.total_spots),
-            member_guest_rate: Number(values.member_guest_rate),
-            dinner: values.dinner,
-          }
-        : {
-            course_id: values.course_id,
-            // PATCH takes a single date; only create fans out.
-            ...(isEdit
-              ? { event_date: values.event_date }
-              : { event_dates: allDates }),
-            tee_time: values.tee_time || null,
-            total_spots: Number(values.total_spots),
-            member_guest_rate: Number(values.member_guest_rate),
-            dinner: values.dinner,
-          };
+    // Spots and rate are the server's to set — every hosted round runs on the
+    // same terms, so they aren't in this body at all.
+    const payload = {
+      course_id: values.course_id,
+      // PATCH takes a single date; only create fans out.
+      ...(isEdit ? { event_date: allDates[0] } : { event_dates: allDates }),
+      tee_time: values.tee_time || null,
+      dinner: values.dinner,
+    };
 
     const res =
       isEdit && event
@@ -672,34 +656,25 @@ function EventDrawer({
       onError(json.error ?? "Could not save.");
       return;
     }
-    // Say how many went live when it was more than one — the host chose several
-    // dates, so a bare "Published" would leave them counting.
+    // Say how many were submitted when it was more than one — the host chose
+    // several dates, so a bare "Submitted" would leave them counting.
     const created = Array.isArray(json.events) ? json.events.length : 1;
-    const published =
-      created > 1 ? `Published ${created} events` : "Published";
+    const submitted =
+      created > 1 ? `${created} events submitted` : "Event submitted";
     onSaved(
       isEdit
         ? "Event updated."
-        : addingClub
-          ? `${published} — live for members now. We'll finish setting the club up.`
-          : `${published} — live for members now.`,
+        : `${submitted} for approval. We'll set up the calendar, then publish it to members.`,
     );
   }
 
   const submit = () =>
     handleSubmit((v) => {
-      // Extra dates aren't RHF fields, so they're checked here. Duplicates would
-      // otherwise be rejected server-side after the whole form was filled in.
-      if (!isEdit && !(fromBooking && v.source_booking_id)) {
-        const all = [v.event_date, ...extraDates].filter(Boolean);
-        if (new Set(all).size !== all.length) {
-          setDateError("Each date can only be added once.");
-          return;
-        }
-        if (extraDates.some((d) => !d)) {
-          setDateError("Fill in or remove the empty date.");
-          return;
-        }
+      // Dates come from the picker rather than an RHF field, so the "at least
+      // one" rule lives here. Duplicates aren't possible — the picker toggles.
+      if (dates.length === 0) {
+        setDateError("Choose at least one date from the venue's open days.");
+        return;
       }
       setDateError(null);
       return save(v);
@@ -737,382 +712,167 @@ function EventDrawer({
             </div>
           )}
 
-          {/* Source: an existing booking, or a newly proposed schedule. */}
-          {!isEdit && (
-            <div className="flex gap-2 p-1 bg-gray-100 rounded-xl">
-              {(
-                [
-                  { key: "booking", label: "Pending linkups" },
-                  { key: "new", label: "New linkup" },
-                ] as const
-              ).map((m) => (
-                <button
-                  key={m.key}
-                  type="button"
-                  onClick={() => {
-                    setMode(m.key);
-                    // The two modes source course/date/tee time differently.
-                    setValue("source_booking_id", "");
-                    setValue("course_id", "");
-                    setValue("event_date", "");
-                    // Extra dates belong to the date field being cleared, and a
-                    // booking-sourced event is always a single date anyway.
-                    setExtraDates([]);
-                    setDateError(null);
-                    setValue("tee_time", NO_TEE_TIME);
-                    // Adding a club only applies to the "New linkup" path.
-                    setAddingClub(false);
-                    setValue("new_club_name", "");
-                    setValue("new_club_website", "");
-                    // Errors from the other mode's required fields no longer apply.
-                    clearErrors([
-                      "source_booking_id",
-                      "course_id",
-                      "event_date",
-                      "new_club_name",
-                      "new_club_website",
-                    ]);
-                  }}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    mode === m.key
-                      ? "bg-white text-gray-900 shadow-sm"
-                      : "text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-          )}
+            <div>
+              <label htmlFor="ev-course" className={labelCls}>
+                Course *
+              </label>
 
-          {fromBooking ? (
-            <>
-              <div>
-                <label htmlFor="ev-booking" className={labelCls}>
-                  Existing booking *
-                </label>
-                <Controller
-                  name="source_booking_id"
-                  control={control}
-                  rules={{
-                    required: fromBooking
-                      ? "Choose one of your bookings"
-                      : false,
-                  }}
-                  render={({ field: f }) => (
-                    <Select
-                      id="ev-booking"
-                      options={bookingOptions}
-                      value={f.value}
-                      onChange={f.onChange}
-                      disabled={isEdit}
-                      placeholder={
-                        bookingOptions.length
-                          ? "Select a booking…"
-                          : "No active bookings available"
-                      }
-                      searchPlaceholder="Search by course, date or member…"
-                    />
-                  )}
-                />
-                {errors.source_booking_id && (
-                  <p className={errCls}>{errors.source_booking_id.message}</p>
+              <Controller
+                name="course_id"
+                control={control}
+                shouldUnregister
+                rules={{ required: "Choose a course" }}
+                render={({ field: f }) => (
+                  <Select
+                    id="ev-course"
+                    options={courseOptions}
+                    value={f.value}
+                    onChange={(next) => {
+                      f.onChange(next);
+                      // Open days belong to a venue, so a change invalidates
+                      // anything picked at the previous one rather than
+                      // carrying dates that club may not have.
+                      setDates([]);
+                      setDateError(null);
+                    }}
+                    placeholder="Select a course…"
+                    searchPlaceholder="Search courses…"
+                  />
                 )}
-                {!isEdit && bookingOptions.length === 0 && (
-                  <p className="text-[11px] text-amber-600 mt-1">
-                    No active bookings are available to take on right now —
-                    switch to &quot;New linkup&quot; to propose your own.
-                  </p>
-                )}
-              </div>
+              />
+              {errors.course_id && (
+                <p className={errCls}>{errors.course_id.message}</p>
+              )}
 
-              {(selectedBooking || isEdit) && (
-                <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 text-xs text-gray-600 space-y-1">
-                  {selectedBooking ? (
-                    <>
-                      <p>
-                        <span className="text-gray-400">Course:</span>{" "}
-                        {selectedBooking.course_name ?? "—"}
+              {/* What the venue actually is, and what hosting it is worth. A
+                  host choosing between clubs shouldn't have to leave the form
+                  to remember which one is which, or what they'll earn. */}
+              {selectedVenue && (
+                <div className="mt-2 rounded-xl border border-gray-200 bg-gray-50/70 px-3 py-3">
+                  <div className="flex items-start gap-3">
+                    {selectedVenue.logo_url && (
+                      <div className="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-white">
+                        <Image
+                          src={selectedVenue.logo_url}
+                          alt=""
+                          fill
+                          unoptimized
+                          className="object-contain"
+                        />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-gray-900 truncate">
+                        {selectedVenue.name}
                       </p>
-                      <p>
-                        <span className="text-gray-400">Date:</span>{" "}
-                        {fmtDate(selectedBooking.booking_date)}
-                      </p>
-                      <p>
-                        <span className="text-gray-400">Tee time:</span>{" "}
-                        {fmtTime(selectedBooking.tee_time) ?? "—"}
-                      </p>
-                      <p>
-                        <span className="text-gray-400">Booked by:</span>{" "}
-                        {selectedBooking.booked_by ?? "—"}
-                      </p>
-                      <p>
-                        <span className="text-gray-400">Seats held:</span>{" "}
-                        {selectedBooking.seats}
-                      </p>
-                    </>
-                  ) : (
-                    <p>
-                      Course, date, and tee time come from the linked booking
-                      and can&apos;t be changed.
+                      {(selectedVenue.city || selectedVenue.state) && (
+                        <p className="text-xs text-gray-500 mt-0.5 truncate">
+                          {[selectedVenue.city, selectedVenue.state]
+                            .filter(Boolean)
+                            .join(", ")}
+                        </p>
+                      )}
+                      {selectedVenue.address && (
+                        <p className="text-[11px] text-gray-400 mt-0.5 truncate">
+                          {selectedVenue.address}
+                        </p>
+                      )}
+                      {selectedVenue.cost_per_player != null && (
+                        <p className="text-[11px] text-gray-500 mt-1">
+                          Green fee ${selectedVenue.cost_per_player}/player
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {selectedVenue.description && (
+                    <p className="text-xs text-gray-600 mt-2.5 leading-relaxed">
+                      {selectedVenue.description}
                     </p>
                   )}
+
+                  {(selectedVenue.map_link || selectedVenue.booking_url) && (
+                    <div className="flex flex-wrap gap-2 mt-2.5">
+                      {selectedVenue.map_link && (
+                        <a
+                          href={selectedVenue.map_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] font-medium px-2.5 py-1 rounded-full border border-gray-200 bg-white text-gray-600 hover:border-green-800 hover:text-green-900"
+                        >
+                          Map
+                        </a>
+                      )}
+                      {selectedVenue.booking_url && (
+                        <a
+                          href={selectedVenue.booking_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] font-medium px-2.5 py-1 rounded-full border border-gray-200 bg-white text-gray-600 hover:border-green-800 hover:text-green-900"
+                        >
+                          Website
+                        </a>
+                      )}
+                    </div>
+                  )}
+
+                  <p className="mt-2.5 pt-2.5 border-t border-gray-200 text-xs font-semibold text-green-900">
+                    Hosting here earns you{" "}
+                    {fmtMoney(HOST_EVENT_GUEST_RATE_USD)} in credits per round,
+                    once the round is verified.
+                  </p>
                 </div>
               )}
-            </>
-          ) : (
-            <>
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label
-                    htmlFor="ev-course"
-                    className="text-xs font-medium text-gray-600"
-                  >
-                    {addingClub ? "New club *" : "Course *"}
-                  </label>
-                  {!isEdit && (
-                    <button
-                      type="button"
-                      onClick={() => toggleAddingClub(!addingClub)}
-                      className="inline-flex items-center gap-1 text-xs font-medium text-green-800 hover:text-green-900"
-                    >
-                      {addingClub ? (
-                        "← Choose from list"
-                      ) : (
-                        <>
-                          <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-                          Add new venue
-                        </>
-                      )}
-                    </button>
-                  )}
-                </div>
+            </div>
 
-                {addingClub ? (
-                  <div className="space-y-2">
-                    <input
-                      id="ev-club-name"
-                      className={field}
-                      placeholder="Golf Club Name"
-                      maxLength={120}
-                      autoFocus
-                      {...register("new_club_name", {
-                        shouldUnregister: true,
-                        required: "Enter the golf club name",
-                        validate: (v) =>
-                          v.trim().length >= 2 || "At least 2 characters",
-                      })}
-                    />
-                    {errors.new_club_name && (
-                      <p className={errCls}>{errors.new_club_name.message}</p>
-                    )}
-                    <input
-                      id="ev-club-website"
-                      className={field}
-                      placeholder="Website link — https://…"
-                      maxLength={200}
-                      {...register("new_club_website", {
-                        shouldUnregister: true,
-                        required: "Enter the club website",
-                        validate: (v) =>
-                          /^https?:\/\/.+/i.test(v.trim()) ||
-                          "Enter a valid URL (https://…)",
-                      })}
-                    />
-                    {errors.new_club_website && (
-                      <p className={errCls}>
-                        {errors.new_club_website.message}
-                      </p>
-                    )}
-                    <p className="text-[11px] text-gray-400">
-                      Your event goes live straight away. We&apos;ll fill in the
-                      rest of this club&apos;s details behind the scenes.
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    <Controller
-                      name="course_id"
-                      control={control}
-                      shouldUnregister
-                      rules={{
-                        required: fromBooking ? false : "Choose a course",
-                      }}
-                      render={({ field: f }) => (
-                        <Select
-                          id="ev-course"
-                          options={courseOptions}
-                          value={f.value}
-                          onChange={f.onChange}
-                          placeholder="Select a course…"
-                          searchPlaceholder="Search courses…"
-                        />
-                      )}
-                    />
-                    {errors.course_id && (
-                      <p className={errCls}>{errors.course_id.message}</p>
-                    )}
-                  </>
-                )}
-              </div>
-
-              <div>
-                <label htmlFor="ev-date" className={labelCls}>
-                  Date *
-                </label>
-                <input
-                  id="ev-date"
-                  type="date"
-                  className={field}
-                  min={new Date().toISOString().slice(0, 10)}
-                  {...register("event_date", {
-                    required: fromBooking ? false : "Choose a date",
-                    validate: (v) =>
-                      fromBooking ||
-                      !v ||
-                      v >= new Date().toISOString().slice(0, 10) ||
-                      "Date cannot be in the past",
-                  })}
-                />
-                {errors.event_date && (
-                  <p className={errCls}>{errors.event_date.message}</p>
-                )}
-
-                {/* Additional dates. Each becomes its own event sharing the
-                    course, tee time, spots, rate and dinner above. */}
-                {!isEdit && extraDates.length > 0 && (
-                  <div className="space-y-2 mt-2">
-                    {extraDates.map((d, i) => (
-                      <div key={i} className="flex items-center gap-2">
-                        <input
-                          type="date"
-                          className={field}
-                          min={new Date().toISOString().slice(0, 10)}
-                          value={d}
-                          onChange={(e) =>
-                            setExtraDates((prev) =>
-                              prev.map((v, vi) =>
-                                vi === i ? e.target.value : v,
-                              ),
-                            )
-                          }
-                        />
-                        <button
-                          type="button"
-                          aria-label={`Remove date ${i + 2}`}
-                          onClick={() =>
-                            setExtraDates((prev) =>
-                              prev.filter((_, vi) => vi !== i),
-                            )
-                          }
-                          className="text-gray-400 hover:text-red-500 px-1"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {!isEdit && extraDates.length < MAX_EXTRA_DATES && (
-                  <button
-                    type="button"
-                    onClick={() => setExtraDates((prev) => [...prev, ""])}
-                    className="mt-2 text-xs font-medium text-green-800 hover:text-green-900"
-                  >
-                    + Add another date
-                  </button>
-                )}
-
-                {dateError && <p className={errCls}>{dateError}</p>}
-              </div>
-
-              <div>
-                <label htmlFor="ev-time" className={labelCls}>
-                  Tee time
-                </label>
-                <input
-                  id="ev-time"
-                  type="text"
-                  className={field}
-                  placeholder="e.g. 8:30 AM (optional)"
-                  maxLength={50}
-                  {...register("tee_time")}
-                />
-                <p className="text-[11px] text-gray-400 mt-1">
-                  Type the tee time however you like, or leave it blank if
-                  there&apos;s no fixed time.
-                </p>
-              </div>
-            </>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label htmlFor="ev-spots" className={labelCls}>
-                Available spots *
+              <label className={labelCls}>
+                {isEdit ? "Date *" : "Dates *"}
+              </label>
+              <VenueDateSelector
+                courseId={courseId || null}
+                value={dates}
+                onChange={(next: string[]) => {
+                  setDates(next);
+                  if (next.length) setDateError(null);
+                }}
+                single={isEdit}
+                max={isEdit ? 1 : MAX_DATES_PER_EVENT}
+                exceptEventId={event?.id}
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                {isEdit
+                  ? "Only days this venue still has open can be chosen."
+                  : "Only days this venue has open and doesn't already have a round on are shown; the number is spots left. Each date becomes its own event."}
+              </p>
+              {dateError && <p className={errCls}>{dateError}</p>}
+            </div>
+
+            <div>
+              <label htmlFor="ev-time" className={labelCls}>
+                Tee time
               </label>
               <input
-                id="ev-spots"
-                type="number"
-                min={1}
-                max={spotCap}
+                id="ev-time"
+                type="text"
                 className={field}
-                {...register("total_spots", {
-                  required: "Enter the number of spots",
-                  valueAsNumber: true,
-                  min: { value: 1, message: "At least 1 spot" },
-                  max: {
-                    value: spotCap,
-                    message: `At most ${spotCap} — the seats this booking holds`,
-                  },
-                  validate: (v) =>
-                    Number.isInteger(Number(v)) || "Whole numbers only",
-                })}
+                placeholder="e.g. 8:30 AM (optional)"
+                maxLength={50}
+                {...register("tee_time")}
               />
-              {errors.total_spots && (
-                <p className={errCls}>{errors.total_spots.message}</p>
-              )}
-              {selectedBooking && (
-                <p className="text-[11px] text-gray-400 mt-1">
-                  Max {selectedBooking.seats} (seats you hold)
-                </p>
-              )}
+              <p className="text-[11px] text-gray-400 mt-1">
+                Type the tee time however you like, or leave it blank if
+                there&apos;s no fixed time.
+              </p>
             </div>
-            <div>
-              <label htmlFor="ev-rate" className={labelCls}>
-                Member guest rate *
-              </label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">
-                  $
-                </span>
-                <input
-                  id="ev-rate"
-                  type="number"
-                  min={0}
-                  step="1"
-                  className={`${field} pl-7`}
-                  {...register("member_guest_rate", {
-                    required: "Enter the guest rate",
-                    valueAsNumber: true,
-                    min: { value: 0, message: "Cannot be negative" },
-                  })}
-                />
-              </div>
-              {errors.member_guest_rate && (
-                <p className={errCls}>{errors.member_guest_rate.message}</p>
-              )}
-            </div>
-          </div>
 
-          {previewPrice !== null && (
-            <div className="rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-xs text-green-900">
-              Members pay <strong>{fmtMoney(previewPrice)}</strong> — your guest
-              rate plus the {fmtMoney(HOST_MEMBER_PRICE_MARKUP_USD)} LinkUp fee.
-              Your credit for this event will be {fmtMoney(Number(rate))}.
-            </div>
-          )}
+          {/* The terms, stated rather than asked for. Every hosted round runs
+              on the same ones, so this is information, not a field. */}
+          <div className="rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-xs text-green-900">
+            Each date is listed with the spots that venue has open that day — the
+            number on each date above — at {fmtMoney(HOST_EVENT_GUEST_RATE_USD)}{" "}
+            per round.
+          </div>
 
           <div>
             <span className={labelCls}>Dinner</span>
@@ -1133,9 +893,15 @@ function EventDrawer({
           </div>
         </form>
 
-        {/* One button either way: a new event publishes on save, so there's no
-            second path to offer. */}
-        <div className="px-6 py-4 border-t border-gray-100 flex gap-3 flex-shrink-0">
+        {/* "Submit", not "Publish" — saving sends the event for approval, and
+            the LinkUp team is what makes it live once the calendar exists. */}
+        <div className="px-6 py-4 border-t border-gray-100 flex flex-col gap-2 flex-shrink-0">
+          {!isEdit && (
+            <p className="text-[11px] text-gray-500">
+              We&apos;ll set up the calendar for this round, then publish it to
+              members.
+            </p>
+          )}
           <button
             type="button"
             onClick={submit}
@@ -1147,7 +913,7 @@ function EventDrawer({
             ) : isEdit ? (
               "Save changes"
             ) : (
-              "Publish event"
+              "Submit for approval"
             )}
           </button>
         </div>

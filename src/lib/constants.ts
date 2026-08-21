@@ -76,6 +76,48 @@ export const PAYOUT_METHOD_LABEL: Record<PayoutMethod, string> = {
 // member price directly, and the earned credit is based on the guest rate.
 export const HOST_MEMBER_PRICE_MARKUP_USD = 10
 
+// Every hosted round is listed on the same terms, so a host proposes a venue and
+// dates and nothing else. Two numbers used to be theirs to type, which meant the
+// same round could cost two different things depending on who listed it.
+//
+// The guest rate is also what the host earns back in credits once the round is
+// verified (award_host_event_credit defaults the award to it), which is why the
+// form can promise a flat figure. Keep the invariant below in mind if either
+// number moves: rate + markup is the standard round price members already pay.
+export const HOST_EVENT_GUEST_RATE_USD = 150
+
+// Capacity is deliberately NOT a constant. A round is listed with the spots its
+// venue actually has that day (see openSpotsByDate), because two days at the
+// same club routinely differ — a flat number would oversell the thin ones and
+// waste the busy ones.
+
+// ---- Credit coupons -----------------------------------------
+// Credit is spent by converting it into a fixed-amount GHL coupon the member
+// enters at the venue's checkout (courses.payment_url). See
+// src/lib/credits/coupons.ts.
+
+// The coupon endpoints are the one part of the GHL API on its own version
+// track — everything else this app calls is GHL_API_VERSION.
+export const GHL_PAYMENTS_API_VERSION = 'v3'
+
+// Prefix on every generated code, so a coupon in the GHL dashboard is
+// recognisable as LinkUp credit rather than a marketing promo, and the sync can
+// tell the two apart.
+//
+// GHL rejects a coupon code containing anything but letters and numbers —
+// "Coupon code can only contain letters and numbers", HTTP 422 — so there is no
+// separator between the prefix and the random part. Keep both alphanumeric.
+export const CREDIT_COUPON_CODE_PREFIX = 'LUC'
+
+// Codes are read off a screen and typed into a checkout, so the random part
+// avoids characters that look alike (no O/0, I/1, S/5).
+export const CREDIT_COUPON_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRTUVWXYZ2346789'
+export const CREDIT_COUPON_CODE_LENGTH = 6
+
+// Codes are created with no end date: the credit behind one is the member's
+// either way, so a deadline only risked stranding it. A code ends by being used
+// or refunded, not by lapsing. (See 20260822000001_credit_coupons_no_expiry.)
+
 export const GHL_CANCEL_BOOKING_URL = 'https://api.leadconnectorhq.com/widget/cancel-booking'
 export const GHL_CALENDAR_PROVIDER_ID = 'bdd10QRepJvC6EYoy32m'
 

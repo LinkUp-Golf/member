@@ -1,6 +1,6 @@
 'use client'
 
-// The member credit wallet: balance, earned/redeemed history, and redemption.
+// The member credit wallet: balance, history, and the codes credit turns into.
 //
 // One component for both workspaces. The wallet belongs to the member, not to
 // their host or partner row, so a user who both hosts and refers sees one
@@ -8,19 +8,26 @@
 // "where credit comes from" copy differ.
 //
 // Spending requires an active membership: a host or partner who isn't a member
-// still earns, and still sees their balance, but redeems nothing until they
-// join. canRedeem comes from the API so a disabled button can say why.
+// still earns, and still sees their balance, but spends nothing until they join.
+// canRedeem comes from the API so a disabled button can say why.
 //
-// Credit is redeemed toward golf, and redemption doesn't ask — the membership
-// option existed for someone putting credit toward joining, and that person can
-// no longer redeem at all. History still renders 'membership' rows, so the
-// label map keeps both.
+// Spending means getting a code. Credit becomes a fixed-amount GHL coupon the
+// member enters at a venue's checkout — which is why this screen shows codes
+// next to the balance: an issued code is money already out of the wallet and
+// waiting to be used. Redemption used to be a request an admin settled by hand,
+// and the ledger still holds those rows; 'membership' purposes date from further
+// back still, which is why the label map keeps both.
 
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { AdminPageHeader, StatCard, AdminCard, Badge } from '@/components/admin/AdminUI'
 import { Spinner, ContentLoader } from '@/components/ui/Loading'
+import CreditCouponModal from '@/components/credits/CreditCouponModal'
 import { MEMBERSHIP_CHECKOUT_URL, MEMBERSHIP_JOIN_URL } from '@/lib/constants'
-import type { CreditEntry, CreditSummary, CreditKind, CreditPurpose } from '@/types'
+import { isCouponUsable } from '@/lib/credits'
+import type {
+  CreditEntry, CreditSummary, CreditKind, CreditPurpose,
+  CreditCoupon, CreditCouponStatus,
+} from '@/types'
 
 const fmtMoney = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -40,6 +47,13 @@ const PURPOSE_LABEL: Record<CreditPurpose, string> = {
   membership: 'Toward membership',
 }
 
+const COUPON_META: Record<CreditCouponStatus, { label: string; colour: 'green' | 'gold' | 'gray' }> = {
+  issued:   { label: 'Ready to use', colour: 'gold' },
+  redeemed: { label: 'Used',         colour: 'green' },
+  void:     { label: 'Returned',     colour: 'gray' },
+  expired:  { label: 'Expired',      colour: 'gray' },
+}
+
 interface Props {
   /** API prefix for this workspace — '/api/host' or '/api/partner'. */
   basePath: string
@@ -50,12 +64,14 @@ interface Props {
 export default function CreditsWallet({ basePath, earnedHint }: Props) {
   const [summary, setSummary] = useState<CreditSummary | null>(null)
   const [entries, setEntries] = useState<CreditEntry[]>([])
+  const [coupons, setCoupons] = useState<CreditCoupon[]>([])
   // Assume no until the API says otherwise — a load failure shouldn't open a
   // form the server is going to refuse.
   const [canRedeem, setCanRedeem] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [redeeming, setRedeeming] = useState(false)
+  const [issuing, setIssuing] = useState(false)
+  const [refundingId, setRefundingId] = useState<string | null>(null)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
   const showToast = useCallback((msg: string, ok = true) => {
@@ -63,17 +79,34 @@ export default function CreditsWallet({ basePath, earnedHint }: Props) {
   }, [])
 
   const load = useCallback(async () => {
-    const res = await fetch(`${basePath}/credits`)
-    const json = await res.json().catch(() => ({}))
-    if (res.ok) {
+    // Two calls: the ledger side is workspace-scoped, the codes are the
+    // member's wherever they're standing. ?sync=1 because this is the screen
+    // where a code's state actually matters, so it's worth the GHL round-trip
+    // to catch one that's been used or has lapsed.
+    const [walletRes, couponRes] = await Promise.all([
+      fetch(`${basePath}/credits`),
+      fetch('/api/credits/coupons?sync=1'),
+    ])
+    const wallet = await walletRes.json().catch(() => ({}))
+
+    if (walletRes.ok) {
       setError(null)
-      setSummary(json.summary)
-      setEntries(json.entries ?? [])
-      setCanRedeem(json.canRedeem === true)
+      setSummary(wallet.summary)
+      setEntries(wallet.entries ?? [])
+      setCanRedeem(wallet.canRedeem === true)
     } else {
       // Without this a failed load renders as a confident "$0.00 balance".
-      setError(json.error ?? 'Could not load your credits.')
+      setError(wallet.error ?? 'Could not load your credits.')
     }
+
+    if (couponRes.ok) {
+      const json = await couponRes.json().catch(() => ({}))
+      setCoupons(json.coupons ?? [])
+      // A code returned or expired since the ledger was read moves the balance,
+      // so prefer the fresher figure when both calls succeeded.
+      if (walletRes.ok && json.summary) setSummary(json.summary)
+    }
+
     setLoading(false)
   }, [basePath])
 
@@ -81,18 +114,35 @@ export default function CreditsWallet({ basePath, earnedHint }: Props) {
 
   const balance = summary?.balance ?? 0
 
+  async function refund(coupon: CreditCoupon) {
+    if (refundingId) return
+    setRefundingId(coupon.id)
+    const res = await fetch(`/api/credits/coupons/${coupon.id}`, { method: 'DELETE' })
+    const json = await res.json().catch(() => ({}))
+    setRefundingId(null)
+    if (!res.ok) {
+      showToast(json.error ?? 'Could not refund that code.', false)
+      // A refusal isn't always a no-op: a code we discover has already been used
+      // gets settled as redeemed. Re-read so the row stops offering a refund.
+      load()
+      return
+    }
+    showToast(`${fmtMoney(Number(coupon.amount))} is back in your balance.`)
+    load()
+  }
+
   return (
     <div className="p-4 sm:p-8 max-w-3xl mx-auto">
       <AdminPageHeader
         title="Credits"
-        description="Credits you've earned and what you've redeemed. Spend them on golf."
+        description="What you've earned, and the codes it turns into. Spend them on golf."
         action={
           <button
-            onClick={() => setRedeeming(true)}
+            onClick={() => setIssuing(true)}
             disabled={loading || balance <= 0 || !canRedeem}
             className="btn btn-gold btn-sm disabled:opacity-50"
           >
-            Redeem credits
+            Get a credit code
           </button>
         }
       />
@@ -103,7 +153,7 @@ export default function CreditsWallet({ basePath, earnedHint }: Props) {
       {!loading && !error && !canRedeem && (
         <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3 mb-6">
           <p className="text-sm font-medium text-amber-900">
-            Redeeming needs a LinkUp membership
+            Spending needs a LinkUp membership
           </p>
           <p className="text-xs text-amber-800/80 mt-1">
             Keep earning — your balance is yours and it keeps building. You can
@@ -156,6 +206,56 @@ export default function CreditsWallet({ basePath, earnedHint }: Props) {
             </div>
           </div>
 
+          {coupons.length > 0 && (
+            <div className="mb-6">
+              <AdminCard title="Credit codes">
+                <div className="divide-y divide-gray-50">
+                  {coupons.map(c => {
+                    const meta = COUPON_META[c.status]
+                    const usable = isCouponUsable(c)
+                    return (
+                      <div key={c.id} className="py-3 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-sm font-semibold text-gray-900">{c.code}</span>
+                            <Badge label={meta.label} colour={meta.colour} />
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1 truncate">
+                            {fmtMoney(Number(c.amount))}
+                            {c.course?.name ? ` · ${c.course.name}` : ''}
+                            {' · '}
+                            {/* Codes don't expire, so an open one is described
+                                by when it was issued. A stored deadline only
+                                exists on legacy rows. */}
+                            {c.status === 'issued'
+                              ? c.expires_at
+                                ? `use by ${fmtDate(c.expires_at)}`
+                                : `issued ${fmtDate(c.created_at)}`
+                              : c.settled_at
+                                ? fmtDate(c.settled_at)
+                                : fmtDate(c.created_at)}
+                          </p>
+                        </div>
+                        {/* An unused code can be refunded — the credit
+                            returns to the balance, which is the only way to
+                            undo a code issued by mistake. */}
+                        {usable && (
+                          <button
+                            onClick={() => refund(c)}
+                            disabled={refundingId === c.id}
+                            className="btn btn-outline btn-sm flex-shrink-0 disabled:opacity-50"
+                          >
+                            {refundingId === c.id ? <Spinner className="w-4 h-4" /> : 'Refund'}
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </AdminCard>
+            </div>
+          )}
+
           <AdminCard title="History">
             {entries.length === 0 ? (
               <p className="text-sm text-gray-400 italic py-6 text-center">
@@ -190,87 +290,22 @@ export default function CreditsWallet({ basePath, earnedHint }: Props) {
         </>
       )}
 
-      {redeeming && summary && canRedeem && (
-        <RedeemModal
-          basePath={basePath}
+      {/* No bill to size against here, so the member says how much — unlike the
+          Book screen and a hosted round, which know what's owed. */}
+      {issuing && canRedeem && (
+        <CreditCouponModal
+          target={{ kind: 'general' }}
           balance={balance}
-          onClose={() => setRedeeming(false)}
-          onRedeemed={(msg) => { setRedeeming(false); showToast(msg); load() }}
-          onError={(msg) => showToast(msg, false)}
+          onIssued={() => { showToast('Your credit code is ready.'); load() }}
+          onClose={() => setIssuing(false)}
         />
       )}
 
       {toast && (
-        <div className={`fixed top-6 right-6 z-[60] px-4 py-3 rounded-xl shadow-lg text-sm font-medium ${toast.ok ? 'bg-green-900 text-white' : 'bg-red-600 text-white'}`}>
+        <div className={`fixed top-6 right-6 z-[80] px-4 py-3 rounded-xl shadow-lg text-sm font-medium ${toast.ok ? 'bg-green-900 text-white' : 'bg-red-600 text-white'}`}>
           {toast.msg}
         </div>
       )}
-    </div>
-  )
-}
-
-function RedeemModal({ basePath, balance, onClose, onRedeemed, onError }: {
-  basePath: string
-  balance: number
-  onClose: () => void
-  onRedeemed: (msg: string) => void
-  onError: (msg: string) => void
-}) {
-  const [amount, setAmount] = useState('')
-  const [note, setNote] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-
-  const field = 'w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:border-green-700 outline-none transition-colors bg-white'
-  const labelCls = 'block text-xs font-medium text-gray-600 mb-1'
-
-  async function submit() {
-    if (submitting) return
-    const amt = Number(amount)
-    if (!Number.isFinite(amt) || amt <= 0) { onError('Enter an amount greater than zero.'); return }
-    if (amt > balance) { onError('That exceeds your available balance.'); return }
-    setSubmitting(true)
-    const res = await fetch(`${basePath}/credits/redeem`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: amt, note: note.trim() || undefined }),
-    })
-    const json = await res.json().catch(() => ({}))
-    setSubmitting(false)
-    if (!res.ok) { onError(json.error ?? 'Could not redeem.'); return }
-    onRedeemed('Credits redeemed — we’ll be in touch to apply them.')
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button type="button" aria-label="Close" className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-1">Redeem credits</h2>
-        <p className="text-sm text-gray-500 mb-5">
-          Available balance: {fmtMoney(balance)} — redeemed toward golf.
-        </p>
-
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="redeem-amount" className={labelCls}>Amount *</label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">$</span>
-              <input id="redeem-amount" type="number" min={0} step="0.01" className={`${field} pl-7`} value={amount} onChange={e => setAmount(e.target.value)} />
-            </div>
-          </div>
-
-          <div>
-            <label htmlFor="redeem-note" className={labelCls}>Note</label>
-            <input id="redeem-note" className={field} value={note} onChange={e => setNote(e.target.value)} placeholder="Anything we should know…" />
-          </div>
-        </div>
-
-        <div className="flex gap-3 mt-6">
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
-          <button onClick={submit} disabled={submitting || !amount} className="flex-1 py-2.5 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 disabled:opacity-50 transition-colors">
-            {submitting ? <Spinner className="w-4 h-4" /> : 'Redeem'}
-          </button>
-        </div>
-      </div>
     </div>
   )
 }

@@ -90,6 +90,10 @@ export default function AdminHostDetailPage() {
             </div>
           </div>
 
+          {/* AdminCard carries no margin of its own — stacked panels need the
+              gap from their container, or they render edge to edge as one
+              undifferentiated block. */}
+          <div className="space-y-6">
           <VenuesCard hostId={id} onDone={showToast} onError={(msg) => showToast(msg, false)} />
 
           <AdjustCard hostId={id} onDone={(msg) => { showToast(msg); load() }} onError={(msg) => showToast(msg, false)} />
@@ -125,6 +129,7 @@ export default function AdminHostDetailPage() {
               </div>
             )}
           </AdminCard>
+          </div>
         </>
       )}
 

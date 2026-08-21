@@ -231,9 +231,15 @@ export default function AdminCoursesPage() {
     setProcessing(null)
   }
 
-  async function deleteCourse(course: CourseRow) {
+  async function deleteCourse(course: CourseRow, reason: string) {
     setProcessing(course.id)
-    const res = await fetch(`/api/admin/courses/${course.id}`, { method: 'DELETE' })
+    // The row is about to be gone, so this note becomes the whole record of the
+    // decision in admin_audit_log. The server requires it too.
+    const res = await fetch(`/api/admin/courses/${course.id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    })
     const json = await res.json().catch(() => ({}))
     if (res.ok) {
       showToast('Course deleted.')
@@ -686,9 +692,9 @@ export default function AdminCoursesPage() {
         <DeleteCourseModal
           course={courses.find(c => c.id === deletingId) ?? null}
           processing={!!processing}
-          onConfirm={() => {
+          onConfirm={(reason) => {
             const course = courses.find(c => c.id === deletingId)
-            if (course) deleteCourse(course)
+            if (course) deleteCourse(course, reason)
           }}
           onClose={() => setDeletingId(null)}
         />
@@ -715,9 +721,10 @@ function DeleteCourseModal({
 }: {
   course: CourseRow | null
   processing: boolean
-  onConfirm: () => void
+  onConfirm: (reason: string) => void
   onClose: () => void
 }) {
+  const [reason, setReason] = useState('')
   if (!course) return null
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -755,6 +762,26 @@ function DeleteCourseModal({
           <p className="text-[11px] text-amber-500 mt-2">If the course has any booking history, deletion will be blocked — use Archive instead.</p>
         </div>
 
+        {/* The row disappears; this note is what's left. It goes to the audit
+            log with a snapshot of the course, and it's the only thing a future
+            admin will have to explain where the course went. */}
+        <div className="mb-6">
+          <label htmlFor="delete-reason" className="block text-xs font-medium text-gray-600 mb-1.5">
+            Why is it being deleted?
+          </label>
+          <input
+            id="delete-reason"
+            className="input text-sm"
+            placeholder="e.g. Duplicate of Aviara — created in error"
+            value={reason}
+            maxLength={300}
+            onChange={e => setReason(e.target.value)}
+          />
+          <p className="text-[11px] text-gray-400 mt-1.5">
+            Saved to the audit log with the course details.
+          </p>
+        </div>
+
         <div className="flex gap-3">
           <button
             type="button"
@@ -765,8 +792,8 @@ function DeleteCourseModal({
           </button>
           <button
             type="button"
-            onClick={onConfirm}
-            disabled={processing}
+            onClick={() => onConfirm(reason.trim())}
+            disabled={processing || !reason.trim()}
             className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition-colors"
           >
             {processing ? 'Deleting…' : 'Delete Course'}

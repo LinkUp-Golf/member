@@ -329,7 +329,10 @@ export const PATCH = withAuth(
           total_spots: round.total_spots,
           member_guest_rate: round.member_guest_rate,
           dinner: round.dinner,
-          status: 'upcoming',
+          // Approving the application grants the role, not the listing. These
+          // rounds still need a GHL calendar before a member can book one, so
+          // they queue up behind the same gate as anything a host creates.
+          status: 'pending_approval',
         })
         .select('id')
         .single()

@@ -37,6 +37,13 @@ export type RedeemResult =
  *
  * A redemption is a request an admin then settles by putting it against a round,
  * which is why they're notified here.
+ *
+ * This is now the fallback rather than the way in: the wallet spends credit by
+ * issuing a GHL coupon (./coupons), which settles itself at the checkout with no
+ * admin in the loop. The endpoints on top of this stay because a client running
+ * a cached service worker can still be serving the old form, and because a
+ * redemption that can't become a code — GHL unreachable — should still be
+ * recordable by hand.
  */
 export async function redeemCredit(params: {
   admin: AdminClient

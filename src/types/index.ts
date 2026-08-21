@@ -493,6 +493,11 @@ export interface HostApplication {
 }
 
 export type HostedEventStatus =
+  /**
+   * Created by the host, not yet visible to members. Waiting on an admin to
+   * approve it, which is also when the GHL calendar behind it gets set up.
+   */
+  | 'pending_approval'
   | 'upcoming'
   | 'completed'
   | 'cancelled'
@@ -525,7 +530,21 @@ export interface HostedEvent {
   member_price?: number
   filled_spots?: number
   remaining_spots?: number
-  course?: { id: string; name: string; city?: string | null } | null
+  /**
+   * Members with a booking at this venue on this day. They are at the round
+   * without having reserved through it, so host-facing screens count them in
+   * the roster — but not in filled_spots, which is what the reservation RPC
+   * enforces capacity against.
+   */
+  booked_attendees?: {
+    member_id: string
+    first_name: string
+    last_name: string
+    avatar_url: string | null
+    tee_time: string | null
+  }[]
+  booked_spots?: number
+  course?: { id: string; name: string; city?: string | null; payment_url?: string | null } | null
   host?: { id: string; name: string; member?: { first_name: string; last_name: string } | null } | null
   proofs?: HostedEventProof[]
   /** True when the requesting member holds an active reservation. */
@@ -538,20 +557,6 @@ export interface HostedEvent {
  * bookings rows sharing member/created_at/date/tee time — one row per seat —
  * so `seats` is that row count.
  */
-export interface HostBookingOption {
-  /** The representative bookings row the event will link to. */
-  id: string
-  course_id: string
-  course_name: string | null
-  /** The member who made the booking. */
-  booked_by: string | null
-  booking_date: string
-  tee_time: string
-  seats: number
-  /** True when this booking is already listed as a live hosted event. */
-  already_listed: boolean
-}
-
 export type HostedEventRegistrationStatus = 'reserved' | 'cancelled'
 
 export interface HostedEventRegistration {
@@ -559,9 +564,18 @@ export interface HostedEventRegistration {
   hosted_event_id: string
   member_id: string
   status: HostedEventRegistrationStatus
-  created_at: string
+  /** Null on a booking-derived entry, which has no reservation row behind it. */
+  created_at: string | null
   // Enriched
   member?: { first_name: string; last_name: string; avatar_url?: string | null } | null
+  /**
+   * How this member reached the round. 'booking' means they booked the venue on
+   * the day rather than reserving through the event — same afternoon, same
+   * club, so they're on the roster either way.
+   */
+  source?: 'reservation' | 'booking'
+  /** Their tee time, when they got here by booking one. */
+  tee_time?: string | null
 }
 
 export interface HostedEventProof {
@@ -608,7 +622,54 @@ export interface CreditSummary {
   balance: number
 }
 
+/**
+ * Where a credit coupon stands.
+ *   issued   — live in GHL, waiting to be used at a checkout
+ *   redeemed — GHL reports it used; the credit is spent
+ *   void     — cancelled before use; the credit was refunded
+ *   expired  — ran out unused; the credit was refunded
+ */
+export type CreditCouponStatus = 'issued' | 'redeemed' | 'void' | 'expired'
+
+/**
+ * Credit converted into a GHL coupon — the code a member types at a venue's
+ * checkout instead of paying cash. One row per code: the wallet debit that
+ * funded it (`ledger_entry_id`), the coupon it became in GHL, and the booking or
+ * hosted event whose price it was sized against.
+ */
+export interface CreditCoupon {
+  id: string
+  member_id: string
+  ledger_entry_id: string
+  amount: number
+  code: string
+  /** Null only if the GHL call failed, in which case the row is void. */
+  ghl_coupon_id: string | null
+  status: CreditCouponStatus
+  /** Set when the code was issued to pay for one specific booking row. */
+  booking_id: string | null
+  /** Set when it was issued for a hosted round. */
+  hosted_event_id: string | null
+  course_id: string | null
+  usage_count: number
+  starts_at: string
+  /**
+   * When the code stops working. Null means never, which is how codes are
+   * issued now; a date is a legacy row from when they lapsed after 30 days.
+   */
+  expires_at: string | null
+  settled_at: string | null
+  note: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  // Enriched
+  course?: { id: string; name: string; payment_url?: string | null } | null
+  member?: { first_name: string; last_name: string; email?: string } | null
+}
+
 export interface HostStats {
+  pendingCount: number
   upcomingCount: number
   completedCount: number
   cancelledCount: number

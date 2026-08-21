@@ -189,37 +189,20 @@ export function validateReferralPartnerPayload(
 /** Bound on rounds proposed in one application — the form is not a bulk importer. */
 export const MAX_PROPOSED_EVENTS = 20
 
-/** Bound on brand-new clubs named in one application. */
-export const MAX_NEW_VENUES = 10
-
-/** Prefix marking an event's venue as one of this payload's `new_venues`. */
-export const NEW_VENUE_REF = 'new:'
-
 /**
- * The venue an application's proposed round sits at: either an existing course id,
- * or `new:<index>` pointing into the same payload's `new_venues`.
- *
- * A club that isn't on LinkUp yet has no course id at the moment the applicant
- * fills the form in — the course is created when the application is submitted, not
- * when they type the name — so rounds at those clubs reference them by position
- * and the server resolves the reference once the courses exist.
+ * The venue an application's proposed round sits at. Always an existing course:
+ * an applicant used to be able to name a club LinkUp didn't have, which meant a
+ * round could reference a venue by its position in the payload before any course
+ * existed. Hosting is now offered at listed venues only, so a venue reference is
+ * just a course id.
  */
 export function parseVenueRef(
-  value: unknown,
-  newVenueCount: number
-): { courseId?: string; newVenueIndex?: number; error?: string } {
+  value: unknown
+): { courseId?: string; error?: string } {
   if (typeof value !== 'string' || !value.trim()) {
     return { error: 'Choose which venue this round is at' }
   }
   const ref = value.trim()
-
-  if (ref.startsWith(NEW_VENUE_REF)) {
-    const index = Number(ref.slice(NEW_VENUE_REF.length))
-    if (!Number.isInteger(index) || index < 0 || index >= newVenueCount) {
-      return { error: 'A round points at a venue that was not submitted' }
-    }
-    return { newVenueIndex: index }
-  }
 
   const uuid = validateUUID(ref, 'Venue')
   if (!uuid.valid) return { error: uuid.errors[0] }
@@ -245,37 +228,20 @@ export function validateHostApplicationPayload(body: unknown): ValidationResult 
     if (!descResult.valid) errors.push(...descResult.errors)
   }
 
-  // Existing venues the applicant picked, and clubs they named that aren't on
-  // LinkUp yet. Either list can be empty, but not both.
+  // Venues the applicant picked, all of them existing courses.
   const courseIds = Array.isArray(b.course_ids) ? b.course_ids : []
-  const newVenues = Array.isArray(b.new_venues) ? b.new_venues : []
 
   if (b.course_ids !== undefined && !Array.isArray(b.course_ids)) {
     errors.push('Selected venues must be a list')
   }
-  if (b.new_venues !== undefined && !Array.isArray(b.new_venues)) {
-    errors.push('New venues must be a list')
-  }
 
-  if (courseIds.length === 0 && newVenues.length === 0) {
+  if (courseIds.length === 0) {
     errors.push('Choose at least one venue')
   }
   if (courseIds.length > 50) {
     errors.push('Too many venues selected')
   } else if (courseIds.some(id => !validateUUID(id, 'Venue').valid)) {
     errors.push('One of the selected venues is invalid')
-  }
-
-  if (newVenues.length > MAX_NEW_VENUES) {
-    errors.push(`At most ${MAX_NEW_VENUES} new venues`)
-  } else {
-    newVenues.forEach((venue, i) => {
-      // Same bar as the event form: name and website both. An admin has to find
-      // this club and set up a calendar for it, and a name alone can be two
-      // different courses in two different states.
-      const result = validateProposedClub(venue, { requireWebsite: true })
-      if (!result.valid) errors.push(`Venue ${i + 1}: ${result.errors[0]}`)
-    })
   }
 
   // Rounds proposed alongside the application. Optional — an applicant can name
@@ -290,9 +256,9 @@ export function validateHostApplicationPayload(body: unknown): ValidationResult 
       b.events.forEach((ev, i) => {
         const round = (ev ?? {}) as Record<string, unknown>
 
-        // The venue is a course id or a new_venues reference, so course_id can't
-        // be validated as a plain UUID here.
-        const venue = parseVenueRef(round.venue, newVenues.length)
+        // The round names its venue in `venue`, not `course_id`, so the shared
+        // event validator below is told not to look for a course.
+        const venue = parseVenueRef(round.venue)
         if (venue.error) {
           errors.push(`Round ${i + 1}: ${venue.error}`)
           return
@@ -434,14 +400,18 @@ export function validateHostedEventPayload(
     if (!teeResult.valid) errors.push(...teeResult.errors)
   }
 
-  if (!partial || 'total_spots' in b) {
+  // Neither is the client's to send: the rate is a fixed term and capacity comes
+  // from what the venue has open that day, so a payload that omits both is
+  // complete. They're still checked when present, because an older client may
+  // still send them and a nonsense value must not reach the CHECK constraints.
+  if ('total_spots' in b && b.total_spots !== undefined && b.total_spots !== null) {
     const spots = Number(b.total_spots)
     if (!Number.isInteger(spots) || spots < 1 || spots > 200) {
       errors.push('Available spots must be a whole number between 1 and 200')
     }
   }
 
-  if (!partial || 'member_guest_rate' in b) {
+  if ('member_guest_rate' in b && b.member_guest_rate !== undefined && b.member_guest_rate !== null) {
     const rate = Number(b.member_guest_rate)
     if (!Number.isFinite(rate) || rate < 0 || rate > 100000) {
       errors.push('Member guest rate must be a positive amount')

@@ -4,10 +4,16 @@
 // page — reviewing an application ends in creating a host, so it belongs beside
 // the host list rather than in a separate destination.
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { AdminTable, AdminTr, AdminTd, StatCard, Badge } from '@/components/admin/AdminUI'
 import { errorMessage } from '@/lib/errors/error-message'
 import type { HostApplication } from '@/types'
+
+// A raw ISO date is a database value, not something to make a reviewer decode.
+const fmtRoundDate = (d: string) =>
+  new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', {
+    weekday: 'short', month: 'long', day: 'numeric',
+  })
 
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -173,7 +179,27 @@ function ReviewDrawer({ application, memberName, onClose, onReviewed, onError }:
 
   // Rounds the applicant proposed. Approving creates each of these as a live
   // event, so the admin picks which ones — the same shape as the venue grant.
-  const proposedRounds = application.events ?? []
+  // `?? []` would be a fresh array each render, which defeats the memo below.
+  const proposedRounds = useMemo(() => application.events ?? [], [application.events])
+
+  // Grouped by venue, because an applicant proposing three dates at one club is
+  // one thing to decide about, not three. Flat, every row repeated the venue
+  // name and the reader had to spot which ones matched.
+  const roundsByVenue = useMemo(() => {
+    const byCourse = new Map<string, { name: string; rounds: typeof proposedRounds }>()
+    for (const r of proposedRounds) {
+      const entry = byCourse.get(r.course_id) ?? {
+        name: r.course?.name ?? 'Venue',
+        rounds: [] as typeof proposedRounds,
+      }
+      entry.rounds.push(r)
+      byCourse.set(r.course_id, entry)
+    }
+    for (const entry of byCourse.values()) {
+      entry.rounds.sort((a, b) => a.event_date.localeCompare(b.event_date))
+    }
+    return Array.from(byCourse.entries()).map(([courseId, v]) => ({ courseId, ...v }))
+  }, [proposedRounds])
   const [roundIds, setRoundIds] = useState<string[]>(proposedRounds.map(r => r.id))
 
   const toggleRound = (id: string) =>
@@ -289,42 +315,83 @@ function ReviewDrawer({ application, memberName, onClose, onReviewed, onError }:
           {proposedRounds.length > 0 && (
             <div>
               <p className={labelCls}>Proposed rounds</p>
-              <div className="space-y-1">
-                {proposedRounds.map(r => {
-                  // A round at a dropped venue can't be created, and one whose
-                  // date has passed while the application sat in the queue can't
-                  // become an upcoming event. Both are shown, disabled, so the
-                  // reason is visible rather than the round just missing.
-                  const venueDropped = !grantIds.includes(r.course_id)
-                  const datePassed = r.event_date < today
-                  const blocked = venueDropped || datePassed
-                  const label = `${r.course?.name ?? 'Venue'} · ${r.event_date}${r.tee_time ? ` · ${r.tee_time}` : ''} · ${r.total_spots} spots · $${Number(r.member_guest_rate)}${r.dinner ? ' · dinner' : ''}`
-
-                  if (readOnly) {
-                    return (
-                      <p key={r.id} className="text-sm text-gray-700 flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-700 flex-shrink-0" />
-                        <span>{label}</span>
-                        {r.hosted_event_id && <Badge label="Created" colour="green" />}
-                      </p>
-                    )
-                  }
+              <div className="space-y-3">
+                {roundsByVenue.map(v => {
+                  const selectable = v.rounds.filter(
+                    r => grantIds.includes(r.course_id) && r.event_date >= today,
+                  )
+                  const allOn =
+                    selectable.length > 0 && selectable.every(r => roundIds.includes(r.id))
 
                   return (
-                    <label key={r.id} className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 mt-0.5 rounded border-gray-300 text-green-800 focus:ring-green-700"
-                        checked={roundIds.includes(r.id) && !blocked}
-                        disabled={blocked}
-                        onChange={() => toggleRound(r.id)}
-                      />
-                      <span className={blocked ? 'text-gray-400' : undefined}>
-                        {label}
-                        {datePassed && <span className="text-amber-600"> (date passed)</span>}
-                        {venueDropped && !datePassed && <span className="text-amber-600"> (venue not granted)</span>}
-                      </span>
-                    </label>
+                    <div key={v.courseId} className="rounded-xl border border-gray-200 px-3 py-2.5">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-gray-800">
+                          {v.name}
+                          <span className="ml-2 font-normal text-gray-400">
+                            {v.rounds.length} {v.rounds.length === 1 ? 'date' : 'dates'}
+                          </span>
+                        </p>
+                        {/* One tick for a whole venue — the common case is
+                            wanting all of a club's dates or none of them. */}
+                        {!readOnly && selectable.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setRoundIds(prev =>
+                                allOn
+                                  ? prev.filter(id => !selectable.some(r => r.id === id))
+                                  : Array.from(new Set([...prev, ...selectable.map(r => r.id)])),
+                              )
+                            }
+                            className="text-xs font-semibold text-green-800 hover:underline"
+                          >
+                            {allOn ? 'Clear all' : `Select all ${selectable.length}`}
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="space-y-1 mt-1.5">
+                        {v.rounds.map(r => {
+                          // A round at a dropped venue can't be created, and one
+                          // whose date passed while the application sat in the
+                          // queue can't become an upcoming event. Both are shown,
+                          // disabled, so the reason is visible rather than the
+                          // round just missing.
+                          const venueDropped = !grantIds.includes(r.course_id)
+                          const datePassed = r.event_date < today
+                          const blocked = venueDropped || datePassed
+                          const label = `${fmtRoundDate(r.event_date)}${r.tee_time ? ` · ${r.tee_time}` : ''} · ${r.total_spots} spots${r.dinner ? ' · dinner' : ''}`
+
+                          if (readOnly) {
+                            return (
+                              <p key={r.id} className="text-sm text-gray-700 flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 rounded-full bg-green-700 flex-shrink-0" />
+                                <span>{label}</span>
+                                {r.hosted_event_id && <Badge label="Created" colour="green" />}
+                              </p>
+                            )
+                          }
+
+                          return (
+                            <label key={r.id} className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 mt-0.5 rounded border-gray-300 text-green-800 focus:ring-green-700"
+                                checked={roundIds.includes(r.id) && !blocked}
+                                disabled={blocked}
+                                onChange={() => toggleRound(r.id)}
+                              />
+                              <span className={blocked ? 'text-gray-400' : undefined}>
+                                {label}
+                                {datePassed && <span className="text-amber-600"> (date has passed)</span>}
+                                {venueDropped && !datePassed && <span className="text-amber-600"> (venue not granted)</span>}
+                              </span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </div>
                   )
                 })}
               </div>

@@ -8,16 +8,18 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { validateHostApplicationPayload, sanitiseText, NEW_VENUE_REF } from '@/lib/validation'
-import { requestPendingCourse } from '@/lib/courses/request-course'
+import { validateHostApplicationPayload, sanitiseText } from '@/lib/validation'
 import { logger } from '@/lib/logger'
+import { HOST_EVENT_GUEST_RATE_USD } from '@/lib/constants'
+import { openSpotsByDate } from '@/lib/bookings/availability'
 import type { AuthContext } from '@/lib/auth/types'
-import type { HostApplicationEventInput } from '@/types'
+import type { Course, HostApplicationEventInput } from '@/types'
 
 /**
- * A proposed round as it arrives on the wire. `venue` replaces `course_id`: a club
- * created by this very request has no id yet, so rounds at one reference it as
- * `new:<index>` into `new_venues`.
+ * A proposed round as it arrives on the wire. `venue` replaces `course_id` — it
+ * held either a course id or a `new:<index>` reference back when an applicant
+ * could name a club we didn't have. That path is gone; a venue is now always an
+ * existing course, and the field keeps its name so older clients still parse.
  */
 type ProposedRoundInput = Omit<HostApplicationEventInput, 'course_id'> & { venue?: string }
 
@@ -72,7 +74,6 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     name?: string
     description?: string
     course_ids?: string[]
-    new_venues?: { name?: string; website?: string | null }[]
     events?: ProposedRoundInput[]
   }
 
@@ -83,7 +84,6 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   // No longer collected by the form; kept nullable so an older client that
   // still sends one doesn't lose it.
   const description = body.description?.trim() || null
-  const newVenues = Array.isArray(body.new_venues) ? body.new_venues : []
 
   const admin = createAdminClient()
 
@@ -96,16 +96,20 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   // approval silently drops the venue it was granting.
   const requestedIds = Array.from(new Set(body.course_ids ?? []))
   let requestedCourseIds: string[] = []
+  // Kept whole rather than as ids alone: working out what a venue has open on a
+  // date needs its calendar id, timezone, daily cap and curated-slot flag.
+  const coursesById = new Map<string, Course>()
   if (requestedIds.length) {
     const { data: validCourses } = await admin
       .from('courses')
-      .select('id')
+      .select('*')
       .in('id', requestedIds)
       .eq('active', true)
       .in('approval_status', ['active', 'pending'])
-    requestedCourseIds = (validCourses ?? []).map(c => c.id)
+    for (const c of (validCourses ?? []) as Course[]) coursesById.set(c.id, c)
+    requestedCourseIds = Array.from(coursesById.keys())
   }
-  if (requestedCourseIds.length === 0 && newVenues.length === 0) {
+  if (requestedCourseIds.length === 0) {
     return NextResponse.json({ error: 'Choose at least one valid venue.' }, { status: 400 })
   }
 
@@ -131,41 +135,13 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     return NextResponse.json({ error: 'You already have an application under review.' }, { status: 409 })
   }
 
-  // Create the clubs the applicant named that aren't on LinkUp yet. This happens
-  // here, on submission — not when they typed the name — so abandoning the form
-  // doesn't leave a pending course sitting in the admin queue for an application
-  // that was never made. requestPendingCourse dedupes by slug, so a resubmission
-  // after a failure reuses the same row rather than piling up near-duplicates.
-  //
-  // Index order is load-bearing: rounds reference these venues as `new:<index>`.
-  const createdVenueIds: string[] = []
-  for (const venue of newVenues) {
-    const result = await requestPendingCourse({
-      admin,
-      name: String(venue.name ?? '').trim(),
-      website: typeof venue.website === 'string' ? venue.website.trim() || null : null,
-      requestedBy: ctx.memberId,
-    })
-
-    if (result.error || !result.course) {
-      return NextResponse.json(
-        { error: result.error ?? 'Could not add one of the new venues.' },
-        { status: result.status ?? 500 }
-      )
-    }
-    createdVenueIds.push(result.course.id)
-  }
-
-  // Both kinds of venue are just courses from here on.
-  const allVenueIds = Array.from(new Set([...requestedCourseIds, ...createdVenueIds]))
-
   const { data, error } = await admin
     .from('host_applications')
     .insert({
       member_id: ctx.memberId,
       name: sanitiseText(name),
       description: description ? sanitiseText(description) : null,
-      requested_course_ids: allVenueIds,
+      requested_course_ids: requestedCourseIds,
     })
     .select()
     .single()
@@ -177,24 +153,40 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  // Rounds the applicant proposed. `venue` is either a course id or a
-  // `new:<index>` reference into new_venues, now resolvable to a real course.
-  // Anything that doesn't resolve to a granted venue is dropped rather than
-  // carried, so approval can't try to create an event at a course the host was
-  // never given.
+  // Rounds the applicant proposed. `venue` is a course id. Anything that doesn't
+  // resolve to a granted venue is dropped rather than carried, so approval can't
+  // try to create an event at a course the host was never given.
   const proposed = Array.isArray(body.events) ? body.events : []
-  const rounds = proposed
-    .map(ev => {
-      const ref = String(ev.venue ?? '')
-      const courseId = ref.startsWith(NEW_VENUE_REF)
-        ? createdVenueIds[Number(ref.slice(NEW_VENUE_REF.length))]
-        : ref
-      return { ev, courseId }
-    })
+  const kept = proposed
+    .map(ev => ({ ev, courseId: String(ev.venue ?? '') }))
     .filter((r): r is { ev: ProposedRoundInput; courseId: string } =>
-      !!r.courseId && allVenueIds.includes(r.courseId)
+      !!r.courseId && requestedCourseIds.includes(r.courseId)
     )
+
+  // Capacity is what each venue actually has open that day, exactly as a hosted
+  // event created directly gets it — a flat number would either oversell the
+  // thin days or waste the busy ones. Looked up per course so a schedule across
+  // several clubs costs one pass each, not one per round.
+  //
+  // A round whose day has since filled is dropped rather than rejected: an
+  // application is a proposal an admin reviews, so losing one date shouldn't
+  // cost the applicant the whole submission.
+  const spotsByCourse = new Map<string, Map<string, number>>()
+  for (const courseId of new Set(kept.map(r => r.courseId))) {
+    const course = coursesById.get(courseId)
+    if (!course) continue
+    const datesForCourse = kept.filter(r => r.courseId === courseId).map(r => String(r.ev.event_date))
+    spotsByCourse.set(courseId, await openSpotsByDate(admin, course, datesForCourse))
+  }
+
+  const rounds = kept
     .map(({ ev, courseId }) => ({
+      ev,
+      courseId,
+      spots: spotsByCourse.get(courseId)?.get(String(ev.event_date)) ?? 0,
+    }))
+    .filter(r => r.spots > 0)
+    .map(({ ev, courseId, spots }) => ({
       application_id: data.id,
       course_id: courseId,
       event_date: String(ev.event_date),
@@ -202,8 +194,11 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
       tee_time: typeof ev.tee_time === 'string' && ev.tee_time.trim()
         ? sanitiseText(ev.tee_time.trim())
         : null,
-      total_spots: Number(ev.total_spots),
-      member_guest_rate: Number(ev.member_guest_rate),
+      total_spots: spots,
+      // A fixed term, same as a hosted event created directly — these rows
+      // become hosted_events on approval, so they can't be listed at a
+      // different rate from one another.
+      member_guest_rate: HOST_EVENT_GUEST_RATE_USD,
       dinner: ev.dinner === true,
     }))
 

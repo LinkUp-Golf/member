@@ -9,7 +9,7 @@
 import { fromZonedTime, formatInTimeZone } from 'date-fns-tz'
 import { getAvailableSlots } from '@/lib/ghl/client'
 import { getCache, withCache } from '@/lib/cache'
-import { GHL_SLOTS_NS, GHL_SLOTS_TTL_MS, ghlSlotsKey } from '@/lib/cache/keys'
+import { GHL_SLOTS_NS, GHL_SLOTS_TTL_MS, ghlSlotsKey, ghlSlotsMonthKey } from '@/lib/cache/keys'
 import { AVIARA_TIMEZONE, FALLBACK_ROUND_DURATION_MINUTES, DEFAULT_MAX_PLAYERS_PER_DAY } from '@/lib/constants'
 import type { createAdminClient } from '@/lib/supabase-server'
 import type { Course, GHLBookingSlot } from '@/types'
@@ -166,6 +166,249 @@ async function mapWithConcurrency<T, R>(
 
   await Promise.all(workers)
   return results
+}
+
+// ---- Aggregated month availability --------------------------
+//
+// The month calendar on /book answers "which venues can I play at, on which
+// day" for every bookable course at once. GHL has no cross-calendar endpoint,
+// so it costs one call per course per month — bounded by GHL_CONCURRENCY and
+// cached per calendar+month, which is what keeps a second member opening the
+// same month free.
+
+/** A venue as the month calendar needs to label and colour it. */
+export interface CalendarVenue {
+  id: string
+  name: string
+  city: string | null
+  state: string | null
+}
+
+/** One bookable tee time, as the calendar and its detail sheet quote it. */
+export interface CalendarTee {
+  /** Wall-clock 'HH:mm:ss' at the venue. */
+  time: string
+  /** Seats left at this tee time, never more than the day itself has left. */
+  spotsOpen: number
+}
+
+/** One venue's opening on one day. */
+export interface CalendarOpening {
+  courseId: string
+  /** Bookable tee times left that day — the true total, not tees.length. */
+  openSlots: number
+  /**
+   * Seats bookable across those tee times, clamped to what the venue's daily
+   * player cap still allows. Without the clamp a day could advertise more
+   * seats than it can actually sell — the cap is enforced atomically at
+   * booking time, so the surplus would fail with DAY_FULL on submit.
+   */
+  openSpots: number
+  /**
+   * The earliest few bookable tee times. Capped: the detail sheet previews
+   * them, and the member picks an exact time in the booking flow itself, so
+   * sending a whole day's grid per venue per day would bloat the month payload
+   * for nothing.
+   */
+  tees: CalendarTee[]
+}
+
+// How many tee times per venue-day ride along in the month payload.
+const TEE_PREVIEW_LIMIT = 4
+
+export interface MonthAvailability {
+  /** Every venue with at least one opening in the window, sorted by name. */
+  venues: CalendarVenue[]
+  /** 'YYYY-MM-DD' → the venues open that day. */
+  days: Record<string, CalendarOpening[]>
+}
+
+/** A course's whole month of slots, curated dates overriding GHL as ever. */
+async function slotsForMonth(
+  admin: AdminClient,
+  course: Course,
+  month: string,
+  startDate: string,
+  endDate: string,
+): Promise<Record<string, GHLBookingSlot[]>> {
+  const timezone = course.timezone || AVIARA_TIMEZONE
+  const durationMins = course.meeting_duration_mins || FALLBACK_ROUND_DURATION_MINUTES
+
+  const ghl = course.ghl_calendar_id
+    ? await withCache(
+        getCache(GHL_SLOTS_NS),
+        ghlSlotsMonthKey(course.ghl_calendar_id, month),
+        () => getAvailableSlots({
+          calendarId: course.ghl_calendar_id as string,
+          startDate,
+          endDate,
+          timezone,
+          userId: course.ghl_calendar_user_id || undefined,
+          sendSeatsPerSlot: true,
+          fallbackDurationMins: durationMins,
+        }),
+        GHL_SLOTS_TTL_MS,
+      )
+    : {}
+
+  if (!course.custom_slots_enabled) return ghl
+
+  // Only curated dates are replaced; the rest keep their GHL availability.
+  const custom = await buildCustomSlots(admin, course.id, startDate, endDate, timezone, durationMins)
+  return { ...ghl, ...custom }
+}
+
+/**
+ * Every venue's openings across one month, keyed by day — what the aggregated
+ * month calendar plots.
+ *
+ * A day is only listed for a venue if a member could actually book it: the
+ * calendar has an open tee time AND the venue's daily player cap still has room.
+ * Both checks mirror coursesWithAvailabilityOn, so the month grid and the
+ * single-date filter can never disagree about whether a day is bookable.
+ *
+ * "Today" is resolved in each venue's own timezone — a tee time is wall-clock
+ * local to the club, so a course an hour ahead drops today's date before one
+ * behind it does.
+ */
+export async function venueAvailabilityForMonth(
+  admin: AdminClient,
+  courses: Course[],
+  month: string,
+  startDate: string,
+  endDate: string,
+): Promise<MonthAvailability> {
+  if (courses.length === 0) return { venues: [], days: {} }
+
+  // Seats already held per venue per day, in one query rather than one per
+  // course-day.
+  const { data: bookingRows } = await admin
+    .from('bookings')
+    .select('course_id, booking_date')
+    .in('course_id', courses.map(c => c.id))
+    .gte('booking_date', startDate)
+    .lte('booking_date', endDate)
+    .not('status', 'in', NON_HOLDING_STATUSES)
+
+  const held = new Map<string, number>()
+  for (const row of bookingRows ?? []) {
+    const key = `${row.course_id}|${row.booking_date}`
+    held.set(key, (held.get(key) ?? 0) + 1)
+  }
+
+  const perCourse = await mapWithConcurrency(courses, GHL_CONCURRENCY, async (course) => {
+    // An unreachable calendar yields no slots rather than throwing, so one bad
+    // venue drops out of the month instead of emptying it.
+    const slots = await slotsForMonth(admin, course, month, startDate, endDate)
+    const cap = course.max_players_per_day ?? DEFAULT_MAX_PLAYERS_PER_DAY
+    const todayAtVenue = formatInTimeZone(new Date(), course.timezone || AVIARA_TIMEZONE, 'yyyy-MM-dd')
+
+    const openings: Array<{ date: string; opening: CalendarOpening }> = []
+    for (const [date, daySlots] of Object.entries(slots)) {
+      if (date < todayAtVenue) continue
+
+      // What the venue's daily cap still allows, whatever its calendar says.
+      const dayRemaining = cap - (held.get(`${course.id}|${date}`) ?? 0)
+      if (dayRemaining <= 0) continue
+
+      const open = (daySlots ?? []).filter(s => s.available && (s.spotsOpen ?? 0) > 0)
+      if (open.length === 0) continue
+
+      openings.push({
+        date,
+        opening: {
+          courseId: course.id,
+          openSlots: open.length,
+          openSpots: Math.min(
+            open.reduce((n, s) => n + (s.spotsOpen ?? 0), 0),
+            dayRemaining,
+          ),
+          // startTime carries the venue's own offset, so the wall-clock time is
+          // readable straight off the string — no re-zoning on the client.
+          tees: open
+            .slice(0, TEE_PREVIEW_LIMIT)
+            .map(s => ({
+              time: s.startTime.split('T')[1]?.slice(0, 8) ?? '',
+              // No single tee time can seat more than the day has left either.
+              spotsOpen: Math.min(s.spotsOpen ?? 0, dayRemaining),
+            }))
+            .filter(t => t.time),
+        },
+      })
+    }
+    return { course, openings }
+  })
+
+  const days: Record<string, CalendarOpening[]> = {}
+  const venues: CalendarVenue[] = []
+
+  for (const { course, openings } of perCourse) {
+    if (openings.length === 0) continue
+    venues.push({ id: course.id, name: course.name, city: course.city, state: course.state })
+    for (const { date, opening } of openings) {
+      ;(days[date] ??= []).push(opening)
+    }
+  }
+
+  venues.sort((a, b) => a.name.localeCompare(b.name))
+  // Within a day, the venue teeing off earliest reads first — the same order the
+  // grid chips and the agenda render in.
+  for (const list of Object.values(days)) {
+    list.sort((a, b) => (a.tees[0]?.time ?? '').localeCompare(b.tees[0]?.time ?? ''))
+  }
+
+  return { venues, days }
+}
+
+/**
+ * How many spots one course has open on each of an arbitrary set of dates.
+ *
+ * A hosted round is listed with the seats the venue actually has that day — two
+ * days at the same club rarely have the same room — so this is what decides an
+ * event's capacity rather than a number the host types or a flat default.
+ *
+ * Dates are grouped by month because availability is fetched (and cached) a
+ * month at a time; a schedule spanning a month boundary costs one call per
+ * month, not one per date. A date with nothing open is absent from the result,
+ * which the caller must treat as "can't be listed" rather than zero.
+ */
+export async function openSpotsByDate(
+  admin: AdminClient,
+  course: Course,
+  dates: string[],
+): Promise<Map<string, number>> {
+  const byMonth = new Map<string, string[]>()
+  for (const date of dates) {
+    const month = date.slice(0, 7)
+    const list = byMonth.get(month) ?? []
+    list.push(date)
+    byMonth.set(month, list)
+  }
+
+  const out = new Map<string, number>()
+
+  for (const month of byMonth.keys()) {
+    const [yearStr, monthStr] = month.split('-')
+    const year = parseInt(yearStr ?? '0', 10)
+    const monthIdx = parseInt(monthStr ?? '1', 10) - 1
+    const startDate = formatDateOnly(new Date(year, monthIdx, 1))
+    const endDate = formatDateOnly(new Date(year, monthIdx + 1, 0))
+
+    const { days } = await venueAvailabilityForMonth(admin, [course], month, startDate, endDate)
+    for (const [date, openings] of Object.entries(days)) {
+      const spots = openings[0]?.openSpots ?? 0
+      if (spots > 0) out.set(date, spots)
+    }
+  }
+
+  return out
+}
+
+/** Local YYYY-MM-DD, avoiding the UTC shift toISOString would introduce. */
+function formatDateOnly(d: Date): string {
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${mm}-${dd}`
 }
 
 /**

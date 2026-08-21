@@ -7,7 +7,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { AdminPageHeader, AdminCard, Badge, ProgressBar } from '@/components/admin/AdminUI'
+import { AdminPageHeader, AdminCard, Badge } from '@/components/admin/AdminUI'
 import { ContentLoader } from '@/components/ui/Loading'
 import { formatEventTeeTime as fmtTime } from '@/lib/utils'
 import Avatar from '@/components/ui/Avatar'
@@ -24,6 +24,7 @@ const fmtDateTime = (d: string) =>
 
 
 const STATUS_META: Record<HostedEventStatus, { label: string; colour: 'green' | 'gold' | 'red' | 'blue' | 'gray' }> = {
+  pending_approval:        { label: 'Awaiting approval', colour: 'gold' },
   upcoming:                { label: 'Upcoming',         colour: 'green' },
   completed:               { label: 'Completed',        colour: 'blue' },
   pending_credit_approval: { label: 'Credit approval',  colour: 'gold' },
@@ -50,7 +51,6 @@ export default function HostEventDetailPage() {
 
   useEffect(() => { if (id) load() }, [id, load])
 
-  const filled = event?.filled_spots ?? 0
   const meta = event ? STATUS_META[event.status] : null
 
   return (
@@ -69,25 +69,26 @@ export default function HostEventDetailPage() {
             action={meta ? <Badge label={meta.label} colour={meta.colour} /> : undefined}
           />
 
-          <AdminCard title="Spots">
-            <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
-              <span>{filled} of {event.total_spots} filled</span>
-              <span>{event.remaining_spots ?? (event.total_spots - filled)} left</span>
-            </div>
-            <ProgressBar value={filled} max={event.total_spots} />
-            <p className="text-xs text-gray-500 mt-3">
-              Members pay {fmtMoney(event.member_price ?? event.member_guest_rate)} · your guest rate {fmtMoney(event.member_guest_rate)}
-              {' · '}credit for this event {fmtMoney(event.member_guest_rate)}
-            </p>
-            {event.dinner && (
-              <p className="text-xs text-green-800 mt-2 font-medium">🍽 Dinner included</p>
-            )}
-          </AdminCard>
+          {/* AdminCard carries no margin of its own — stacked panels need the
+              gap from their container, or they render edge to edge as one
+              undifferentiated block. */}
+          <div className="space-y-6">
+          {/* The terms and dinner note used to sit in a "Spots" card above the
+              roster, alongside a progress bar counting reservations only —
+              which was half the people actually on the round. The roster itself
+              is the headcount now, so this is just the round's terms. */}
+          <p className="text-xs text-gray-500">
+            Members pay {fmtMoney(event.member_price ?? event.member_guest_rate)}
+            {" · "}your credit for this round {fmtMoney(event.member_guest_rate)}
+            {event.dinner ? " · dinner included" : ""}
+          </p>
 
-          <AdminCard title={`Registered members (${registrations.length})`}>
+          <AdminCard
+            title={`${registrations.length} ${registrations.length === 1 ? "member" : "members"}`}
+          >
             {registrations.length === 0 ? (
               <p className="text-sm text-gray-400 italic py-6 text-center">
-                No one has reserved a spot yet.
+                No one is playing this round yet.
               </p>
             ) : (
               <div className="divide-y divide-gray-50">
@@ -103,7 +104,16 @@ export default function HostEventDetailPage() {
                       <p className="text-sm font-medium text-gray-900 truncate">
                         {`${r.member?.first_name ?? ''} ${r.member?.last_name ?? ''}`.trim() || 'Member'}
                       </p>
-                      <p className="text-xs text-gray-400">Reserved {fmtDateTime(r.created_at)}</p>
+                      {/* How they got here. Booking the venue that day puts a
+                          member at this round without reserving through it, and
+                          the host should be able to tell the two apart. */}
+                      <p className="text-xs text-gray-400">
+                        {r.source === "booking"
+                          ? `Booked this venue${r.tee_time ? ` · ${r.tee_time.slice(0, 5)}` : ""}`
+                          : r.created_at
+                            ? `Reserved ${fmtDateTime(r.created_at)}`
+                            : "Reserved"}
+                      </p>
                     </div>
                   </div>
                 ))}
@@ -133,6 +143,7 @@ export default function HostEventDetailPage() {
               <p className="text-sm text-gray-600">{event.cancellation_reason}</p>
             </AdminCard>
           )}
+          </div>
         </>
       )}
     </div>

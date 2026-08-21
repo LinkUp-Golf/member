@@ -7,18 +7,12 @@ import {
   addDays, addMonths, format, isSameMonth, isToday,
 } from 'date-fns'
 import { cn } from '@/lib/utils'
+import {
+  VENUE_DOT as DOT,
+  VENUE_TEXT as TEXT,
+  VENUE_COLOUR_COUNT,
+} from '@/components/calendar/venue-colours'
 import type { HostedEvent } from '@/types'
-
-// A stable colour per venue so the same club reads the same across the month
-// (dots on mobile, name chips on wider screens, and the legend all share it).
-const DOT = [
-  'bg-emerald-500', 'bg-sky-500', 'bg-violet-500', 'bg-orange-500',
-  'bg-rose-500', 'bg-teal-500', 'bg-indigo-500', 'bg-fuchsia-500',
-]
-const TEXT = [
-  'text-emerald-700', 'text-sky-700', 'text-violet-700', 'text-orange-700',
-  'text-rose-700', 'text-teal-700', 'text-indigo-700', 'text-fuchsia-700',
-]
 
 const WEEKDAYS = [
   ['Sun', 'S'], ['Mon', 'M'], ['Tue', 'T'], ['Wed', 'W'],
@@ -175,7 +169,7 @@ function EventCalendar({
     for (const e of events) {
       const cid = e.course?.id ?? 'unknown'
       if (!colourByCourse.has(cid)) {
-        colourByCourse.set(cid, colourByCourse.size % DOT.length)
+        colourByCourse.set(cid, colourByCourse.size % VENUE_COLOUR_COUNT)
         nameByCourse.set(cid, e.course?.name ?? 'Course')
       }
     }

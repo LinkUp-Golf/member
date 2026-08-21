@@ -321,14 +321,37 @@ export const NotificationTemplates = {
   // Sent to admins when a host's event goes live. Events publish without
   // waiting for approval, so this is the after-the-fact heads-up that gives an
   // admin the chance to reject one that shouldn't have gone out.
-  hostedEventNeedsReview: (hostName: string, courseName: string, date: string): PushPayload => ({
-    title: 'New hosted event is live',
-    body:  `${hostName} published an event at ${courseName} on ${date}. Review it if it shouldn't be listed.`,
+  // Sent to admins when a host submits an event. It is not live — it sits in
+  // 'pending_approval' until someone sets up the GHL calendar and approves it,
+  // so this is a queue item to action, not an FYI about something already out.
+  // A host asking to run a round. Nothing is visible to members until an admin
+  // approves it, so this push is the only thing that says there's a queue.
+  // `dateCount` covers the batch case: a host picks their dates in one go, and
+  // naming only the first would understate what's waiting.
+  hostedEventNeedsReview: (
+    hostName: string,
+    courseName: string,
+    date: string,
+    dateCount = 1,
+  ): PushPayload => ({
+    title: 'A host wants to run a round',
+    body: dateCount > 1
+      ? `${hostName} wants to host ${dateCount} rounds at ${courseName}, from ${date}. Set up the calendar, then approve them to put them in front of members.`
+      : `${hostName} wants to host a round at ${courseName} on ${date}. Set up the calendar, then approve it to put it in front of members.`,
     url:   '/admin/hosts',
     tag:   'hosted-event-review',
   }),
 
-  // Sent to the host when an admin takes their live event down. It's cancelled,
+  // Sent to the host when an admin publishes their event. Until this lands the
+  // event exists but no member can see it, so this is the one that matters.
+  hostedEventApproved: (courseName: string, date: string): PushPayload => ({
+    title: 'Your event is live',
+    body:  `Your ${courseName} event on ${date} has been approved — members can reserve a spot now.`,
+    url:   '/host/events',
+    tag:   'hosted-event-approved',
+  }),
+
+  // Sent to the host when an admin takes their event down. It's cancelled,
   // not parked — so the host's route back is a new event, not a republish.
   hostedEventRejected: (courseName: string, date: string, reason: string): PushPayload => ({
     title: 'Your event was taken down',
@@ -374,6 +397,15 @@ export const NotificationTemplates = {
     body:  `You redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in credits toward golf.`,
     url:   '/host/credits',
     tag:   'host-credit-redeemed',
+  }),
+
+  // A code is the whole point of issuing one, so it goes in the notification
+  // body: the member can copy it from here without reopening the app.
+  creditCouponIssued: (amount: number, code: string): PushPayload => ({
+    title: 'Your credit code is ready',
+    body:  `${code} — ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} off at checkout.`,
+    url:   '/host/credits',
+    tag:   'host-credit-coupon',
   }),
 
   // Sent to admins — a redemption isn't settled until someone puts it against a

@@ -9,6 +9,8 @@ import AppShell from '@/components/layout/AppShell'
 import { Spinner } from '@/components/ui/Loading'
 import { memberPrice } from '@/lib/hosts/events'
 import { formatEventTeeTime as fmtTime } from '@/lib/utils'
+import CreditCouponModal from '@/components/credits/CreditCouponModal'
+import { useCreditWallet } from '@/hooks/useCreditWallet'
 import type { HostedEvent } from '@/types'
 
 const fmtMoney = (n: number) =>
@@ -34,6 +36,11 @@ export default function HostedEventDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [confirmingCancel, setConfirmingCancel] = useState(false)
+  const [payingWithCredit, setPayingWithCredit] = useState(false)
+
+  // A host who is also a member can settle this round out of what they earned
+  // hosting other ones.
+  const wallet = useCreditWallet(true)
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/hosted-events/${id}`)
@@ -71,6 +78,9 @@ export default function HostedEventDetailPage() {
   const remaining = event?.remaining_spots ?? 0
   const full = remaining <= 0
   const registered = !!event?.is_registered
+  // What a member pays for this round, and the code they already hold for it.
+  const price = event ? (event.member_price ?? memberPrice(event.member_guest_rate)) : 0
+  const heldCoupon = event ? wallet.couponForEvent(event.id) : null
   // Only a live event is joinable. A shared link to a cancelled/finished event
   // must not render a Reserve button that's guaranteed to fail server-side.
   const isOpen = event?.status === 'upcoming'
@@ -165,8 +175,65 @@ export default function HostedEventDetailPage() {
                 )}
               </div>
             )}
+            {/* Once the spot is theirs, the round has to be paid for. Credit
+                is the second way to do that: the code stands in for the cash,
+                so this sits where the "arrange it with the host" line was and
+                falls back to that line for anyone with nothing to spend. */}
             {registered && (
-              <p className="text-xs text-green-900/45 text-center mt-3">You have a spot at this event. Payment is arranged with the host.</p>
+              heldCoupon ? (
+                <>
+                  {/* What the credit does, not just its code — and the reminder
+                      that a code is inert until it reaches the checkout. */}
+                  <button
+                    type="button"
+                    onClick={() => setPayingWithCredit(true)}
+                    className="btn btn-outline btn-full justify-center mt-3"
+                  >
+                    🎟 {fmtMoney(Number(heldCoupon.amount))} credit ready · view code
+                  </button>
+                  <p className="text-xs text-green-900/45 text-center mt-2">
+                    Paste it into the coupon field when you settle this round.
+                  </p>
+                </>
+              ) : isOpen && wallet.coversBill(price) ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setPayingWithCredit(true)}
+                    className="btn btn-outline btn-full justify-center mt-3"
+                  >
+                    Pay with credits · {fmtMoney(price)}
+                  </button>
+                  <p className="text-xs text-green-900/45 text-center mt-2">
+                    You have {fmtMoney(wallet.balance)} in credits — enough to
+                    cover this round.
+                  </p>
+                </>
+              ) : isOpen && wallet.canPayWithCredit ? (
+                /* There is credit, just not enough: a code has to pay the round
+                   in full, so there's nothing to offer here. Saying how far off
+                   they are beats silently hiding the option they know exists. */
+                <p className="text-xs text-green-900/45 text-center mt-3">
+                  You have {fmtMoney(wallet.balance)} in credits —{' '}
+                  {fmtMoney(price - wallet.balance)} short of covering this round,
+                  so it&apos;s settled with the host.
+                </p>
+              ) : (
+                <p className="text-xs text-green-900/45 text-center mt-3">You have a spot at this event. Payment is arranged with the host.</p>
+              )
+            )}
+
+            {payingWithCredit && event && (
+              <CreditCouponModal
+                target={{ kind: 'hosted_event', hostedEventId: event.id }}
+                price={price}
+                balance={wallet.balance}
+                paymentUrl={event.course?.payment_url ?? null}
+                roundLabel={`${event.course?.name ?? 'this round'} on ${fmtDate(event.event_date)}`}
+                existing={heldCoupon}
+                onIssued={() => wallet.refetch()}
+                onClose={() => setPayingWithCredit(false)}
+              />
             )}
           </>
         )}
