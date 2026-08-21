@@ -544,7 +544,7 @@ export interface HostedEvent {
     tee_time: string | null
   }[]
   booked_spots?: number
-  course?: { id: string; name: string; city?: string | null } | null
+  course?: { id: string; name: string; city?: string | null; payment_url?: string | null } | null
   host?: { id: string; name: string; member?: { first_name: string; last_name: string } | null } | null
   proofs?: HostedEventProof[]
   /** True when the requesting member holds an active reservation. */
@@ -620,6 +620,52 @@ export interface CreditSummary {
   earned: number
   redeemed: number
   balance: number
+}
+
+/**
+ * Where a credit coupon stands.
+ *   issued   — live in GHL, waiting to be used at a checkout
+ *   redeemed — GHL reports it used; the credit is spent
+ *   void     — cancelled before use; the credit was refunded
+ *   expired  — ran out unused; the credit was refunded
+ */
+export type CreditCouponStatus = 'issued' | 'redeemed' | 'void' | 'expired'
+
+/**
+ * Credit converted into a GHL coupon — the code a member types at a venue's
+ * checkout instead of paying cash. One row per code: the wallet debit that
+ * funded it (`ledger_entry_id`), the coupon it became in GHL, and the booking or
+ * hosted event whose price it was sized against.
+ */
+export interface CreditCoupon {
+  id: string
+  member_id: string
+  ledger_entry_id: string
+  amount: number
+  code: string
+  /** Null only if the GHL call failed, in which case the row is void. */
+  ghl_coupon_id: string | null
+  status: CreditCouponStatus
+  /** Set when the code was issued to pay for one specific booking row. */
+  booking_id: string | null
+  /** Set when it was issued for a hosted round. */
+  hosted_event_id: string | null
+  course_id: string | null
+  usage_count: number
+  starts_at: string
+  /**
+   * When the code stops working. Null means never, which is how codes are
+   * issued now; a date is a legacy row from when they lapsed after 30 days.
+   */
+  expires_at: string | null
+  settled_at: string | null
+  note: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  // Enriched
+  course?: { id: string; name: string; payment_url?: string | null } | null
+  member?: { first_name: string; last_name: string; email?: string } | null
 }
 
 export interface HostStats {

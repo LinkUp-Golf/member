@@ -20,7 +20,10 @@ export const GET = withAuth(
 
     const { data, error } = await admin
       .from('hosted_events')
-      .select('*, course:courses(id, name, city), host:hosts(id, name, member_id, member:members!hosts_member_id_fkey(first_name, last_name))')
+      // payment_url comes along because this is a screen a member pays from:
+      // credit issued for the round hands them a code and the checkout to use
+      // it at, in the same step.
+      .select('*, course:courses(id, name, city, payment_url), host:hosts(id, name, member_id, member:members!hosts_member_id_fkey(first_name, last_name))')
       .eq('id', id)
       .maybeSingle()
 

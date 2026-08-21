@@ -1,6 +1,7 @@
 import { format } from 'date-fns'
 import { titleCaseName } from '@/lib/utils'
 import { validateUUID } from '@/lib/validation'
+import { bookingAmountDue } from './price'
 import type { createAdminClient } from '@/lib/supabase-server'
 
 // Only 'availability_confirmed' — GHL has confirmed the slot and a payment
@@ -39,6 +40,9 @@ export interface PendingPaymentBooking {
   // Name of the member who booked this round, shown when `invited` so the
   // added player can see who invited them. Null otherwise.
   booker_name: string | null
+  // What this row costs, so the payment banner can say what paying with credit
+  // would cover. See bookingAmountDue.
+  amount_due: number
 }
 
 type AdminClient = ReturnType<typeof createAdminClient>
@@ -107,14 +111,14 @@ export async function findPendingPaymentBookings(
 ): Promise<PendingPaymentBooking[]> {
   const { data } = await admin
     .from('bookings')
-    .select('id, member_id, course_id, booking_date, tee_time, status, guest_name, player_member_id, booker:members!bookings_member_id_fkey(first_name, last_name), course:courses!bookings_course_id_fkey(name, payment_url)')
+    .select('id, member_id, course_id, booking_date, tee_time, status, guest_name, player_member_id, amount_charged, booker:members!bookings_member_id_fkey(first_name, last_name), course:courses!bookings_course_id_fkey(name, payment_url, cost_per_player)')
     .or(`member_id.eq.${memberId},player_member_id.eq.${memberId}`)
     .in('status', UNPAID_BOOKING_STATUSES)
     .gte('booking_date', todayStr())
     .order('booking_date', { ascending: true })
 
   return (data ?? []).map((row) => {
-    const course = row.course as unknown as { name: string; payment_url: string | null } | null
+    const course = row.course as unknown as { name: string; payment_url: string | null; cost_per_player: number | null } | null
     // The querying member's own round is either their primary row (no guest
     // name) or one where they were the invited player, regardless of who
     // booked it.
@@ -139,6 +143,10 @@ export async function findPendingPaymentBookings(
       target_member_id: isOwnRound ? null : row.player_member_id,
       invited,
       booker_name: invited ? bookerName : null,
+      amount_due: bookingAmountDue({
+        amount_charged: row.amount_charged,
+        cost_per_player: course?.cost_per_player,
+      }),
     }
   })
 }

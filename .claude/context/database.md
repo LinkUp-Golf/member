@@ -46,6 +46,8 @@
 | `guest_access_requests` | Cross-course visit requests, moderated | → members, courses |
 | `play_suggestions` | Dismissed play-partner suggestions | unique `(member_id, suggested_id)` |
 | `push_subscriptions` | Web Push endpoints | unique `endpoint`, cascade on delete |
+| `credit_ledger` | Append-only member credit wallet; signed `amount` (earned +, redeemed −, adjusted ±), so a balance is `SUM(amount)` per `member_id` | → members, hosts (nullable — credit can arrive without a host row), hosted_events |
+| `credit_coupons` | Credit converted into a GHL coupon: the code, the `credit_ledger` debit that funded it, and the booking / hosted event it was issued against. Codes don't expire (`expires_at` NULL); credit comes back via a refund, which deletes the coupon at GHL | → members, credit_ledger (`ON DELETE RESTRICT`), bookings, hosted_events, courses. Partial unique on `booking_id` and on `(member_id, hosted_event_id)` **where status = 'issued'** — one open code per bill |
 
 ## Row-Level Security (RLS)
 
@@ -100,6 +102,14 @@ If a new table needs live updates, add it to the publication in a migration.
 - `update_updated_at()` — bumps `updated_at` on update (members, profiles).
 - `create_member_profile()` — auto-creates a `member_profiles` row on member
   insert (`security definer`).
+- **Money is service-role only.** Every function that moves credit is
+  `security definer` with `EXECUTE` revoked from `anon`/`authenticated`:
+  `award_host_event_credit`, `redeem_member_credit`, `adjust_member_credit`,
+  `issue_credit_coupon`, `settle_credit_coupon`,
+  `attach_credit_coupon_ghl_id`. They take `pg_advisory_xact_lock` on the
+  member's wallet so concurrent spends can't both read the same balance.
+  `settle_credit_coupon` is idempotent (only acts on a coupon still `issued`),
+  which is what stops a re-run refunding twice.
 - Beware **RLS recursion** on self-referential policies — there is a dedicated fix
   migration (`20260528000002_fix_rls_recursion.sql`); review it before changing
   `conversation_participants` policies.

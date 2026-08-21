@@ -31,7 +31,11 @@ function getClient(): HighLevel {
 }
 
 // ---- Raw fetch for endpoints not covered by the SDK ---------
-async function ghlFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+// Exported so sibling modules covering other uncovered areas (./coupons) share
+// one place that knows the base URL, the auth header and the error mapping.
+// `Version` is spread last from options.headers, so a caller on a different API
+// version (the payments endpoints are on v3) can override it.
+export async function ghlFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${GHL_BASE_URL}${path}`, {
     ...options,
     headers: {

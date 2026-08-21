@@ -28,6 +28,9 @@ import VenueDayDetailSheet, {
   type VenueDayDetail,
 } from "@/components/calendar/VenueDayDetailSheet";
 import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
+import { bookingAmountDue } from "@/lib/bookings/price";
+import CreditCouponModal from "@/components/credits/CreditCouponModal";
+import { useCreditWallet } from "@/hooks/useCreditWallet";
 import {
   format,
   differenceInHours,
@@ -76,6 +79,8 @@ interface PendingPayment {
   target_member_id: string | null;
   invited: boolean;
   booker_name: string | null;
+  // What this row costs — what a credit code would be covering.
+  amount_due: number;
 }
 
 function formatSlotTime(isoString: string): string {
@@ -86,6 +91,7 @@ export default function BookPage() {
   const { user } = useProfile();
   const searchParams = useSearchParams();
   const inviteMemberId = searchParams?.get("invite") ?? null;
+
 
   // What the member picked on the calendar. Venue, day and tee time arrive
   // together, so there is no partial selection to hold between screens.
@@ -135,6 +141,15 @@ export default function BookPage() {
   // checkout tab we're re-checking their status, so block a second tap until we
   // know whether that row has already cleared (guards against a double payment).
   const [refreshingPending, setRefreshingPending] = useState(false);
+
+  // Credit a member earned (hosting a round, referring someone) is a way to
+  // settle a tee time, so the payment surfaces need to know about it. Deliberately
+  // not fetched on every visit: most of them are someone browsing the calendar
+  // with nothing to pay, and the wallet is only worth a request once there's a
+  // bill on screen — a pending payment, or the bookings list itself.
+  const creditWallet = useCreditWallet(
+    !!user && (pendingBookings.length > 0 || activeTab === "myBookings"),
+  );
 
   useEffect(() => {
     if (user) loadMyBookings();
@@ -367,6 +382,7 @@ export default function BookPage() {
           pendingBookings={pendingBookings}
           loadingPendingBookings={loadingPendingBookings}
           refreshingPending={refreshingPending}
+          wallet={creditWallet}
         />
       ) : (
         <MyBookingsTab
@@ -381,6 +397,7 @@ export default function BookPage() {
           onPlayersAdded={(rows) =>
             setMyBookings((prev) => [...rows, ...prev])
           }
+          wallet={creditWallet}
         />
       )}
     </AppShell>
@@ -445,15 +462,60 @@ function groupPendingPayments(pending: PendingPayment[]): PendingGroup[] {
   return groups;
 }
 
+// A code already issued for a round. The bare code used to be the whole chip,
+// which told a member nothing: not that it was credit, not what it was worth,
+// and not that there was still a checkout to visit. So the chip carries the
+// meaning — credit, applied, for this much — and the code itself lives one tap
+// away in the modal, where it can be copied and explained.
+function CreditReadyChip({
+  amount,
+  onOpen,
+  compact = false,
+}: {
+  amount: number;
+  onOpen: () => void;
+  /** Drops the word "credit" where the row is tightest. */
+  compact?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title="View your credit code"
+      className="text-xs font-semibold px-2.5 py-1.5 rounded-lg flex-shrink-0 inline-flex items-center gap-1"
+      style={{ background: "rgba(146,100,10,0.1)", color: "#92640a" }}
+    >
+      <span aria-hidden>🎟</span>
+      {formatCredit(amount)}
+      {!compact && " credit"}
+    </button>
+  );
+}
+
+// Whole dollars — these chips sit in a row with several other controls, and the
+// cents are never the interesting part of a round's price.
+function formatCredit(amount: number): string {
+  return Number(amount).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+}
+
 function PendingPaymentBanner({
   pending,
   refreshing = false,
+  wallet,
 }: {
   pending: PendingPayment[];
   // True while the parent is re-checking the pending-payment list (e.g. right
   // after the member returns from the checkout tab). Disables the "Pay →" links
   // so a member can't fire a second payment before we know a row has cleared.
   refreshing?: boolean;
+  // The member's credit, so a host who earned it can settle a round with it
+  // instead of cash. Absent (or empty) simply means no credit option is offered.
+  wallet?: ReturnType<typeof useCreditWallet>;
 }) {
   const router = useRouter();
   const [index, setIndex] = useState(0);
@@ -461,6 +523,8 @@ function PendingPaymentBanner({
   // shows a disabled/loading state.
   const [messagingId, setMessagingId] = useState<string | null>(null);
   const [messageError, setMessageError] = useState("");
+  // The row whose credit modal is open — one at a time, keyed by booking id.
+  const [creditRow, setCreditRow] = useState<PendingPayment | null>(null);
 
   const groups = groupPendingPayments(pending);
   const current = groups[Math.min(index, groups.length - 1)];
@@ -598,6 +662,34 @@ function PendingPaymentBanner({
                     <MessageCircle className="w-3.5 h-3.5" strokeWidth={2} />
                   </button>
                 )}
+                {/* Credit is the other way to settle this row. Once a code
+                    exists the chip reports that instead of offering it again. */}
+                {(() => {
+                  const held = wallet?.couponForBooking(row.id) ?? null;
+                  if (held) {
+                    return (
+                      <CreditReadyChip
+                        amount={Number(held.amount)}
+                        onOpen={() => setCreditRow(row)}
+                      />
+                    );
+                  }
+                  // Only when the balance settles this row outright: a code has
+                  // to cover the round in full, so offering it on a balance
+                  // that's short would be an offer we'd refuse.
+                  if (!wallet?.coversBill(row.amount_due)) return null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setCreditRow(row)}
+                      disabled={refreshing}
+                      className="text-xs font-semibold px-2.5 py-1.5 rounded-lg flex-shrink-0 disabled:opacity-50"
+                      style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+                    >
+                      Use credits
+                    </button>
+                  );
+                })()}
                 {row.payment_url ? (
                   <a
                     href={row.payment_url}
@@ -625,6 +717,23 @@ function PendingPaymentBanner({
               </div>
             ))}
           </div>
+
+          {/* A code on its own is inert until it's typed into the checkout, and
+              nothing else on this screen says so. Shown once for the card
+              rather than per row, since the instruction is the same either
+              way. */}
+          {rows.some((r) => wallet?.couponForBooking(r.id)) && (
+            <p
+              className="text-xs mt-2 pt-2 leading-relaxed"
+              style={{
+                color: "#92640a",
+                borderTop: "1px solid rgba(0,38,105,0.06)",
+              }}
+            >
+              🎟 Tap your credit chip to copy the code, then paste it into the
+              coupon field at checkout — the discount comes off there, not here.
+            </p>
+          )}
 
           {/* When the booker is paying on behalf of additional players, the
               external GHL payment form defaults to the payer's email. Paying
@@ -658,6 +767,21 @@ function PendingPaymentBanner({
           )}
         </div>
       </div>
+
+      {creditRow && (
+        <CreditCouponModal
+          target={{ kind: "booking", bookingId: creditRow.id }}
+          // The same figure the server sizes the code to (bookingAmountDue),
+          // so what the member is shown and what they get can't disagree.
+          price={creditRow.amount_due}
+          balance={wallet?.balance ?? 0}
+          paymentUrl={creditRow.payment_url}
+          roundLabel={`${creditRow.course_name} on ${formatPendingDate(creditRow.booking_date)}`}
+          existing={wallet?.couponForBooking(creditRow.id) ?? null}
+          onIssued={() => wallet?.refetch()}
+          onClose={() => setCreditRow(null)}
+        />
+      )}
     </div>
   );
 }
@@ -2356,12 +2480,16 @@ function MyBookingsTab({
   onSwitchToBook: _onSwitchToBook,
   onUpdateBooking,
   onPlayersAdded,
+  wallet,
 }: {
   bookings: Booking[];
   onRefresh: () => void;
   onSwitchToBook: () => void;
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
   onPlayersAdded: (rows: Booking[]) => void;
+  // Passed down rather than fetched here: the page already holds the member's
+  // credit for the payment banner, and two copies would mean two requests.
+  wallet?: ReturnType<typeof useCreditWallet>;
 }) {
   const { user } = useProfile();
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
@@ -2487,6 +2615,7 @@ function MyBookingsTab({
                 onCancel={setCancelTarget}
                 onEditGuest={setEditTarget}
                 onAddPlayer={setAddTarget}
+                wallet={wallet}
               />
             ))}
           </div>
@@ -2585,14 +2714,23 @@ function BookingCard({
   onCancel,
   onEditGuest,
   onAddPlayer,
+  wallet,
 }: {
   group: BookingGroup;
   userId: string | undefined;
   onCancel: (target: CancelTarget) => void;
   onEditGuest: (target: EditGuestTarget) => void;
   onAddPlayer: (target: AddPlayerTarget) => void;
+  // Credit, so a payable row here offers the same choice the payment banner
+  // does. Undefined means the member has none and nothing extra is rendered.
+  wallet?: ReturnType<typeof useCreditWallet>;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // The payable row whose credit modal is open, with what it costs.
+  const [creditTarget, setCreditTarget] = useState<{
+    id: string;
+    amountDue: number;
+  } | null>(null);
 
   const iAmBooker = group.primary.member_id === userId;
   const activePlayers = group.players.filter((p) => p.status !== "cancelled");
@@ -2643,6 +2781,7 @@ function BookingCard({
           ghlBookingId: group.primary.ghl_booking_id ?? null,
           canCancel: canCancelPrimary,
           canPay: group.primary.status === "availability_confirmed",
+          amountDue: bookingAmountDue(group.primary),
           isYou: true,
           adminNotes: group.primary.admin_notes ?? null,
           editablePlayer: null as AdditionalPlayer | null,
@@ -2654,6 +2793,7 @@ function BookingCard({
           ghlBookingId: p.ghl_booking_id ?? null,
           canCancel: hoursUntil > 0 && CANCELLABLE.includes(p.status),
           canPay: p.status === "availability_confirmed",
+          amountDue: bookingAmountDue(p),
           isYou: false,
           adminNotes: p.admin_notes ?? null,
           // Only a still-pending non-member guest can be corrected — once an
@@ -2678,6 +2818,7 @@ function BookingCard({
               ? hoursUntil > 0 && CANCELLABLE.includes(myRow.status)
               : false,
             canPay: myRow?.status === "availability_confirmed",
+            amountDue: bookingAmountDue(myRow ?? group.primary),
             isYou: true,
             adminNotes: myRow?.admin_notes ?? null,
             editablePlayer: null as AdditionalPlayer | null,
@@ -2689,6 +2830,7 @@ function BookingCard({
             ghlBookingId: null,
             canCancel: false,
             canPay: false,
+            amountDue: 0,
             isYou: false,
             adminNotes: group.primary.admin_notes ?? null,
             editablePlayer: null as AdditionalPlayer | null,
@@ -2701,6 +2843,7 @@ function BookingCard({
             canCancel: false,
             editablePlayer: null as AdditionalPlayer | null,
             canPay: false,
+            amountDue: 0,
             isYou: false,
             adminNotes: p.admin_notes ?? null,
           })),
@@ -2839,6 +2982,30 @@ function BookingCard({
 
                 {/* Status badge or Pay CTA */}
                 {!canPay && <BookingStatusBadge status={row.status} />}
+                {/* Credit, offered on the same row as the Pay link — or the code
+                    already covering it, which is what the member needs by then. */}
+                {canPay && (() => {
+                  const held = wallet?.couponForBooking(row.id) ?? null;
+                  // Same rule as the payment banner: credit is only offered when
+                  // it covers the row in full.
+                  if (!held && !wallet?.coversBill(row.amountDue)) return null;
+                  const open = () =>
+                    setCreditTarget({ id: row.id, amountDue: row.amountDue });
+                  // A held code reports what it's worth; the offer stays a verb.
+                  // Compact here — this row also carries Edit and Cancel.
+                  return held ? (
+                    <CreditReadyChip amount={Number(held.amount)} onOpen={open} compact />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={open}
+                      className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
+                      style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+                    >
+                      Use credits
+                    </button>
+                  );
+                })()}
                 {canPay &&
                   (group.primary.course?.payment_url ? (
                     <a
@@ -2946,6 +3113,19 @@ function BookingCard({
             </button>
           )}
         </div>
+      )}
+
+      {creditTarget && (
+        <CreditCouponModal
+          target={{ kind: "booking", bookingId: creditTarget.id }}
+          price={creditTarget.amountDue}
+          balance={wallet?.balance ?? 0}
+          paymentUrl={group.primary.course?.payment_url ?? null}
+          roundLabel={`${courseName} on ${format(bookingDate, "EEEE, MMMM d")}`}
+          existing={wallet?.couponForBooking(creditTarget.id) ?? null}
+          onIssued={() => wallet?.refetch()}
+          onClose={() => setCreditTarget(null)}
+        />
       )}
     </div>
   );
@@ -3362,12 +3542,15 @@ function EventSelectionScreen({
   pendingBookings,
   loadingPendingBookings,
   refreshingPending,
+  wallet,
 }: {
   /** Venue, day and tee time all chosen at once — this goes to confirmation. */
   onSelect: (course: Course, date: string, slot: GHLBookingSlot) => void;
   pendingBookings: PendingPayment[];
   loadingPendingBookings: boolean;
   refreshingPending: boolean;
+  /** Credit, for the payment banner's "use credits" option. */
+  wallet?: ReturnType<typeof useCreditWallet>;
 }) {
   // Every bookable venue, fetched once. The calendar plots availability, but
   // the venue's own details — price, address, rules, links — live on these
@@ -3622,6 +3805,7 @@ function EventSelectionScreen({
           <PendingPaymentBanner
             pending={pendingBookings}
             refreshing={refreshingPending}
+            wallet={wallet}
           />
         )
       )}

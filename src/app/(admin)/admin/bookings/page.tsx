@@ -31,6 +31,10 @@ interface BookingRow {
   player?: { id: string; first_name: string; last_name: string; email: string } | null
   course?: { name: string; id?: string; meeting_duration_mins?: number | null } | null
   course_id?: string
+  // Attached after loading (see loadBookings) — a booking with credit put
+  // toward it. Void/expired codes are kept rather than dropped: they say credit
+  // was attempted here, which is worth seeing when a payment is chased.
+  credit_coupon?: BookingCoupon | null
 }
 
 const STATUS_META: Record<BookingStatus, { label: string; colour: string; dot: string }> = {
@@ -65,6 +69,37 @@ const DINNER_FILTERS = ['all', 'yes', 'no', 'maybe', 'none'] as const
 type DinnerFilter = typeof DINNER_FILTERS[number]
 const DINNER_FILTER_LABELS: Record<DinnerFilter, string> = {
   all: 'All', yes: '🍽 Yes', no: '🍽 No', maybe: '🍽 Maybe', none: 'No response',
+}
+
+// How a round was settled. Members can pay cash at the venue's checkout or put
+// credit toward it, and credit arrives as a GHL coupon code issued against the
+// booking row — so a row with a credit coupon attached is one paid (wholly or
+// partly) with credit, and everything else is cash.
+//
+// Not a column on bookings: the coupon is the record, and inferring from it
+// keeps one source of truth for "was credit used here". 'credits' matches rows
+// with any coupon, 'cash' those with none.
+const PAYMENT_FILTERS = ['all', 'credits', 'cash'] as const
+type PaymentFilter = typeof PAYMENT_FILTERS[number]
+const PAYMENT_FILTER_LABELS: Record<PaymentFilter, string> = {
+  all: 'Cash or credits',
+  credits: '🎟 Paid with credits',
+  cash: 'Cash only',
+}
+
+// The credit code attached to a booking row, as this page needs it.
+interface BookingCoupon {
+  id: string
+  code: string
+  amount: number
+  status: 'issued' | 'redeemed' | 'void' | 'expired'
+}
+
+const COUPON_STATUS_LABEL: Record<BookingCoupon['status'], string> = {
+  issued: 'code issued',
+  redeemed: 'credit used',
+  void: 'returned',
+  expired: 'expired',
 }
 
 // "Who's Playing" is a 30-day-lookahead preset of the date-range toggle —
@@ -330,6 +365,20 @@ function SlotCard({
                           ⏳ {daysLeftLabel}
                         </span>
                       )}
+                      {/* Credit put toward this row. The code is here because
+                          it's what a member quotes when they call about it. */}
+                      {b.credit_coupon && (
+                        <span
+                          title={`${b.credit_coupon.code} · $${b.credit_coupon.amount.toFixed(2)} · ${COUPON_STATUS_LABEL[b.credit_coupon.status]}`}
+                          className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 whitespace-nowrap ${
+                            b.credit_coupon.status === 'void' || b.credit_coupon.status === 'expired'
+                              ? 'bg-gray-100 text-gray-400'
+                              : 'bg-amber-50 text-amber-700'
+                          }`}
+                        >
+                          🎟 ${b.credit_coupon.amount.toFixed(0)} credit
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-gray-400 mt-0.5 truncate">{info.sub}</p>
                   </div>
@@ -560,6 +609,7 @@ export default function AdminBookingsPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [dinnerFilter, setDinnerFilter] = useState<DinnerFilter>('all')
+  const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all')
   const [locationFilter, setLocationFilter] = useState<string>('all')
   const [tagFilter, setTagFilter] = useState<string>('all')
   const [eventNameFilter, setEventNameFilter] = useState('')
@@ -704,7 +754,33 @@ export default function AdminBookingsPage() {
       players?.forEach(m => playerMap.set(m.id, m))
     }
 
-    const enriched = rows.map(b => ({ ...b, player: b.player_member_id ? (playerMap.get(b.player_member_id) ?? null) : null }))
+    // Which of these were paid with credit. One query for the page rather than
+    // an embed on the bookings select: credit_coupons has no FK PostgREST can
+    // join from bookings, and most rows have no coupon at all.
+    const couponMap = new Map<string, BookingCoupon>()
+    const bookingIds = rows.map(b => b.id)
+    if (bookingIds.length > 0) {
+      const { data: coupons } = await supabase
+        .from('credit_coupons')
+        .select('id, code, amount, status, booking_id')
+        .in('booking_id', bookingIds)
+      for (const c of coupons ?? []) {
+        if (c.booking_id) {
+          couponMap.set(c.booking_id as string, {
+            id: c.id as string,
+            code: c.code as string,
+            amount: Number(c.amount),
+            status: c.status as BookingCoupon['status'],
+          })
+        }
+      }
+    }
+
+    const enriched = rows.map(b => ({
+      ...b,
+      player: b.player_member_id ? (playerMap.get(b.player_member_id) ?? null) : null,
+      credit_coupon: couponMap.get(b.id) ?? null,
+    }))
     setBookings(enriched)
     const initial: Record<string, string> = {}
     enriched.forEach(b => { initial[b.id] = b.admin_notes ?? '' })
@@ -820,13 +896,17 @@ export default function AdminBookingsPage() {
   }
 
   // Status/dinner-RSVP/venue/location/tags are already applied server-side in
-  // loadBookings — only free-text search (out of scope for server-side filtering,
-  // see plan) is re-checked here.
+  // loadBookings — free-text search (out of scope for server-side filtering,
+  // see plan) and the payment method are re-checked here. Payment can't be a
+  // server filter without a join: it's derived from the coupons fetched
+  // alongside the rows.
   const filtered = useMemo(() => bookings.filter(b => {
+    if (paymentFilter === 'credits' && !b.credit_coupon) return false
+    if (paymentFilter === 'cash' && b.credit_coupon) return false
     const info = playerInfo(b)
     const q = search.toLowerCase()
     return !search || info.name.toLowerCase().includes(q) || info.sub.toLowerCase().includes(q)
-  }), [bookings, search])
+  }), [bookings, search, paymentFilter])
 
   const locationOptions = useMemo(() => {
     const set = new Set(courseList.filter(c => c.city || c.state).map(c => `${c.city}, ${c.state}`))
@@ -841,7 +921,7 @@ export default function AdminBookingsPage() {
   // Course selection itself is driven by the sidebar's "Booking Courses" list
   // (and highlighted there), so it's intentionally excluded here — this only
   // covers filters this page's own controls can set and clear.
-  const hasActiveFilters = statusFilter !== 'all' || dinnerFilter !== 'all'
+  const hasActiveFilters = statusFilter !== 'all' || dinnerFilter !== 'all' || paymentFilter !== 'all'
     || locationFilter !== 'all' || tagFilter !== 'all' || !!eventNameFilter || !!search || !!customFrom || !!customTo
 
   // Count of active fields inside the mobile Filters drawer specifically
@@ -850,6 +930,7 @@ export default function AdminBookingsPage() {
   const activeFilterCount = [
     statusFilter !== 'all',
     dinnerFilter !== 'all',
+    paymentFilter !== 'all',
     !!customFrom || !!customTo,
     locationFilter !== 'all',
     tagFilter !== 'all',
@@ -860,6 +941,7 @@ export default function AdminBookingsPage() {
     setSearch('')
     setStatusFilter('all')
     setDinnerFilter('all')
+    setPaymentFilter('all')
     setLocationFilter('all')
     setTagFilter('all')
     setEventNameFilter('')
@@ -889,6 +971,10 @@ export default function AdminBookingsPage() {
   const tentative  = bookings.filter(b => ['tentative', 'awaiting_approval'].includes(b.status)).length
   const revenue    = bookings.filter(b => ['confirmed', 'payment_confirmed'].includes(b.status)).reduce((s, b) => s + Number(b.amount_charged), 0)
   const attention  = bookings.filter(b => b.status === 'awaiting_approval').length
+  // Credit put toward these rounds. Void and expired codes are excluded — that
+  // credit went back to the member and paid for nothing.
+  const creditRows = bookings.filter(b => b.credit_coupon && b.credit_coupon.status !== 'void' && b.credit_coupon.status !== 'expired')
+  const creditTotal = creditRows.reduce((s, b) => s + Number(b.credit_coupon?.amount ?? 0), 0)
 
   async function updateStatus(bookingId: string, status: BookingStatus) {
     setUpdatingStatus(bookingId)
@@ -994,10 +1080,18 @@ export default function AdminBookingsPage() {
   }
 
   function exportCSV() {
-    const headers = ['Course', 'Player', 'Email', 'Type', 'Date', 'Tee Time', 'Status', 'Dinner RSVP', 'Admin Notes']
+    const headers = ['Course', 'Player', 'Email', 'Type', 'Date', 'Tee Time', 'Status', 'Payment', 'Credit code', 'Credit amount', 'Dinner RSVP', 'Admin Notes']
     const rows = filtered.map(b => {
       const info = playerInfo(b)
-      return [b.course?.name ?? '', info.name, info.sub, info.badge ?? 'Booker', b.booking_date, b.tee_time, b.status, b.dinner_rsvp ?? '', b.admin_notes ?? '']
+      const coupon = b.credit_coupon
+      return [
+        b.course?.name ?? '', info.name, info.sub, info.badge ?? 'Booker',
+        b.booking_date, b.tee_time, b.status,
+        coupon ? 'Credits' : 'Cash',
+        coupon?.code ?? '',
+        coupon ? coupon.amount.toFixed(2) : '',
+        b.dinner_rsvp ?? '', b.admin_notes ?? '',
+      ]
     })
     const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
@@ -1043,6 +1137,17 @@ export default function AdminBookingsPage() {
             onChange={v => setDinnerFilter(v as DinnerFilter)}
             options={DINNER_FILTERS.map(d => ({ value: d, label: DINNER_FILTER_LABELS[d] }))}
             placeholder="All dinner RSVPs"
+            className="w-full"
+            triggerClassName="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg flex items-center justify-between gap-2 bg-white"
+          />
+        </FilterField>
+        <FilterField label="Payment" htmlFor={`payment-${idSuffix}`}>
+          <Select
+            id={`payment-${idSuffix}`}
+            value={paymentFilter}
+            onChange={v => setPaymentFilter(v as PaymentFilter)}
+            options={PAYMENT_FILTERS.map(p => ({ value: p, label: PAYMENT_FILTER_LABELS[p] }))}
+            placeholder="Cash or credits"
             className="w-full"
             triggerClassName="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg flex items-center justify-between gap-2 bg-white"
           />
@@ -1281,7 +1386,7 @@ export default function AdminBookingsPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 mb-5">
         <StatCard label="Active"        value={confirmed} sub="Confirmed / avail. confirmed" colour="green" />
         <StatCard label="Pending"       value={tentative} sub="Tentative / awaiting approval" colour="blue" />
-        <StatCard label="Revenue"       value={`$${revenue.toLocaleString()}`} sub="Confirmed + payment" colour="green" />
+        <StatCard label="Revenue"       value={`$${revenue.toLocaleString()}`} sub={creditTotal > 0 ? `Confirmed + payment · $${creditTotal.toLocaleString()} on credit` : 'Confirmed + payment'} colour="green" />
         <StatCard label="Attention"     value={attention} sub="Awaiting admin approval" colour={attention > 0 ? 'red' : 'gray'} />
       </div>
 

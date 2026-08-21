@@ -399,6 +399,15 @@ export const NotificationTemplates = {
     tag:   'host-credit-redeemed',
   }),
 
+  // A code is the whole point of issuing one, so it goes in the notification
+  // body: the member can copy it from here without reopening the app.
+  creditCouponIssued: (amount: number, code: string): PushPayload => ({
+    title: 'Your credit code is ready',
+    body:  `${code} — ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} off at checkout.`,
+    url:   '/host/credits',
+    tag:   'host-credit-coupon',
+  }),
+
   // Sent to admins — a redemption isn't settled until someone puts it against a
   // round for them.
   creditRedemptionRequested: (name: string, amount: number): PushPayload => ({
