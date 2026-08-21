@@ -32,37 +32,23 @@ export const GET = withHostAuth(async (_req: NextRequest, ctx: HostAuthContext) 
   return NextResponse.json({ events })
 })
 
-// Cancelled / waitlisted rows don't hold a seat — same rule as the capacity RPCs.
-const ACTIVE_BOOKING_STATUSES = [
-  'tentative', 'awaiting_approval', 'availability_confirmed',
-  'payment_confirmed', 'confirmed', 'pending',
-]
-
 export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) => {
   const body = await req.json().catch(() => ({})) as Record<string, unknown>
 
   const admin = createAdminClient()
-  const sourceBookingId = typeof body.source_booking_id === 'string' && body.source_booking_id
-    ? body.source_booking_id
-    : null
 
-  // Hosting is for venues already on LinkUp. A host proposing a club we don't
-  // have used to file it as a pending course from here, which meant an event
-  // could exist before anyone had confirmed the club did — so the path is gone,
-  // and a club that isn't listed has to be added by an admin first.
+  // Hosting is for venues already on LinkUp, on days that venue has open. Two
+  // other ways in have been removed as the flow settled: proposing a club we
+  // don't have (an event could exist before anyone confirmed the club did), and
+  // adopting one of the host's own bookings (course, date and tee time came
+  // from the booking, which the date picker now supplies from the venue
+  // itself). Existing events created either way still edit and cancel.
   let courseId: string
-  // One event per date. A booking-sourced event is always exactly one (the tee
-  // time it came from); a proposed schedule accepts several dates sharing the
-  // same course, spots, rate and dinner.
+  /** One event per date, sharing the course, tee time and dinner setting. */
   let eventDates: string[]
   let teeTime: string | null
-  let seatCap: number | null = null
 
-  /**
-   * The dates asked for, rejecting any that have already passed. Shared by both
-   * client-supplied paths so a multi-date submission can't slip a past date
-   * through on a later entry.
-   */
+  /** The dates asked for, rejecting any that have already passed. */
   const resolveDates = (): { dates?: string[]; error?: string } => {
     const dates = normaliseEventDates(body)
     if (!dates || dates.length === 0) return { error: 'Choose at least one date.' }
@@ -72,48 +58,7 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     return { dates }
   }
 
-  if (sourceBookingId) {
-    // ---- Listed from an existing booking -------------------------------
-    // Any active booking may be taken on by a host, not just their own.
-    // Course/date/tee time come from the booking, never from the client, so the
-    // event can't drift from the real tee time.
-    const { data: booking } = await admin
-      .from('bookings')
-      .select('id, member_id, course_id, booking_date, tee_time, created_at, status')
-      .eq('id', sourceBookingId)
-      .maybeSingle()
-
-    if (!booking) {
-      return NextResponse.json({ error: 'That booking no longer exists.' }, { status: 404 })
-    }
-    if (!ACTIVE_BOOKING_STATUSES.includes(booking.status)) {
-      return NextResponse.json({ error: 'That booking is no longer active.' }, { status: 400 })
-    }
-    if (booking.booking_date < todayISO()) {
-      return NextResponse.json({ error: 'That booking has already passed.' }, { status: 400 })
-    }
-
-    courseId = booking.course_id
-    // Exactly one: the partial unique index on source_booking_id allows a single
-    // live listing per booking, so multiple dates make no sense on this path.
-    eventDates = [booking.booking_date]
-    teeTime = String(booking.tee_time).slice(0, 5)
-
-    // Seats held = rows in the same booking group (one row per seat), counted
-    // against whoever made the booking.
-    const { count } = await admin
-      .from('bookings')
-      .select('id', { count: 'exact', head: true })
-      .eq('member_id', booking.member_id)
-      .eq('created_at', booking.created_at)
-      .eq('booking_date', booking.booking_date)
-      .eq('tee_time', booking.tee_time)
-      .eq('course_id', booking.course_id)
-      .in('status', ACTIVE_BOOKING_STATUSES)
-    seatCap = count ?? 1
-
-  } else {
-    // ---- A newly proposed schedule at an existing course ---------------
+  {
     const { valid, errors } = validateHostedEventPayload(body)
     if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })
 
@@ -186,23 +131,19 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
   // the thin ones or waste the busy ones. A booking-sourced event is bounded by
   // the seats the booking itself holds instead.
   const spotsFor = new Map<string, number>()
-  if (seatCap !== null) {
-    for (const date of orderedDates) spotsFor.set(date, seatCap)
-  } else {
-    const open = await openSpotsByDate(admin, course as Course, orderedDates)
-    for (const date of orderedDates) {
-      const spots = open.get(date)
-      // The host picked from this venue's open days, but a day can fill between
-      // choosing it and submitting. Better to say so than to list a round with
-      // no seats behind it.
-      if (!spots) {
-        return NextResponse.json(
-          { error: `${date} is no longer open at ${course.name}. Remove it and try again.` },
-          { status: 409 }
-        )
-      }
-      spotsFor.set(date, spots)
+  const open = await openSpotsByDate(admin, course as Course, orderedDates)
+  for (const date of orderedDates) {
+    const spots = open.get(date)
+    // The host picked from this venue's open days, but a day can fill between
+    // choosing it and submitting. Better to say so than to list a round with no
+    // seats behind it.
+    if (!spots) {
+      return NextResponse.json(
+        { error: `${date} is no longer open at ${course.name}. Remove it and try again.` },
+        { status: 409 }
+      )
     }
+    spotsFor.set(date, spots)
   }
 
   const { data: created, error } = await admin
@@ -215,23 +156,13 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       total_spots: spotsFor.get(date) ?? 1,
       member_guest_rate: rate,
       dinner,
-      // Only the single booking-sourced event carries this; the partial unique
-      // index would reject a second row holding the same booking.
-      source_booking_id: sourceBookingId,
       // Not live yet. An admin approves it — which is when the GHL calendar
       // behind it gets created — and approval is what makes it 'upcoming'.
       status: 'pending_approval',
     })))
     .select()
 
-  if (error) {
-    // The partial unique index on source_booking_id — this booking is already
-    // listed as a live event.
-    if (error.code === '23505') {
-      return NextResponse.json({ error: 'That booking is already listed as an event.' }, { status: 409 })
-    }
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const events = created ?? []
   const event = events[0]
@@ -261,7 +192,6 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       event_id: event.id,
       event_count: events.length,
       host_id: ctx.host.id,
-      from_booking: !!sourceBookingId,
     },
   })
 

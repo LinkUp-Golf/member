@@ -9,17 +9,12 @@ import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useForm, Controller } from "react-hook-form";
-import {
-  AdminPageHeader,
-  AdminCard,
-  Badge,
-  ProgressBar,
-} from "@/components/admin/AdminUI";
+import { AdminPageHeader, AdminCard } from "@/components/admin/AdminUI";
 import { Spinner, ContentLoader } from "@/components/ui/Loading";
 import Select, { type SelectOption } from "@/components/ui/Select";
 import VenueDateSelector from "@/components/host/VenueDateSelector";
 import { HOST_EVENT_GUEST_RATE_USD } from "@/lib/constants";
-import { memberPrice, canUploadProof } from "@/lib/hosts/events";
+import { canUploadProof } from "@/lib/hosts/events";
 import { formatEventTeeTime as fmtTime } from "@/lib/utils";
 import type {
   HostedEvent,
@@ -47,17 +42,46 @@ const fmtDate = (d: string) =>
 // rather than one field plus a list of extras.
 const MAX_DATES_PER_EVENT = 30;
 
+// A dot and a word. A pill per row turned a list of dates into a wall of
+// badges; the state matters, but not that much of the row's weight.
 const STATUS_META: Record<
   HostedEventStatus,
-  { label: string; colour: "green" | "gold" | "red" | "blue" | "gray" }
+  { label: string; dot: string; text: string }
 > = {
-  pending_approval: { label: "Awaiting approval", colour: "gold" },
-  upcoming: { label: "Upcoming", colour: "green" },
-  completed: { label: "Completed", colour: "blue" },
-  pending_credit_approval: { label: "Credit approval", colour: "gold" },
-  credits_awarded: { label: "Credits awarded", colour: "green" },
-  cancelled: { label: "Cancelled", colour: "red" },
+  pending_approval: { label: "Waiting on us", dot: "bg-amber-500", text: "text-amber-700" },
+  upcoming: { label: "Live", dot: "bg-green-600", text: "text-green-700" },
+  completed: { label: "Finished", dot: "bg-blue-500", text: "text-blue-700" },
+  pending_credit_approval: { label: "Credit pending", dot: "bg-amber-500", text: "text-amber-700" },
+  credits_awarded: { label: "Credit paid", dot: "bg-green-600", text: "text-green-700" },
+  cancelled: { label: "Cancelled", dot: "bg-red-500", text: "text-red-600" },
 };
+
+/** One venue's rounds. A host listing several dates at a club sees one card. */
+interface VenueGroup {
+  courseId: string;
+  name: string;
+  city: string | null;
+  events: HostedEvent[];
+}
+
+function groupByVenue(events: HostedEvent[]): VenueGroup[] {
+  const byCourse = new Map<string, VenueGroup>();
+  for (const e of events) {
+    const group = byCourse.get(e.course_id) ?? {
+      courseId: e.course_id,
+      name: e.course?.name ?? "Course",
+      city: e.course?.city ?? null,
+      events: [],
+    };
+    group.events.push(e);
+    byCourse.set(e.course_id, group);
+  }
+  // Soonest first inside a card; the API already orders the events themselves.
+  for (const g of byCourse.values()) {
+    g.events.sort((a, b) => a.event_date.localeCompare(b.event_date));
+  }
+  return Array.from(byCourse.values());
+}
 
 export default function HostEventsPage() {
   const [events, setEvents] = useState<HostedEvent[]>([]);
@@ -87,8 +111,10 @@ export default function HostEventsPage() {
   const handleEdit = useCallback((e: HostedEvent) => setEditing(e), []);
   const handleNew = useCallback(() => setEditing("new"), []);
 
+  const groups = useMemo(() => groupByVenue(events), [events]);
+
   return (
-    <div className="p-4 sm:p-8 max-w-4xl mx-auto">
+    <div className="p-4 sm:p-8 max-w-3xl mx-auto">
       <AdminPageHeader
         title="My Events"
         description="Create rounds members can reserve, then earn credits once they run."
@@ -114,10 +140,10 @@ export default function HostEventsPage() {
         </AdminCard>
       ) : (
         <div className="space-y-3">
-          {events.map((e) => (
-            <EventCard
-              key={e.id}
-              event={e}
+          {groups.map((g) => (
+            <VenueCard
+              key={g.courseId}
+              group={g}
               onChanged={load}
               onToast={showToast}
               onEdit={handleEdit}
@@ -150,9 +176,54 @@ export default function HostEventsPage() {
   );
 }
 
-// ---- Event card ---------------------------------------------
+// ---- Venue card ---------------------------------------------
 
-const EventCard = memo(function EventCard({
+const VenueCard = memo(function VenueCard({
+  group,
+  onChanged,
+  onToast,
+  onEdit,
+}: {
+  group: VenueGroup;
+  onChanged: () => void;
+  onToast: (msg: string, ok?: boolean) => void;
+  onEdit: (event: HostedEvent) => void;
+}) {
+  return (
+    <section className="card overflow-hidden">
+      <header className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-gray-100">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-gray-900 truncate">
+            {group.name}
+          </h2>
+          {group.city && (
+            <p className="text-xs text-gray-400 mt-0.5 truncate">{group.city}</p>
+          )}
+        </div>
+        <span className="text-xs text-gray-400 flex-shrink-0 whitespace-nowrap">
+          {group.events.length}{" "}
+          {group.events.length === 1 ? "date" : "dates"}
+        </span>
+      </header>
+
+      <ul className="divide-y divide-gray-100">
+        {group.events.map((e) => (
+          <EventRow
+            key={e.id}
+            event={e}
+            onChanged={onChanged}
+            onToast={onToast}
+            onEdit={onEdit}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+});
+
+// ---- One date -----------------------------------------------
+
+const EventRow = memo(function EventRow({
   event,
   onChanged,
   onToast,
@@ -165,8 +236,13 @@ const EventCard = memo(function EventCard({
   onEdit: (event: HostedEvent) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const meta = STATUS_META[event.status];
   const filled = event.filled_spots ?? 0;
+  // Members who booked the venue that day are at this round too, so the host's
+  // headcount is both. filled_spots alone is what the reservation RPC enforces
+  // capacity against, which is why the two numbers aren't the same thing.
+  const playing = filled + (event.booked_spots ?? 0);
   // Mirrors the server's editable/cancellable set — a host can still fix an
   // event that hasn't happened yet, including one still waiting on approval.
   const awaitingApproval = event.status === "pending_approval";
@@ -191,144 +267,116 @@ const EventCard = memo(function EventCard({
     onChanged();
   }
 
+  // At most one line of explanation, and only where the state needs one — four
+  // possible notes stacked under every row was most of the old card's height.
+  const note =
+    awaitingApproval
+      ? {
+          tone: "text-amber-600",
+          text: "Not visible to members yet — we're setting up the calendar.",
+        }
+      : event.status === "pending_credit_approval"
+        ? { tone: "text-amber-600", text: "Proof sent — waiting on your credit." }
+        : event.status === "cancelled" && event.rejection_reason
+          ? { tone: "text-red-600", text: `Taken down: ${event.rejection_reason}` }
+          : event.status === "cancelled" && event.cancellation_reason
+            ? { tone: "text-gray-400", text: `Cancelled: ${event.cancellation_reason}` }
+            : null;
+
   return (
-    <div className="card card-pad">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+    <li className="px-4 sm:px-5 py-3">
+      {/* Stacked on a phone, one line from sm up: the date and its numbers read
+          left, the things you can do to it read right. */}
+      <div className="sm:flex sm:items-center sm:gap-4">
+        <div className="min-w-0 sm:flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm font-semibold text-gray-900">
-              {event.course?.name ?? "Course"}
+            <p className="text-sm font-medium text-gray-900">
+              {fmtDate(event.event_date)}
             </p>
-            <Badge label={meta.label} colour={meta.colour} />
+            <span className={`inline-flex items-center gap-1.5 text-xs ${meta.text}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
+              {meta.label}
+            </span>
           </div>
-          <p className="text-xs text-gray-500 mt-1">
-            {fmtDate(event.event_date)}
-            {event.tee_time ? ` · ${fmtTime(event.tee_time)}` : ""}
-          </p>
           <p className="text-xs text-gray-500 mt-0.5">
-            {fmtMoney(
-              event.member_price ?? memberPrice(event.member_guest_rate),
-            )}{" "}
-            member
-            <span className="text-gray-300"> · </span>
-            {fmtMoney(event.member_guest_rate)} guest rate
+            {event.tee_time ? `${fmtTime(event.tee_time)} · ` : ""}
+            {playing} of {event.total_spots} spots
+            {event.dinner ? " · dinner" : ""}
           </p>
         </div>
-        <Link
-          href={`/host/events/${event.id}`}
-          className="text-xs font-medium text-gray-500 hover:text-green-800 flex-shrink-0 whitespace-nowrap"
-        >
-          {filled} registered →
-        </Link>
-      </div>
 
-      {/* Spots */}
-      <div className="mt-3">
-        <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
-          <span>
-            {filled} of {event.total_spots} spots filled
-          </span>
-          <span>
-            {event.remaining_spots ?? event.total_spots - filled} left
-          </span>
-        </div>
-        <ProgressBar value={filled} max={event.total_spots} />
-      </div>
-
-      {event.dinner && (
-        <p className="text-xs text-green-800 mt-3 font-medium">
-          🍽 Dinner included
-        </p>
-      )}
-
-      {/* Actions */}
-      <div className="flex flex-wrap gap-2 mt-4">
-        {editable && (
-          <button
-            onClick={() => onEdit(event)}
-            disabled={busy}
-            className="btn btn-outline btn-sm"
+        <div className="flex items-center gap-2 flex-wrap mt-2 sm:mt-0 sm:flex-shrink-0">
+          {editable && (
+            <button
+              onClick={() => onEdit(event)}
+              disabled={busy}
+              className="btn btn-outline btn-sm"
+            >
+              Edit
+            </button>
+          )}
+          {canProof && (
+            <ProofControl event={event} onDone={onChanged} onToast={onToast} />
+          )}
+          {editable && !cancelling && (
+            <button
+              onClick={() => setCancelling(true)}
+              disabled={busy}
+              className="btn btn-outline btn-sm text-red-600 border-red-200"
+            >
+              Cancel
+            </button>
+          )}
+          {/* The registered count is the link — it is the reason to open the
+              round, so it does not need a separate arrow next to it. */}
+          <Link
+            href={`/host/events/${event.id}`}
+            className="text-xs font-medium text-gray-500 hover:text-green-800 whitespace-nowrap ml-auto sm:ml-0"
           >
-            Edit
-          </button>
-        )}
-        {canProof && (
-          <ProofControl event={event} onDone={onChanged} onToast={onToast} />
-        )}
-        {editable && (
-          <CancelButton
-            event={event}
-            busy={busy}
-            onCancelReason={(reason) =>
-              act("cancel", { cancellation_reason: reason })
-            }
-          />
-        )}
+            {playing} {playing === 1 ? "member" : "members"} →
+          </Link>
+        </div>
       </div>
 
-      {/* The host needs to know members can't see this yet, and why — otherwise
-          an empty spots bar reads as "nobody wants it" rather than "not live". */}
-      {awaitingApproval && (
-        <p className="text-[11px] text-amber-600 mt-3">
-          Not visible to members yet — we&apos;re setting up the calendar for
-          this round. You&apos;ll get a notification when it goes live.
-        </p>
+      {note && !cancelling && (
+        <p className={`text-[11px] mt-2 ${note.tone}`}>{note.text}</p>
       )}
-      {event.status === "pending_credit_approval" && (
-        <p className="text-[11px] text-amber-600 mt-3">
-          Proof submitted — awaiting admin approval for your credit.
-        </p>
+
+      {/* Under the row rather than in the button column, so the reason field
+          gets the full width on a phone. */}
+      {cancelling && (
+        <CancelPanel
+          event={event}
+          busy={busy}
+          onDismiss={() => setCancelling(false)}
+          onCancelReason={(reason) => {
+            setCancelling(false);
+            act("cancel", { cancellation_reason: reason });
+          }}
+        />
       )}
-      {/* An admin took this live event down. rejection_reason is what separates
-          that from the host cancelling it themselves — say which it was. */}
-      {event.status === "cancelled" && event.rejection_reason && (
-        <p className="text-[11px] text-red-600 mt-3">
-          Taken down by an admin: {event.rejection_reason}
-        </p>
-      )}
-      {event.source_booking_id && (
-        <p className="text-[11px] text-gray-400 mt-2">
-          Listed from an existing booking — course, date, and tee time are
-          fixed.
-        </p>
-      )}
-      {event.status === "cancelled" && event.cancellation_reason && (
-        <p className="text-[11px] text-gray-400 mt-3">
-          Reason: {event.cancellation_reason}
-        </p>
-      )}
-    </div>
+    </li>
   );
 });
 
 // ---- Cancel with optional reason ----------------------------
 
-function CancelButton({
+function CancelPanel({
   event,
   onCancelReason,
+  onDismiss,
   busy,
 }: {
   event: HostedEvent;
   onCancelReason: (reason: string) => void;
+  onDismiss: () => void;
   busy: boolean;
 }) {
-  const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState("");
   const hasRegs = (event.filled_spots ?? 0) > 0;
 
-  if (!confirming) {
-    return (
-      <button
-        onClick={() => setConfirming(true)}
-        disabled={busy}
-        className="btn btn-outline btn-sm text-red-600 border-red-200"
-      >
-        Cancel
-      </button>
-    );
-  }
   return (
-    <div className="w-full mt-1 p-3 rounded-xl bg-red-50 border border-red-100 space-y-2">
+    <div className="mt-3 p-3 rounded-xl bg-red-50 border border-red-100 space-y-2">
       <p className="text-xs text-red-700">
         Cancel this event
         {hasRegs
@@ -344,7 +392,7 @@ function CancelButton({
       />
       <div className="flex gap-2">
         <button
-          onClick={() => setConfirming(false)}
+          onClick={onDismiss}
           disabled={busy}
           className="btn btn-outline btn-sm flex-1"
         >

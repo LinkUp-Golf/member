@@ -530,6 +530,20 @@ export interface HostedEvent {
   member_price?: number
   filled_spots?: number
   remaining_spots?: number
+  /**
+   * Members with a booking at this venue on this day. They are at the round
+   * without having reserved through it, so host-facing screens count them in
+   * the roster — but not in filled_spots, which is what the reservation RPC
+   * enforces capacity against.
+   */
+  booked_attendees?: {
+    member_id: string
+    first_name: string
+    last_name: string
+    avatar_url: string | null
+    tee_time: string | null
+  }[]
+  booked_spots?: number
   course?: { id: string; name: string; city?: string | null } | null
   host?: { id: string; name: string; member?: { first_name: string; last_name: string } | null } | null
   proofs?: HostedEventProof[]
@@ -543,20 +557,6 @@ export interface HostedEvent {
  * bookings rows sharing member/created_at/date/tee time — one row per seat —
  * so `seats` is that row count.
  */
-export interface HostBookingOption {
-  /** The representative bookings row the event will link to. */
-  id: string
-  course_id: string
-  course_name: string | null
-  /** The member who made the booking. */
-  booked_by: string | null
-  booking_date: string
-  tee_time: string
-  seats: number
-  /** True when this booking is already listed as a live hosted event. */
-  already_listed: boolean
-}
-
 export type HostedEventRegistrationStatus = 'reserved' | 'cancelled'
 
 export interface HostedEventRegistration {
@@ -564,9 +564,18 @@ export interface HostedEventRegistration {
   hosted_event_id: string
   member_id: string
   status: HostedEventRegistrationStatus
-  created_at: string
+  /** Null on a booking-derived entry, which has no reservation row behind it. */
+  created_at: string | null
   // Enriched
   member?: { first_name: string; last_name: string; avatar_url?: string | null } | null
+  /**
+   * How this member reached the round. 'booking' means they booked the venue on
+   * the day rather than reserving through the event — same afternoon, same
+   * club, so they're on the roster either way.
+   */
+  source?: 'reservation' | 'booking'
+  /** Their tee time, when they got here by booking one. */
+  tee_time?: string | null
 }
 
 export interface HostedEventProof {
