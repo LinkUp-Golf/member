@@ -10,6 +10,7 @@ export default function HostCreditsPage() {
     <CreditsWallet
       basePath="/api/host"
       earnedHint="credits appear here once an admin approves a completed event."
+      tutorialId="credit-usage"
     />
   )
 }

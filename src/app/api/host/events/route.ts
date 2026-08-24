@@ -20,9 +20,13 @@ const todayISO = () => new Date().toISOString().slice(0, 10)
 export const GET = withHostAuth(async (_req: NextRequest, ctx: HostAuthContext) => {
   const admin = createAdminClient()
 
+  // Proofs come along because the list is where a host looks to see whether
+  // they've already submitted one. Without them every row's button read
+  // "Upload proof" no matter what had been sent — the status can't answer it,
+  // since a same-day upload deliberately leaves the event 'upcoming'.
   const { data, error } = await admin
     .from('hosted_events')
-    .select('*, course:courses(id, name)')
+    .select('*, course:courses(id, name), proofs:hosted_event_proofs(id, image_url, created_at)')
     .eq('host_id', ctx.host.id)
     .order('event_date', { ascending: false })
 

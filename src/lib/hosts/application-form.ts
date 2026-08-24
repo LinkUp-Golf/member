@@ -12,11 +12,6 @@ import type { HostApplicationEventInput } from '@/types'
 export const NAME_MIN = 2
 export const NAME_MAX = 120
 export const TEE_TIME_MAX = 50
-export const SPOTS_MIN = 1
-export const SPOTS_MAX = 200
-/** Matches the CHECK on host_application_events.member_guest_rate. */
-export const RATE_MAX = 100000
-export const DEFAULT_SPOTS = '3'
 export const MAX_DATES_PER_ROUND = 30
 
 /** A round as submitted: `venue` is the course id it sits at. */
@@ -34,19 +29,22 @@ export type SubmitValues = {
  * The round a venue would host.
  *
  * Dates are wrapped in objects because useFieldArray keys rows by identity, and
- * a bare string list has none. Everything else is a string because these are raw
- * inputs — an empty numeric field is "" and must stay distinguishable from 0,
- * which is a legitimate guest rate.
+ * a bare string list has none.
  *
- * Several dates on one round become one event each, sharing the tee time, spots,
- * rate and dinner. That's why a venue needs only one round: two rounds at the
+ * Spots and the guest rate are deliberately absent, matching the host's own
+ * event form: capacity is whatever the venue has open on the day (the number the
+ * date picker already shows on each chip) and the rate is a fixed term, so
+ * neither was ever the applicant's to type. The server sets both — see POST
+ * /api/host/application — which is why asking for them here produced two numbers
+ * that were collected, validated, and then thrown away.
+ *
+ * Several dates on one round become one event each, sharing the tee time and
+ * dinner setting. That's why a venue needs only one round: two rounds at the
  * same club were only ever two dates.
  */
 export interface RoundFields {
   dates: { value: string }[]
   tee_time: string
-  total_spots: string
-  member_guest_rate: string
   dinner: boolean
 }
 
@@ -77,22 +75,19 @@ export type VenueKind = 'existing'
 export const newRound = (): RoundFields => ({
   dates: [{ value: '' }],
   tee_time: '',
-  total_spots: DEFAULT_SPOTS,
-  member_guest_rate: '',
   dinner: false,
 })
 
 /**
  * Has the applicant started filling this round in? Rounds stay optional — you
  * can name the clubs you want and supply dates later — so an untouched one is
- * skipped rather than failing validation. total_spots is excluded because it
- * carries a default nobody chose.
+ * skipped rather than failing validation. Every field left is one the applicant
+ * chose, so any of them being set counts.
  */
 export const roundStarted = (r: RoundFields | undefined): boolean =>
   !!r &&
   (r.dates.some(d => d.value.trim() !== '') ||
     r.tee_time.trim() !== '' ||
-    r.member_guest_rate.trim() !== '' ||
     r.dinner)
 
 /**
@@ -121,8 +116,6 @@ export function buildApplicationPayload(data: ApplicationValues): SubmitValues {
         venue,
         event_date: date,
         tee_time: round.tee_time.trim() || null,
-        total_spots: Number(round.total_spots),
-        member_guest_rate: Number(round.member_guest_rate),
         dinner: round.dinner,
       })
     }

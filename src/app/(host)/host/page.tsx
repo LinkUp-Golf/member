@@ -9,6 +9,7 @@ import {
   StatCard,
   AdminCard,
 } from "@/components/admin/AdminUI";
+import { TutorialLink } from "@/components/tutorials/TutorialPlayer";
 import { ContentLoader } from "@/components/ui/Loading";
 import type { Host, HostStats } from "@/types";
 
@@ -130,6 +131,18 @@ export default function HostOverviewPage() {
                 Redeem your available balance any time from the Credits tab.
               </li>
             </ul>
+
+            {/* Four bullets can't show anyone the screens. The set lives under
+                Guides; this is the shortest path to it from the host's home. */}
+            <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between gap-3">
+              <TutorialLink tutorial="credit-usage" />
+              <Link
+                href="/host/guides"
+                className="text-xs font-medium text-gray-500 hover:text-green-800 whitespace-nowrap"
+              >
+                All guides →
+              </Link>
+            </div>
           </AdminCard>
         </>
       )}

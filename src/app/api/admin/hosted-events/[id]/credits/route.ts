@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic'
 //             optional amount: omitted, the host is credited the rate the event
 //             was listed at; supplied, the admin's figure wins.
 //   reject  → back to 'completed' so the host can upload fresh proof.
+//
+// Approving is also when the proof photo is copied into the GHL media library.
+// It used to be mirrored the moment the host uploaded, which put every attempt
+// over there — including the ones they replaced and the ones an admin sent back,
+// none of which LinkUp keeps a row for afterwards. Doing it here means one file
+// per credited round, and it's the photo the credit was actually paid on.
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
@@ -14,6 +20,7 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { sanitiseText } from '@/lib/validation'
 import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { mirrorProofToGhl } from '@/lib/hosts/proofs'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -38,9 +45,11 @@ export const POST = withAuth(
 
     const admin = createAdminClient()
 
+    // event_date and the course name go into the mirrored file's name; the proof
+    // itself is what gets mirrored once the award lands.
     const { data: event } = await admin
       .from('hosted_events')
-      .select('id, status, member_guest_rate, host:hosts(member_id)')
+      .select('id, status, member_guest_rate, event_date, course:courses(name), host:hosts(member_id)')
       .eq('id', id)
       .maybeSingle()
 
@@ -142,6 +151,29 @@ export const POST = withAuth(
     // single-element array depending on how PostgREST resolves it.
     const row = Array.isArray(ledgerRow) ? ledgerRow[0] : ledgerRow
     const amount = Number(row?.amount ?? event.member_guest_rate)
+
+    // Copy the approved photo to GHL. After the award on purpose: the credit is
+    // already committed by the RPC above, so a GHL problem costs the copy and
+    // nothing else. Awaited rather than backgrounded because a serverless
+    // function can be frozen the moment it responds.
+    const { data: proofRow } = await admin
+      .from('hosted_event_proofs')
+      .select('id, image_url')
+      .eq('hosted_event_id', id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (proofRow) {
+      const course = Array.isArray(event.course) ? event.course[0] : event.course
+      await mirrorProofToGhl({
+        admin,
+        proof: proofRow as { id: string; image_url: string },
+        courseName: (course as { name: string } | null)?.name ?? null,
+        eventDate: event.event_date as string,
+        actorId: ctx.userId,
+      })
+    }
     if (host?.member_id) {
       void sendPushToMember(host.member_id, NotificationTemplates.hostCreditApproved(amount)).catch(() => {})
     }

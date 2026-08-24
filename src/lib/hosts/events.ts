@@ -118,6 +118,80 @@ export function canUploadProof(status: string, eventDate: string, today = new Da
   return false
 }
 
+/** How a proof note reads; the UI maps these to colours. */
+export type ProofNoteTone = 'pending' | 'rejected' | 'sent'
+
+export interface ProofState {
+  hasProof: boolean
+  canUpload: boolean
+  /** Button label. 'Replace proof' the moment one is in. */
+  label: 'Upload proof' | 'Replace proof'
+  note: { tone: ProofNoteTone; text: string } | null
+}
+
+/**
+ * What to tell a host about proof on one of their events.
+ *
+ * Exists because the status alone can't answer it. A same-day upload leaves the
+ * event in `upcoming` on purpose (see canUploadProof), so status said nothing
+ * had happened while a photo was sitting in the table — the button kept reading
+ * "Upload proof" and no line anywhere said one had been submitted. And a proof
+ * an admin sends back returns the event to `completed`, which is
+ * indistinguishable from never having uploaded at all unless the rejection
+ * reason is surfaced.
+ *
+ * So the answer is derived from status, date, whether a proof row exists, and
+ * the rejection reason together — once, here, rather than three times across
+ * two screens.
+ */
+export function proofState(params: {
+  status: string
+  eventDate: string
+  hasProof: boolean
+  /** Set when an admin sent the proof back. Only meaningful on 'completed'. */
+  rejectionReason?: string | null
+  today?: string
+}): ProofState {
+  const { status, eventDate, hasProof } = params
+  const reason = params.rejectionReason?.trim() || null
+  const canUpload = canUploadProof(status, eventDate, params.today)
+  const label = hasProof ? 'Replace proof' : 'Upload proof'
+
+  // Awaiting the credit decision. Say that replacing is still possible — it is,
+  // and a host who spots a bad photo shouldn't assume it's too late.
+  if (status === 'pending_credit_approval') {
+    return {
+      hasProof, canUpload, label,
+      note: { tone: 'pending', text: 'Proof sent — waiting on your credit. You can still replace the photo.' },
+    }
+  }
+
+  // Sent back. Without this the host sees a bare "Finished" row and an upload
+  // button, with nothing to say their photo was reviewed and refused.
+  if (status === 'completed' && reason) {
+    return { hasProof, canUpload, label, note: { tone: 'rejected', text: `Proof not accepted: ${reason}` } }
+  }
+
+  if (hasProof) {
+    // Uploaded on the day, while the round is still live and listed. It reaches
+    // the credit queue when the nightly job closes the event out.
+    if (status === 'upcoming') {
+      return {
+        hasProof, canUpload, label,
+        note: { tone: 'sent', text: 'Proof sent — it goes for credit review once the round closes out.' },
+      }
+    }
+    // A proof exists but the event never moved on: the status update after the
+    // upload didn't land. Worth showing rather than looking like nothing was sent.
+    if (status === 'completed') {
+      return { hasProof, canUpload, label, note: { tone: 'sent', text: 'Proof sent — waiting on review.' } }
+    }
+  }
+
+  // Cancelled, settled, or nothing uploaded yet — the status label already says it.
+  return { hasProof, canUpload, label, note: null }
+}
+
 /**
  * A member with a booking at the venue on the day a round runs.
  *
