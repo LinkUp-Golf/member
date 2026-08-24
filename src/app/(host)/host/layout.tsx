@@ -10,7 +10,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
 import { motion } from 'framer-motion'
-import { LayoutDashboard, CalendarDays, Wallet, ChevronLeft } from 'lucide-react'
+import { LayoutDashboard, CalendarDays, Wallet, PlayCircle, ChevronLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FullScreenLoader } from '@/components/ui/Loading'
 import { useMemberRoles } from '@/hooks/useMemberRoles'
@@ -22,6 +22,7 @@ const NAV_ITEMS = [
   { href: '/host',         label: 'Overview',  short: 'Overview', icon: LayoutDashboard },
   { href: '/host/events',  label: 'My Events', short: 'Events',   icon: CalendarDays },
   { href: '/host/credits', label: 'Credits',   short: 'Credits',  icon: Wallet },
+  { href: '/host/guides',  label: 'Guides',    short: 'Guides',   icon: PlayCircle },
 ]
 
 // '/host' is a prefix of every other route, so it only matches exactly.

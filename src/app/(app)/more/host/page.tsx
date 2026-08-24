@@ -18,6 +18,7 @@ import { apiClient } from "@/lib/api-client";
 import { Spinner } from "@/components/ui/Loading";
 import AppShell from "@/components/layout/AppShell";
 import { formatRelativeTime } from "@/lib/utils";
+import { TutorialLink } from "@/components/tutorials/TutorialPlayer";
 import { HOST_EVENT_GUEST_RATE_USD } from "@/lib/constants";
 import {
   buildApplicationPayload,
@@ -131,7 +132,12 @@ export default function HostApplicationPage() {
           <>
             {/* How it works */}
             <div className="card card-pad mb-5 space-y-3">
-              <p className="section-label">How it works</p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="section-label">How it works</p>
+                {/* The same five steps, watchable. Sits on the card it narrates
+                    rather than in a help menu nobody opens. */}
+                <TutorialLink tutorial="host-application" label="Watch it" />
+              </div>
               <Step
                 n={1}
                 text="Tell us the private or semi-private golf club where you have a membership and would like to host LinkUps. You may select from the list below or add a new club not already on the list."

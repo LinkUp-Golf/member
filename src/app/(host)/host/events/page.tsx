@@ -18,6 +18,7 @@ import ProofControl, {
   currentProof,
   eventProofState,
 } from "@/components/host/ProofControl";
+import { TutorialLink } from "@/components/tutorials/TutorialPlayer";
 import { HOST_EVENT_GUEST_RATE_USD } from "@/lib/constants";
 import { formatEventTeeTime as fmtTime } from "@/lib/utils";
 import type {
@@ -129,6 +130,12 @@ export default function HostEventsPage() {
         }
       />
 
+      {/* Under the header, above the list: the answer to "how do I do this?"
+          where the question gets asked. */}
+      <div className="mb-4">
+        <TutorialLink tutorial="hosting-event" label="Watch: putting a round on" />
+      </div>
+
       {loading ? (
         <ContentLoader />
       ) : events.length === 0 ? (
@@ -140,6 +147,10 @@ export default function HostEventsPage() {
             <button onClick={handleNew} className="btn btn-gold btn-sm mt-4">
               Create your first event
             </button>
+            {/* A first-time host has nothing else on this screen to learn from. */}
+            <div className="mt-4 flex justify-center">
+              <TutorialLink tutorial="hosting-event" label="Watch how it works first" />
+            </div>
           </div>
         </AdminCard>
       ) : (
