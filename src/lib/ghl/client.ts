@@ -497,6 +497,52 @@ export async function uploadMediaToGhl(params: {
   }
 }
 
+/**
+ * Remove a file from the media library.
+ *
+ * Needed because proofs used to be mirrored to GHL the moment a host uploaded
+ * them, so rows written before that changed carry a ghl_media_id for a photo
+ * that can still be replaced or deleted here. Without this, removing such a
+ * proof would leave the GHL copy behind with nothing pointing at it.
+ *
+ * altType/altId are query params on this call, not body fields — the opposite
+ * of upload-file above. Returns false rather than throwing: the LinkUp side of
+ * the deletion has already happened by the time this runs.
+ */
+export async function deleteGhlMedia(fileId: string): Promise<boolean> {
+  if (!GHL_LOCATION_ID) {
+    logger.warn('GHL media delete skipped — GHL_LOCATION_ID is not set', { action: 'ghl_media_delete' })
+    return false
+  }
+
+  try {
+    const res = await fetch(
+      `${GHL_BASE_URL}/medias/${encodeURIComponent(fileId)}?altType=location&altId=${encodeURIComponent(GHL_LOCATION_ID)}`,
+      {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${process.env.GHL_API_KEY}`,
+          Version: GHL_API_VERSION,
+        },
+        signal: AbortSignal.timeout(MEDIA_UPLOAD_TIMEOUT_MS),
+      }
+    )
+
+    // Already gone is the outcome we wanted.
+    if (res.ok || res.status === 404) return true
+
+    const body = await res.text().catch(() => '')
+    logger.warn('GHL media delete failed', {
+      action: 'ghl_media_delete',
+      metadata: { statusCode: res.status, body: body.slice(0, 200), file_id: fileId },
+    })
+    return false
+  } catch (err) {
+    logger.warn('GHL media delete failed', { action: 'ghl_media_delete', errorMessage: String(err) })
+    return false
+  }
+}
+
 // ---- Calendar (raw fetch — not yet in SDK) ------------------
 
 // Cached location timezone — fetched once per process lifetime.

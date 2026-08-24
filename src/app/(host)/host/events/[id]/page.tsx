@@ -11,6 +11,7 @@ import { AdminPageHeader, AdminCard, Badge } from '@/components/admin/AdminUI'
 import { ContentLoader } from '@/components/ui/Loading'
 import { formatEventTeeTime as fmtTime } from '@/lib/utils'
 import Avatar from '@/components/ui/Avatar'
+import ProofControl, { PROOF_NOTE_CLASS, eventProofState } from '@/components/host/ProofControl'
 import type { HostedEvent, HostedEventRegistration, HostedEventStatus } from '@/types'
 
 const fmtMoney = (n: number) =>
@@ -40,6 +41,12 @@ export default function HostEventDetailPage() {
   const [registrations, setRegistrations] = useState<HostedEventRegistration[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
+
+  const showToast = useCallback((msg: string, ok = true) => {
+    setToast({ msg, ok })
+    setTimeout(() => setToast(null), 3500)
+  }, [])
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/host/events/${id}`)
@@ -52,6 +59,7 @@ export default function HostEventDetailPage() {
   useEffect(() => { if (id) load() }, [id, load])
 
   const meta = event ? STATUS_META[event.status] : null
+  const proof = event ? eventProofState(event) : null
 
   return (
     <div className="p-4 sm:p-8 max-w-3xl mx-auto">
@@ -121,18 +129,41 @@ export default function HostEventDetailPage() {
             )}
           </AdminCard>
 
-          {(event.proofs?.length ?? 0) > 0 && (
-            <AdminCard title="Submitted proof">
-              <div className="flex gap-2 flex-wrap">
-                {event.proofs?.map(p => (
-                  <a key={p.id} href={p.image_url} target="_blank" rel="noopener noreferrer" className="block">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={p.image_url} alt="Event proof" className="w-24 h-24 object-cover rounded-lg border border-gray-200" />
-                  </a>
-                ))}
-              </div>
-              {event.status === 'pending_credit_approval' && (
-                <p className="text-xs text-amber-600 mt-3">Awaiting admin approval for your credit.</p>
+          {/* Proof of the round. Shown whenever there's a photo to see or one to
+              send — previously this card only existed once a proof was in, so a
+              host with a finished round had nowhere here to submit one, and no
+              indication that submitting was the next thing to do. */}
+          {proof && (proof.hasProof || proof.canUpload) && (
+            <AdminCard title={proof.hasProof ? 'Submitted proof' : 'Proof of the round'}>
+              {proof.hasProof ? (
+                <div className="flex gap-2 flex-wrap">
+                  {event.proofs?.map(p => (
+                    <a key={p.id} href={p.image_url} target="_blank" rel="noopener noreferrer" className="block">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.image_url} alt="Event proof" className="w-24 h-24 object-cover rounded-lg border border-gray-200" />
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  Upload a photo of the round — a group shot works — and we&apos;ll
+                  review it for your {fmtMoney(event.member_guest_rate)} credit.
+                </p>
+              )}
+
+              {proof.note && (
+                <p className={`text-xs mt-3 ${PROOF_NOTE_CLASS[proof.note.tone]}`}>{proof.note.text}</p>
+              )}
+
+              {proof.canUpload && (
+                <div className="mt-3">
+                  <ProofControl
+                    event={event}
+                    onDone={load}
+                    onToast={showToast}
+                    variant={proof.hasProof ? 'outline' : 'gold'}
+                  />
+                </div>
               )}
             </AdminCard>
           )}
@@ -145,6 +176,14 @@ export default function HostEventDetailPage() {
           )}
           </div>
         </>
+      )}
+
+      {toast && (
+        <div
+          className={`fixed top-6 right-6 z-[60] px-4 py-3 rounded-xl shadow-lg text-sm font-medium ${toast.ok ? 'bg-green-900 text-white' : 'bg-red-600 text-white'}`}
+        >
+          {toast.msg}
+        </div>
       )}
     </div>
   )

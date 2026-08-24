@@ -5,7 +5,7 @@
 // approval → credits awarded. Cancelling frees any reserved spots, and an admin
 // can take a listing down (which cancels it) if it shouldn't have gone out.
 
-import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
+import { useState, useEffect, useCallback, useMemo, memo } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useForm, Controller } from "react-hook-form";
@@ -13,8 +13,12 @@ import { AdminPageHeader, AdminCard } from "@/components/admin/AdminUI";
 import { Spinner, ContentLoader } from "@/components/ui/Loading";
 import Select, { type SelectOption } from "@/components/ui/Select";
 import VenueDateSelector from "@/components/host/VenueDateSelector";
+import ProofControl, {
+  PROOF_NOTE_CLASS,
+  currentProof,
+  eventProofState,
+} from "@/components/host/ProofControl";
 import { HOST_EVENT_GUEST_RATE_USD } from "@/lib/constants";
-import { canUploadProof } from "@/lib/hosts/events";
 import { formatEventTeeTime as fmtTime } from "@/lib/utils";
 import type {
   HostedEvent,
@@ -247,7 +251,10 @@ const EventRow = memo(function EventRow({
   // event that hasn't happened yet, including one still waiting on approval.
   const awaitingApproval = event.status === "pending_approval";
   const editable = event.status === "upcoming" || awaitingApproval;
-  const canProof = canUploadProof(event.status, event.event_date);
+  // Whether a proof is in, what the button should say, and what to tell them —
+  // all from one place, because the status alone can't answer the first of those.
+  const proof = eventProofState(event);
+  const proofImage = currentProof(event);
 
   async function act(action: string, extra: Record<string, unknown> = {}) {
     if (busy) return;
@@ -275,8 +282,8 @@ const EventRow = memo(function EventRow({
           tone: "text-amber-600",
           text: "Not visible to members yet — we're setting up the calendar.",
         }
-      : event.status === "pending_credit_approval"
-        ? { tone: "text-amber-600", text: "Proof sent — waiting on your credit." }
+      : proof.note
+        ? { tone: PROOF_NOTE_CLASS[proof.note.tone], text: proof.note.text }
         : event.status === "cancelled" && event.rejection_reason
           ? { tone: "text-red-600", text: `Taken down: ${event.rejection_reason}` }
           : event.status === "cancelled" && event.cancellation_reason
@@ -315,7 +322,7 @@ const EventRow = memo(function EventRow({
               Edit
             </button>
           )}
-          {canProof && (
+          {proof.canUpload && (
             <ProofControl event={event} onDone={onChanged} onToast={onToast} />
           )}
           {editable && !cancelling && (
@@ -338,8 +345,31 @@ const EventRow = memo(function EventRow({
         </div>
       </div>
 
-      {note && !cancelling && (
-        <p className={`text-[11px] mt-2 ${note.tone}`}>{note.text}</p>
+      {/* Either half can stand alone: a settled round has a photo worth seeing
+          and nothing left to say, and a note can exist before any photo does. */}
+      {(note || proofImage) && !cancelling && (
+        <div className="flex items-center gap-2 mt-2">
+          {/* The photo itself, small. A line of text saying proof was sent is
+              easy to miss and impossible to check; the thumbnail is the actual
+              indicator, and it opens the full image. */}
+          {proofImage && (
+            <a
+              href={proofImage.image_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-shrink-0"
+              aria-label="View the proof you submitted"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={proofImage.image_url}
+                alt=""
+                className="w-8 h-8 rounded object-cover border border-gray-200"
+              />
+            </a>
+          )}
+          {note && <p className={`text-[11px] ${note.tone}`}>{note.text}</p>}
+        </div>
       )}
 
       {/* Under the row rather than in the button column, so the reason field
@@ -407,74 +437,6 @@ function CancelPanel({
         </button>
       </div>
     </div>
-  );
-}
-
-// ---- Proof upload -------------------------------------------
-
-function ProofControl({
-  event,
-  onDone,
-  onToast,
-}: {
-  event: HostedEvent;
-  onDone: () => void;
-  onToast: (msg: string, ok?: boolean) => void;
-}) {
-  const [uploading, setUploading] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  async function upload(file: File) {
-    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
-      onToast("Use a JPG, PNG, or WebP image.", false);
-      return;
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      onToast("Image must be under 10 MB.", false);
-      return;
-    }
-    setUploading(true);
-    const data = new FormData();
-    data.append("file", file);
-    const res = await fetch(`/api/host/events/${event.id}/proof`, {
-      method: "POST",
-      body: data,
-    });
-    const json = await res.json().catch(() => ({}));
-    setUploading(false);
-    if (!res.ok) {
-      onToast(json.error ?? "Upload failed.", false);
-      return;
-    }
-    onToast("Proof submitted for approval.");
-    onDone();
-  }
-
-  return (
-    <>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/jpeg,image/png,image/webp"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) upload(f);
-          e.target.value = "";
-        }}
-      />
-      <button
-        onClick={() => inputRef.current?.click()}
-        disabled={uploading}
-        className="btn btn-gold btn-sm"
-      >
-        {uploading
-          ? "Uploading…"
-          : event.status === "pending_credit_approval"
-            ? "Replace proof"
-            : "Upload proof"}
-      </button>
-    </>
   );
 }
 
