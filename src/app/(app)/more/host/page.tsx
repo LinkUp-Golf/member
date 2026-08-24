@@ -18,23 +18,27 @@ import { apiClient } from "@/lib/api-client";
 import { Spinner } from "@/components/ui/Loading";
 import AppShell from "@/components/layout/AppShell";
 import { formatRelativeTime } from "@/lib/utils";
+import { HOST_EVENT_GUEST_RATE_USD } from "@/lib/constants";
 import {
   buildApplicationPayload,
   newRound,
-  roundAt,
-  roundStarted,
   MAX_DATES_PER_ROUND,
   NAME_MAX,
   NAME_MIN,
-  RATE_MAX,
-  SPOTS_MAX,
-  SPOTS_MIN,
   TEE_TIME_MAX,
   type ApplicationValues,
   type RoundFields,
   type SubmitValues,
 } from "@/lib/hosts/application-form";
 import type { Host, HostApplication, Course } from "@/types";
+
+const fmtMoney = (n: number) =>
+  n.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
 
 type VenueOption = Pick<Course, "id" | "name" | "city"> & {
   /** 'pending' for a club the applicant proposed that an admin hasn't set up yet. */
@@ -134,7 +138,7 @@ export default function HostApplicationPage() {
               />
               <Step
                 n={2}
-                text={`Type the dates, time, number of guests and cost per player. If you don't know the exact tee time, just enter "morning" or "afternoon". You may enter just one date or several.`}
+                text={`Pick the dates you'd like to host — we show you the days that club actually has open, and how many spots each one has. If you don't know the exact tee time, just enter "morning" or "afternoon". You may pick just one date or several.`}
               />
               <Step
                 n={3}
@@ -146,7 +150,7 @@ export default function HostApplicationPage() {
               />
               <Step
                 n={5}
-                text="For each event you submit proof of hosting with a group pic, you receive LinkUp credit of $150, which you can apply to either your membership or any LinkUp event."
+                text={`For each event you submit proof of hosting with a group pic, you receive LinkUp credit of ${fmtMoney(HOST_EVENT_GUEST_RATE_USD)}, which you can spend on any LinkUp round.`}
               />
             </div>
 
@@ -528,9 +532,6 @@ function VenueCard({
   onRemove: () => void;
 }) {
   const prefix = `existing.${index}` as const;
-  // A venue can still be requested on its own and dated later — naming the club
-  // you want to host at is a complete thing to ask for.
-  const roundRequired = false;
 
   return (
     <div className="rounded-xl border border-green-900/20 bg-green-50/40 px-3 py-3 space-y-2">
@@ -598,51 +599,15 @@ function VenueCard({
         <p className="text-xs text-red-500">{roundErrors.tee_time.message}</p>
       )}
 
-      <div className="grid grid-cols-2 gap-2">
-        <input
-          type="number"
-          className="input"
-          min={SPOTS_MIN}
-          max={SPOTS_MAX}
-          placeholder="Available spots"
-          {...register(`${prefix}.round.total_spots` as const, {
-            validate: (value: string, values: ApplicationValues) => {
-              if (!roundRequired && !roundStarted(roundAt(values, "existing", index)))
-                return true;
-              const n = Number(value);
-              return (
-                (Number.isInteger(n) && n >= SPOTS_MIN && n <= SPOTS_MAX) ||
-                `Spots must be a whole number between ${SPOTS_MIN} and ${SPOTS_MAX}.`
-              );
-            },
-          })}
-        />
-        <input
-          type="number"
-          className="input"
-          min={0}
-          step="1"
-          placeholder="Member guest rate"
-          {...register(`${prefix}.round.member_guest_rate` as const, {
-            validate: (value: string, values: ApplicationValues) => {
-              if (!roundRequired && !roundStarted(roundAt(values, "existing", index)))
-                return true;
-              if (value.trim() === "") return "Enter the guest rate.";
-              const n = Number(value);
-              if (!Number.isFinite(n) || n < 0) return "Enter the guest rate.";
-              return n <= RATE_MAX || `At most ${RATE_MAX}.`;
-            },
-          })}
-        />
-      </div>
-      {roundErrors?.total_spots && (
-        <p className="text-xs text-red-500">{roundErrors.total_spots.message}</p>
-      )}
-      {roundErrors?.member_guest_rate && (
-        <p className="text-xs text-red-500">
-          {roundErrors.member_guest_rate.message}
-        </p>
-      )}
+      {/* The terms, stated rather than asked for — the same two numbers the
+          host's own event form declines to collect. Spots come from the venue's
+          open day (the count on each date chip above) and the rate is fixed, so
+          an applicant typing either was typing something we then ignored. */}
+      <p className="text-xs text-green-900/60 leading-relaxed">
+        Each date is listed with the spots that venue has open that day — the
+        number on each date above — and earns you{" "}
+        {fmtMoney(HOST_EVENT_GUEST_RATE_USD)} in credits per round.
+      </p>
 
       <label className="flex items-center gap-3 text-sm text-green-900/80 cursor-pointer">
         <input

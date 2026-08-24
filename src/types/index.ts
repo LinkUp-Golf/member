@@ -460,10 +460,18 @@ export interface HostApplicationEvent {
   course?: { id: string; name: string; city?: string | null; approval_status?: string } | null
 }
 
-/** What the applicant submits per proposed round (no ids yet). */
+/**
+ * What the applicant submits per proposed round (no ids yet).
+ *
+ * Narrower than the row it becomes: total_spots and member_guest_rate are set by
+ * the server — capacity from what the venue has open that day, the rate from the
+ * fixed term — exactly as they are for an event a host creates directly. The
+ * columns still exist on HostApplicationEvent; they just aren't the applicant's
+ * to send.
+ */
 export type HostApplicationEventInput = Pick<
   HostApplicationEvent,
-  'course_id' | 'event_date' | 'tee_time' | 'total_spots' | 'member_guest_rate' | 'dinner'
+  'course_id' | 'event_date' | 'tee_time' | 'dinner'
 >
 
 export interface HostApplication {

@@ -23,7 +23,6 @@ const filled = (dates: string[]): RoundFields =>
   round({
     dates: dates.map(value => ({ value })),
     tee_time: '8:30 AM',
-    member_guest_rate: '150',
   })
 
 const COURSE_A = '3f2504e0-4f89-11d3-9a0c-0305e82c3301'
@@ -37,15 +36,12 @@ const form = (overrides: Partial<ApplicationValues> = {}): ApplicationValues => 
 
 describe('roundStarted', () => {
   it('is false for an untouched round', () => {
-    // total_spots carries a default, so it alone must not count as touched —
-    // otherwise every selected venue would demand a full round.
     expect(roundStarted(newRound())).toBe(false)
   })
 
   it('is true once any field the applicant owns is filled', () => {
     expect(roundStarted(round({ dates: [{ value: '2099-06-01' }] }))).toBe(true)
     expect(roundStarted(round({ tee_time: 'morning' }))).toBe(true)
-    expect(roundStarted(round({ member_guest_rate: '0' }))).toBe(true)
     expect(roundStarted(round({ dinner: true }))).toBe(true)
   })
 
@@ -63,7 +59,7 @@ describe('roundAt', () => {
     const values = form({
       existing: [{ courseId: COURSE_A, label: 'Aviara', pending: false, round: filled(['2099-06-01']) }],
     })
-    expect(roundAt(values, 'existing', 0)?.member_guest_rate).toBe('150')
+    expect(roundAt(values, 'existing', 0)?.tee_time).toBe('8:30 AM')
   })
 
   it('returns undefined for an index that is gone', () => {
@@ -98,7 +94,26 @@ describe('buildApplicationPayload', () => {
     ])
     // Everything but the date is shared across them.
     expect(new Set(payload.events.map(e => e.venue))).toEqual(new Set([COURSE_A]))
-    expect(payload.events.every(e => e.member_guest_rate === 150)).toBe(true)
+    expect(payload.events.every(e => e.tee_time === '8:30 AM')).toBe(true)
+  })
+
+  it('sends neither spots nor a guest rate', () => {
+    // Both are the server's to set — capacity from what the venue has open that
+    // day, the rate from the fixed term — exactly as for an event a host creates
+    // directly. They were collected and validated here for a while, then thrown
+    // away on arrival; this is the guard against them creeping back.
+    const payload = buildApplicationPayload(
+      form({
+        existing: [{
+          courseId: COURSE_A,
+          label: 'Aviara',
+          pending: false,
+          round: filled(['2099-06-01']),
+        }],
+      }),
+    )
+    expect(payload.events[0]).not.toHaveProperty('total_spots')
+    expect(payload.events[0]).not.toHaveProperty('member_guest_rate')
   })
 
   it('drops blank dates rather than emitting an empty event', () => {
@@ -122,13 +137,11 @@ describe('buildApplicationPayload', () => {
           courseId: COURSE_A,
           label: 'Aviara',
           pending: false,
-          round: round({ dates: [{ value: '2099-06-01' }], member_guest_rate: '0' }),
+          round: round({ dates: [{ value: '2099-06-01' }] }),
         }],
       }),
     )
     expect(payload.events[0]?.tee_time).toBeNull()
-    // 0 is a real rate, not "unset".
-    expect(payload.events[0]?.member_guest_rate).toBe(0)
   })
 
   it('trims the host name', () => {
