@@ -19,17 +19,19 @@
 // day is selected, so a member always has something readable to scroll.
 
 import { memo, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, CalendarDays, Clock, MapPin } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CalendarDays, Clock, MapPin, Pin } from 'lucide-react'
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   addDays, addMonths, format, isSameMonth, isToday,
 } from 'date-fns'
 import { cn, formatTeeTime } from '@/lib/utils'
 import { Spinner } from '@/components/ui/Loading'
+import { useStickyHeaderOffset } from '@/hooks/useStickyHeaderOffset'
 import {
   VENUE_DOT as DOT,
   VENUE_TEXT as TEXT,
   VENUE_CHIP as CHIP,
+  VENUE_COLOUR_COUNT,
   buildVenueColours,
 } from '@/components/calendar/venue-colours'
 
@@ -67,9 +69,11 @@ const WEEKDAYS = [
 
 const iso = (d: Date) => format(d, 'yyyy-MM-dd')
 
-// Stable empty array so days with nothing open keep a constant prop reference
-// (a fresh `[]` per render would defeat DayCell's memo).
+// Stable empty arrays so days with nothing open — and a screen with nothing
+// pinned — keep a constant prop reference (a fresh `[]` per render would
+// defeat DayCell's memo, and this component's own).
 const EMPTY: CalendarOpening[] = []
+const EMPTY_VENUES: CalendarVenue[] = []
 
 const venueLocation = (v: CalendarVenue | undefined) =>
   [v?.city, v?.state].filter(Boolean).join(', ')
@@ -263,6 +267,137 @@ function AgendaDay({
   )
 }
 
+// ---- Pinned venue dock --------------------------------------
+
+/**
+ * A pinned venue, docked above the agenda and stuck there while it scrolls.
+ *
+ * The agenda answers "what is open, in date order" — a venue we want members
+ * to see first loses that argument as soon as another club opens earlier in
+ * the month. So a pinned venue is lifted out of the list and shown as itself:
+ * the club, and the next day it has tee times. Tapping it opens that day,
+ * exactly as its row in the agenda would.
+ *
+ * It still respects the filters above it: a member narrowing the month to one
+ * other club is not asking to keep seeing this one.
+ */
+function PinnedVenueDock({
+  venues, days, month, colourByVenue, onPickOpening, todayIso,
+}: {
+  venues: CalendarVenue[]
+  /** Already filtered — 'YYYY-MM-DD' → the venues open that day. */
+  days: Record<string, CalendarOpening[]>
+  month: Date
+  colourByVenue: Map<string, number>
+  onPickOpening: (courseId: string, date: string) => void
+  todayIso: string
+}) {
+  const top = useStickyHeaderOffset()
+
+  // The next day each pinned venue is open, this month. Today counts; a day
+  // already gone does not.
+  const nextByVenue = useMemo(() => {
+    const out = new Map<string, { date: string; opening: CalendarOpening }>()
+    const dates = Object.keys(days)
+      .filter(d => d >= todayIso && isSameMonth(new Date(`${d}T12:00:00`), month))
+      .sort()
+    for (const date of dates) {
+      for (const opening of days[date] ?? []) {
+        if (!out.has(opening.courseId)) out.set(opening.courseId, { date, opening })
+      }
+    }
+    return out
+  }, [days, month, todayIso])
+
+  if (venues.length === 0) return null
+
+  return (
+    // Opaque, or the agenda would scroll through it. Bled 4px sideways (and
+    // padded back) so the card's shadow lands on the dock's own background
+    // instead of being cut off at its edge.
+    <div
+      className="sticky z-10 -mx-1 px-1 pt-1 pb-2"
+      style={{ top, background: 'var(--color-cream)' }}
+    >
+      <div className="space-y-2">
+        {venues.map(venue => {
+          const next = nextByVenue.get(venue.id)
+          const idx = colourByVenue.get(venue.id) ?? 0
+          const location = venueLocation(venue)
+          const tee = next?.opening.tees[0]
+
+          const header = (
+            <>
+              <span className={cn('w-1 self-stretch rounded-full flex-shrink-0', DOT[idx])} />
+              <span className="flex-1 min-w-0">
+                <span className="flex items-center gap-1.5">
+                  <Pin className="w-3 h-3 flex-shrink-0 text-green-900/40" strokeWidth={2.2} />
+                  <span className="text-[10px] uppercase tracking-wider font-semibold text-green-900/40">
+                    Pinned venue
+                  </span>
+                </span>
+                <span className="mt-0.5 block text-sm font-semibold text-green-950 truncate">
+                  {venue.name}
+                </span>
+                {next ? (
+                  <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-green-900/45">
+                    <span className="font-medium text-green-900/70">
+                      {format(new Date(`${next.date}T12:00:00`), 'EEE, MMM d')}
+                    </span>
+                    {tee && (
+                      <>
+                        <span aria-hidden className="text-green-900/25">·</span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
+                          {formatTeeTime(tee.time)}
+                        </span>
+                      </>
+                    )}
+                    <span aria-hidden className="text-green-900/25">·</span>
+                    <span className={cn('font-medium', TEXT[idx])}>
+                      {next.opening.openSpots} spot{next.opening.openSpots === 1 ? '' : 's'} open
+                    </span>
+                  </span>
+                ) : (
+                  <span className="mt-0.5 block text-[11px] text-green-900/45">
+                    No tee times open in {format(month, 'MMMM')}.
+                  </span>
+                )}
+                {location && (
+                  <span className="mt-0.5 flex items-center gap-1 text-[11px] text-green-900/40">
+                    <MapPin className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
+                    <span className="truncate">{location}</span>
+                  </span>
+                )}
+              </span>
+            </>
+          )
+
+          const shell = 'w-full text-left flex items-center gap-3 rounded-xl border bg-white px-3 py-2.5 shadow-sm border-green-900/15'
+
+          // Nothing open means nothing to open — the card still says the venue
+          // is pinned, it just isn't a button.
+          return next ? (
+            <button
+              key={venue.id}
+              type="button"
+              onClick={() => onPickOpening(venue.id, next.date)}
+              className={cn(shell, 'transition-colors hover:bg-green-50/50 active:opacity-70')}
+            >
+              {header}
+              <ChevronRight className="w-4 h-4 flex-shrink-0 text-green-900/25" strokeWidth={2} />
+            </button>
+          ) : (
+            <div key={venue.id} className={shell}>
+              {header}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ---- Month calendar -----------------------------------------
 
 interface VenueAvailabilityCalendarProps {
@@ -286,6 +421,13 @@ interface VenueAvailabilityCalendarProps {
   allowedVenueIds: string[] | null
   /** Clears every venue narrowing at once; null when there's nothing to clear. */
   onClearVenueFilters: (() => void) | null
+  /**
+   * Venues an admin has pinned. Docked above the agenda and kept stuck there
+   * while it scrolls, showing the next day each one is open. Passed separately
+   * from `venues` because a pinned venue stays worth showing in a month it has
+   * nothing open in — and `venues` only carries the ones that do.
+   */
+  pinnedVenues?: CalendarVenue[]
   /** Booking a specific venue on a specific day. */
   onPickOpening: (courseId: string, date: string) => void
 }
@@ -293,6 +435,7 @@ interface VenueAvailabilityCalendarProps {
 function VenueAvailabilityCalendar({
   month, venues, days, loading, selectedDate, onSelectDate, onMonthChange,
   canGoPrev = true, allowedVenueIds, onClearVenueFilters, onPickOpening,
+  pinnedVenues = EMPTY_VENUES,
 }: VenueAvailabilityCalendarProps) {
   const todayIso = useMemo(() => iso(new Date()), [])
 
@@ -344,6 +487,37 @@ function VenueAvailabilityCalendar({
   const monthOpeningCount = useMemo(
     () => agendaDays.reduce((n, d) => n + (visibleDays[d]?.length ?? 0), 0),
     [agendaDays, visibleDays],
+  )
+
+  // A pinned venue the filters have excluded is not what the member asked to
+  // see — the dock drops it rather than overriding them.
+  const visiblePinnedVenues = useMemo(
+    () => (allowed ? pinnedVenues.filter(v => allowed.has(v.id)) : pinnedVenues),
+    [pinnedVenues, allowed],
+  )
+
+  // Pinned venues need a colour too, and a pinned venue with nothing open this
+  // month isn't in `venues` at all, so it has none from the assignment above.
+  const pinnedColours = useMemo(() => {
+    if (visiblePinnedVenues.every(v => colourByVenue.has(v.id))) return colourByVenue
+    const merged = new Map(colourByVenue)
+    for (const v of visiblePinnedVenues) {
+      // Same rule buildVenueColours uses, so an appended venue can't land on an
+      // index the palette doesn't have.
+      if (!merged.has(v.id)) merged.set(v.id, merged.size % VENUE_COLOUR_COUNT)
+    }
+    return merged
+  }, [visiblePinnedVenues, colourByVenue])
+
+  const pinnedDock = visiblePinnedVenues.length > 0 && (
+    <PinnedVenueDock
+      venues={visiblePinnedVenues}
+      days={visibleDays}
+      month={month}
+      colourByVenue={pinnedColours}
+      onPickOpening={onPickOpening}
+      todayIso={todayIso}
+    />
   )
 
   const onCurrentMonth = isSameMonth(month, new Date())
@@ -440,6 +614,7 @@ function VenueAvailabilityCalendar({
       {!loading && (
         selectedDate ? (
           <div>
+            {pinnedDock}
             <div className="flex items-baseline justify-between gap-3 mb-2">
               <h3 className="text-sm font-bold text-green-950">
                 {format(new Date(`${selectedDate}T12:00:00`), 'EEEE, MMMM d')}
@@ -478,6 +653,7 @@ function VenueAvailabilityCalendar({
           </div>
         ) : agendaDays.length > 0 ? (
           <div>
+            {pinnedDock}
             <div className="flex items-baseline justify-between gap-3 mb-2">
               <h3 className="text-sm font-bold text-green-950">
                 Everything in {format(month, 'MMMM')}
@@ -501,33 +677,36 @@ function VenueAvailabilityCalendar({
             </div>
           </div>
         ) : (
-          <div className="card card-pad text-center py-10">
-            <CalendarDays className="w-8 h-8 mx-auto text-green-900/30" strokeWidth={1.5} />
-            <p className="text-sm text-green-900/60 mt-3">
-              {soleVenueName
-                ? `No tee times at ${soleVenueName} in ${format(month, 'MMMM')}.`
-                : narrowed
-                  ? `Nothing matches your filters in ${format(month, 'MMMM')}.`
-                  : `No tee times open in ${format(month, 'MMMM')}.`}
-            </p>
-            {/* When filters are what emptied the month, clearing them is the
-                likelier fix than skipping forward. */}
-            <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
-              {narrowed && (
+          <div>
+            {pinnedDock}
+            <div className="card card-pad text-center py-10">
+              <CalendarDays className="w-8 h-8 mx-auto text-green-900/30" strokeWidth={1.5} />
+              <p className="text-sm text-green-900/60 mt-3">
+                {soleVenueName
+                  ? `No tee times at ${soleVenueName} in ${format(month, 'MMMM')}.`
+                  : narrowed
+                    ? `Nothing matches your filters in ${format(month, 'MMMM')}.`
+                    : `No tee times open in ${format(month, 'MMMM')}.`}
+              </p>
+              {/* When filters are what emptied the month, clearing them is the
+                  likelier fix than skipping forward. */}
+              <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
+                {narrowed && (
+                  <button
+                    onClick={onClearVenueFilters ?? undefined}
+                    className="btn btn-outline btn-sm"
+                  >
+                    Clear filters
+                  </button>
+                )}
                 <button
-                  onClick={onClearVenueFilters ?? undefined}
+                  onClick={() => onMonthChange(addMonths(month, 1))}
                   className="btn btn-outline btn-sm"
                 >
-                  Clear filters
+                  {format(addMonths(month, 1), 'MMMM')}
+                  <ChevronRight className="w-3.5 h-3.5" strokeWidth={2} />
                 </button>
-              )}
-              <button
-                onClick={() => onMonthChange(addMonths(month, 1))}
-                className="btn btn-outline btn-sm"
-              >
-                {format(addMonths(month, 1), 'MMMM')}
-                <ChevronRight className="w-3.5 h-3.5" strokeWidth={2} />
-              </button>
+              </div>
             </div>
           </div>
         )

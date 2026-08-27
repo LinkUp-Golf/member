@@ -3673,6 +3673,17 @@ function EventSelectionScreen({
       .map((v) => v.id);
   }, [calVenues, debouncedSearch, locationFilter, calVenueFilters]);
 
+  // Venues an admin pinned. Read off the course rows rather than the month
+  // payload: a pinned venue is worth docking even in a month it has nothing
+  // open in, and the availability response only carries the ones that do.
+  const pinnedVenues = useMemo<CalendarVenue[]>(
+    () =>
+      events
+        .filter((e) => e.pinned)
+        .map((e) => ({ id: e.id, name: e.name, city: e.city, state: e.state })),
+    [events],
+  );
+
   const clearVenueFilters = useCallback(() => {
     setSearch("");
     setDebouncedSearch("");
@@ -3885,6 +3896,7 @@ function EventSelectionScreen({
             onClearVenueFilters={
               calAllowedVenueIds === null ? null : clearVenueFilters
             }
+            pinnedVenues={pinnedVenues}
             onPickOpening={openDayDetail}
           />
         )}

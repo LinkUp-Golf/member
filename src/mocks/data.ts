@@ -51,6 +51,7 @@ export const mockCourse: Course = {
   payment_url: 'https://linkupgolf-services.com/aviara-event-booking-checkout-page',
   ghl_group_id: null,
   sort_order: 10,
+  pinned: false,
   approval_status: 'active',
   requested_by: null,
   reviewed_by: null,

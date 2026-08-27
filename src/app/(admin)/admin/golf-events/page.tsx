@@ -271,6 +271,23 @@ export default function AdminCoursesPage() {
     setProcessing(null)
   }
 
+  // Pinning docks the venue above the month agenda on the member Book screen,
+  // stuck there while the agenda scrolls. Nothing enforces one pin at a time —
+  // the dock lists each pinned venue — but it's meant for one.
+  async function togglePinned(course: CourseRow, pinned: boolean) {
+    setProcessing(course.id)
+    const res = await fetch(`/api/admin/courses/${course.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pinned }),
+    })
+    const json = await res.json().catch(() => ({}))
+    if (res.ok) showToast(pinned ? 'Course pinned to the booking screen.' : 'Course unpinned.')
+    else showToast(json.error ?? 'Update failed.', false)
+    await loadCourses()
+    setProcessing(null)
+  }
+
   const grouped = {
     pending:  courses.filter(c => c.approval_status === 'pending'),
     active:   courses.filter(c => c.approval_status === 'active'),
@@ -382,7 +399,7 @@ export default function AdminCoursesPage() {
           <p className="text-xs text-gray-500">
             {reordering
               ? 'Use the arrows to reorder, then save. This is the order members see when booking.'
-              : 'Set the order courses appear to members on the booking screen.'}
+              : 'Set the order courses appear to members on the booking screen. Pin one to dock it above the month agenda.'}
           </p>
           {reordering ? (
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -517,6 +534,9 @@ export default function AdminCoursesPage() {
                         {course.custom_slots_enabled && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-medium">Custom slots</span>
                         )}
+                        {course.pinned && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-800 font-medium">📌 Pinned</span>
+                        )}
                       </div>
                     </div>
 
@@ -556,6 +576,9 @@ export default function AdminCoursesPage() {
                               <CourseMenuItem label={isProcessing ? 'Approving…' : 'Approve'} disabled={isProcessing} onClick={() => { approveCourse(course); closeMenu() }} />
                               <CourseMenuItem label="Reject" danger disabled={isProcessing} onClick={() => { setRejectingId(course.id); setRejectReason(''); closeMenu() }} />
                             </>
+                          )}
+                          {course.approval_status === 'active' && (
+                            <CourseMenuItem label={course.pinned ? 'Unpin' : 'Pin to booking'} disabled={isProcessing} onClick={() => { togglePinned(course, !course.pinned); closeMenu() }} />
                           )}
                           {course.approval_status === 'active' && (
                             <CourseMenuItem label={isProcessing ? '…' : 'Archive'} disabled={isProcessing} onClick={() => { toggleActive(course, true); closeMenu() }} />
@@ -658,6 +681,15 @@ export default function AdminCoursesPage() {
                         <AdminButton label={isProcessing ? 'Approving…' : 'Approve'} onClick={() => approveCourse(course)} variant="primary" size="sm" disabled={isProcessing} />
                         <AdminButton label="Reject" onClick={() => { setRejectingId(course.id); setRejectReason('') }} variant="danger" size="sm" disabled={isProcessing} />
                       </>
+                    )}
+                    {course.approval_status === 'active' && (
+                      <AdminButton
+                        label={course.pinned ? 'Unpin' : 'Pin to booking'}
+                        onClick={() => togglePinned(course, !course.pinned)}
+                        variant={course.pinned ? 'gold' : 'ghost'}
+                        size="sm"
+                        disabled={isProcessing}
+                      />
                     )}
                     {course.approval_status === 'active' && (
                       <AdminButton label={isProcessing ? '…' : 'Archive'} onClick={() => toggleActive(course, true)} variant="ghost" size="sm" disabled={isProcessing} />
