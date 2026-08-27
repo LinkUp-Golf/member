@@ -133,7 +133,7 @@ export default function HostEventsPage() {
       {/* Under the header, above the list: the answer to "how do I do this?"
           where the question gets asked. */}
       <div className="mb-4">
-        <TutorialLink tutorial="hosting-event" label="Watch: putting a round on" />
+        <TutorialLink tutorial="hosting-event" label="Watch: how to create an event" />
       </div>
 
       {loading ? (

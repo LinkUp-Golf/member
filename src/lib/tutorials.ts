@@ -42,7 +42,7 @@ const CDN = 'https://assets.cdn.filesafe.space/J3tfnLdEv4WmE3XorQYW/media'
 export const TUTORIALS: Tutorial[] = [
   {
     id: 'host-application',
-    title: 'Applying to host',
+    title: 'Apply to be a Host',
     description: 'How to apply, what we ask for, and what happens once you are approved.',
     url: `${CDN}/6a8c366267f8d8c86b4e2100.mp4`,
     audience: 'host',
@@ -50,7 +50,7 @@ export const TUTORIALS: Tutorial[] = [
   },
   {
     id: 'hosting-event',
-    title: 'Putting a round on',
+    title: 'Create an event',
     description: 'Listing rounds at your club, and what happens as members reserve the spots.',
     url: `${CDN}/6a8c366267bb7ac35108b769.mp4`,
     audience: 'host',
@@ -58,7 +58,7 @@ export const TUTORIALS: Tutorial[] = [
   },
   {
     id: 'credit-usage',
-    title: 'Using your credit',
+    title: 'Redeem credits',
     description: 'Turning the credit you earned into a code, and paying for a round with it.',
     url: `${CDN}/6a8c3662ad59e6cfed052362.mp4`,
     audience: 'host',
