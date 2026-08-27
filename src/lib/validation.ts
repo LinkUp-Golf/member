@@ -279,17 +279,20 @@ export function validateHostApplicationPayload(body: unknown): ValidationResult 
 }
 
 // ---- Proposed club (a venue not yet on LinkUp) ---------------
-// One rule for "the applicant/host is naming a club we don't have yet", shared
-// by the host application form, the hosted-event new-club path and
-// POST /api/courses/request. These three had drifted apart — the event route
-// required a website with no length bound, /api/courses/request treated it as
-// optional, and the application form had no website field at all — which meant
-// the same club proposed from two places produced two different rows.
+// One rule for "the applicant/host is naming a club we don't have yet". There
+// used to be three — the event route required a website with no length bound,
+// POST /api/courses/request treated it as optional, and the application form had
+// no website field at all — so the same club proposed from two places produced
+// two different rows.
 //
-// `requireWebsite` stays a parameter for /api/courses/request, which has no
-// caller in the app today. Both host paths pass it: a club we've never seen has
-// to carry enough for an admin to identify and set it up, and chasing a missing
-// link by hand was never the good outcome it was assumed to be.
+// There is one caller now: POST /api/courses/request. The become-a-host
+// application and the host event form both go through it (AddVenueControl)
+// rather than carrying a proposed club in their own payloads, which is what
+// keeps the rule single by construction rather than by agreement.
+//
+// `requireWebsite` is left as a parameter and nobody passes it. The website is
+// asked for and not demanded: an admin reviews every one of these by hand, and
+// refusing the club over a URL the host may not have to hand loses the club.
 export function validateProposedClub(
   club: unknown,
   options: { requireWebsite?: boolean } = {}

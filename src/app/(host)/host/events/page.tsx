@@ -13,6 +13,9 @@ import { AdminPageHeader, AdminCard } from "@/components/admin/AdminUI";
 import { Spinner, ContentLoader } from "@/components/ui/Loading";
 import Select, { type SelectOption } from "@/components/ui/Select";
 import VenueDateSelector from "@/components/host/VenueDateSelector";
+import AddVenueControl, {
+  type ProposedVenue,
+} from "@/components/host/AddVenueControl";
 import ProofControl, {
   PROOF_NOTE_CLASS,
   currentProof,
@@ -506,6 +509,8 @@ function EventDrawer({
     event?.event_date ? [event.event_date.slice(0, 10)] : [],
   );
   const [dateError, setDateError] = useState<string | null>(null);
+  // What just happened to a club the host proposed from this form.
+  const [venueNotice, setVenueNotice] = useState<string | null>(null);
 
   const {
     register,
@@ -561,6 +566,37 @@ function EventDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+
+  // A club the host just proposed. It exists as a pending course and the route
+  // granted them the venue, so it belongs in both lists: `venues` is what a
+  // scoped host picks from, `courses` what an unrestricted one does. Selecting
+  // it immediately is the point — it's the venue they were looking for — and
+  // the date picker below then explains that it isn't set up yet.
+  const handleVenueAdded = useCallback(
+    (venue: ProposedVenue, alreadyRequested: boolean) => {
+      const added: VenueDetail = {
+        id: venue.id,
+        name: venue.name,
+        city: venue.city,
+        approval_status: venue.approval_status,
+      };
+      setVenues((prev) =>
+        prev.some((v) => v.id === added.id) ? prev : [...prev, added],
+      );
+      setCourses((prev) =>
+        prev.some((v) => v.id === added.id) ? prev : [...prev, added],
+      );
+      setValue("course_id", added.id, { shouldValidate: true });
+      setDates([]);
+      setDateError(null);
+      setVenueNotice(
+        alreadyRequested
+          ? `${added.name} was already requested — it's selected below.`
+          : `${added.name} is with us to set up. We'll let you know when you can list rounds there.`,
+      );
+    },
+    [setValue],
+  );
 
   // Select is memoized on its props, so these must be stable across renders —
   // rebuilding the arrays every keystroke would re-render the whole dropdown.
@@ -707,6 +743,9 @@ function EventDrawer({
                       // carrying dates that club may not have.
                       setDates([]);
                       setDateError(null);
+                      // The notice is about the club that was just added; it
+                      // says nothing about whichever one this is.
+                      setVenueNotice(null);
                     }}
                     placeholder="Select a course…"
                     searchPlaceholder="Search courses…"
@@ -715,6 +754,23 @@ function EventDrawer({
               />
               {errors.course_id && (
                 <p className={errCls}>{errors.course_id.message}</p>
+              )}
+
+              {/* Hosting is offered at listed venues, so a host whose club
+                  isn't here had no way to say so. Proposing it is not the same
+                  as listing a round at it — the club goes to us to set up, and
+                  the date picker below says as much. Editing an existing event
+                  is not the moment for it. */}
+              {!isEdit && (
+                <div className="mt-2">
+                  <AddVenueControl onAdded={handleVenueAdded} />
+                </div>
+              )}
+
+              {venueNotice && (
+                <p className="mt-2 rounded-xl bg-amber-50 border border-amber-100 px-3 py-2 text-[11px] text-amber-800 leading-snug">
+                  {venueNotice}
+                </p>
               )}
 
               {/* What the venue actually is, and what hosting it is worth. A

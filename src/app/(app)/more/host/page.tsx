@@ -13,6 +13,9 @@ import {
 import Link from "next/link";
 import { Flag, X } from "lucide-react";
 import VenueDateSelector from "@/components/host/VenueDateSelector";
+import AddVenueControl, {
+  type ProposedVenue,
+} from "@/components/host/AddVenueControl";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
 import { Spinner } from "@/components/ui/Loading";
@@ -345,6 +348,8 @@ function ApplicationForm({
 
   const [venues, setVenues] = useState<VenueOption[]>([]);
   const [venuesLoaded, setVenuesLoaded] = useState(false);
+  // What just happened to a club the applicant proposed from this form.
+  const [venueNotice, setVenueNotice] = useState<string | null>(null);
 
   useEffect(() => {
     apiClient.get<{ courses: VenueOption[] }>("/api/courses").then((res) => {
@@ -375,6 +380,35 @@ function ApplicationForm({
     clearErrors("root.venues");
   };
 
+  /**
+   * A club the applicant just proposed. It's a real (pending) course now, so it
+   * goes onto the application exactly like a listed venue — the server accepts
+   * pending course ids for this reason. Ticked straight away, since asking for
+   * it and then having to find it in the list would be a step for nothing.
+   */
+  const handleVenueAdded = (
+    venue: ProposedVenue,
+    alreadyRequested: boolean,
+  ) => {
+    const added: VenueOption = {
+      id: venue.id,
+      name: venue.name,
+      city: venue.city,
+      approval_status: venue.approval_status as VenueOption["approval_status"],
+    };
+    setVenues((prev) =>
+      prev.some((v) => v.id === added.id) ? prev : [...prev, added],
+    );
+    if (!existing.fields.some((f) => f.courseId === added.id)) {
+      toggleVenue(added);
+    }
+    setVenueNotice(
+      alreadyRequested
+        ? `${added.name} was already requested — it's on your application.`
+        : `${added.name} is with us to set up. It's on your application either way.`,
+    );
+  };
+
   // Only what's left to pick — anything chosen has moved up into a card, so the
   // list below never shows the same venue twice.
   const unselectedVenues = venues.filter(
@@ -392,7 +426,10 @@ function ApplicationForm({
     }
 
     const ok = await onSubmit(buildApplicationPayload(data));
-    if (ok) reset({ name: "", existing: [] });
+    if (ok) {
+      reset({ name: "", existing: [] });
+      setVenueNotice(null);
+    }
   });
 
   return (
@@ -484,6 +521,20 @@ function ApplicationForm({
             </div>
           )
         )}
+        {/* Applying is the first time most hosts say where they want to host,
+            so it's the likeliest place for a club we don't have to come up.
+            Proposing it puts it on the application as a pending venue; rounds
+            there stay optional, because there are no open days to pick yet. */}
+        <div className="mt-2.5">
+          <AddVenueControl onAdded={handleVenueAdded} />
+        </div>
+
+        {venueNotice && (
+          <p className="mt-2 rounded-xl bg-amber-50 border border-amber-100 px-3 py-2 text-[11px] text-amber-800 leading-snug">
+            {venueNotice}
+          </p>
+        )}
+
         {errors.root?.venues && (
           <p className="text-xs text-red-500 mt-1.5">
             {errors.root.venues.message}
