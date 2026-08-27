@@ -3831,7 +3831,7 @@ function EventSelectionScreen({
           </svg>
           <input
             type="search"
-            placeholder="Search by event name…"
+            placeholder="Search by venue name…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="flex-1 min-w-0 bg-transparent text-sm outline-none"
