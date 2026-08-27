@@ -9,6 +9,7 @@ import {
 } from '@/components/admin/AdminUI'
 import Select from '@/components/ui/Select'
 import MediaUpload from '@/components/ui/MediaUpload'
+import { MAX_PINNED_COURSES } from '@/lib/constants'
 import type { Course, CourseApprovalStatus } from '@/types'
 
 type FilterTab = 'pending' | 'active' | 'rejected' | 'archived'
@@ -272,8 +273,9 @@ export default function AdminCoursesPage() {
   }
 
   // Pinning docks the venue above the month agenda on the member Book screen,
-  // stuck there while the agenda scrolls. Nothing enforces one pin at a time —
-  // the dock lists each pinned venue — but it's meant for one.
+  // stuck there while the agenda scrolls. Up to MAX_PINNED_COURSES at once, the
+  // same shape as the cap on pinned announcements — the server counts, and a
+  // refusal comes back as the toast below.
   async function togglePinned(course: CourseRow, pinned: boolean) {
     setProcessing(course.id)
     const res = await fetch(`/api/admin/courses/${course.id}`, {
@@ -295,6 +297,11 @@ export default function AdminCoursesPage() {
     archived: courses.filter(c => c.approval_status === 'archived'),
   }
   const filtered = grouped[filter]
+
+  // Pinning is capped the same way pinned announcements are; the server is the
+  // authority, this just stops the button offering a pin that would be refused.
+  const pinnedCount = grouped.active.filter(c => c.pinned).length
+  const pinMaxed = pinnedCount >= MAX_PINNED_COURSES
 
   function startReorder() {
     setReorderList([...grouped.active])
@@ -399,7 +406,10 @@ export default function AdminCoursesPage() {
           <p className="text-xs text-gray-500">
             {reordering
               ? 'Use the arrows to reorder, then save. This is the order members see when booking.'
-              : 'Set the order courses appear to members on the booking screen. Pin one to dock it above the month agenda.'}
+              : <>
+                  Set the order courses appear to members on the booking screen. Pin one to dock it
+                  above the month agenda — <span className="font-medium text-gray-600">{pinnedCount} / {MAX_PINNED_COURSES} pinned</span>.
+                </>}
           </p>
           {reordering ? (
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -578,7 +588,11 @@ export default function AdminCoursesPage() {
                             </>
                           )}
                           {course.approval_status === 'active' && (
-                            <CourseMenuItem label={course.pinned ? 'Unpin' : 'Pin to booking'} disabled={isProcessing} onClick={() => { togglePinned(course, !course.pinned); closeMenu() }} />
+                            <CourseMenuItem
+                              label={course.pinned ? 'Unpin' : 'Pin to booking'}
+                              disabled={isProcessing || (!course.pinned && pinMaxed)}
+                              onClick={() => { togglePinned(course, !course.pinned); closeMenu() }}
+                            />
                           )}
                           {course.approval_status === 'active' && (
                             <CourseMenuItem label={isProcessing ? '…' : 'Archive'} disabled={isProcessing} onClick={() => { toggleActive(course, true); closeMenu() }} />
@@ -688,7 +702,7 @@ export default function AdminCoursesPage() {
                         onClick={() => togglePinned(course, !course.pinned)}
                         variant={course.pinned ? 'gold' : 'ghost'}
                         size="sm"
-                        disabled={isProcessing}
+                        disabled={isProcessing || (!course.pinned && pinMaxed)}
                       />
                     )}
                     {course.approval_status === 'active' && (

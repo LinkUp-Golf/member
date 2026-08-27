@@ -7,6 +7,7 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { createGHLCalendar, deleteGHLCalendar, getCalendarBookingRules } from '@/lib/ghl/client'
 import { validateTimezone, sanitiseText } from '@/lib/validation'
 import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
+import { MAX_PINNED_COURSES } from '@/lib/constants'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 import type { Course } from '@/types'
@@ -203,6 +204,30 @@ export const PATCH = withAuth(
     const updates: Record<string, unknown> = {}
     for (const key of allowed) {
       if (key in body) updates[key] = body[key]
+    }
+
+    // Cap on pinned venues, the same rule pinned announcements are held to.
+    // Counted server-side rather than trusted from the admin page, which can be
+    // looking at a stale list — two admins pinning at once would otherwise both
+    // pass a client check that said there was room for one.
+    if (updates.pinned === true) {
+      const { data: current } = await admin
+        .from('courses')
+        .select('pinned')
+        .eq('id', id)
+        .maybeSingle()
+      if (current && !current.pinned) {
+        const { count } = await admin
+          .from('courses')
+          .select('id', { count: 'exact', head: true })
+          .eq('pinned', true)
+        if ((count ?? 0) >= MAX_PINNED_COURSES) {
+          return NextResponse.json(
+            { error: `Maximum of ${MAX_PINNED_COURSES} venues can be pinned at a time.` },
+            { status: 400 }
+          )
+        }
+      }
     }
     // Sync access_tag from required_tags whenever tags are updated
     if ('required_tags' in updates) {

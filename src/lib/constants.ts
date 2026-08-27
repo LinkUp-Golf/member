@@ -173,6 +173,14 @@ export const FALLBACK_ROUND_DURATION_MINUTES = 300
 // unset. Mirrors the column's DB default.
 export const DEFAULT_MAX_PLAYERS_PER_DAY = 15
 
+// How many venues can be pinned to the Book screen at once. Same shape as the
+// cap on pinned announcements, with a smaller number: pinned announcements are
+// cards at the top of a list you scroll past, whereas the pinned venues are a
+// sticky dock that holds its place — five of them would be most of a phone
+// screen before the calendar got a word in. Enforced in
+// PATCH /api/admin/courses/[id] and surfaced on the admin Courses page.
+export const MAX_PINNED_COURSES = 3
+
 // ---- Cancellation policy tiers ------------------------------
 
 export const POLICY_TIERS = [

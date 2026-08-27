@@ -270,13 +270,17 @@ function AgendaDay({
 // ---- Pinned venue dock --------------------------------------
 
 /**
- * A pinned venue, docked above the agenda and stuck there while it scrolls.
+ * The pinned venues, docked above the agenda and stuck there while it scrolls.
  *
  * The agenda answers "what is open, in date order" — a venue we want members
- * to see first loses that argument as soon as another club opens earlier in
+ * to see first loses that position as soon as another club opens earlier in
  * the month. So a pinned venue is lifted out of the list and shown as itself:
  * the club, and the next day it has tee times. Tapping it opens that day,
  * exactly as its row in the agenda would.
+ *
+ * More than one can be pinned (up to MAX_PINNED_COURSES). Past the first, the
+ * cards lose their location line — the dock holds its place on screen, so every
+ * row it grows by is a row of the calendar the member can't see.
  *
  * It still respects the filters above it: a member narrowing the month to one
  * other club is not asking to keep seeing this one.
@@ -311,32 +315,35 @@ function PinnedVenueDock({
 
   if (venues.length === 0) return null
 
+  const compact = venues.length > 1
+
   return (
     // Opaque, or the agenda would scroll through it. Bled 4px sideways (and
-    // padded back) so the card's shadow lands on the dock's own background
+    // padded back) so the cards' shadows land on the dock's own background
     // instead of being cut off at its edge.
     <div
       className="sticky z-10 -mx-1 px-1 pt-1 pb-2"
       style={{ top, background: 'var(--color-cream)' }}
     >
-      <div className="space-y-2">
+      {/* One label for the group rather than one per card — with three pinned
+          it was the same three words three times. */}
+      <p className="flex items-center gap-1.5 mb-1.5 text-[10px] uppercase tracking-wider font-semibold text-green-900/40">
+        <Pin className="w-3 h-3 flex-shrink-0" strokeWidth={2.2} />
+        {venues.length === 1 ? 'Pinned venue' : `Pinned venues (${venues.length})`}
+      </p>
+
+      <div className="space-y-1.5">
         {venues.map(venue => {
           const next = nextByVenue.get(venue.id)
           const idx = colourByVenue.get(venue.id) ?? 0
           const location = venueLocation(venue)
           const tee = next?.opening.tees[0]
 
-          const header = (
+          const body = (
             <>
               <span className={cn('w-1 self-stretch rounded-full flex-shrink-0', DOT[idx])} />
               <span className="flex-1 min-w-0">
-                <span className="flex items-center gap-1.5">
-                  <Pin className="w-3 h-3 flex-shrink-0 text-green-900/40" strokeWidth={2.2} />
-                  <span className="text-[10px] uppercase tracking-wider font-semibold text-green-900/40">
-                    Pinned venue
-                  </span>
-                </span>
-                <span className="mt-0.5 block text-sm font-semibold text-green-950 truncate">
+                <span className="block text-sm font-semibold text-green-950 truncate">
                   {venue.name}
                 </span>
                 {next ? (
@@ -363,7 +370,7 @@ function PinnedVenueDock({
                     No tee times open in {format(month, 'MMMM')}.
                   </span>
                 )}
-                {location && (
+                {location && !compact && (
                   <span className="mt-0.5 flex items-center gap-1 text-[11px] text-green-900/40">
                     <MapPin className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
                     <span className="truncate">{location}</span>
@@ -384,12 +391,12 @@ function PinnedVenueDock({
               onClick={() => onPickOpening(venue.id, next.date)}
               className={cn(shell, 'transition-colors hover:bg-green-50/50 active:opacity-70')}
             >
-              {header}
+              {body}
               <ChevronRight className="w-4 h-4 flex-shrink-0 text-green-900/25" strokeWidth={2} />
             </button>
           ) : (
             <div key={venue.id} className={shell}>
-              {header}
+              {body}
             </div>
           )
         })}
