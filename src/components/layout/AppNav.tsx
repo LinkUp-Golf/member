@@ -14,6 +14,7 @@ import BookingSurveyPrompt from "@/components/surveys/BookingSurveyPrompt";
 import { getMoreItems } from "@/lib/nav/moreItems";
 import { useMemberRoles } from "@/hooks/useMemberRoles";
 import { hasPartnerTag, hasHostTag } from "@/lib/ghl/tags";
+import SidebarSignOut from "@/components/layout/SidebarSignOut";
 
 // Extracted + memoized so a pathname change (i.e. every navigation) only
 // re-renders the one or two nav rows whose `active` flag actually flips,
@@ -249,13 +250,17 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
 
+        {/* Footer. Sign out lives here because the sidebar replaces the /more
+            hub from tablet up — the page the mobile sign-out button sits on is
+            never visited at this width. */}
         <div
-          className="px-4 py-3 border-t"
+          className="px-4 py-3 border-t flex items-center justify-between gap-2"
           style={{ borderColor: "rgba(255,255,255,0.07)" }}
         >
-          <p className="text-xs" style={{ color: "rgba(255,255,255,0.18)" }}>
+          <p className="text-xs truncate" style={{ color: "rgba(255,255,255,0.18)" }}>
             Park Hyatt Aviara
           </p>
+          <SidebarSignOut />
         </div>
       </aside>
 
