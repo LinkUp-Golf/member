@@ -932,13 +932,13 @@ function EventDrawer({
                     id="ev-new-name"
                     type="text"
                     className={field}
-                    placeholder="The golf club you want to host at"
+                    placeholder="Name of the event you want to host"
                     maxLength={120}
                     {...register("new_event_name", {
                       validate: (v) =>
                         !proposing ||
                         v.trim().length >= 2 ||
-                        "Enter the golf club name",
+                        "Enter the event name",
                     })}
                   />
                   {errors.new_event_name && (
@@ -968,7 +968,7 @@ function EventDrawer({
                     <p className={errCls}>{errors.new_website.message}</p>
                   )}
                   <p className="text-[11px] text-gray-400 mt-1">
-                    Optional, but it saves us finding the club ourselves.
+                    Optional, but it saves us looking the event up ourselves.
                   </p>
                 </div>
 
@@ -993,7 +993,7 @@ function EventDrawer({
                   )}
                   <p className="text-[11px] text-gray-400 mt-1">
                     Write them however you like — there&apos;s no calendar to
-                    pick from until we&apos;ve set the club up.
+                    pick from until we&apos;ve set the event up.
                   </p>
                 </div>
 
@@ -1168,7 +1168,7 @@ function EventDrawer({
           {!isEdit && (
             <p className="text-[11px] text-gray-500">
               {proposing
-                ? "We'll add the club, set up its calendar against the dates you've listed, then publish it to members."
+                ? "We'll add the event, set up its calendar against the dates you've listed, then publish it to members."
                 : "We'll set up the calendar for this round, then publish it to members."}
             </p>
           )}
