@@ -404,6 +404,84 @@ export async function openSpotsByDate(
   return out
 }
 
+/**
+ * How many months ahead nextOpeningForCourse walks before giving up.
+ *
+ * A club's calendar is usually open a few weeks out, so the answer almost
+ * always comes from the first month. Twelve is the ceiling for the case this
+ * exists for — a venue with a long-dated or seasonal calendar — and it bounds
+ * a walk that costs one GHL call per month it has to look at.
+ */
+export const NEXT_OPENING_MAX_MONTHS = 12
+
+/** The soonest day a venue can take a booking, and what it has that day. */
+export interface NextOpening {
+  /** 'YYYY-MM-DD' at the venue. */
+  date: string
+  openSlots: number
+  openSpots: number
+  tees: CalendarTee[]
+}
+
+/**
+ * The next day this venue has anything bookable, looking forward from today.
+ *
+ * The month calendar answers "what is open in August"; this answers "when can I
+ * play here at all", which is a different question the moment August has
+ * nothing. Used by the pinned-venue dock on /book, where a featured club with
+ * nothing open this month should point at the month it does rather than vanish.
+ *
+ * Walks month by month and stops at the first hit, so the common case — a club
+ * with something open in the next few weeks — costs a single month's
+ * availability, already cached by whatever drew the calendar. A venue with
+ * nothing at all costs `maxMonths` of them, which is why there is a ceiling.
+ *
+ * The walk is not a choice: GHL's free-slots endpoint caps its range at 31 days
+ * and offers nothing that returns the next slot directly, so asking for a year
+ * in one call isn't available to us. Each month it does look at lands in the
+ * per-calendar month cache, so the second member to ask pays for none of it.
+ *
+ * Returns null for a venue with no calendar behind it yet, same as one with
+ * genuinely nothing open: neither can be booked, and the caller has no
+ * different thing to do about it.
+ */
+export async function nextOpeningForCourse(
+  admin: AdminClient,
+  course: Course,
+  maxMonths: number = NEXT_OPENING_MAX_MONTHS,
+): Promise<NextOpening | null> {
+  // Nothing to ask. A curated course carries its own slots, so it stays in.
+  if (!course.ghl_calendar_id && !course.custom_slots_enabled) return null
+
+  const now = new Date()
+
+  for (let ahead = 0; ahead < maxMonths; ahead++) {
+    const cursor = new Date(now.getFullYear(), now.getMonth() + ahead, 1)
+    const year = cursor.getFullYear()
+    const monthIdx = cursor.getMonth()
+    const month = `${year}-${String(monthIdx + 1).padStart(2, '0')}`
+    const startDate = formatDateOnly(new Date(year, monthIdx, 1))
+    const endDate = formatDateOnly(new Date(year, monthIdx + 1, 0))
+
+    // Past days are already dropped inside, in the venue's own timezone, so the
+    // current month needs no clamping here.
+    const { days } = await venueAvailabilityForMonth(admin, [course], month, startDate, endDate)
+
+    const earliest = Object.keys(days).sort()[0]
+    const opening = earliest ? days[earliest]?.[0] : undefined
+    if (earliest && opening) {
+      return {
+        date: earliest,
+        openSlots: opening.openSlots,
+        openSpots: opening.openSpots,
+        tees: opening.tees,
+      }
+    }
+  }
+
+  return null
+}
+
 /** Local YYYY-MM-DD, avoiding the UTC shift toISOString would introduce. */
 function formatDateOnly(d: Date): string {
   const mm = String(d.getMonth() + 1).padStart(2, '0')

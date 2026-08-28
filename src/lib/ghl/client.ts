@@ -569,8 +569,14 @@ export async function getLocationTimezone(fallback?: string): Promise<string> {
   return fallback ?? Intl.DateTimeFormat().resolvedOptions().timeZone
 }
 
+// GET /calendars/{id}/free-slots.
 // Response shape: { "YYYY-MM-DD": { slots: { "ISO_DATETIME": spotsOpen } }, traceId: "..." }
 // Returns a map of date string → slot array so the UI can show the full month at once.
+//
+// GHL caps the range at 31 days, which is why every caller works a month at a
+// time and why "when is this venue next open" has to be a walk rather than one
+// long query — there is no next-slot endpoint either. Widening startDate/endDate
+// past a month doesn't get more back, it gets an error.
 export async function getAvailableSlots(params: {
   calendarId: string
   startDate: string  // YYYY-MM-DD

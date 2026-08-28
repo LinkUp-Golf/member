@@ -74,6 +74,7 @@ const iso = (d: Date) => format(d, 'yyyy-MM-dd')
 // defeat DayCell's memo, and this component's own).
 const EMPTY: CalendarOpening[] = []
 const EMPTY_VENUES: PinnedVenue[] = []
+const EMPTY_NEXT: Record<string, PinnedNextOpening | null> = {}
 
 const venueLocation = (v: CalendarVenue | undefined) =>
   [v?.city, v?.state].filter(Boolean).join(', ')
@@ -279,6 +280,17 @@ export interface PinnedVenue extends CalendarVenue {
 }
 
 /**
+ * A pinned venue's next open day anywhere ahead, for when the visible month has
+ * none of its own. Fetched per venue from GET /api/courses/[id]/next-available.
+ */
+export interface PinnedNextOpening {
+  /** 'YYYY-MM-DD' at the venue. */
+  date: string
+  openSpots: number
+  tees: CalendarTee[]
+}
+
+/**
  * The pinned venues, docked above the agenda and stuck there while it scrolls.
  *
  * The agenda answers "what is open, in date order" — a venue we want members
@@ -287,10 +299,15 @@ export interface PinnedVenue extends CalendarVenue {
  * the club, and the next day it has tee times. Tapping it opens that day,
  * exactly as its row in the agenda would.
  *
- * A pinned venue with nothing open this month isn't shown. The dock exists to
- * put a bookable day in front of the member; a card that can't be tapped is a
- * held-open place on screen that gives nothing back, and the member can find
- * the club perfectly well next month.
+ * When the visible month has nothing for it, the card shows the venue's next
+ * open day from wherever it falls — `nextAvailable`, looked up a month at a
+ * time by the server. A featured club with a quiet August should point at the
+ * month it does have something in rather than disappear until the member
+ * happens to page onto it. That date is out of view by definition, so tapping
+ * it takes the calendar there instead of opening a day the month doesn't hold.
+ *
+ * Only a venue with nothing at all — not this month, not in the year ahead —
+ * is dropped. There is nothing to send the member to.
  *
  * More than one can be pinned (up to MAX_PINNED_COURSES). Past the first, the
  * cards lose their location line — the dock holds its place on screen, so every
@@ -300,14 +317,18 @@ export interface PinnedVenue extends CalendarVenue {
  * other club is not asking to keep seeing this one.
  */
 function PinnedVenueDock({
-  venues, days, month, colourByVenue, onPickOpening, todayIso,
+  venues, days, month, colourByVenue, nextAvailable, onPickOpening, onJumpToDate, todayIso,
 }: {
   venues: PinnedVenue[]
   /** Already filtered — 'YYYY-MM-DD' → the venues open that day. */
   days: Record<string, CalendarOpening[]>
   month: Date
   colourByVenue: Map<string, number>
+  /** courseId → its next open day anywhere ahead; absent while still loading. */
+  nextAvailable: Record<string, PinnedNextOpening | null>
   onPickOpening: (courseId: string, date: string) => void
+  /** Takes the calendar to a date outside the month it's showing. */
+  onJumpToDate: (date: string) => void
   todayIso: string
 }) {
   const top = useStickyHeaderOffset()
@@ -327,11 +348,35 @@ function PinnedVenueDock({
     return out
   }, [days, month, todayIso])
 
-  // Only the ones with a day to offer.
-  const shown = venues.filter(v => nextByVenue.has(v.id))
-  if (shown.length === 0) return null
+  // What each card will say: this month's day where there is one, else the
+  // venue's next from anywhere ahead. A venue with neither has nothing to
+  // offer and doesn't appear.
+  const cards = venues.flatMap(venue => {
+    const here = nextByVenue.get(venue.id)
+    if (here) {
+      return [{
+        venue,
+        date: here.date,
+        openSpots: here.opening.openSpots,
+        tee: here.opening.tees[0],
+        inMonth: true,
+      }]
+    }
+    const ahead = nextAvailable[venue.id]
+    if (!ahead) return []
+    return [{
+      venue,
+      date: ahead.date,
+      openSpots: ahead.openSpots,
+      tee: ahead.tees[0],
+      inMonth: false,
+    }]
+  })
 
-  const compact = shown.length > 1
+  if (cards.length === 0) return null
+
+  const compact = cards.length > 1
+  const thisYear = new Date().getFullYear()
 
   return (
     // Opaque, or the agenda would scroll through it. Bled 4px sideways (and
@@ -345,25 +390,23 @@ function PinnedVenueDock({
           it was the same three words three times. */}
       <p className="flex items-center gap-1.5 mb-1.5 text-[10px] uppercase tracking-wider font-semibold text-green-900/40">
         <Pin className="w-3 h-3 flex-shrink-0" strokeWidth={2.2} />
-        {shown.length === 1 ? 'Pinned venue' : `Pinned venues (${shown.length})`}
+        {cards.length === 1 ? 'Pinned venue' : `Pinned venues (${cards.length})`}
       </p>
 
       <div className="space-y-1.5">
-        {shown.map(venue => {
-          // Guaranteed by the filter above, but read as a lookup so the type
-          // narrows without an assertion.
-          const next = nextByVenue.get(venue.id)
-          if (!next) return null
-
+        {cards.map(({ venue, date, openSpots, tee, inMonth }) => {
           const idx = colourByVenue.get(venue.id) ?? 0
           const location = venueLocation(venue)
-          const tee = next.opening.tees[0]
+          const when = new Date(`${date}T12:00:00`)
+          // The year only earns its place once the date isn't in this one —
+          // which, for a venue whose next opening is months out, it may not be.
+          const dateLabel = format(when, when.getFullYear() === thisYear ? 'EEE, MMM d' : 'EEE, MMM d yyyy')
 
           return (
             <button
               key={venue.id}
               type="button"
-              onClick={() => onPickOpening(venue.id, next.date)}
+              onClick={() => (inMonth ? onPickOpening(venue.id, date) : onJumpToDate(date))}
               className="w-full text-left flex items-center gap-3 rounded-xl border border-green-900/15 bg-white px-3 py-2.5 shadow-sm transition-colors hover:bg-green-50/50 active:opacity-70"
             >
               {/* The club's own mark, where the agenda rows carry a colour bar.
@@ -388,7 +431,9 @@ function PinnedVenueDock({
                 </span>
                 <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-green-900/45">
                   <span className="font-medium text-green-900/70">
-                    {format(new Date(`${next.date}T12:00:00`), 'EEE, MMM d')}
+                    {/* Said out loud when the day isn't in the month on screen,
+                        so a date that reads as out of place has a reason. */}
+                    {inMonth ? dateLabel : `Next open ${dateLabel}`}
                   </span>
                   {tee && (
                     <>
@@ -400,8 +445,12 @@ function PinnedVenueDock({
                     </>
                   )}
                   <span aria-hidden className="text-green-900/25">·</span>
-                  <span className={cn('font-medium', TEXT[idx])}>
-                    {next.opening.openSpots} spot{next.opening.openSpots === 1 ? '' : 's'} open
+                  {/* The venue colour is what ties this card to its dots on the
+                      calendar above. A day in another month has no dots up
+                      there, so it goes without rather than borrowing a colour
+                      that belongs to a club the member can actually see. */}
+                  <span className={cn('font-medium', inMonth ? TEXT[idx] : 'text-green-800')}>
+                    {openSpots} spot{openSpots === 1 ? '' : 's'} open
                   </span>
                 </span>
                 {location && !compact && (
@@ -448,10 +497,18 @@ interface VenueAvailabilityCalendarProps {
    * Venues an admin has pinned. Docked above the agenda and kept stuck there
    * while it scrolls, showing the next day each one is open. Passed separately
    * from `venues` because the dock needs the club's logo, which the month
-   * payload doesn't carry; one with nothing open this month is dropped by the
-   * dock itself.
+   * payload doesn't carry.
    */
   pinnedVenues?: PinnedVenue[]
+  /**
+   * Each pinned venue's next open day from anywhere ahead, keyed by course id —
+   * what a card falls back to when the visible month has nothing for it. An
+   * absent key is "still loading"; an explicit null is "nothing in the year
+   * ahead", and that venue drops out of the dock.
+   */
+  pinnedNextAvailable?: Record<string, PinnedNextOpening | null>
+  /** Takes the calendar to a date outside the month it's showing. */
+  onJumpToDate?: (date: string) => void
   /** Booking a specific venue on a specific day. */
   onPickOpening: (courseId: string, date: string) => void
 }
@@ -459,7 +516,7 @@ interface VenueAvailabilityCalendarProps {
 function VenueAvailabilityCalendar({
   month, venues, days, loading, selectedDate, onSelectDate, onMonthChange,
   canGoPrev = true, allowedVenueIds, onClearVenueFilters, onPickOpening,
-  pinnedVenues = EMPTY_VENUES,
+  pinnedVenues = EMPTY_VENUES, pinnedNextAvailable = EMPTY_NEXT, onJumpToDate,
 }: VenueAvailabilityCalendarProps) {
   const todayIso = useMemo(() => iso(new Date()), [])
 
@@ -520,15 +577,19 @@ function VenueAvailabilityCalendar({
     [pinnedVenues, allowed],
   )
 
-  // The dock only shows a venue that has a day open, and anything with a day
-  // open is in `venues` — so the colours assigned above already cover it.
+  // Colours come from the month's own assignment. A card falling back to a date
+  // in another month has none — it isn't on this calendar to match — and says so
+  // by not wearing one.
   const pinnedDock = visiblePinnedVenues.length > 0 && (
     <PinnedVenueDock
       venues={visiblePinnedVenues}
       days={visibleDays}
       month={month}
       colourByVenue={colourByVenue}
+      nextAvailable={pinnedNextAvailable}
       onPickOpening={onPickOpening}
+      // Without a way to navigate, a card can only offer this month's day.
+      onJumpToDate={onJumpToDate ?? (() => {})}
       todayIso={todayIso}
     />
   )

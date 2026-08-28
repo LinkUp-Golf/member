@@ -20,6 +20,7 @@ import VenueAvailabilityCalendar, {
   type CalendarVenue,
   type CalendarOpening,
   type PinnedVenue,
+  type PinnedNextOpening,
 } from "@/components/calendar/VenueAvailabilityCalendar";
 import {
   VENUE_DOT,
@@ -3691,6 +3692,46 @@ function EventSelectionScreen({
     [events],
   );
 
+  // Each pinned venue's next open day from anywhere ahead, for the months it
+  // has nothing in. Its own request per venue rather than part of the month
+  // payload: the server looks a month at a time (GHL won't answer a range wider
+  // than 31 days), and the calendar shouldn't wait on a venue that may have
+  // nothing for a year. The dock fills these in when they land.
+  const [pinnedNext, setPinnedNext] = useState<
+    Record<string, PinnedNextOpening | null>
+  >({});
+
+  // Keyed on the ids, not the array, so this runs once for a given set of
+  // pinned venues — the answer is "next from today" and doesn't move as the
+  // member pages through months.
+  const pinnedIds = useMemo(
+    () => pinnedVenues.map((v) => v.id).join(","),
+    [pinnedVenues],
+  );
+
+  useEffect(() => {
+    if (!pinnedIds) return;
+    let cancelled = false;
+    Promise.all(
+      pinnedIds.split(",").map(async (id) => {
+        try {
+          const r = await fetch(`/api/courses/${id}/next-available`);
+          const d = await r.json().catch(() => ({}));
+          // A failed lookahead is "nothing to show", not an error worth putting
+          // in front of the member — the dock simply drops that card.
+          return [id, r.ok ? ((d.next ?? null) as PinnedNextOpening | null) : null] as const;
+        } catch {
+          return [id, null] as const;
+        }
+      }),
+    ).then((entries) => {
+      if (!cancelled) setPinnedNext(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pinnedIds]);
+
   const clearVenueFilters = useCallback(() => {
     setSearch("");
     setDebouncedSearch("");
@@ -3904,6 +3945,8 @@ function EventSelectionScreen({
               calAllowedVenueIds === null ? null : clearVenueFilters
             }
             pinnedVenues={pinnedVenues}
+            pinnedNextAvailable={pinnedNext}
+            onJumpToDate={handleDateFilterChange}
             onPickOpening={openDayDetail}
           />
         )}
