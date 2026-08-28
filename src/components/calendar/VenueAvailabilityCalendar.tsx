@@ -298,8 +298,16 @@ export interface PinnedNextOpening {
  * The agenda answers "what is open, in date order" — a venue we want members
  * to see first loses that position as soon as another club opens earlier in
  * the month. So a pinned venue is lifted out of the list and shown as itself:
- * the club, and the next day it has tee times. Tapping it opens that day,
- * exactly as its row in the agenda would.
+ * the club, and the next day it has tee times. Tapping it opens that day.
+ *
+ * These cards are dark where everything around them is white. That is the
+ * whole of the treatment and it's deliberate: the first pass styled them like
+ * the agenda rows they sit above, which made the one card meant to stand out of
+ * that list read as a member of it. Inverting to the app's own navy — the
+ * colour of its nav and its header — says "not one of these" in one move,
+ * without a badge, a ribbon or a second border. The venue's palette colour goes
+ * with it; gold is the accent on navy everywhere else in the app, and a card
+ * that isn't in the month grid has no dots up there to match anyway.
  *
  * When the visible month has nothing for it, the card shows the venue's next
  * open day from wherever it falls — `nextAvailable`, looked up a month at a
@@ -325,13 +333,12 @@ export interface PinnedNextOpening {
  * So the dock reads the unfiltered month, not the narrowed one.
  */
 function PinnedVenueDock({
-  venues, days, month, colourByVenue, nextAvailable, onPickOpening, todayIso,
+  venues, days, month, nextAvailable, onPickOpening, todayIso,
 }: {
   venues: PinnedVenue[]
-  /** Already filtered — 'YYYY-MM-DD' → the venues open that day. */
+  /** 'YYYY-MM-DD' → the venues open that day, unfiltered. */
   days: Record<string, CalendarOpening[]>
   month: Date
-  colourByVenue: Map<string, number>
   /** courseId → its next open day anywhere ahead; absent while still loading. */
   nextAvailable: Record<string, PinnedNextOpening | null>
   /** Opens the day, whichever month it falls in. */
@@ -389,20 +396,9 @@ function PinnedVenueDock({
     // Opaque, or the agenda would scroll through it. Bled 4px sideways (and
     // padded back) so the cards' shadows land on the dock's own background
     // instead of being cut off at its edge.
-    <div
-      className="sticky z-10 -mx-1 px-1 pt-1 pb-2"
-      style={{ top, background: 'var(--color-cream)' }}
-    >
-      {/* One label for the group rather than one per card — with three pinned
-          it was the same three words three times. */}
-      <p className="flex items-center gap-1.5 mb-1.5 text-[10px] uppercase tracking-wider font-semibold text-green-900/40">
-        <Pin className="w-3 h-3 flex-shrink-0" strokeWidth={2.2} />
-        {cards.length === 1 ? 'Pinned venue' : `Pinned venues (${cards.length})`}
-      </p>
-
-      <div className="space-y-1.5">
+    <div className="sticky z-10 -mx-1 px-1 pt-1 pb-2.5 bg-cream" style={{ top }}>
+      <div className="space-y-2">
         {cards.map(({ venue, date, openSpots, tee, inMonth }) => {
-          const idx = colourByVenue.get(venue.id) ?? 0
           const location = venueLocation(venue)
           const when = new Date(`${date}T12:00:00`)
           // The year only earns its place once the date isn't in this one —
@@ -414,61 +410,72 @@ function PinnedVenueDock({
               key={venue.id}
               type="button"
               onClick={() => onPickOpening(venue.id, date)}
-              className="w-full text-left flex items-center gap-3 rounded-xl border border-green-900/15 bg-white px-3 py-2.5 shadow-sm transition-colors hover:bg-green-50/50 active:opacity-70"
+              // Navy with a little depth, so the card reads as a surface
+              // rather than a block of colour.
+              className="group w-full text-left flex items-center gap-3 rounded-2xl px-3 py-3 bg-gradient-to-br from-green-900 to-green-950 shadow-lg shadow-green-950/20 transition-opacity active:opacity-80"
             >
-              {/* The club's own mark, where the agenda rows carry a colour bar.
-                  A course always has a logo; the tinted initial is the last
-                  resort rather than a broken image. */}
-              <span className="relative w-11 h-11 rounded-lg overflow-hidden flex-shrink-0 bg-green-900/[0.03]">
+              {/* White tile behind the mark. Club logos are dark artwork on
+                  transparent backgrounds — dropped straight onto the navy most
+                  of them would simply disappear. */}
+              <span className="relative w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 bg-white">
                 {venue.logoUrl ? (
-                  <Image src={venue.logoUrl} alt="" fill unoptimized className="object-contain" />
+                  <Image src={venue.logoUrl} alt="" fill unoptimized className="object-contain p-1" />
                 ) : (
-                  <span className={cn(
-                    'absolute inset-0 flex items-center justify-center text-sm font-bold border rounded-lg',
-                    CHIP[idx], TEXT[idx],
-                  )}>
+                  <span className="absolute inset-0 flex items-center justify-center text-base font-black text-green-900">
                     {venue.name.charAt(0).toUpperCase()}
                   </span>
                 )}
               </span>
 
               <span className="flex-1 min-w-0">
-                <span className="block text-sm font-semibold text-green-950 truncate">
+                <span className="flex items-center gap-1 text-[9px] uppercase tracking-[0.14em] font-bold text-gold">
+                  <Pin className="w-2.5 h-2.5 flex-shrink-0" strokeWidth={2.6} />
+                  Pinned venue
+                </span>
+
+                <span className="mt-0.5 block text-[15px] font-bold text-white truncate">
                   {venue.name}
                 </span>
-                <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-green-900/45">
-                  <span className="font-medium text-green-900/70">
+
+                <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-white/65">
+                  <span>
                     {/* Said out loud when the day isn't in the month on screen,
                         so a date that reads as out of place has a reason. */}
                     {inMonth ? dateLabel : `Next open ${dateLabel}`}
                   </span>
                   {tee && (
                     <>
-                      <span aria-hidden className="text-green-900/25">·</span>
+                      <span aria-hidden className="text-white/25">·</span>
                       <span className="flex items-center gap-1">
                         <Clock className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
                         {formatTeeTime(tee.time)}
                       </span>
                     </>
                   )}
-                  <span aria-hidden className="text-green-900/25">·</span>
-                  {/* The venue colour is what ties this card to its dots on the
-                      calendar above. A day in another month has no dots up
-                      there, so it goes without rather than borrowing a colour
-                      that belongs to a club the member can actually see. */}
-                  <span className={cn('font-medium', inMonth ? TEXT[idx] : 'text-green-800')}>
+                  <span aria-hidden className="text-white/25">·</span>
+                  {/* The number that decides whether it's worth acting on, so
+                      it gets the accent rather than the date beside it. */}
+                  <span className="font-semibold text-gold">
                     {openSpots} spot{openSpots === 1 ? '' : 's'} open
                   </span>
                 </span>
+
+                {/* /55 rather than lower: 11px on navy is already at the edge
+                    of legible, and this is the line most likely to be read at
+                    arm's length. */}
                 {location && !compact && (
-                  <span className="mt-0.5 flex items-center gap-1 text-[11px] text-green-900/40">
+                  <span className="mt-1 flex items-center gap-1 text-[11px] text-white/55">
                     <MapPin className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
                     <span className="truncate">{location}</span>
                   </span>
                 )}
               </span>
 
-              <ChevronRight className="w-4 h-4 flex-shrink-0 text-green-900/25" strokeWidth={2} />
+              {/* Reads as something to press, which a bare chevron on a card
+                  this size did not. */}
+              <span className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-white/10 text-gold transition-colors group-hover:bg-white/20">
+                <ChevronRight className="w-4 h-4" strokeWidth={2.4} />
+              </span>
             </button>
           )
         })}
@@ -575,20 +582,18 @@ function VenueAvailabilityCalendar({
     [agendaDays, visibleDays],
   )
 
-  // Colours come from the month's own assignment, which is taken over every
-  // venue rather than the surviving ones — so a pinned venue the filters exclude
-  // still has its own. A card falling back to a date in another month has none:
-  // it isn't on this calendar to match, and says so by not wearing one.
-  //
   // `days`, not `visibleDays` — the dock is deliberately outside the filters, so
   // narrowing the month to another club must not turn a pinned venue's real day
   // this month into a "next open" one in some later month.
+  //
+  // No colour map: the dock's cards are navy, where the venue palette is a set
+  // of light-background text colours, and a card showing a date in another
+  // month has no dots on this calendar to be matched to anyway.
   const pinnedDock = pinnedVenues.length > 0 && (
     <PinnedVenueDock
       venues={pinnedVenues}
       days={days}
       month={month}
-      colourByVenue={colourByVenue}
       nextAvailable={pinnedNextAvailable}
       onPickOpening={onPickOpening}
       todayIso={todayIso}
