@@ -8,6 +8,7 @@ import { createGHLCalendar, deleteGHLCalendar, getCalendarBookingRules } from '@
 import { validateTimezone, sanitiseText } from '@/lib/validation'
 import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
 import { APPROVABLE_STATUSES, canApproveEvent } from '@/lib/hosts/events'
+import { openSpotsByDate } from '@/lib/bookings/availability'
 import { sendPushToMember, NotificationTemplates } from '@/lib/push'
 import { MAX_PINNED_COURSES } from '@/lib/constants'
 import { logger } from '@/lib/logger'
@@ -96,11 +97,26 @@ export const PATCH = withAuth(
         // reading "we're setting up the calendar" about a calendar that now
         // exists.
         //
-        // Same gate as approving one by hand (canApproveEvent): only rounds
-        // still awaiting approval, and never one whose date has gone — that
-        // would put something in member browse nobody can attend. Rejecting a
-        // published round still works if an admin wants it down.
+        // Two gates, not one.
+        //
+        // canApproveEvent, as when approving by hand: only rounds still awaiting
+        // approval, and never one whose date has gone.
+        //
+        // Then the calendar. A host proposing a venue picks the dates they want
+        // before the venue has a calendar to ask, so those dates are a request,
+        // not availability — and the calendar an admin then sets up is free to
+        // disagree with every one of them. Publishing a round on a day the venue
+        // has nothing open lists something no member can actually play, and it
+        // makes the host's wishlist look like availability on a screen whose
+        // whole job is to report what the venue has.
+        //
+        // So the calendar decides: a date it holds open is published (with the
+        // capacity it actually has, replacing the number the host guessed at),
+        // and a date it doesn't is left awaiting approval for an admin to sort
+        // out with the host. Left, not rejected — the host asked for something
+        // real, and the answer is a conversation rather than a deletion.
         let publishedEvents = 0
+        let heldEvents = 0
         try {
           const { data: waiting } = await admin
             .from('hosted_events')
@@ -108,32 +124,49 @@ export const PATCH = withAuth(
             .eq('course_id', id)
             .in('status', [...APPROVABLE_STATUSES])
 
-          const publishable = (waiting ?? []).filter(
+          const approvable = (waiting ?? []).filter(
             e => canApproveEvent(e.status as string, e.event_date as string).ok,
           )
 
-          if (publishable.length) {
-            const { data: published } = await admin
-              .from('hosted_events')
-              .update({
-                status: 'upcoming',
-                reviewed_by: ctx.userId,
-                reviewed_at: new Date().toISOString(),
-                rejection_reason: null,
-              })
-              .in('id', publishable.map(e => e.id))
-              // The status filter is the race guard, exactly as it is on the
-              // single-event route: a host cancelling mid-review must win.
-              .in('status', [...APPROVABLE_STATUSES])
-              .select('id')
+          if (approvable.length) {
+            // `data` carries the calendar id this approval just created, which
+            // is what makes there be anything to ask.
+            const openByDate = await openSpotsByDate(
+              admin,
+              data as Course,
+              Array.from(new Set(approvable.map(e => String(e.event_date)))),
+            )
 
-            publishedEvents = published?.length ?? 0
+            const supported = approvable.filter(e => (openByDate.get(String(e.event_date)) ?? 0) > 0)
+            heldEvents = approvable.length - supported.length
+
+            // Capacity per date, so each round is listed with what its own day
+            // has room for — two days at the same club rarely match.
+            for (const event of supported) {
+              const date = String(event.event_date)
+              await admin
+                .from('hosted_events')
+                .update({
+                  status: 'upcoming',
+                  total_spots: openByDate.get(date),
+                  reviewed_by: ctx.userId,
+                  reviewed_at: new Date().toISOString(),
+                  rejection_reason: null,
+                })
+                .eq('id', event.id)
+                // The status filter is the race guard, exactly as it is on the
+                // single-event route: a host cancelling mid-review must win.
+                .in('status', [...APPROVABLE_STATUSES])
+              publishedEvents += 1
+            }
 
             // One piece of news per host, not one per date — a host with five
             // rounds here doesn't want five notifications. Each is told about
-            // their own soonest date, which is the one they'll act on first.
+            // their own soonest published date, which is the one they'll act on
+            // first. A host whose dates were all held hears nothing here; that
+            // needs a person, not a push.
             const soonestByHost = new Map<string, string>()
-            for (const e of publishable) {
+            for (const e of supported) {
               const host = Array.isArray(e.host) ? e.host[0] : e.host
               const memberId = (host as { member_id?: string } | null)?.member_id
               if (!memberId) continue
@@ -187,7 +220,7 @@ export const PATCH = withAuth(
           }))
           .catch(err => console.error('[courses/approve] Announcement post failed (non-fatal):', err))
 
-        return NextResponse.json({ course: data, publishedEvents })
+        return NextResponse.json({ course: data, publishedEvents, heldEvents })
       }
 
       // reject — the reason is required, not optional. A rejected course is one
