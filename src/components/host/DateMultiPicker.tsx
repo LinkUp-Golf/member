@@ -144,14 +144,17 @@ export default function DateMultiPicker({
         </div>
       </div>
 
-      {/* The picked dates aren't listed back — the grid shows them. The one
-          exception is a date in another month, which the grid can't: without
-          this line, paging away from a pick makes it look like it was lost. */}
-      {offMonth.length > 0 && (
-        <div className="px-3 py-2 border-t border-gray-100">
-          <p className="text-[11px] text-gray-400">
-            Also picked: {offMonth.map(fullDayLabel).join(', ')}
+      {(value.length > 0 || atMax) && (
+        <div className="px-3 py-2 border-t border-gray-100 space-y-1">
+          <p className="text-[11px] text-gray-500">
+            {value.length} date{value.length === 1 ? '' : 's'} picked
+            {max ? ` · ${max} max` : ''}
           </p>
+          {offMonth.length > 0 && (
+            <p className="text-[11px] text-gray-400">
+              Also picked: {offMonth.map(fullDayLabel).join(', ')}
+            </p>
+          )}
         </div>
       )}
     </div>
