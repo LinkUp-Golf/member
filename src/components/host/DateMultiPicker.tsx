@@ -24,7 +24,14 @@ import { cn } from '@/lib/utils'
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'] as const
 
 const iso = (d: Date) => format(d, 'yyyy-MM-dd')
-const fullDayLabel = (d: string) => format(new Date(`${d}T12:00:00`), 'EEE, MMM d')
+
+// The year only earns its place once the date isn't in this one — a picker that
+// can reach next spring shouldn't leave "Sat, Mar 7" ambiguous.
+const fullDayLabel = (d: string) => {
+  const date = new Date(`${d}T12:00:00`)
+  const sameYear = date.getFullYear() === new Date().getFullYear()
+  return format(date, sameYear ? 'EEE, MMM d' : 'EEE, MMM d yyyy')
+}
 
 export default function DateMultiPicker({
   value,
@@ -64,11 +71,6 @@ export default function DateMultiPicker({
     },
     [selected, value, onChange, atMax],
   )
-
-  // Days picked in other months stay selected but aren't on screen, so they're
-  // listed back rather than silently carried — the same courtesy
-  // VenueDateSelector extends.
-  const offMonth = value.filter(d => !d.startsWith(format(month, 'yyyy-MM'))).sort()
 
   return (
     <div className="rounded-xl border border-gray-200">
@@ -144,17 +146,19 @@ export default function DateMultiPicker({
         </div>
       </div>
 
-      {(value.length > 0 || atMax) && (
+      {/* Every picked date, not only the ones this month can't show. A host
+          listing a run of rounds is choosing across months, and the grid can
+          only ever show them one month at a time — so what's actually been
+          picked has to be readable in one place. */}
+      {value.length > 0 && (
         <div className="px-3 py-2 border-t border-gray-100 space-y-1">
           <p className="text-[11px] text-gray-500">
             {value.length} date{value.length === 1 ? '' : 's'} picked
             {max ? ` · ${max} max` : ''}
           </p>
-          {offMonth.length > 0 && (
-            <p className="text-[11px] text-gray-400">
-              Also picked: {offMonth.map(fullDayLabel).join(', ')}
-            </p>
-          )}
+          <p className="text-[11px] text-gray-400 leading-relaxed">
+            {value.map(fullDayLabel).join(' · ')}
+          </p>
         </div>
       )}
     </div>
