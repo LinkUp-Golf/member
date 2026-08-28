@@ -28,6 +28,11 @@ const FILTER_LABELS: Record<FilterTab, string> = {
   archived: 'Archived',
 }
 
+// The courses.logo_url default (20260701000003_courses_logo_url.sql). A
+// host-proposed course carries it until someone uploads the real thing, which is
+// worth flagging before it goes live rather than after a member sees it.
+const PLACEHOLDER_LOGO = '/course-logo-fallback.svg'
+
 const TIMEZONES = [
   'America/Los_Angeles', 'America/Denver', 'America/Chicago',
   'America/New_York', 'America/Phoenix', 'Pacific/Honolulu',
@@ -658,7 +663,24 @@ export default function AdminCoursesPage() {
 
                   {course.approval_status === 'active' && !course.payment_url && (
                     <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-1.5">
-                      ⚠️ No payment link configured — members cannot pay for confirmed bookings yet.
+                      ⚠️ No payment link — this course is hidden from members until one is set. Edit the course to add it.
+                    </p>
+                  )}
+
+                  {/* Said before Approve is pressed, not after. A host-proposed
+                      course arrives with no payment link and the placeholder
+                      logo, and approving it without those produced a course
+                      that was live, calendared and invisible. */}
+                  {course.approval_status === 'pending' && !course.payment_url && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-1.5">
+                      ⚠️ Needs a payment link before it can be approved — members
+                      can&apos;t pay for a booking without one. Edit the course to add it.
+                    </p>
+                  )}
+
+                  {course.approval_status === 'pending' && course.logo_url === PLACEHOLDER_LOGO && (
+                    <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-1.5">
+                      Still on the placeholder logo — members will see it as-is unless one is uploaded.
                     </p>
                   )}
 

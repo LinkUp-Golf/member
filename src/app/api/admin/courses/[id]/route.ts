@@ -37,6 +37,26 @@ export const PATCH = withAuth(
       if (course.approval_status !== 'pending') return NextResponse.json({ error: 'Course is not pending' }, { status: 409 })
 
       if (body.action === 'approve') {
+        // Approving is what publishes a course to members, so it has to clear
+        // the bar the member endpoints actually apply. GET /api/courses and
+        // GET /api/bookings/availability both require a payment link — a
+        // confirmed booking is sent to courses.payment_url to be paid, so a
+        // course without one has nowhere to send anybody.
+        //
+        // A course an admin created can't get here without one (POST requires
+        // it). A course a host proposed arrives with none at all, and approving
+        // it used to succeed and produce a course that was active, calendared,
+        // and invisible — with nothing saying why.
+        if (!(course.payment_url as string | null)?.trim()) {
+          return NextResponse.json(
+            {
+              error:
+                'Add a payment link before approving. Without one this course stays hidden from members, because a confirmed booking has nowhere to be paid — edit the course, add the link, then approve.',
+            },
+            { status: 400 }
+          )
+        }
+
         let ghlCalendarId = course.ghl_calendar_id as string | null
         if (!ghlCalendarId) {
           try {
