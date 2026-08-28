@@ -20,7 +20,7 @@
 
 import { memo, useMemo } from 'react'
 import Image from 'next/image'
-import { ChevronLeft, ChevronRight, CalendarDays, Clock, MapPin, Pin } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CalendarDays, Clock, MapPin } from 'lucide-react'
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   addDays, addMonths, format, isSameMonth, isToday,
@@ -305,9 +305,11 @@ export interface PinnedNextOpening {
  * the agenda rows they sit above, which made the one card meant to stand out of
  * that list read as a member of it. Inverting to the app's own navy — the
  * colour of its nav and its header — says "not one of these" in one move,
- * without a badge, a ribbon or a second border. The venue's palette colour goes
- * with it; gold is the accent on navy everywhere else in the app, and a card
- * that isn't in the month grid has no dots up there to match anyway.
+ * without a badge, a ribbon, a label or a second border. Nothing on the card
+ * announces that it's pinned: being the only dark card on the screen is the
+ * announcement, and a member doesn't need the mechanism named. The venue's
+ * palette colour goes too; gold is the accent on navy everywhere else in the
+ * app, and a card that isn't in the month grid has no dots up there to match.
  *
  * When the visible month has nothing for it, the card shows the venue's next
  * open day from wherever it falls — `nextAvailable`, looked up a month at a
@@ -416,8 +418,11 @@ function PinnedVenueDock({
             >
               {/* White tile behind the mark. Club logos are dark artwork on
                   transparent backgrounds — dropped straight onto the navy most
-                  of them would simply disappear. */}
-              <span className="relative w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 bg-white">
+                  of them would simply disappear.
+                  `aspect-square` alongside the w/h so the tile can't be pulled
+                  out of square by a long venue name or the location line, the
+                  same guarantee the admin venue rows use. */}
+              <span className="relative w-12 h-12 aspect-square rounded-xl overflow-hidden flex-shrink-0 bg-white">
                 {venue.logoUrl ? (
                   <Image src={venue.logoUrl} alt="" fill unoptimized className="object-contain p-1" />
                 ) : (
@@ -428,12 +433,7 @@ function PinnedVenueDock({
               </span>
 
               <span className="flex-1 min-w-0">
-                <span className="flex items-center gap-1 text-[9px] uppercase tracking-[0.14em] font-bold text-gold">
-                  <Pin className="w-2.5 h-2.5 flex-shrink-0" strokeWidth={2.6} />
-                  Pinned venue
-                </span>
-
-                <span className="mt-0.5 block text-[15px] font-bold text-white truncate">
+                <span className="block text-[15px] font-bold text-white truncate">
                   {venue.name}
                 </span>
 
