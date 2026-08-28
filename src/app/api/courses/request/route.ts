@@ -12,10 +12,12 @@ export const dynamic = 'force-dynamic'
 // it here first, which is why the application and event validators can insist on
 // a real course id.
 //
-// The event form also sends the schedule it wants to run there: free-text dates,
-// slots per day, a guest rate. That can't be hosted_events yet — no calendar
-// behind a pending course means no open day to attach a round to — so it's
-// stored on the pending course for the admin setting the club up.
+// The event form also sends what the host wants to run there: free-text dates,
+// slots per day, a guest rate. None of it becomes anything on its own — the team
+// sets those into a GHL calendar event by hand once the club is set up — so it
+// isn't stored on the course. It's written to admin_audit_log against the
+// course, which the admin Courses queue reads back as the host's brief. No
+// column for it, because nothing in the app ever acts on it.
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
@@ -51,9 +53,9 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   const schedule =
     typeof body.event_dates === 'string' && body.event_dates.trim()
       ? {
-          eventDates: sanitiseText(body.event_dates.trim()),
-          slotsPerDay: Number(body.slots_per_day),
-          memberGuestRate: Number(body.member_guest_rate),
+          event_dates: sanitiseText(body.event_dates.trim()),
+          slots_per_day: Number(body.slots_per_day),
+          member_guest_rate: Number(body.member_guest_rate),
         }
       : null
 
@@ -63,7 +65,6 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     name: (body.name ?? '').trim(),
     website,
     requestedBy: ctx.memberId,
-    schedule,
   })
 
   if (result.error || !result.course) {
@@ -100,6 +101,28 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
       userId: ctx.userId,
       metadata: { course_id: result.course.id, error: String(err) },
     })
+  }
+
+  // The host's brief, for whoever sets the club up. It lives in the audit log
+  // rather than on the course because nothing in the app reads it to make a
+  // decision — a person does, once, and then builds the GHL calendar event from
+  // it. Best-effort: the club is what the host is waiting on.
+  if (schedule) {
+    try {
+      await admin.from('admin_audit_log').insert({
+        admin_id: ctx.memberId,
+        action: 'courses.requested_schedule',
+        target_type: 'course',
+        target_id: result.course.id,
+        payload: schedule,
+      })
+    } catch (err) {
+      logger.warn('Could not record the requested schedule', {
+        action: 'course.requested.schedule_failed',
+        userId: ctx.userId,
+        metadata: { course_id: result.course.id, error: String(err) },
+      })
+    }
   }
 
   logger.info('Course requested by member', {

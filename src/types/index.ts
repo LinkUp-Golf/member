@@ -148,14 +148,6 @@ export interface Course {
   // Approval workflow
   approval_status: CourseApprovalStatus
   requested_by: string | null
-  // What the host who proposed this club asked for: the dates they want to run
-  // (free text — a schedule, not parsed dates), slots per day, and the guest
-  // rate. Null on a course an admin added. See the "New LinkUp" tab on the host
-  // event form, and 20260828000001_courses_requested_schedule.sql for why none
-  // of it can be hosted_events yet.
-  requested_event_dates: string | null
-  requested_slots_per_day: number | null
-  requested_member_guest_rate: number | null
   reviewed_by: string | null
   rejection_reason: string | null
   requester?: { first_name: string; last_name: string } | null

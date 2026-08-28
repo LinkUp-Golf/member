@@ -25,21 +25,6 @@ function toSlug(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
-/**
- * The schedule a host wants to run at a club we don't have yet — free-text
- * dates, slots per day and the guest rate they'd charge.
- *
- * Stored on the pending course rather than turned into events: there's no
- * calendar behind a pending course, so no real open day to attach a round to,
- * and the dates arrive as a sentence rather than as dates. An admin reads it
- * while setting the club up.
- */
-export interface RequestedSchedule {
-  eventDates: string
-  slotsPerDay: number
-  memberGuestRate: number
-}
-
 export async function requestPendingCourse(params: {
   admin: SupabaseClient
   name: string
@@ -47,20 +32,10 @@ export async function requestPendingCourse(params: {
   website?: string | null
   /** members.id of the requester. */
   requestedBy: string
-  /** Absent when the club is being proposed on its own. */
-  schedule?: RequestedSchedule | null
 }): Promise<RequestCourseResult> {
-  const { admin, requestedBy, schedule } = params
+  const { admin, requestedBy } = params
   const name = params.name.trim()
   const website = params.website?.trim() || null
-
-  const scheduleColumns = schedule
-    ? {
-        requested_event_dates: schedule.eventDates.trim(),
-        requested_slots_per_day: schedule.slotsPerDay,
-        requested_member_guest_rate: schedule.memberGuestRate,
-      }
-    : {}
 
   const baseSlug = toSlug(name)
   if (!baseSlug) return { error: 'Enter a valid golf club name', status: 400 }
@@ -79,13 +54,6 @@ export async function requestPendingCourse(params: {
     if (existing.approval_status === 'pending') {
       // Already queued (possibly by someone else) — reuse it so callers can
       // attach to the same pending course without creating a duplicate row.
-      //
-      // A schedule that came with this request still lands: the club being
-      // queued already doesn't mean an admin has been told which days this host
-      // wants. Best-effort, because the club is what the caller is waiting on.
-      if (schedule) {
-        await admin.from('courses').update(scheduleColumns).eq('id', existing.id)
-      }
       return { course: existing as RequestedCourse, alreadyRequested: true }
     }
     // rejected / archived: fall through and create a fresh request below.
@@ -105,7 +73,6 @@ export async function requestPendingCourse(params: {
       booking_url: website,
       approval_status: 'pending',
       requested_by: requestedBy,
-      ...scheduleColumns,
     })
     .select('id, name, city, approval_status')
     .single()
