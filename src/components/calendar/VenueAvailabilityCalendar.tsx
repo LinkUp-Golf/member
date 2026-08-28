@@ -300,16 +300,21 @@ export interface PinnedNextOpening {
  * the month. So a pinned venue is lifted out of the list and shown as itself:
  * the club, and the next day it has tee times. Tapping it opens that day.
  *
- * These cards are dark where everything around them is white. That is the
- * whole of the treatment and it's deliberate: the first pass styled them like
- * the agenda rows they sit above, which made the one card meant to stand out of
- * that list read as a member of it. Inverting to the app's own navy — the
- * colour of its nav and its header — says "not one of these" in one move,
- * without a badge, a ribbon, a label or a second border. Nothing on the card
- * announces that it's pinned: being the only dark card on the screen is the
- * announcement, and a member doesn't need the mechanism named. The venue's
- * palette colour goes too; gold is the accent on navy everywhere else in the
- * app, and a card that isn't in the month grid has no dots up there to match.
+ * Nothing on the card announces that it's pinned — no badge, no ribbon, no
+ * label. It's set apart by how it's made instead: a warm gold hairline where
+ * the agenda rows carry a cool navy one, a soft lift off the page where they
+ * sit flat on it, and the club's own mark at a size the rows don't have room
+ * for. Quiet differences, but four of them, and none that need reading.
+ *
+ * Two earlier passes are worth not repeating. Styling it like the agenda rows
+ * made the one card meant to stand out of that list read as a member of it.
+ * Inverting it to solid navy fixed that and overshot — a black-on-cream slab
+ * shouting above a calendar. The tint here is barely there on purpose; the
+ * card should look considered, not loud.
+ *
+ * The venue's palette colour is gone either way: those colours mark which dot
+ * in the grid is which club, and a card showing a date in another month has no
+ * dot up there to be matched to.
  *
  * When the visible month has nothing for it, the card shows the venue's next
  * open day from wherever it falls — `nextAvailable`, looked up a month at a
@@ -412,32 +417,32 @@ function PinnedVenueDock({
               key={venue.id}
               type="button"
               onClick={() => onPickOpening(venue.id, date)}
-              // Navy with a little depth, so the card reads as a surface
-              // rather than a block of colour.
-              className="group w-full text-left flex items-center gap-3 rounded-2xl px-3 py-3 bg-gradient-to-br from-green-900 to-green-950 shadow-lg shadow-green-950/20 transition-opacity active:opacity-80"
+              // Almost white, with just enough wash and lift to read as its
+              // own surface. The gold hairline is what actually separates it
+              // from the rows below — theirs is navy at a tenth opacity.
+              className="group w-full text-left flex items-center gap-3.5 rounded-2xl px-3.5 py-3.5 bg-gradient-to-br from-white to-green-50 border border-gold/40 shadow-md shadow-green-950/[0.06] transition-colors hover:border-gold/70 active:opacity-80"
             >
-              {/* White tile behind the mark. Club logos are dark artwork on
-                  transparent backgrounds — dropped straight onto the navy most
-                  of them would simply disappear.
-                  `aspect-square` alongside the w/h so the tile can't be pulled
+              {/* `aspect-square` alongside the w/h so the tile can't be pulled
                   out of square by a long venue name or the location line, the
-                  same guarantee the admin venue rows use. */}
-              <span className="relative w-20 h-20 aspect-square rounded-xl overflow-hidden flex-shrink-0 bg-white">
+                  same guarantee the admin venue rows use. The faint ground is
+                  the day sheet's, so one club's mark sits on the same tile in
+                  both places. */}
+              <span className="relative w-20 h-20 aspect-square rounded-xl overflow-hidden flex-shrink-0 bg-green-900/[0.03]">
                 {venue.logoUrl ? (
-                  <Image src={venue.logoUrl} alt="" fill unoptimized className="object-contain p-1" />
+                  <Image src={venue.logoUrl} alt="" fill unoptimized className="object-contain p-1.5" />
                 ) : (
-                  <span className="absolute inset-0 flex items-center justify-center text-base font-black text-green-900">
+                  <span className="absolute inset-0 flex items-center justify-center text-xl font-black text-green-900/70">
                     {venue.name.charAt(0).toUpperCase()}
                   </span>
                 )}
               </span>
 
               <span className="flex-1 min-w-0">
-                <span className="block text-[15px] font-bold text-white truncate">
+                <span className="block text-[15px] font-bold text-green-950 truncate">
                   {venue.name}
                 </span>
 
-                <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-white/65">
+                <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-green-900/55">
                   <span>
                     {/* Said out loud when the day isn't in the month on screen,
                         so a date that reads as out of place has a reason. */}
@@ -445,26 +450,25 @@ function PinnedVenueDock({
                   </span>
                   {tee && (
                     <>
-                      <span aria-hidden className="text-white/25">·</span>
+                      <span aria-hidden className="text-green-900/20">·</span>
                       <span className="flex items-center gap-1">
                         <Clock className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
                         {formatTeeTime(tee.time)}
                       </span>
                     </>
                   )}
-                  <span aria-hidden className="text-white/25">·</span>
-                  {/* The number that decides whether it's worth acting on, so
-                      it gets the accent rather than the date beside it. */}
-                  <span className="font-semibold text-gold">
+                  <span aria-hidden className="text-green-900/20">·</span>
+                  {/* The number that decides whether the day is worth taking,
+                      so it carries the weight rather than the date beside it.
+                      Navy rather than gold: gold is a mid-tone that doesn't
+                      clear 4.5:1 on a near-white card at 11px. */}
+                  <span className="font-bold text-green-800">
                     {openSpots} spot{openSpots === 1 ? '' : 's'} open
                   </span>
                 </span>
 
-                {/* /55 rather than lower: 11px on navy is already at the edge
-                    of legible, and this is the line most likely to be read at
-                    arm's length. */}
                 {location && !compact && (
-                  <span className="mt-1 flex items-center gap-1 text-[11px] text-white/55">
+                  <span className="mt-1 flex items-center gap-1 text-[11px] text-green-900/45">
                     <MapPin className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
                     <span className="truncate">{location}</span>
                   </span>
@@ -473,7 +477,7 @@ function PinnedVenueDock({
 
               {/* Reads as something to press, which a bare chevron on a card
                   this size did not. */}
-              <span className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-white/10 text-gold transition-colors group-hover:bg-white/20">
+              <span className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-green-900/[0.06] text-green-800 transition-colors group-hover:bg-green-900/[0.11]">
                 <ChevronRight className="w-4 h-4" strokeWidth={2.4} />
               </span>
             </button>
