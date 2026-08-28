@@ -54,6 +54,9 @@ export const mockCourse: Course = {
   pinned: false,
   approval_status: 'active',
   requested_by: null,
+  requested_event_dates: null,
+  requested_slots_per_day: null,
+  requested_member_guest_rate: null,
   reviewed_by: null,
   rejection_reason: null,
 }

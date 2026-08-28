@@ -6,23 +6,36 @@ export const dynamic = 'force-dynamic'
 // approve into a live, bookable course.
 //
 // Both host surfaces that can name a club call this one endpoint — the become-a-
-// host application and the host's own event form (AddVenueControl) — so the same
-// club proposed from either place produces the same row. Neither submits a
-// proposed club as part of its own payload: they propose it here first and then
-// carry the course id, which is why the application and event validators can
-// insist on a real course id.
+// host application (AddVenueControl) and the "New LinkUp" tab on the host's own
+// event form — so the same club proposed from either place produces the same
+// row. Neither submits a proposed club as part of its own payload: they propose
+// it here first, which is why the application and event validators can insist on
+// a real course id.
+//
+// The event form also sends the schedule it wants to run there: free-text dates,
+// slots per day, a guest rate. That can't be hosted_events yet — no calendar
+// behind a pending course means no open day to attach a round to — so it's
+// stored on the pending course for the admin setting the club up.
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { validateProposedClub } from '@/lib/validation'
+import { validateProposedClub, sanitiseText } from '@/lib/validation'
 import { requestPendingCourse } from '@/lib/courses/request-course'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
-  const body = (await req.json().catch(() => ({}))) as { name?: string; website?: string }
+  const body = (await req.json().catch(() => ({}))) as {
+    name?: string
+    website?: string
+    // The "New LinkUp" tab's schedule. All three or none — see
+    // validateProposedClub.
+    event_dates?: string
+    slots_per_day?: number | string
+    member_guest_rate?: number | string
+  }
 
   // One rule for every caller, so the same club proposed from the event form and
   // from the application can't come out different. The website stays optional: an
@@ -33,12 +46,24 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
   const website = typeof body.website === 'string' && body.website.trim() ? body.website.trim() : null
 
+  // Validation above already rejected a half-filled schedule, so the presence of
+  // the dates is enough to know the whole thing is here.
+  const schedule =
+    typeof body.event_dates === 'string' && body.event_dates.trim()
+      ? {
+          eventDates: sanitiseText(body.event_dates.trim()),
+          slotsPerDay: Number(body.slots_per_day),
+          memberGuestRate: Number(body.member_guest_rate),
+        }
+      : null
+
   const admin = createAdminClient()
   const result = await requestPendingCourse({
     admin,
     name: (body.name ?? '').trim(),
     website,
     requestedBy: ctx.memberId,
+    schedule,
   })
 
   if (result.error || !result.course) {

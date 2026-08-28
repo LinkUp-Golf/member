@@ -58,6 +58,70 @@ describe('validateProposedClub', () => {
     expect(r.valid).toBe(true)
   })
 
+  // The "New LinkUp" tab sends the schedule it wants to run at the proposed
+  // club. The application form sends none of it, so absent has to stay valid —
+  // and half-filled has to not be, or an admin gets a club to set up with no
+  // idea what for.
+  describe('requested schedule', () => {
+    const club = { name: 'Torrey Pines' }
+    const schedule = { event_dates: 'Sat 4 Oct, Sat 18 Oct', slots_per_day: 12, member_guest_rate: 150 }
+
+    it('accepts a club with no schedule at all', () => {
+      expect(validateProposedClub(club).valid).toBe(true)
+    })
+
+    it('accepts a club with a complete schedule', () => {
+      expect(validateProposedClub({ ...club, ...schedule }).valid).toBe(true)
+    })
+
+    it('accepts a zero guest rate', () => {
+      expect(validateProposedClub({ ...club, ...schedule, member_guest_rate: 0 }).valid).toBe(true)
+    })
+
+    it('accepts numeric strings, which is what a form sends', () => {
+      const r = validateProposedClub({ ...club, ...schedule, slots_per_day: '12', member_guest_rate: '150' })
+      expect(r.valid).toBe(true)
+    })
+
+    it('rejects dates on their own', () => {
+      expect(validateProposedClub({ ...club, event_dates: 'Sat 4 Oct' }).valid).toBe(false)
+    })
+
+    it('rejects slots on their own', () => {
+      expect(validateProposedClub({ ...club, slots_per_day: 12 }).valid).toBe(false)
+    })
+
+    it('rejects a rate on its own', () => {
+      expect(validateProposedClub({ ...club, member_guest_rate: 150 }).valid).toBe(false)
+    })
+
+    it('rejects a schedule with blank dates', () => {
+      expect(validateProposedClub({ ...club, ...schedule, event_dates: '   ' }).valid).toBe(false)
+    })
+
+    it('rejects a schedule whose dates run past the cap', () => {
+      const r = validateProposedClub({ ...club, ...schedule, event_dates: 'x'.repeat(501) })
+      expect(r.valid).toBe(false)
+    })
+
+    it('rejects a fractional slots-per-day', () => {
+      expect(validateProposedClub({ ...club, ...schedule, slots_per_day: 2.5 }).valid).toBe(false)
+    })
+
+    it('rejects slots per day outside 1-200', () => {
+      expect(validateProposedClub({ ...club, ...schedule, slots_per_day: 0 }).valid).toBe(false)
+      expect(validateProposedClub({ ...club, ...schedule, slots_per_day: 201 }).valid).toBe(false)
+    })
+
+    it('rejects a negative guest rate', () => {
+      expect(validateProposedClub({ ...club, ...schedule, member_guest_rate: -1 }).valid).toBe(false)
+    })
+
+    it('rejects a non-numeric guest rate', () => {
+      expect(validateProposedClub({ ...club, ...schedule, member_guest_rate: 'free' }).valid).toBe(false)
+    })
+  })
+
   it('rejects a non-object payload', () => {
     expect(validateProposedClub(null).valid).toBe(false)
     expect(validateProposedClub('Torrey Pines').valid).toBe(false)

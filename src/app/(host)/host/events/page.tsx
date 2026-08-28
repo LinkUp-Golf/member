@@ -13,17 +13,17 @@ import { AdminPageHeader, AdminCard } from "@/components/admin/AdminUI";
 import { Spinner, ContentLoader } from "@/components/ui/Loading";
 import Select, { type SelectOption } from "@/components/ui/Select";
 import VenueDateSelector from "@/components/host/VenueDateSelector";
-import AddVenueControl, {
-  type ProposedVenue,
-} from "@/components/host/AddVenueControl";
 import ProofControl, {
   PROOF_NOTE_CLASS,
   currentProof,
   eventProofState,
 } from "@/components/host/ProofControl";
 import { TutorialLink } from "@/components/tutorials/TutorialPlayer";
-import { HOST_EVENT_GUEST_RATE_USD } from "@/lib/constants";
-import { formatEventTeeTime as fmtTime } from "@/lib/utils";
+import {
+  HOST_EVENT_GUEST_RATE_USD,
+  HOST_MEMBER_PRICE_MARKUP_USD,
+} from "@/lib/constants";
+import { formatEventTeeTime as fmtTime, cn } from "@/lib/utils";
 import type {
   HostedEvent,
   HostedEventStatus,
@@ -77,7 +77,7 @@ function groupByVenue(events: HostedEvent[]): VenueGroup[] {
   for (const e of events) {
     const group = byCourse.get(e.course_id) ?? {
       courseId: e.course_id,
-      name: e.course?.name ?? "Course",
+      name: e.course?.name ?? "Event",
       city: e.course?.city ?? null,
       events: [],
     };
@@ -456,14 +456,36 @@ function CancelPanel({
 
 // ---- Create / edit drawer -----------------------------------
 
+/**
+ * Which of the drawer's two tabs is open.
+ *
+ * 'existing' lists rounds at a club already on LinkUp: pick the venue, pick from
+ * the days it actually has open. 'new' proposes a club we don't have — there is
+ * no calendar to ask, so the host types what they want and an admin sets it up.
+ */
+type LinkupTab = "existing" | "new";
+
 interface EventFormValues {
   course_id: string;
   /** '' means "no fixed tee time". */
   tee_time: string;
   dinner: boolean;
+  // ---- New LinkUp only ----
+  /** The club being proposed. */
+  new_event_name: string;
+  /** Optional — the one field on this tab that is. */
+  new_website: string;
+  /** Free text. A club with no calendar has no open days to offer, so the host
+   *  writes the schedule they want and an admin reads it. */
+  new_dates: string;
+  new_slots_per_day: string;
+  new_member_guest_rate: string;
 }
 
 const NO_TEE_TIME = "";
+
+/** Matches PROPOSED_DATES_MAX in @/lib/validation. */
+const NEW_DATES_MAX = 500;
 
 /**
  * A venue as the form needs it: enough to name it in the dropdown and to show
@@ -509,8 +531,10 @@ function EventDrawer({
     event?.event_date ? [event.event_date.slice(0, 10)] : [],
   );
   const [dateError, setDateError] = useState<string | null>(null);
-  // What just happened to a club the host proposed from this form.
-  const [venueNotice, setVenueNotice] = useState<string | null>(null);
+  // Editing acts on an event that already exists at a club that already exists,
+  // so the proposal tab has nothing to offer there.
+  const [tab, setTab] = useState<LinkupTab>("existing");
+  const proposing = !isEdit && tab === "new";
 
   const {
     register,
@@ -524,12 +548,25 @@ function EventDrawer({
       course_id: event?.course_id ?? "",
       tee_time: event?.tee_time ?? NO_TEE_TIME,
       dinner: event?.dinner ?? false,
+      new_event_name: "",
+      new_website: "",
+      new_dates: "",
+      new_slots_per_day: "",
+      new_member_guest_rate: "",
     },
   });
 
   // The date picker asks this venue what it has open, so changing the venue
   // invalidates whatever was picked at the previous one.
   const courseId = watch("course_id");
+
+  // Read back so the markup notice can name the member price against the rate
+  // the host is typing, rather than leaving them to add ten in their head.
+  const rawNewRate = watch("new_member_guest_rate");
+  const newRateNumber =
+    rawNewRate?.trim() && Number.isFinite(Number(rawNewRate))
+      ? Number(rawNewRate)
+      : null;
 
   // A failed load leaves an empty dropdown with no explanation, so surface it
   // rather than swallowing the error.
@@ -567,37 +604,6 @@ function EventDrawer({
   }, []);
 
 
-  // A club the host just proposed. It exists as a pending course and the route
-  // granted them the venue, so it belongs in both lists: `venues` is what a
-  // scoped host picks from, `courses` what an unrestricted one does. Selecting
-  // it immediately is the point — it's the venue they were looking for — and
-  // the date picker below then explains that it isn't set up yet.
-  const handleVenueAdded = useCallback(
-    (venue: ProposedVenue, alreadyRequested: boolean) => {
-      const added: VenueDetail = {
-        id: venue.id,
-        name: venue.name,
-        city: venue.city,
-        approval_status: venue.approval_status,
-      };
-      setVenues((prev) =>
-        prev.some((v) => v.id === added.id) ? prev : [...prev, added],
-      );
-      setCourses((prev) =>
-        prev.some((v) => v.id === added.id) ? prev : [...prev, added],
-      );
-      setValue("course_id", added.id, { shouldValidate: true });
-      setDates([]);
-      setDateError(null);
-      setVenueNotice(
-        alreadyRequested
-          ? `${added.name} was already requested — it's selected below.`
-          : `${added.name} is with us to set up. We'll let you know when you can list rounds there.`,
-      );
-    },
-    [setValue],
-  );
-
   // Select is memoized on its props, so these must be stable across renders —
   // rebuilding the arrays every keystroke would re-render the whole dropdown.
   // Only a host the server says is unrestricted gets every bookable course; a
@@ -617,7 +623,7 @@ function EventDrawer({
     if (event?.course_id && !opts.some((o) => o.value === event.course_id)) {
       opts.unshift({
         value: event.course_id,
-        label: event.course?.name ?? "Current course",
+        label: event.course?.name ?? "Current event",
       });
     }
     return opts;
@@ -632,6 +638,40 @@ function EventDrawer({
   const field = "input text-sm";
   const labelCls = "block text-xs font-medium text-gray-600 mb-1";
   const errCls = "text-xs text-red-500 mt-1";
+
+  /**
+   * Proposing a club we don't have. This is a new-course request, not an event:
+   * POST /api/courses/request creates the pending course an admin sets up, and
+   * carries the schedule the host wants to run there. No hosted_events row can
+   * exist yet — there's no calendar behind a pending course to hold a round, and
+   * the dates are a sentence rather than dates.
+   */
+  async function propose(values: EventFormValues) {
+    const res = await fetch("/api/courses/request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: values.new_event_name.trim(),
+        website: values.new_website.trim() || null,
+        event_dates: values.new_dates.trim(),
+        slots_per_day: Number(values.new_slots_per_day),
+        member_guest_rate: Number(values.new_member_guest_rate),
+      }),
+    });
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      onError(json.error ?? "Could not send the request.");
+      return;
+    }
+
+    const name = json.course?.name ?? values.new_event_name.trim();
+    onSaved(
+      json.alreadyRequested
+        ? `${name} was already requested — your dates are on the record.`
+        : `${name} sent for setup. We'll build its calendar against your dates, then publish it to members.`,
+    );
+  }
 
   async function save(values: EventFormValues) {
     // Every date being listed, all picked from the venue's own availability.
@@ -679,6 +719,10 @@ function EventDrawer({
 
   const submit = () =>
     handleSubmit((v) => {
+      // Proposing a club has no picker to check — every field on that tab is
+      // registered, so react-hook-form has already had the last word.
+      if (proposing) return propose(v);
+
       // Dates come from the picker rather than an RHF field, so the "at least
       // one" rule lives here. Duplicates aren't possible — the picker toggles.
       if (dates.length === 0) {
@@ -721,16 +765,53 @@ function EventDrawer({
             </div>
           )}
 
+          {/* Two ways to put a round on, and they aren't variations of one
+              form: listing at a club we have asks the club what days it's
+              free, while proposing one we don't have can't ask anything and
+              has to be typed. Tabs rather than a toggle inside the form,
+              because the fields below barely overlap. */}
+          {!isEdit && (
+            <div
+              className="flex rounded-xl bg-gray-100 p-1"
+              role="tablist"
+              aria-label="Event source"
+            >
+              {(
+                [
+                  ["existing", "LinkUps"],
+                  ["new", "New LinkUp"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === key}
+                  onClick={() => setTab(key)}
+                  className={cn(
+                    "flex-1 rounded-lg py-2 text-xs font-semibold transition-colors",
+                    tab === key
+                      ? "bg-white text-green-900 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+            {!proposing && (
             <div>
               <label htmlFor="ev-course" className={labelCls}>
-                Course *
+                Event *
               </label>
 
               <Controller
                 name="course_id"
                 control={control}
                 shouldUnregister
-                rules={{ required: "Choose a course" }}
+                rules={{ required: "Choose an event" }}
                 render={({ field: f }) => (
                   <Select
                     id="ev-course"
@@ -743,34 +824,14 @@ function EventDrawer({
                       // carrying dates that club may not have.
                       setDates([]);
                       setDateError(null);
-                      // The notice is about the club that was just added; it
-                      // says nothing about whichever one this is.
-                      setVenueNotice(null);
                     }}
-                    placeholder="Select a course…"
-                    searchPlaceholder="Search courses…"
+                    placeholder="Select an event…"
+                    searchPlaceholder="Search events…"
                   />
                 )}
               />
               {errors.course_id && (
                 <p className={errCls}>{errors.course_id.message}</p>
-              )}
-
-              {/* Hosting is offered at listed venues, so a host whose club
-                  isn't here had no way to say so. Proposing it is not the same
-                  as listing a round at it — the club goes to us to set up, and
-                  the date picker below says as much. Editing an existing event
-                  is not the moment for it. */}
-              {!isEdit && (
-                <div className="mt-2">
-                  <AddVenueControl onAdded={handleVenueAdded} />
-                </div>
-              )}
-
-              {venueNotice && (
-                <p className="mt-2 rounded-xl bg-amber-50 border border-amber-100 px-3 py-2 text-[11px] text-amber-800 leading-snug">
-                  {venueNotice}
-                </p>
               )}
 
               {/* What the venue actually is, and what hosting it is worth. A
@@ -853,7 +914,169 @@ function EventDrawer({
                 </div>
               )}
             </div>
+            )}
 
+            {/* ---- New LinkUp ------------------------------------------
+                A club we don't have has no calendar, so nothing here can be
+                asked of it — no venue to pick, and no open days to offer. The
+                host writes what they want to run and an admin sets the club up
+                against it. Everything but the website is required: this is the
+                whole of what we'll have to work from. */}
+            {proposing && (
+              <>
+                <div>
+                  <label htmlFor="ev-new-name" className={labelCls}>
+                    Event *
+                  </label>
+                  <input
+                    id="ev-new-name"
+                    type="text"
+                    className={field}
+                    placeholder="The golf club you want to host at"
+                    maxLength={120}
+                    {...register("new_event_name", {
+                      validate: (v) =>
+                        !proposing ||
+                        v.trim().length >= 2 ||
+                        "Enter the golf club name",
+                    })}
+                  />
+                  {errors.new_event_name && (
+                    <p className={errCls}>{errors.new_event_name.message}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label htmlFor="ev-new-website" className={labelCls}>
+                    Website
+                  </label>
+                  <input
+                    id="ev-new-website"
+                    type="url"
+                    className={field}
+                    placeholder="https://… (optional)"
+                    maxLength={200}
+                    {...register("new_website", {
+                      validate: (v) =>
+                        !proposing ||
+                        !v.trim() ||
+                        /^https?:\/\/.+/i.test(v.trim()) ||
+                        "Website must start with https://",
+                    })}
+                  />
+                  {errors.new_website && (
+                    <p className={errCls}>{errors.new_website.message}</p>
+                  )}
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Optional, but it saves us finding the club ourselves.
+                  </p>
+                </div>
+
+                <div>
+                  <label htmlFor="ev-new-dates" className={labelCls}>
+                    Dates *
+                  </label>
+                  <textarea
+                    id="ev-new-dates"
+                    className={`${field} min-h-[76px] resize-y`}
+                    placeholder="e.g. Sat 4 Oct, Sat 18 Oct, and the first Saturday of each month after"
+                    maxLength={NEW_DATES_MAX}
+                    {...register("new_dates", {
+                      validate: (v) =>
+                        !proposing ||
+                        v.trim().length >= 2 ||
+                        "List the dates you want to run",
+                    })}
+                  />
+                  {errors.new_dates && (
+                    <p className={errCls}>{errors.new_dates.message}</p>
+                  )}
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Write them however you like — there&apos;s no calendar to
+                    pick from until we&apos;ve set the club up.
+                  </p>
+                </div>
+
+                <div>
+                  <label htmlFor="ev-new-slots" className={labelCls}>
+                    Slots per day *
+                  </label>
+                  <input
+                    id="ev-new-slots"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={200}
+                    className={field}
+                    placeholder="e.g. 12"
+                    {...register("new_slots_per_day", {
+                      validate: (v) => {
+                        if (!proposing) return true;
+                        const n = Number(v);
+                        return (
+                          (Number.isInteger(n) && n >= 1 && n <= 200) ||
+                          "A whole number between 1 and 200"
+                        );
+                      },
+                    })}
+                  />
+                  {errors.new_slots_per_day && (
+                    <p className={errCls}>
+                      {errors.new_slots_per_day.message}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label htmlFor="ev-new-rate" className={labelCls}>
+                    Member guest rate *
+                  </label>
+                  <input
+                    id="ev-new-rate"
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step="0.01"
+                    className={field}
+                    placeholder="e.g. 150"
+                    {...register("new_member_guest_rate", {
+                      validate: (v) => {
+                        if (!proposing) return true;
+                        const n = Number(v);
+                        return (
+                          (Number.isFinite(n) && n >= 0) || "0 or more"
+                        );
+                      },
+                    })}
+                  />
+                  {errors.new_member_guest_rate && (
+                    <p className={errCls}>
+                      {errors.new_member_guest_rate.message}
+                    </p>
+                  )}
+                </div>
+
+                {/* The one term the host doesn't set, so it's stated rather
+                    than asked for — and stated against the number they just
+                    typed, since "we add $10" is easy to read past. */}
+                <div className="rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-xs text-green-900 leading-relaxed">
+                  We add {fmtMoney(HOST_MEMBER_PRICE_MARKUP_USD)} per member on
+                  top of your guest rate.
+                  {newRateNumber !== null && (
+                    <>
+                      {" "}
+                      At {fmtMoney(newRateNumber)}, members are listed at{" "}
+                      <span className="font-semibold">
+                        {fmtMoney(newRateNumber + HOST_MEMBER_PRICE_MARKUP_USD)}
+                      </span>
+                      .
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+
+            {!proposing && (
             <div>
               <label className={labelCls}>
                 {isEdit ? "Date *" : "Dates *"}
@@ -876,7 +1099,9 @@ function EventDrawer({
               </p>
               {dateError && <p className={errCls}>{dateError}</p>}
             </div>
+            )}
 
+            {!proposing && (
             <div>
               <label htmlFor="ev-time" className={labelCls}>
                 Tee time
@@ -885,7 +1110,7 @@ function EventDrawer({
                 id="ev-time"
                 type="text"
                 className={field}
-                placeholder="e.g. 8:30 AM (optional)"
+                placeholder="e.g. 8:30 AM or morning/afternoon"
                 maxLength={50}
                 {...register("tee_time")}
               />
@@ -894,32 +1119,47 @@ function EventDrawer({
                 there&apos;s no fixed time.
               </p>
             </div>
+            )}
 
-          {/* The terms, stated rather than asked for. Every hosted round runs
-              on the same ones, so this is information, not a field. */}
-          <div className="rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-xs text-green-900">
-            Each date is listed with the spots that venue has open that day — the
-            number on each date above — at {fmtMoney(HOST_EVENT_GUEST_RATE_USD)}{" "}
-            per round.
-          </div>
-
-          <div>
-            <span className={labelCls}>Dinner</span>
-            <label
-              htmlFor="ev-dinner"
-              className="flex items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 cursor-pointer"
-            >
-              <input
-                id="ev-dinner"
-                type="checkbox"
-                className="h-4 w-4 rounded border-gray-300 text-green-900 focus:ring-green-800"
-                {...register("dinner")}
-              />
-              <span className="text-sm text-gray-700">
-                Dinner is included with this event
+          {/* The terms, stated rather than asked for. Every hosted round at a
+              listed club runs on the same ones, so this is information, not a
+              field — including the markup, which is the part a host is most
+              likely to be surprised by later. */}
+          {!proposing && (
+            <div className="rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-xs text-green-900 leading-relaxed">
+              Each date is listed with the spots that venue has open that day —
+              the number on each date above — at{" "}
+              {fmtMoney(HOST_EVENT_GUEST_RATE_USD)} per round. We add{" "}
+              {fmtMoney(HOST_MEMBER_PRICE_MARKUP_USD)} per member on top, so
+              members are listed at{" "}
+              <span className="font-semibold">
+                {fmtMoney(
+                  HOST_EVENT_GUEST_RATE_USD + HOST_MEMBER_PRICE_MARKUP_USD,
+                )}
               </span>
-            </label>
-          </div>
+              .
+            </div>
+          )}
+
+          {!proposing && (
+            <div>
+              <span className={labelCls}>Dinner</span>
+              <label
+                htmlFor="ev-dinner"
+                className="flex items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 cursor-pointer"
+              >
+                <input
+                  id="ev-dinner"
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300 text-green-900 focus:ring-green-800"
+                  {...register("dinner")}
+                />
+                <span className="text-sm text-gray-700">
+                  Dinner is included with this event
+                </span>
+              </label>
+            </div>
+          )}
         </form>
 
         {/* "Submit", not "Publish" — saving sends the event for approval, and
@@ -927,8 +1167,9 @@ function EventDrawer({
         <div className="px-6 py-4 border-t border-gray-100 flex flex-col gap-2 flex-shrink-0">
           {!isEdit && (
             <p className="text-[11px] text-gray-500">
-              We&apos;ll set up the calendar for this round, then publish it to
-              members.
+              {proposing
+                ? "We'll add the club, set up its calendar against the dates you've listed, then publish it to members."
+                : "We'll set up the calendar for this round, then publish it to members."}
             </p>
           )}
           <button
@@ -941,6 +1182,8 @@ function EventDrawer({
               <Spinner className="w-4 h-4 text-green-900" />
             ) : isEdit ? (
               "Save changes"
+            ) : proposing ? (
+              "Request this LinkUp"
             ) : (
               "Submit for approval"
             )}

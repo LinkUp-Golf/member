@@ -9,7 +9,7 @@ import {
 } from '@/components/admin/AdminUI'
 import Select from '@/components/ui/Select'
 import MediaUpload from '@/components/ui/MediaUpload'
-import { MAX_PINNED_COURSES } from '@/lib/constants'
+import { MAX_PINNED_COURSES, HOST_MEMBER_PRICE_MARKUP_USD } from '@/lib/constants'
 import type { Course, CourseApprovalStatus } from '@/types'
 
 type FilterTab = 'pending' | 'active' | 'rejected' | 'archived'
@@ -666,6 +666,38 @@ export default function AdminCoursesPage() {
                     <p className="text-xs text-gray-400">
                       Requested by <span className="font-medium text-gray-600">{course.requester.first_name} {course.requester.last_name}</span>
                     </p>
+                  )}
+
+                  {/* What the host asked for when they proposed this club from
+                      the "New LinkUp" tab. It can't be events yet — a pending
+                      course has no calendar to hold a round, and the dates are
+                      a sentence rather than dates — so this is the brief for
+                      setting the club up. */}
+                  {(course.requested_event_dates || course.requested_slots_per_day != null || course.requested_member_guest_rate != null) && (
+                    <div className="rounded-lg bg-blue-50/70 border border-blue-100 px-3 py-2 space-y-1">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-blue-700">
+                        Host&apos;s request
+                      </p>
+                      {course.requested_event_dates && (
+                        <p className="text-xs text-gray-700 whitespace-pre-line">
+                          <span className="text-gray-500">Dates: </span>
+                          {course.requested_event_dates}
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-700">
+                        {course.requested_slots_per_day != null && (
+                          <><span className="text-gray-500">Slots/day: </span>{course.requested_slots_per_day}</>
+                        )}
+                        {course.requested_slots_per_day != null && course.requested_member_guest_rate != null && ' · '}
+                        {course.requested_member_guest_rate != null && (
+                          <>
+                            <span className="text-gray-500">Guest rate: </span>
+                            ${course.requested_member_guest_rate}
+                            <span className="text-gray-400"> (members ${Number(course.requested_member_guest_rate) + HOST_MEMBER_PRICE_MARKUP_USD})</span>
+                          </>
+                        )}
+                      </p>
+                    </div>
                   )}
 
                   {course.rejection_reason && (
