@@ -630,6 +630,37 @@ export async function getAvailableSlots(params: {
   }
 }
 
+/**
+ * Who to assign a new appointment on this calendar to.
+ *
+ * GHL_DEFAULT_ASSIGNEE_ID used to be hardcoded into every appointment we
+ * created, which held only for as long as that one user stayed on every
+ * calendar. The moment a calendar's host is changed in GHL the id is a user who
+ * isn't on it any more, and appointments start being assigned to nobody useful
+ * or rejected outright — with nothing in LinkUp to change, because the id was a
+ * constant in the source.
+ *
+ * So the calendar is asked first, off the same cached read that supplies its
+ * booking rules. The constant is now only the fallback: for a calendar we
+ * couldn't read (GHL down mid-booking) or one that names nobody, an assignee we
+ * know existed once beats sending none at all.
+ *
+ * That read is cached for GHL_CAL_RULES_TTL_MS (30 min), so changing a
+ * calendar's host takes up to half an hour to reach bookings. Bounded and
+ * self-healing, unlike a constant in the source, and not worth a fresh GHL call
+ * on every booking for a setting that changes a few times a year.
+ */
+async function resolveAppointmentAssignee(calendarId: string): Promise<string | null> {
+  const rules = await getCalendarBookingRules(calendarId)
+  if (rules?.assigneeId) return rules.assigneeId
+
+  logger.warn('No assignee on calendar; falling back to the default', {
+    action: 'ghl_calendar_assignee',
+    metadata: { calendarId, fallback: GHL_DEFAULT_ASSIGNEE_ID || null },
+  })
+  return GHL_DEFAULT_ASSIGNEE_ID || null
+}
+
 export async function createBooking(params: {
   calendarId: string
   contact: { id: string; email: string; phone?: string | null }
@@ -639,6 +670,10 @@ export async function createBooking(params: {
   timezone: string
   address?: string
 }): Promise<string> {
+  // Read from the calendar rather than baked in, so changing a calendar's host
+  // in GHL is the whole of the change.
+  const assigneeId = await resolveAppointmentAssignee(params.calendarId)
+
   const data = await ghlFetch<{ id: string }>(
     '/calendars/events/appointments',
     {
@@ -665,8 +700,10 @@ export async function createBooking(params: {
         source: GHL_OPPORTUNITY_SOURCE,
         channel: 'web_app',
         calendarProviderId: GHL_CALENDAR_PROVIDER_ID,
-        userId: GHL_DEFAULT_ASSIGNEE_ID,
-        assignedUserId: GHL_DEFAULT_ASSIGNEE_ID,
+        // Omitted entirely when we have nobody. assignedUserId is optional on
+        // this endpoint, so letting GHL assign from the calendar's own staffing
+        // beats naming a user who may no longer be on it.
+        ...(assigneeId ? { userId: assigneeId, assignedUserId: assigneeId } : {}),
         address: params.address ?? '',
         overrideLocationConfig: false,
         isCustomRecurring: false,
@@ -941,6 +978,43 @@ export interface GHLCalendarSummary {
   allowBookingAfterUnit: GHLDurationUnit | null
   allowBookingFor: number | null
   allowBookingForUnit: GHLDurationUnit | null
+  // Who the calendar is staffed by. GHL's docs for GET /calendars/{id} don't
+  // expand the calendar object's child attributes, so these are typed as
+  // optional and read tolerantly — see pickCalendarAssignee.
+  teamMembers?: Array<{
+    userId?: string | null
+    priority?: number | null
+    isPrimary?: boolean | null
+    selected?: boolean | null
+  }> | null
+  // Single-owner calendars carry the user directly rather than as a team.
+  userId?: string | null
+  assignedUserId?: string | null
+}
+
+/**
+ * The user a calendar's appointments should be assigned to.
+ *
+ * Pure and exported so the picking can be tested without GHL: the shape here is
+ * the part we're least sure of, since the Get Calendar docs don't expand the
+ * calendar object's child attributes.
+ *
+ * Order: a team member the calendar marks as primary or selected, then the first
+ * team member with a user id, then a single-owner calendar's own user. Priority
+ * is deliberately not used to rank — on a round-robin calendar it's a
+ * distribution weight, not a seniority, so "highest priority" would be a
+ * misreading rather than a better guess.
+ */
+export function pickCalendarAssignee(cal: GHLCalendarSummary | null | undefined): string | null {
+  if (!cal) return null
+
+  const members = (cal.teamMembers ?? []).filter(m => !!m?.userId)
+  const flagged = members.find(m => m.isPrimary === true || m.selected === true)
+  if (flagged?.userId) return flagged.userId
+  const first = members[0]
+  if (first?.userId) return first.userId
+
+  return cal.assignedUserId?.trim() || cal.userId?.trim() || null
 }
 
 // ---- Calendar booking rules ---------------------------------
@@ -971,6 +1045,11 @@ export interface CalendarBookingRules {
   minSchedulingNoticeMins: number | null
   dateRangeDays: number | null
   seatsPerSlot: number | null
+  /**
+   * The user this calendar's appointments should be assigned to, as GHL has it
+   * right now. Null when the calendar names nobody or couldn't be read.
+   */
+  assigneeId: string | null
 }
 
 // Reads one calendar's booking rules, normalised to minutes. Cached — a
@@ -996,6 +1075,7 @@ export async function getCalendarBookingRules(calendarId: string): Promise<Calen
           minSchedulingNoticeMins: ghlRuleToMinutes(cal.allowBookingAfter, cal.allowBookingAfterUnit),
           dateRangeDays:           dateRangeMins === null ? null : Math.round(dateRangeMins / (60 * 24)),
           seatsPerSlot:            cal.appoinmentPerSlot ?? null,
+          assigneeId:              pickCalendarAssignee(cal),
         }
       } catch {
         return null

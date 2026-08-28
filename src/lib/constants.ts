@@ -24,6 +24,13 @@ export const DEFAULT_LANDING_PATH = '/book'
 export const GHL_BASE_URL = 'https://services.leadconnectorhq.com'
 export const GHL_API_VERSION = '2021-07-28'
 export const GHL_OPPORTUNITY_SOURCE = 'Focus LinkUps'
+// Last-resort assignee. It is NOT the assignee for a booking appointment any
+// more: that comes off the calendar's own teamMembers (see
+// resolveAppointmentAssignee / pickCalendarAssignee), because hardcoding one
+// user held only until a calendar's host was changed in GHL, after which every
+// appointment named someone who wasn't on it. Still used directly for
+// opportunities, which belong to a pipeline rather than a calendar and so have
+// no host to read.
 export const GHL_DEFAULT_ASSIGNEE_ID = 'D21Ek6JOVnWiySyrRw0U'
 
 // Custom field IDs on the Avi-Play opportunity object
