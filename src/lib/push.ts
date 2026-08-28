@@ -351,6 +351,30 @@ export const NotificationTemplates = {
     tag:   'hosted-event-approved',
   }),
 
+  // Sent to the host who proposed a venue when an admin approves it, and only
+  // when nothing else already told them. A host with rounds there hears about
+  // the rounds instead — "your Sept 10 round is live" says everything this does
+  // and more, and two pushes for one approval is one too many.
+  venueApproved: (courseName: string): PushPayload => ({
+    title: 'Your venue is live',
+    body:  `${courseName} is set up on LinkUp — you can list rounds there now.`,
+    url:   '/host/events',
+    tag:   'venue-approved',
+  }),
+
+  // Sent when a venue goes live but some of the dates the host asked for can't
+  // go with it. They picked those dates before the venue had a calendar to ask,
+  // so this is the first moment anyone could know — and it needs the host to
+  // pick again, which is why it says so rather than going quiet.
+  hostedEventDatesHeld: (courseName: string, count: number): PushPayload => ({
+    title: count === 1 ? 'One date needs changing' : `${count} dates need changing`,
+    body:  count === 1
+      ? `${courseName} is live, but the date you asked for has nothing open. Pick another and we'll put it in front of members.`
+      : `${courseName} is live, but ${count} of the dates you asked for have nothing open. Pick others and we'll put them in front of members.`,
+    url:   '/host/events',
+    tag:   'hosted-event-dates-held',
+  }),
+
   // Sent to the host when an admin takes their event down. It's cancelled,
   // not parked — so the host's route back is a new event, not a republish.
   hostedEventRejected: (courseName: string, date: string, reason: string): PushPayload => ({

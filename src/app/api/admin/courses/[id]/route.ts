@@ -117,6 +117,9 @@ export const PATCH = withAuth(
         // real, and the answer is a conversation rather than a deletion.
         let publishedEvents = 0
         let heldEvents = 0
+        // Hosts who've already heard about this approval through their rounds.
+        // The venue notice below is for whoever hasn't.
+        const notified = new Set<string>()
         try {
           const { data: waiting } = await admin
             .from('hosted_events')
@@ -138,7 +141,8 @@ export const PATCH = withAuth(
             )
 
             const supported = approvable.filter(e => (openByDate.get(String(e.event_date)) ?? 0) > 0)
-            heldEvents = approvable.length - supported.length
+            const held = approvable.filter(e => !supported.includes(e))
+            heldEvents = held.length
 
             // Capacity per date, so each round is listed with what its own day
             // has room for — two days at the same club rarely match.
@@ -160,31 +164,66 @@ export const PATCH = withAuth(
               publishedEvents += 1
             }
 
-            // One piece of news per host, not one per date — a host with five
-            // rounds here doesn't want five notifications. Each is told about
-            // their own soonest published date, which is the one they'll act on
-            // first. A host whose dates were all held hears nothing here; that
-            // needs a person, not a push.
+            // One piece of news per host per fact, not one per date — a host
+            // with five rounds here doesn't want five notifications.
+            const hostOf = (e: { host?: unknown }) => {
+              const host = Array.isArray(e.host) ? e.host[0] : e.host
+              return (host as { member_id?: string } | null)?.member_id ?? null
+            }
+
+            // Published: told about their own soonest date, the one they'll act
+            // on first.
             const soonestByHost = new Map<string, string>()
             for (const e of supported) {
-              const host = Array.isArray(e.host) ? e.host[0] : e.host
-              const memberId = (host as { member_id?: string } | null)?.member_id
+              const memberId = hostOf(e)
               if (!memberId) continue
               const date = String(e.event_date)
-              const held = soonestByHost.get(memberId)
-              if (!held || date < held) soonestByHost.set(memberId, date)
+              const standing = soonestByHost.get(memberId)
+              if (!standing || date < standing) soonestByHost.set(memberId, date)
             }
             for (const [memberId, date] of soonestByHost) {
               void sendPushToMember(
                 memberId,
                 NotificationTemplates.hostedEventApproved(data.name, date),
               ).catch(() => {})
+              notified.add(memberId)
+            }
+
+            // Held: told how many, because this one needs them to do something.
+            // They picked those dates before the venue had a calendar to ask, so
+            // this is the first moment anyone could know they don't work.
+            const heldByHost = new Map<string, number>()
+            for (const e of held) {
+              const memberId = hostOf(e)
+              if (!memberId) continue
+              heldByHost.set(memberId, (heldByHost.get(memberId) ?? 0) + 1)
+            }
+            for (const [memberId, count] of heldByHost) {
+              void sendPushToMember(
+                memberId,
+                NotificationTemplates.hostedEventDatesHeld(data.name, count),
+              ).catch(() => {})
+              notified.add(memberId)
             }
           }
         } catch (err) {
           // The course is approved either way — the rounds can still be
           // published by hand from the hosted-events queue.
           console.error('[courses/approve] Publishing waiting events failed (non-fatal):', err)
+        }
+
+        // The member who proposed this venue, if nothing above already told them.
+        //
+        // A host asking for a venue with no rounds yet, or one whose rounds all
+        // landed on days the calendar can't take, would otherwise watch a venue
+        // go live in silence — the request they made would just stop being
+        // pending, with nothing to say so.
+        const requestedBy = data.requested_by as string | null
+        if (requestedBy && !notified.has(requestedBy)) {
+          void sendPushToMember(
+            requestedBy,
+            NotificationTemplates.venueApproved(data.name),
+          ).catch(() => {})
         }
 
         // Grant host access to any host who already has an event at this club —
