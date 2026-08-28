@@ -422,7 +422,7 @@ function PinnedVenueDock({
                   `aspect-square` alongside the w/h so the tile can't be pulled
                   out of square by a long venue name or the location line, the
                   same guarantee the admin venue rows use. */}
-              <span className="relative w-12 h-12 aspect-square rounded-xl overflow-hidden flex-shrink-0 bg-white">
+              <span className="relative w-20 h-20 aspect-square rounded-xl overflow-hidden flex-shrink-0 bg-white">
                 {venue.logoUrl ? (
                   <Image src={venue.logoUrl} alt="" fill unoptimized className="object-contain p-1" />
                 ) : (
