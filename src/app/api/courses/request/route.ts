@@ -12,32 +12,23 @@ export const dynamic = 'force-dynamic'
 // it here first, which is why the application and event validators can insist on
 // a real course id.
 //
-// The event form also sends what the host wants to run there: free-text dates,
-// slots per day, a guest rate. None of it becomes anything on its own — the team
-// sets those into a GHL calendar event by hand once the club is set up — so it
-// isn't stored on the course. It's written to admin_audit_log against the
-// course, which the admin Courses queue reads back as the host's brief. No
-// column for it, because nothing in the app ever acts on it.
+// The event form's "New LinkUp" tab calls this first and then POSTs the rounds
+// it wants to /api/host/events against the course id this returns. That's what
+// ties the host to the events: they're real hosted_events rows from the start,
+// waiting on the same admin approval as any other, rather than a note for
+// someone to retype.
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { validateProposedClub, sanitiseText } from '@/lib/validation'
+import { validateProposedClub } from '@/lib/validation'
 import { requestPendingCourse } from '@/lib/courses/request-course'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
-  const body = (await req.json().catch(() => ({}))) as {
-    name?: string
-    website?: string
-    // The "New LinkUp" tab's schedule. All three or none — see
-    // validateProposedClub.
-    event_dates?: string
-    slots_per_day?: number | string
-    member_guest_rate?: number | string
-  }
+  const body = (await req.json().catch(() => ({}))) as { name?: string; website?: string }
 
   // One rule for every caller, so the same club proposed from the event form and
   // from the application can't come out different. The website stays optional: an
@@ -47,17 +38,6 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   if (!valid) return NextResponse.json({ error: errors[0] }, { status: 400 })
 
   const website = typeof body.website === 'string' && body.website.trim() ? body.website.trim() : null
-
-  // Validation above already rejected a half-filled schedule, so the presence of
-  // the dates is enough to know the whole thing is here.
-  const schedule =
-    typeof body.event_dates === 'string' && body.event_dates.trim()
-      ? {
-          event_dates: sanitiseText(body.event_dates.trim()),
-          slots_per_day: Number(body.slots_per_day),
-          member_guest_rate: Number(body.member_guest_rate),
-        }
-      : null
 
   const admin = createAdminClient()
   const result = await requestPendingCourse({
@@ -101,28 +81,6 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
       userId: ctx.userId,
       metadata: { course_id: result.course.id, error: String(err) },
     })
-  }
-
-  // The host's brief, for whoever sets the club up. It lives in the audit log
-  // rather than on the course because nothing in the app reads it to make a
-  // decision — a person does, once, and then builds the GHL calendar event from
-  // it. Best-effort: the club is what the host is waiting on.
-  if (schedule) {
-    try {
-      await admin.from('admin_audit_log').insert({
-        admin_id: ctx.memberId,
-        action: 'courses.requested_schedule',
-        target_type: 'course',
-        target_id: result.course.id,
-        payload: schedule,
-      })
-    } catch (err) {
-      logger.warn('Could not record the requested schedule', {
-        action: 'course.requested.schedule_failed',
-        userId: ctx.userId,
-        metadata: { course_id: result.course.id, error: String(err) },
-      })
-    }
   }
 
   logger.info('Course requested by member', {

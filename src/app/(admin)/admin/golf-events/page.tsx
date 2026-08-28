@@ -9,7 +9,7 @@ import {
 } from '@/components/admin/AdminUI'
 import Select from '@/components/ui/Select'
 import MediaUpload from '@/components/ui/MediaUpload'
-import { MAX_PINNED_COURSES, HOST_MEMBER_PRICE_MARKUP_USD } from '@/lib/constants'
+import { MAX_PINNED_COURSES } from '@/lib/constants'
 import type { Course, CourseApprovalStatus } from '@/types'
 
 type FilterTab = 'pending' | 'active' | 'rejected' | 'archived'
@@ -33,21 +33,8 @@ const TIMEZONES = [
   'America/New_York', 'America/Phoenix', 'Pacific/Honolulu',
 ]
 
-/**
- * What a host asked for when they proposed this club from the "New LinkUp" tab.
- * Response-only — GET /api/admin/courses reads it out of admin_audit_log rather
- * than off the course, because nothing in the app acts on it. It's the brief for
- * building the GHL calendar event by hand.
- */
-interface RequestedSchedule {
-  event_dates?: string | null
-  slots_per_day?: number | null
-  member_guest_rate?: number | null
-}
-
 interface CourseRow extends Course {
   requester?: { first_name: string; last_name: string } | null
-  requested_schedule?: RequestedSchedule | null
 }
 
 
@@ -679,37 +666,6 @@ export default function AdminCoursesPage() {
                     <p className="text-xs text-gray-400">
                       Requested by <span className="font-medium text-gray-600">{course.requester.first_name} {course.requester.last_name}</span>
                     </p>
-                  )}
-
-                  {/* The host's brief: what they want to run here. Nothing
-                      builds itself from this — the dates arrive as a sentence
-                      and a pending course has no calendar to hold a round — so
-                      it's here to be read once and set up by hand. */}
-                  {course.requested_schedule && (
-                    <div className="rounded-lg bg-blue-50/70 border border-blue-100 px-3 py-2 space-y-1">
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-blue-700">
-                        Host&apos;s request
-                      </p>
-                      {course.requested_schedule.event_dates && (
-                        <p className="text-xs text-gray-700 whitespace-pre-line">
-                          <span className="text-gray-500">Dates: </span>
-                          {course.requested_schedule.event_dates}
-                        </p>
-                      )}
-                      <p className="text-xs text-gray-700">
-                        {course.requested_schedule.slots_per_day != null && (
-                          <><span className="text-gray-500">Slots/day: </span>{course.requested_schedule.slots_per_day}</>
-                        )}
-                        {course.requested_schedule.slots_per_day != null && course.requested_schedule.member_guest_rate != null && ' · '}
-                        {course.requested_schedule.member_guest_rate != null && (
-                          <>
-                            <span className="text-gray-500">Guest rate: </span>
-                            ${course.requested_schedule.member_guest_rate}
-                            <span className="text-gray-400"> (members ${Number(course.requested_schedule.member_guest_rate) + HOST_MEMBER_PRICE_MARKUP_USD})</span>
-                          </>
-                        )}
-                      </p>
-                    </div>
                   )}
 
                   {course.rejection_reason && (

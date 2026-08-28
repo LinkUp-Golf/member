@@ -31,35 +31,7 @@ export const GET = withAuth(
       .order('name')
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    const courses = data ?? []
-
-    // What the host asked for when they proposed a club from the "New LinkUp"
-    // tab: the dates they want to run, slots per day, their guest rate. It's in
-    // the audit log rather than on the course because nothing in the app acts on
-    // it — a person reads it once and builds the GHL calendar event by hand.
-    // Attached here so the queue can show it without a second request.
-    //
-    // Only pending courses can have one, so the lookup is scoped to those; a
-    // failure costs the brief, not the list.
-    const pendingIds = courses.filter(c => c.approval_status === 'pending').map(c => c.id)
-    const briefs = new Map<string, unknown>()
-    if (pendingIds.length) {
-      const { data: logs } = await admin
-        .from('admin_audit_log')
-        .select('target_id, payload, created_at')
-        .eq('action', 'courses.requested_schedule')
-        .in('target_id', pendingIds)
-        .order('created_at', { ascending: false })
-      // Newest first, so the first one seen per course is the one that stands.
-      for (const row of logs ?? []) {
-        if (!briefs.has(row.target_id)) briefs.set(row.target_id, row.payload)
-      }
-    }
-
-    return NextResponse.json({
-      courses: courses.map(c => ({ ...c, requested_schedule: briefs.get(c.id) ?? null })),
-    })
+    return NextResponse.json({ courses: data ?? [] })
   },
   { requireAdmin: true, skipGHLCheck: true }
 )

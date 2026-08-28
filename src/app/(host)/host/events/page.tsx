@@ -13,6 +13,7 @@ import { AdminPageHeader, AdminCard } from "@/components/admin/AdminUI";
 import { Spinner, ContentLoader } from "@/components/ui/Loading";
 import Select, { type SelectOption } from "@/components/ui/Select";
 import VenueDateSelector from "@/components/host/VenueDateSelector";
+import DateMultiPicker from "@/components/host/DateMultiPicker";
 import ProofControl, {
   PROOF_NOTE_CLASS,
   currentProof,
@@ -475,17 +476,11 @@ interface EventFormValues {
   new_event_name: string;
   /** Optional — the one field on this tab that is. */
   new_website: string;
-  /** Free text. A club with no calendar has no open days to offer, so the host
-   *  writes the schedule they want and an admin reads it. */
-  new_dates: string;
   new_slots_per_day: string;
   new_member_guest_rate: string;
 }
 
 const NO_TEE_TIME = "";
-
-/** Matches PROPOSED_DATES_MAX in @/lib/validation. */
-const NEW_DATES_MAX = 500;
 
 /**
  * A venue as the form needs it: enough to name it in the dropdown and to show
@@ -550,7 +545,6 @@ function EventDrawer({
       dinner: event?.dinner ?? false,
       new_event_name: "",
       new_website: "",
-      new_dates: "",
       new_slots_per_day: "",
       new_member_guest_rate: "",
     },
@@ -640,36 +634,67 @@ function EventDrawer({
   const errCls = "text-xs text-red-500 mt-1";
 
   /**
-   * Proposing a club we don't have. This is a new-course request, not an event:
-   * POST /api/courses/request creates the pending course an admin sets up, and
-   * carries the schedule the host wants to run there. No hosted_events row can
-   * exist yet — there's no calendar behind a pending course to hold a round, and
-   * the dates are a sentence rather than dates.
+   * Proposing a venue we don't have, and the rounds the host wants there.
+   *
+   * Two steps, in order, because the second needs the first's id:
+   *
+   *   1. POST /api/courses/request creates the venue as a pending course and
+   *      grants this host access to it.
+   *   2. POST /api/host/events creates a real hosted_event per date against it,
+   *      in pending_approval — the same queue any other new round lands in.
+   *
+   * Doing it as events rather than a filed note is what ties the host to the
+   * rounds: they're attached from the start, so approving the venue approves
+   * rounds someone is already waiting on. Spots and rate come from the host here
+   * because nothing else can supply them — there's no calendar to read capacity
+   * from and no rate agreed with a club we haven't spoken to.
+   *
+   * If step 2 fails the venue request stands. That's the right way round: the
+   * venue is the part that takes a person to action, and the host can list the
+   * dates once it's live.
    */
   async function propose(values: EventFormValues) {
-    const res = await fetch("/api/courses/request", {
+    const name = values.new_event_name.trim();
+
+    const courseRes = await fetch("/api/courses/request", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: values.new_event_name.trim(),
+        name,
         website: values.new_website.trim() || null,
-        event_dates: values.new_dates.trim(),
-        slots_per_day: Number(values.new_slots_per_day),
-        member_guest_rate: Number(values.new_member_guest_rate),
       }),
     });
-
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      onError(json.error ?? "Could not send the request.");
+    const courseJson = await courseRes.json().catch(() => ({}));
+    if (!courseRes.ok || !courseJson.course?.id) {
+      onError(courseJson.error ?? "Could not request that venue.");
       return;
     }
 
-    const name = json.course?.name ?? values.new_event_name.trim();
+    const eventsRes = await fetch("/api/host/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        course_id: courseJson.course.id,
+        event_dates: [...dates].sort(),
+        total_spots: Number(values.new_slots_per_day),
+        member_guest_rate: Number(values.new_member_guest_rate),
+      }),
+    });
+    const eventsJson = await eventsRes.json().catch(() => ({}));
+    if (!eventsRes.ok) {
+      onError(
+        `${name} was requested, but the dates didn't save: ${
+          eventsJson.error ?? "please try adding them again."
+        }`,
+      );
+      return;
+    }
+
+    const created = Array.isArray(eventsJson.events)
+      ? eventsJson.events.length
+      : dates.length;
     onSaved(
-      json.alreadyRequested
-        ? `${name} was already requested — your dates are on the record.`
-        : `${name} sent for setup. We'll build its calendar against your dates, then publish it to members.`,
+      `${name} requested with ${created} date${created === 1 ? "" : "s"}. We'll set the venue up, then publish your rounds to members.`,
     );
   }
 
@@ -719,18 +744,19 @@ function EventDrawer({
 
   const submit = () =>
     handleSubmit((v) => {
-      // Proposing a club has no picker to check — every field on that tab is
-      // registered, so react-hook-form has already had the last word.
-      if (proposing) return propose(v);
-
-      // Dates come from the picker rather than an RHF field, so the "at least
-      // one" rule lives here. Duplicates aren't possible — the picker toggles.
+      // Dates come from a picker rather than an RHF field on both tabs, so the
+      // "at least one" rule lives here either way. Duplicates aren't possible —
+      // both pickers toggle.
       if (dates.length === 0) {
-        setDateError("Choose at least one date from the venue's open days.");
+        setDateError(
+          proposing
+            ? "Pick the dates you want to host."
+            : "Choose at least one date from the venue's open days.",
+        );
         return;
       }
       setDateError(null);
-      return save(v);
+      return proposing ? propose(v) : save(v);
     })();
 
   return (
@@ -787,7 +813,14 @@ function EventDrawer({
                   type="button"
                   role="tab"
                   aria-selected={tab === key}
-                  onClick={() => setTab(key)}
+                  onClick={() => {
+                    setTab(key);
+                    // The two tabs pick from different things — one from a
+                    // venue's open days, one from the whole calendar — so a
+                    // selection can't carry across.
+                    setDates([]);
+                    setDateError(null);
+                  }}
                   className={cn(
                     "flex-1 rounded-lg py-2 text-xs font-semibold transition-colors",
                     tab === key
@@ -973,28 +1006,27 @@ function EventDrawer({
                 </div>
 
                 <div>
-                  <label htmlFor="ev-new-dates" className={labelCls}>
-                    Dates *
-                  </label>
-                  <textarea
-                    id="ev-new-dates"
-                    className={`${field} min-h-[76px] resize-y`}
-                    placeholder="e.g. Sat 4 Oct, Sat 18 Oct, and the first Saturday of each month after"
-                    maxLength={NEW_DATES_MAX}
-                    {...register("new_dates", {
-                      validate: (v) =>
-                        !proposing ||
-                        v.trim().length >= 2 ||
-                        "List the dates you want to run",
-                    })}
+                  {/* A span, not a label: the control is a grid of day buttons,
+                      so there is nothing for a label to point at. */}
+                  <span className={labelCls}>Dates *</span>
+                  {/* Real dates, not a description of them — that's what lets
+                      each one become an event with this host's name on it,
+                      rather than a note someone has to read and retype. Every
+                      upcoming day is offered: there's no calendar to ask what
+                      this venue has open until we've set it up. */}
+                  <DateMultiPicker
+                    value={dates}
+                    onChange={(next) => {
+                      setDates(next);
+                      if (next.length) setDateError(null);
+                    }}
+                    max={MAX_DATES_PER_EVENT}
                   />
-                  {errors.new_dates && (
-                    <p className={errCls}>{errors.new_dates.message}</p>
-                  )}
                   <p className="text-[11px] text-gray-400 mt-1">
-                    Write them however you like — there&apos;s no calendar to
-                    pick from until we&apos;ve set the event up.
+                    Each date becomes its own event. We&apos;ll confirm them with
+                    the venue while we set it up.
                   </p>
+                  {dateError && <p className={errCls}>{dateError}</p>}
                 </div>
 
                 <div>

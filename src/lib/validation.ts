@@ -286,20 +286,15 @@ export function validateHostApplicationPayload(body: unknown): ValidationResult 
 // two different rows.
 //
 // There is one caller now: POST /api/courses/request. The become-a-host
-// application and the host event form both go through it (AddVenueControl)
+// application and the host event form's "New LinkUp" tab both go through it
 // rather than carrying a proposed club in their own payloads, which is what
-// keeps the rule single by construction rather than by agreement.
+// keeps the rule single by construction rather than by agreement. The rounds a
+// host wants at the proposed club are a separate POST to /api/host/events, held
+// to validateHostedEventPayload like any other.
 //
 // `requireWebsite` is left as a parameter and nobody passes it. The website is
 // asked for and not demanded: an admin reviews every one of these by hand, and
 // refusing the club over a URL the host may not have to hand loses the club.
-/**
- * Bound on the free-text schedule a host types for a proposed club. Long enough
- * for a month of dates written out, short enough that it stays something an
- * admin reads rather than a document.
- */
-export const PROPOSED_DATES_MAX = 500
-
 export function validateProposedClub(
   club: unknown,
   options: { requireWebsite?: boolean } = {}
@@ -322,27 +317,6 @@ export function validateProposedClub(
     errors.push('Website must be a valid URL (https://…)')
   } else if (rawWebsite.length > 200) {
     errors.push('Website must be 200 characters or less')
-  }
-
-  // The schedule the host wants to run there — free text dates, slots per day
-  // and a guest rate. Absent entirely when the club is being proposed on its own
-  // (the become-a-host application does that), and all-or-nothing when it isn't:
-  // half a schedule is a form that got interrupted, not an ask an admin can set
-  // a club up from.
-  const scheduleKeys = ['event_dates', 'slots_per_day', 'member_guest_rate'] as const
-  if (scheduleKeys.some(k => c[k] !== undefined && c[k] !== null && c[k] !== '')) {
-    const datesResult = validateString(c.event_dates, 'Dates', { min: 2, max: PROPOSED_DATES_MAX })
-    if (!datesResult.valid) errors.push(...datesResult.errors)
-
-    const slots = Number(c.slots_per_day)
-    if (!Number.isInteger(slots) || slots < 1 || slots > 200) {
-      errors.push('Slots per day must be a whole number between 1 and 200')
-    }
-
-    const rate = Number(c.member_guest_rate)
-    if (!Number.isFinite(rate) || rate < 0) {
-      errors.push('Member guest rate must be 0 or more')
-    }
   }
 
   return { valid: errors.length === 0, errors }
