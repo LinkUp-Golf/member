@@ -7,6 +7,10 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { createGHLCalendar, deleteGHLCalendar, getCalendarBookingRules } from '@/lib/ghl/client'
 import { validateTimezone, sanitiseText } from '@/lib/validation'
 import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
+import { APPROVABLE_STATUSES, canApproveEvent } from '@/lib/hosts/events'
+import { openSpotsByDate } from '@/lib/bookings/availability'
+import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { MAX_PINNED_COURSES } from '@/lib/constants'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 import type { Course } from '@/types'
@@ -36,6 +40,26 @@ export const PATCH = withAuth(
       if (course.approval_status !== 'pending') return NextResponse.json({ error: 'Course is not pending' }, { status: 409 })
 
       if (body.action === 'approve') {
+        // Approving is what publishes a course to members, so it has to clear
+        // the bar the member endpoints actually apply. GET /api/courses and
+        // GET /api/bookings/availability both require a payment link — a
+        // confirmed booking is sent to courses.payment_url to be paid, so a
+        // course without one has nowhere to send anybody.
+        //
+        // A course an admin created can't get here without one (POST requires
+        // it). A course a host proposed arrives with none at all, and approving
+        // it used to succeed and produce a course that was active, calendared,
+        // and invisible — with nothing saying why.
+        if (!(course.payment_url as string | null)?.trim()) {
+          return NextResponse.json(
+            {
+              error:
+                'Add a payment link before approving. Without one this course stays hidden from members, because a confirmed booking has nowhere to be paid — edit the course, add the link, then approve.',
+            },
+            { status: 400 }
+          )
+        }
+
         let ghlCalendarId = course.ghl_calendar_id as string | null
         if (!ghlCalendarId) {
           try {
@@ -61,6 +85,146 @@ export const PATCH = withAuth(
           .update({ approval_status: 'active', ghl_calendar_id: ghlCalendarId, reviewed_by: ctx.userId })
           .eq('id', id).select().single()
         if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+        // Publish the rounds that were only ever waiting on this.
+        //
+        // A host proposing a venue creates the rounds they want there as real
+        // hosted_events in 'pending_approval', and the one thing holding them
+        // back is the calendar behind them — which approving the course is what
+        // creates. So the events go live here rather than needing a second pass
+        // through the hosted-events queue: the admin has already made the
+        // decision this asks for, and leaving them pending left the host
+        // reading "we're setting up the calendar" about a calendar that now
+        // exists.
+        //
+        // Two gates, not one.
+        //
+        // canApproveEvent, as when approving by hand: only rounds still awaiting
+        // approval, and never one whose date has gone.
+        //
+        // Then the calendar. A host proposing a venue picks the dates they want
+        // before the venue has a calendar to ask, so those dates are a request,
+        // not availability — and the calendar an admin then sets up is free to
+        // disagree with every one of them. Publishing a round on a day the venue
+        // has nothing open lists something no member can actually play, and it
+        // makes the host's wishlist look like availability on a screen whose
+        // whole job is to report what the venue has.
+        //
+        // So the calendar decides: a date it holds open is published (with the
+        // capacity it actually has, replacing the number the host guessed at),
+        // and a date it doesn't is left awaiting approval for an admin to sort
+        // out with the host. Left, not rejected — the host asked for something
+        // real, and the answer is a conversation rather than a deletion.
+        let publishedEvents = 0
+        let heldEvents = 0
+        // Hosts who've already heard about this approval through their rounds.
+        // The venue notice below is for whoever hasn't.
+        const notified = new Set<string>()
+        try {
+          const { data: waiting } = await admin
+            .from('hosted_events')
+            .select('id, status, event_date, host:hosts(member_id)')
+            .eq('course_id', id)
+            .in('status', [...APPROVABLE_STATUSES])
+
+          const approvable = (waiting ?? []).filter(
+            e => canApproveEvent(e.status as string, e.event_date as string).ok,
+          )
+
+          if (approvable.length) {
+            // `data` carries the calendar id this approval just created, which
+            // is what makes there be anything to ask.
+            const openByDate = await openSpotsByDate(
+              admin,
+              data as Course,
+              Array.from(new Set(approvable.map(e => String(e.event_date)))),
+            )
+
+            const supported = approvable.filter(e => (openByDate.get(String(e.event_date)) ?? 0) > 0)
+            const held = approvable.filter(e => !supported.includes(e))
+            heldEvents = held.length
+
+            // Capacity per date, so each round is listed with what its own day
+            // has room for — two days at the same club rarely match.
+            for (const event of supported) {
+              const date = String(event.event_date)
+              await admin
+                .from('hosted_events')
+                .update({
+                  status: 'upcoming',
+                  total_spots: openByDate.get(date),
+                  reviewed_by: ctx.userId,
+                  reviewed_at: new Date().toISOString(),
+                  rejection_reason: null,
+                })
+                .eq('id', event.id)
+                // The status filter is the race guard, exactly as it is on the
+                // single-event route: a host cancelling mid-review must win.
+                .in('status', [...APPROVABLE_STATUSES])
+              publishedEvents += 1
+            }
+
+            // One piece of news per host per fact, not one per date — a host
+            // with five rounds here doesn't want five notifications.
+            const hostOf = (e: { host?: unknown }) => {
+              const host = Array.isArray(e.host) ? e.host[0] : e.host
+              return (host as { member_id?: string } | null)?.member_id ?? null
+            }
+
+            // Published: told about their own soonest date, the one they'll act
+            // on first.
+            const soonestByHost = new Map<string, string>()
+            for (const e of supported) {
+              const memberId = hostOf(e)
+              if (!memberId) continue
+              const date = String(e.event_date)
+              const standing = soonestByHost.get(memberId)
+              if (!standing || date < standing) soonestByHost.set(memberId, date)
+            }
+            for (const [memberId, date] of soonestByHost) {
+              void sendPushToMember(
+                memberId,
+                NotificationTemplates.hostedEventApproved(data.name, date),
+              ).catch(() => {})
+              notified.add(memberId)
+            }
+
+            // Held: told how many, because this one needs them to do something.
+            // They picked those dates before the venue had a calendar to ask, so
+            // this is the first moment anyone could know they don't work.
+            const heldByHost = new Map<string, number>()
+            for (const e of held) {
+              const memberId = hostOf(e)
+              if (!memberId) continue
+              heldByHost.set(memberId, (heldByHost.get(memberId) ?? 0) + 1)
+            }
+            for (const [memberId, count] of heldByHost) {
+              void sendPushToMember(
+                memberId,
+                NotificationTemplates.hostedEventDatesHeld(data.name, count),
+              ).catch(() => {})
+              notified.add(memberId)
+            }
+          }
+        } catch (err) {
+          // The course is approved either way — the rounds can still be
+          // published by hand from the hosted-events queue.
+          console.error('[courses/approve] Publishing waiting events failed (non-fatal):', err)
+        }
+
+        // The member who proposed this venue, if nothing above already told them.
+        //
+        // A host asking for a venue with no rounds yet, or one whose rounds all
+        // landed on days the calendar can't take, would otherwise watch a venue
+        // go live in silence — the request they made would just stop being
+        // pending, with nothing to say so.
+        const requestedBy = data.requested_by as string | null
+        if (requestedBy && !notified.has(requestedBy)) {
+          void sendPushToMember(
+            requestedBy,
+            NotificationTemplates.venueApproved(data.name),
+          ).catch(() => {})
+        }
 
         // Grant host access to any host who already has an event at this club —
         // e.g. the host who proposed it while creating one — so their next event
@@ -95,7 +259,7 @@ export const PATCH = withAuth(
           }))
           .catch(err => console.error('[courses/approve] Announcement post failed (non-fatal):', err))
 
-        return NextResponse.json({ course: data })
+        return NextResponse.json({ course: data, publishedEvents, heldEvents })
       }
 
       // reject — the reason is required, not optional. A rejected course is one
@@ -198,11 +362,35 @@ export const PATCH = withAuth(
       'booking_rules', 'booking_url', 'payment_url', 'required_tags', 'meeting_interval_mins',
       'meeting_duration_mins', 'min_scheduling_notice_mins', 'date_range_days',
       'pre_buffer_mins', 'post_buffer_mins', 'seats_per_class', 'max_players_per_day',
-      'custom_slots_enabled',
+      'custom_slots_enabled', 'pinned',
     ]
     const updates: Record<string, unknown> = {}
     for (const key of allowed) {
       if (key in body) updates[key] = body[key]
+    }
+
+    // Cap on pinned venues, the same rule pinned announcements are held to.
+    // Counted server-side rather than trusted from the admin page, which can be
+    // looking at a stale list — two admins pinning at once would otherwise both
+    // pass a client check that said there was room for one.
+    if (updates.pinned === true) {
+      const { data: current } = await admin
+        .from('courses')
+        .select('pinned')
+        .eq('id', id)
+        .maybeSingle()
+      if (current && !current.pinned) {
+        const { count } = await admin
+          .from('courses')
+          .select('id', { count: 'exact', head: true })
+          .eq('pinned', true)
+        if ((count ?? 0) >= MAX_PINNED_COURSES) {
+          return NextResponse.json(
+            { error: `Maximum of ${MAX_PINNED_COURSES} venues can be pinned at a time.` },
+            { status: 400 }
+          )
+        }
+      }
     }
     // Sync access_tag from required_tags whenever tags are updated
     if ('required_tags' in updates) {

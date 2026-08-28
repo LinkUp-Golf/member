@@ -41,12 +41,15 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
 
   const admin = createAdminClient()
 
-  // Hosting is for venues already on LinkUp, on days that venue has open. Two
-  // other ways in have been removed as the flow settled: proposing a club we
-  // don't have (an event could exist before anyone confirmed the club did), and
-  // adopting one of the host's own bookings (course, date and tee time came
-  // from the booking, which the date picker now supplies from the venue
-  // itself). Existing events created either way still edit and cancel.
+  // Hosting is normally for venues already on LinkUp, on days that venue has
+  // open. A club the host proposed is the exception, and it arrives here as an
+  // ordinary pending course with the host's own spots and rate — see the
+  // proposedVenue branch below.
+  //
+  // Adopting one of the host's own bookings was removed as the flow settled:
+  // course, date and tee time came from the booking, which the date picker now
+  // supplies from the venue itself. Existing events created that way still edit
+  // and cancel.
   let courseId: string
   /** One event per date, sharing the course, tee time and dinner setting. */
   let eventDates: string[]
@@ -84,10 +87,6 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     }
   }
 
-  // The rate is a fixed term — two members comparing two hosts' listings can't
-  // find the same round priced differently.
-  const rate = HOST_EVENT_GUEST_RATE_USD
-
   // The course must exist and be bookable.
   // The whole row: openSpotsByDate needs the calendar id, timezone, daily cap
   // and curated-slot flag to work out what the venue actually has open.
@@ -118,6 +117,42 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     }
   }
 
+  // A club we don't have yet — proposed from the event form's "New LinkUp" tab,
+  // which created it as a pending course moments ago.
+  //
+  // Terms are the server's to set at a listed venue: the rate is fixed so two
+  // hosts can't price the same round differently, and capacity is whatever the
+  // venue has open that day. Neither is answerable here. There is no calendar to
+  // ask for open days and no rate agreed with a club we haven't spoken to, so
+  // the host is the only source for both and sends them.
+  //
+  // The events are still real rows from the start, in pending_approval like any
+  // other. That is the point of doing it this way rather than filing a note: the
+  // host is attached to the rounds before anyone sets the club up, so approving
+  // the club approves the rounds someone is already waiting on.
+  const proposedVenue = course.approval_status === 'pending'
+  let hostSetSpots = 0
+  let rate = HOST_EVENT_GUEST_RATE_USD
+
+  if (proposedVenue) {
+    hostSetSpots = Number(body.total_spots)
+    rate = Number(body.member_guest_rate)
+    // validateHostedEventPayload bounds both when present; this is the rule that
+    // they have to BE present, which only applies on this path.
+    if (!Number.isInteger(hostSetSpots) || hostSetSpots < 1) {
+      return NextResponse.json(
+        { error: 'Tell us how many slots a day this venue can take.' },
+        { status: 400 }
+      )
+    }
+    if (!Number.isFinite(rate) || rate < 0) {
+      return NextResponse.json(
+        { error: 'Tell us the member guest rate for this venue.' },
+        { status: 400 }
+      )
+    }
+  }
+
 
   // Creating an event does not publish it. It lands in 'pending_approval',
   // invisible to members, and an admin approves it once the GHL calendar behind
@@ -135,19 +170,25 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
   // the thin ones or waste the busy ones. A booking-sourced event is bounded by
   // the seats the booking itself holds instead.
   const spotsFor = new Map<string, number>()
-  const open = await openSpotsByDate(admin, course as Course, orderedDates)
-  for (const date of orderedDates) {
-    const spots = open.get(date)
-    // The host picked from this venue's open days, but a day can fill between
-    // choosing it and submitting. Better to say so than to list a round with no
-    // seats behind it.
-    if (!spots) {
-      return NextResponse.json(
-        { error: `${date} is no longer open at ${course.name}. Remove it and try again.` },
-        { status: 409 }
-      )
+  if (proposedVenue) {
+    // Nothing to check the dates against — the club has no calendar yet. Every
+    // day carries what the host said the venue can take.
+    for (const date of orderedDates) spotsFor.set(date, hostSetSpots)
+  } else {
+    const open = await openSpotsByDate(admin, course as Course, orderedDates)
+    for (const date of orderedDates) {
+      const spots = open.get(date)
+      // The host picked from this venue's open days, but a day can fill between
+      // choosing it and submitting. Better to say so than to list a round with no
+      // seats behind it.
+      if (!spots) {
+        return NextResponse.json(
+          { error: `${date} is no longer open at ${course.name}. Remove it and try again.` },
+          { status: 409 }
+        )
+      }
+      spotsFor.set(date, spots)
     }
-    spotsFor.set(date, spots)
   }
 
   const { data: created, error } = await admin

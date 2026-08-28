@@ -140,6 +140,11 @@ export interface Course {
   // Manual display order (admin-controlled); lower sorts first, null sorts last
   sort_order: number | null
 
+  // Docked above the month agenda on the member Book screen and kept stuck
+  // there while it scrolls. Ordering decides where a venue sits in the list;
+  // this takes it out of the list.
+  pinned: boolean
+
   // Approval workflow
   approval_status: CourseApprovalStatus
   requested_by: string | null

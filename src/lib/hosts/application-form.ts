@@ -65,10 +65,14 @@ export interface ApplicationValues {
 }
 
 /**
- * Only one kind of venue now: a course already on LinkUp. Applicants could once
- * name a club we didn't have, which created a pending course on submission —
- * hosting is offered at listed venues only, so that kind is gone. The union is
- * kept so `roundAt` still reads as a lookup by kind rather than a bare field.
+ * One kind of venue: a course that already exists. Naming a club we don't have
+ * is possible again (AddVenueControl), but it creates the pending course before
+ * the application is submitted rather than as part of submitting it — so by the
+ * time this payload is built there is no second kind, only a course id whose
+ * course happens to be pending. That's what lets the server insist on a real id.
+ *
+ * The union is kept so `roundAt` still reads as a lookup by kind rather than a
+ * bare field.
  */
 export type VenueKind = 'existing'
 

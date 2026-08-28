@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { AdminPageHeader, StatCard, AdminCard, Badge } from '@/components/admin/AdminUI'
 import { errorMessage } from '@/lib/errors/error-message'
+import { summariseDates } from '@/lib/utils'
 import type { CreditEntry, CreditSummary, CreditKind, CreditPurpose } from '@/types'
 
 const fmtMoney = (n: number) =>
@@ -94,7 +95,7 @@ export default function AdminHostDetailPage() {
               gap from their container, or they render edge to edge as one
               undifferentiated block. */}
           <div className="space-y-6">
-          <VenuesCard hostId={id} onDone={showToast} onError={(msg) => showToast(msg, false)} />
+          <RoundsCard hostId={id} onError={(msg) => showToast(msg, false)} />
 
           <AdjustCard hostId={id} onDone={(msg) => { showToast(msg); load() }} onError={(msg) => showToast(msg, false)} />
 
@@ -142,144 +143,124 @@ export default function AdminHostDetailPage() {
   )
 }
 
-// ---- Venues -------------------------------------------------
-// The clubs this host may list events at. host_venues was previously write-once
-// (set at approval, silently added to by course approval) with no way for an
-// admin to read it back, let alone change it — so granting a host an extra club
-// meant direct DB access.
+// ---- Rounds -------------------------------------------------
+// What this host has actually put on, by venue. The page could show what they'd
+// earned and which clubs they were allowed to list at, but not which dates they
+// were running — which meant leaving for the hosted-events queue and filtering
+// it, or asking the database.
 
-interface VenueCourse {
-  id: string
+interface HostVenueRounds {
+  courseId: string
   name: string
   city: string | null
-  approval_status: string
+  approvalStatus: string
+  events: {
+    id: string
+    date: string
+    teeTime: string | null
+    spots: number
+    rate: number
+    status: string
+  }[]
 }
 
-function VenuesCard({ hostId, onDone, onError }: {
-  hostId: string
-  onDone: (msg: string) => void
-  onError: (msg: string) => void
-}) {
-  const [granted, setGranted] = useState<string[]>([])
-  const [unrestricted, setUnrestricted] = useState(false)
-  const [courses, setCourses] = useState<VenueCourse[]>([])
+// The statuses worth separating on this card. A host's rounds are mostly
+// upcoming or done; the two that need saying are "waiting on us" and "gone".
+const ROUND_STATUS: Record<string, { label: string; colour: 'green' | 'yellow' | 'gray' | 'red' }> = {
+  pending_approval:        { label: 'Awaiting approval', colour: 'yellow' },
+  upcoming:                { label: 'Live',              colour: 'green'  },
+  completed:               { label: 'Completed',         colour: 'gray'   },
+  pending_credit_approval: { label: 'Proof in review',   colour: 'yellow' },
+  credits_awarded:         { label: 'Credited',          colour: 'green'  },
+  cancelled:               { label: 'Cancelled',         colour: 'red'    },
+}
+
+function RoundsCard({ hostId, onError }: { hostId: string; onError: (msg: string) => void }) {
+  const [venues, setVenues] = useState<HostVenueRounds[]>([])
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [search, setSearch] = useState('')
 
-  const load = useCallback(async () => {
-    try {
-      const [venuesRes, coursesRes] = await Promise.all([
-        fetch(`/api/admin/hosts/${hostId}/venues`),
-        // Every status, so a club the host proposed (a pending course) can be
-        // granted before it's been set up.
-        fetch('/api/admin/courses'),
-      ])
-      const venuesJson = await venuesRes.json().catch(() => ({}))
-      const coursesJson = await coursesRes.json().catch(() => ({}))
-
-      if (!venuesRes.ok) { onError(errorMessage(venuesJson, 'Failed to load venues.')); return }
-
-      setGranted((venuesJson.venues ?? []).map((v: VenueCourse) => v.id))
-      setUnrestricted(venuesJson.venues_unrestricted === true)
-      setCourses(
-        ((coursesJson.courses ?? []) as VenueCourse[])
-          .filter(c => c.approval_status === 'active' || c.approval_status === 'pending')
-      )
-    } catch {
-      onError('Failed to load venues.')
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/admin/hosts/${hostId}/events`)
+      .then(async r => {
+        const json = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(errorMessage(json, 'Failed to load rounds.'))
+        return json
+      })
+      .then(json => {
+        if (!cancelled) setVenues(Array.isArray(json.venues) ? json.venues : [])
+      })
+      .catch((e: Error) => {
+        if (!cancelled) onError(e.message)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
     }
-    // onError is recreated each render by the parent.
+    // onError is recreated each render by the parent; refetching on it would loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hostId])
 
-  useEffect(() => { load() }, [load])
-
-  const toggle = (courseId: string) =>
-    setGranted(prev => (prev.includes(courseId) ? prev.filter(c => c !== courseId) : [...prev, courseId]))
-
-  const save = async () => {
-    if (saving) return
-    setSaving(true)
-    try {
-      const res = await fetch(`/api/admin/hosts/${hostId}/venues`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ course_ids: granted }),
-      })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) { onError(errorMessage(json, 'Could not save venues.')); return }
-      onDone('Venues updated.')
-      load()
-    } catch {
-      onError('Could not save venues.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const term = search.trim().toLowerCase()
-  // Granted venues stay visible regardless of the search term, so saving can
-  // never silently drop one the admin simply filtered out of view.
-  const visible = courses.filter(
-    c => granted.includes(c.id) || !term || c.name.toLowerCase().includes(term)
-  )
+  const totalRounds = venues.reduce((n, v) => n + v.events.length, 0)
 
   return (
-    <AdminCard title="Venues">
+    <AdminCard title={totalRounds ? `Rounds (${totalRounds})` : 'Rounds'}>
       {loading ? (
-        <p className="text-sm text-gray-400 py-4 text-center">Loading…</p>
+        <p className="text-sm text-gray-400 py-6 text-center">Loading…</p>
+      ) : venues.length === 0 ? (
+        <p className="text-sm text-gray-400 italic py-6 text-center">
+          This host hasn&apos;t listed any rounds yet.
+        </p>
       ) : (
-        <div className="space-y-3">
-          {unrestricted && (
-            <p className="text-xs text-blue-700 bg-blue-50 rounded-xl px-3 py-2">
-              This host may list events at any bookable course. The venues below are ignored while that is set.
-            </p>
-          )}
+        <div className="divide-y divide-gray-50">
+          {venues.map(venue => {
+            // Grouped by status inside the venue, so "which dates are live here"
+            // and "which are still waiting on us" are each one line rather than
+            // a list the reader has to sort in their head.
+            const byStatus = new Map<string, string[]>()
+            for (const e of venue.events) {
+              byStatus.set(e.status, [...(byStatus.get(e.status) ?? []), e.date])
+            }
 
-          <input
-            type="search"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search courses"
-            className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:border-green-700 outline-none transition-colors"
-          />
+            return (
+              <div key={venue.courseId} className="py-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-sm font-medium text-gray-900">{venue.name}</p>
+                  {venue.city && <span className="text-xs text-gray-400">{venue.city}</span>}
+                  {venue.approvalStatus === 'pending' && (
+                    <Badge label="Venue pending" colour="yellow" />
+                  )}
+                </div>
 
-          <div className="max-h-72 overflow-y-auto divide-y divide-gray-50">
-            {visible.map(c => (
-              <label key={c.id} className="flex items-center gap-2 py-2 text-sm text-gray-700 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-gray-300 text-green-800 focus:ring-green-700"
-                  checked={granted.includes(c.id)}
-                  onChange={() => toggle(c.id)}
-                />
-                <span>{c.city ? `${c.name} — ${c.city}` : c.name}</span>
-                {c.approval_status === 'pending' && <Badge label="Pending" colour="gold" />}
-              </label>
-            ))}
-            {visible.length === 0 && (
-              <p className="text-sm text-gray-400 py-4 text-center">No courses match that search.</p>
-            )}
-          </div>
-
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-400">{granted.length} granted</span>
-            <button
-              onClick={save}
-              disabled={saving}
-              className="px-4 py-2 text-sm font-medium rounded-xl bg-green-900 text-white disabled:opacity-40"
-            >
-              {saving ? 'Saving…' : 'Save venues'}
-            </button>
-          </div>
+                <div className="mt-1.5 space-y-1">
+                  {Array.from(byStatus.entries()).map(([status, dates]) => {
+                    const meta = ROUND_STATUS[status] ?? { label: status, colour: 'gray' as const }
+                    return (
+                      <div key={status} className="flex items-start gap-2">
+                        <span className="flex-shrink-0 pt-0.5">
+                          <Badge label={meta.label} colour={meta.colour} />
+                        </span>
+                        {/* Ranges, not thirty dates in a row — the same summary
+                            the host saw when they picked them. */}
+                        <p className="text-xs text-gray-600 leading-relaxed">
+                          {summariseDates(dates)}
+                        </p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </AdminCard>
   )
 }
+
+// ---- Manual adjustment -------------------------------------
 
 function AdjustCard({ hostId, onDone, onError }: {
   hostId: string

@@ -24,6 +24,7 @@ import { FullScreenLoader } from '@/components/ui/Loading'
 import { useMemberRoles } from '@/hooks/useMemberRoles'
 import { useProfile } from '@/hooks/useProfile'
 import WorkspaceSwitcher from '@/components/layout/WorkspaceSwitcher'
+import SidebarSignOut from '@/components/layout/SidebarSignOut'
 import { DEFAULT_LANDING_PATH } from '@/lib/constants'
 
 const NAV_ITEMS = [
@@ -99,13 +100,16 @@ export default function PartnerLayout({ children }: { children: React.ReactNode 
           })}
         </nav>
 
-        {isMember && (
-          <div className="px-4 py-3 border-t border-white/[0.07]">
-            <Link href={DEFAULT_LANDING_PATH} className="text-xs text-white/40 hover:text-white/70 transition-colors">
+        {/* Footer — always rendered, because sign out belongs to every partner,
+            member or not, and this shell has nowhere else to put it. */}
+        <div className="px-4 py-3 border-t border-white/[0.07] flex items-center justify-between gap-2">
+          {isMember ? (
+            <Link href={DEFAULT_LANDING_PATH} className="text-xs text-white/40 hover:text-white/70 transition-colors truncate">
               ← Back to LinkUp
             </Link>
-          </div>
-        )}
+          ) : <span />}
+          <SidebarSignOut />
+        </div>
       </aside>
 
       <div className="flex-1 min-w-0">

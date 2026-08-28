@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils'
 import { FullScreenLoader } from '@/components/ui/Loading'
 import { FEATURES } from '@/lib/features'
 import { DEFAULT_LANDING_PATH } from '@/lib/constants'
+import SidebarSignOut from '@/components/layout/SidebarSignOut'
 
 const NAV_GROUPS = [
   {
@@ -216,13 +217,16 @@ function NavContent({
       {/* Footer */}
       <div className="px-5 py-4 border-t border-white/[0.08] flex-shrink-0">
         <p className="text-xs text-white/30 truncate">{user.email}</p>
-        <Link
-          href={DEFAULT_LANDING_PATH}
-          onClick={onNavigate}
-          className="text-xs text-white/40 hover:text-white/70 mt-1 block"
-        >
-          ← Back to member app
-        </Link>
+        <div className="flex items-center justify-between gap-2 mt-1">
+          <Link
+            href={DEFAULT_LANDING_PATH}
+            onClick={onNavigate}
+            className="text-xs text-white/40 hover:text-white/70 truncate"
+          >
+            ← Back to member app
+          </Link>
+          <SidebarSignOut />
+        </div>
       </div>
     </>
   )

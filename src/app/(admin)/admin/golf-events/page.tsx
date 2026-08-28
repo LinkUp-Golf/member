@@ -9,6 +9,7 @@ import {
 } from '@/components/admin/AdminUI'
 import Select from '@/components/ui/Select'
 import MediaUpload from '@/components/ui/MediaUpload'
+import { MAX_PINNED_COURSES } from '@/lib/constants'
 import type { Course, CourseApprovalStatus } from '@/types'
 
 type FilterTab = 'pending' | 'active' | 'rejected' | 'archived'
@@ -26,6 +27,11 @@ const FILTER_LABELS: Record<FilterTab, string> = {
   rejected: 'Rejected',
   archived: 'Archived',
 }
+
+// The courses.logo_url default (20260701000003_courses_logo_url.sql). A
+// host-proposed course carries it until someone uploads the real thing, which is
+// worth flagging before it goes live rather than after a member sees it.
+const PLACEHOLDER_LOGO = '/course-logo-fallback.svg'
 
 const TIMEZONES = [
   'America/Los_Angeles', 'America/Denver', 'America/Chicago',
@@ -210,8 +216,25 @@ export default function AdminCoursesPage() {
       body: JSON.stringify({ action: 'approve' }),
     })
     const json = await res.json().catch(() => ({}))
-    if (res.ok) showToast('Course approved' + (json.course?.ghl_calendar_id ? ' — GHL calendar created.' : '.'))
-    else showToast(json.error ?? 'Approval failed.', false)
+    if (res.ok) {
+      const published = Number(json.publishedEvents ?? 0)
+      const held = Number(json.heldEvents ?? 0)
+      showToast(
+        'Course approved' +
+          (json.course?.ghl_calendar_id ? ' — GHL calendar created.' : '.') +
+          // Said out loud: approving the course publishes the host rounds the
+          // calendar can actually take, and an admin should know both halves —
+          // especially the held ones, which are now waiting on them.
+          (published > 0
+            ? ` ${published} host round${published === 1 ? '' : 's'} published.`
+            : '') +
+          (held > 0
+            ? ` ${held} held — the calendar has nothing open on those dates.`
+            : ''),
+        // A held round needs an admin to do something, so it isn't good news.
+        held === 0,
+      )
+    } else showToast(json.error ?? 'Approval failed.', false)
     await loadCourses()
     setProcessing(null)
   }
@@ -271,6 +294,24 @@ export default function AdminCoursesPage() {
     setProcessing(null)
   }
 
+  // Pinning docks the venue above the month agenda on the member Book screen,
+  // stuck there while the agenda scrolls. Up to MAX_PINNED_COURSES at once, the
+  // same shape as the cap on pinned announcements — the server counts, and a
+  // refusal comes back as the toast below.
+  async function togglePinned(course: CourseRow, pinned: boolean) {
+    setProcessing(course.id)
+    const res = await fetch(`/api/admin/courses/${course.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pinned }),
+    })
+    const json = await res.json().catch(() => ({}))
+    if (res.ok) showToast(pinned ? 'Course pinned to the booking screen.' : 'Course unpinned.')
+    else showToast(json.error ?? 'Update failed.', false)
+    await loadCourses()
+    setProcessing(null)
+  }
+
   const grouped = {
     pending:  courses.filter(c => c.approval_status === 'pending'),
     active:   courses.filter(c => c.approval_status === 'active'),
@@ -278,6 +319,11 @@ export default function AdminCoursesPage() {
     archived: courses.filter(c => c.approval_status === 'archived'),
   }
   const filtered = grouped[filter]
+
+  // Pinning is capped the same way pinned announcements are; the server is the
+  // authority, this just stops the button offering a pin that would be refused.
+  const pinnedCount = grouped.active.filter(c => c.pinned).length
+  const pinMaxed = pinnedCount >= MAX_PINNED_COURSES
 
   function startReorder() {
     setReorderList([...grouped.active])
@@ -382,7 +428,10 @@ export default function AdminCoursesPage() {
           <p className="text-xs text-gray-500">
             {reordering
               ? 'Use the arrows to reorder, then save. This is the order members see when booking.'
-              : 'Set the order courses appear to members on the booking screen.'}
+              : <>
+                  Set the order courses appear to members on the booking screen. Pin one to dock it
+                  above the month agenda — <span className="font-medium text-gray-600">{pinnedCount} / {MAX_PINNED_COURSES} pinned</span>.
+                </>}
           </p>
           {reordering ? (
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -517,6 +566,9 @@ export default function AdminCoursesPage() {
                         {course.custom_slots_enabled && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-medium">Custom slots</span>
                         )}
+                        {course.pinned && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-800 font-medium">📌 Pinned</span>
+                        )}
                       </div>
                     </div>
 
@@ -556,6 +608,13 @@ export default function AdminCoursesPage() {
                               <CourseMenuItem label={isProcessing ? 'Approving…' : 'Approve'} disabled={isProcessing} onClick={() => { approveCourse(course); closeMenu() }} />
                               <CourseMenuItem label="Reject" danger disabled={isProcessing} onClick={() => { setRejectingId(course.id); setRejectReason(''); closeMenu() }} />
                             </>
+                          )}
+                          {course.approval_status === 'active' && (
+                            <CourseMenuItem
+                              label={course.pinned ? 'Unpin' : 'Pin to booking'}
+                              disabled={isProcessing || (!course.pinned && pinMaxed)}
+                              onClick={() => { togglePinned(course, !course.pinned); closeMenu() }}
+                            />
                           )}
                           {course.approval_status === 'active' && (
                             <CourseMenuItem label={isProcessing ? '…' : 'Archive'} disabled={isProcessing} onClick={() => { toggleActive(course, true); closeMenu() }} />
@@ -621,7 +680,24 @@ export default function AdminCoursesPage() {
 
                   {course.approval_status === 'active' && !course.payment_url && (
                     <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-1.5">
-                      ⚠️ No payment link configured — members cannot pay for confirmed bookings yet.
+                      ⚠️ No payment link — this course is hidden from members until one is set. Edit the course to add it.
+                    </p>
+                  )}
+
+                  {/* Said before Approve is pressed, not after. A host-proposed
+                      course arrives with no payment link and the placeholder
+                      logo, and approving it without those produced a course
+                      that was live, calendared and invisible. */}
+                  {course.approval_status === 'pending' && !course.payment_url && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-1.5">
+                      ⚠️ Needs a payment link before it can be approved — members
+                      can&apos;t pay for a booking without one. Edit the course to add it.
+                    </p>
+                  )}
+
+                  {course.approval_status === 'pending' && course.logo_url === PLACEHOLDER_LOGO && (
+                    <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-1.5">
+                      Still on the placeholder logo — members will see it as-is unless one is uploaded.
                     </p>
                   )}
 
@@ -658,6 +734,15 @@ export default function AdminCoursesPage() {
                         <AdminButton label={isProcessing ? 'Approving…' : 'Approve'} onClick={() => approveCourse(course)} variant="primary" size="sm" disabled={isProcessing} />
                         <AdminButton label="Reject" onClick={() => { setRejectingId(course.id); setRejectReason('') }} variant="danger" size="sm" disabled={isProcessing} />
                       </>
+                    )}
+                    {course.approval_status === 'active' && (
+                      <AdminButton
+                        label={course.pinned ? 'Unpin' : 'Pin to booking'}
+                        onClick={() => togglePinned(course, !course.pinned)}
+                        variant={course.pinned ? 'gold' : 'ghost'}
+                        size="sm"
+                        disabled={isProcessing || (!course.pinned && pinMaxed)}
+                      />
                     )}
                     {course.approval_status === 'active' && (
                       <AdminButton label={isProcessing ? '…' : 'Archive'} onClick={() => toggleActive(course, true)} variant="ghost" size="sm" disabled={isProcessing} />

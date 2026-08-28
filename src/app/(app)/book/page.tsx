@@ -19,6 +19,8 @@ import BookingSurveySheet, {
 import VenueAvailabilityCalendar, {
   type CalendarVenue,
   type CalendarOpening,
+  type PinnedVenue,
+  type PinnedNextOpening,
 } from "@/components/calendar/VenueAvailabilityCalendar";
 import {
   VENUE_DOT,
@@ -3673,6 +3675,63 @@ function EventSelectionScreen({
       .map((v) => v.id);
   }, [calVenues, debouncedSearch, locationFilter, calVenueFilters]);
 
+  // Venues an admin pinned. Read off the course rows rather than the month
+  // payload, which carries no logo — and the dock leads with the club's own
+  // mark. A pinned venue with nothing open this month is dropped by the dock.
+  const pinnedVenues = useMemo<PinnedVenue[]>(
+    () =>
+      events
+        .filter((e) => e.pinned)
+        .map((e) => ({
+          id: e.id,
+          name: e.name,
+          city: e.city,
+          state: e.state,
+          logoUrl: e.logo_url,
+        })),
+    [events],
+  );
+
+  // Each pinned venue's next open day from anywhere ahead, for the months it
+  // has nothing in. Its own request per venue rather than part of the month
+  // payload: the server looks a month at a time (GHL won't answer a range wider
+  // than 31 days), and the calendar shouldn't wait on a venue that may have
+  // nothing for a year. The dock fills these in when they land.
+  const [pinnedNext, setPinnedNext] = useState<
+    Record<string, PinnedNextOpening | null>
+  >({});
+
+  // Keyed on the ids, not the array, so this runs once for a given set of
+  // pinned venues — the answer is "next from today" and doesn't move as the
+  // member pages through months.
+  const pinnedIds = useMemo(
+    () => pinnedVenues.map((v) => v.id).join(","),
+    [pinnedVenues],
+  );
+
+  useEffect(() => {
+    if (!pinnedIds) return;
+    let cancelled = false;
+    Promise.all(
+      pinnedIds.split(",").map(async (id) => {
+        try {
+          const r = await fetch(`/api/courses/${id}/next-available`);
+          const d = await r.json().catch(() => ({}));
+          // A failed lookahead is "nothing to show", not an error worth putting
+          // in front of the member — the dock simply drops that card.
+          return [id, r.ok ? ((d.next ?? null) as PinnedNextOpening | null) : null] as const;
+        } catch {
+          return [id, null] as const;
+        }
+      }),
+    ).then((entries) => {
+      if (!cancelled) setPinnedNext(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pinnedIds]);
+
   const clearVenueFilters = useCallback(() => {
     setSearch("");
     setDebouncedSearch("");
@@ -3692,8 +3751,18 @@ function EventSelectionScreen({
   const openDayDetail = useCallback(
     (courseId: string, date: string) => {
       const course = events.find((e) => e.id === courseId);
-      const opening = (calDays[date] ?? []).find((o) => o.courseId === courseId);
-      if (!course || !opening) return;
+      if (!course) return;
+
+      // The month on screen, or — for a pinned venue whose next open day is in
+      // some later month — the lookahead that put that date on its card. The
+      // sheet fetches its own tee times for whatever date it's handed, so a day
+      // outside the visible month opens like any other.
+      const ahead = pinnedNext[courseId];
+      const opening =
+        (calDays[date] ?? []).find((o) => o.courseId === courseId) ??
+        (ahead?.date === date ? ahead : null);
+      if (!opening) return;
+
       setDayDetail({
         course,
         date,
@@ -3704,7 +3773,7 @@ function EventSelectionScreen({
         pendingCount: pendingBookings.length,
       });
     },
-    [events, calDays, pendingBookings],
+    [events, calDays, pinnedNext, pendingBookings],
   );
 
   useEffect(() => {
@@ -3831,7 +3900,7 @@ function EventSelectionScreen({
           </svg>
           <input
             type="search"
-            placeholder="Search by event name…"
+            placeholder="Search by venue name…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="flex-1 min-w-0 bg-transparent text-sm outline-none"
@@ -3885,6 +3954,8 @@ function EventSelectionScreen({
             onClearVenueFilters={
               calAllowedVenueIds === null ? null : clearVenueFilters
             }
+            pinnedVenues={pinnedVenues}
+            pinnedNextAvailable={pinnedNext}
             onPickOpening={openDayDetail}
           />
         )}

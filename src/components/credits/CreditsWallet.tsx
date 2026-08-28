@@ -156,7 +156,7 @@ export default function CreditsWallet({ basePath, earnedHint, tutorialId }: Prop
 
       {tutorialId && (
         <div className="mb-5">
-          <TutorialLink tutorial={tutorialId} label="Watch: using your credit" />
+          <TutorialLink tutorial={tutorialId} label="Watch: Credit usage guide" />
         </div>
       )}
 

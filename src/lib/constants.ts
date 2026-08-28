@@ -24,6 +24,13 @@ export const DEFAULT_LANDING_PATH = '/book'
 export const GHL_BASE_URL = 'https://services.leadconnectorhq.com'
 export const GHL_API_VERSION = '2021-07-28'
 export const GHL_OPPORTUNITY_SOURCE = 'Focus LinkUps'
+// Last-resort assignee. It is NOT the assignee for a booking appointment any
+// more: that comes off the calendar's own teamMembers (see
+// resolveAppointmentAssignee / pickCalendarAssignee), because hardcoding one
+// user held only until a calendar's host was changed in GHL, after which every
+// appointment named someone who wasn't on it. Still used directly for
+// opportunities, which belong to a pipeline rather than a calendar and so have
+// no host to read.
 export const GHL_DEFAULT_ASSIGNEE_ID = 'D21Ek6JOVnWiySyrRw0U'
 
 // Custom field IDs on the Avi-Play opportunity object
@@ -172,6 +179,14 @@ export const FALLBACK_ROUND_DURATION_MINUTES = 300
 // Fallback daily booking cap per course when courses.max_players_per_day is
 // unset. Mirrors the column's DB default.
 export const DEFAULT_MAX_PLAYERS_PER_DAY = 15
+
+// How many venues can be pinned to the Book screen at once. Same shape as the
+// cap on pinned announcements, with a smaller number: pinned announcements are
+// cards at the top of a list you scroll past, whereas the pinned venues are a
+// sticky dock that holds its place — five of them would be most of a phone
+// screen before the calendar got a word in. Enforced in
+// PATCH /api/admin/courses/[id] and surfaced on the admin Courses page.
+export const MAX_PINNED_COURSES = 3
 
 // ---- Cancellation policy tiers ------------------------------
 
