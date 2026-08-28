@@ -412,26 +412,9 @@ function PinnedVenueDock({
               key={venue.id}
               type="button"
               onClick={() => onPickOpening(venue.id, date)}
-              // The rim is the other half of the gloss: a hairline of light
-              // around the edge is what makes a dark surface read as glass
-              // rather than as paint.
-              className="group w-full text-left flex items-center gap-3 rounded-2xl px-3 py-3 ring-1 ring-white/10 shadow-lg shadow-green-950/20 transition-opacity active:opacity-80"
-              style={{
-                // Two layers, one property — a sheen falling off from the
-                // bottom right, over the navy. Done as a layered background
-                // rather than an overlay element so there's no extra node to
-                // keep behind the text. Values stay low on purpose: enough to
-                // catch the light, not enough to look wet.
-                //
-                // Both layers are lit from the same corner. The navy runs from
-                // its lighter end at the bottom right to its darker one at the
-                // top left, so the base agrees with where the highlight says
-                // the light is coming from.
-                background: [
-                  'linear-gradient(335deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.05) 30%, rgba(255,255,255,0) 55%)',
-                  'linear-gradient(315deg, var(--color-green-900) 0%, var(--color-green-950) 100%)',
-                ].join(', '),
-              }}
+              // Navy with a little depth, so the card reads as a surface
+              // rather than a block of colour.
+              className="group w-full text-left flex items-center gap-3 rounded-2xl px-3 py-3 bg-gradient-to-br from-green-900 to-green-950 shadow-lg shadow-green-950/20 transition-opacity active:opacity-80"
             >
               {/* White tile behind the mark. Club logos are dark artwork on
                   transparent backgrounds — dropped straight onto the navy most
