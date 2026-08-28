@@ -3751,8 +3751,18 @@ function EventSelectionScreen({
   const openDayDetail = useCallback(
     (courseId: string, date: string) => {
       const course = events.find((e) => e.id === courseId);
-      const opening = (calDays[date] ?? []).find((o) => o.courseId === courseId);
-      if (!course || !opening) return;
+      if (!course) return;
+
+      // The month on screen, or — for a pinned venue whose next open day is in
+      // some later month — the lookahead that put that date on its card. The
+      // sheet fetches its own tee times for whatever date it's handed, so a day
+      // outside the visible month opens like any other.
+      const ahead = pinnedNext[courseId];
+      const opening =
+        (calDays[date] ?? []).find((o) => o.courseId === courseId) ??
+        (ahead?.date === date ? ahead : null);
+      if (!opening) return;
+
       setDayDetail({
         course,
         date,
@@ -3763,7 +3773,7 @@ function EventSelectionScreen({
         pendingCount: pendingBookings.length,
       });
     },
-    [events, calDays, pendingBookings],
+    [events, calDays, pinnedNext, pendingBookings],
   );
 
   useEffect(() => {
@@ -3946,7 +3956,6 @@ function EventSelectionScreen({
             }
             pinnedVenues={pinnedVenues}
             pinnedNextAvailable={pinnedNext}
-            onJumpToDate={handleDateFilterChange}
             onPickOpening={openDayDetail}
           />
         )}
