@@ -19,19 +19,16 @@ import {
   addDays, addMonths, endOfMonth, endOfWeek, format,
   isSameMonth, isToday, startOfMonth, startOfWeek,
 } from 'date-fns'
-import { cn } from '@/lib/utils'
+import { cn, summariseDates } from '@/lib/utils'
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'] as const
 
 const iso = (d: Date) => format(d, 'yyyy-MM-dd')
 
-// The year only earns its place once the date isn't in this one — a picker that
-// can reach next spring shouldn't leave "Sat, Mar 7" ambiguous.
-const fullDayLabel = (d: string) => {
-  const date = new Date(`${d}T12:00:00`)
-  const sameYear = date.getFullYear() === new Date().getFullYear()
-  return format(date, sameYear ? 'EEE, MMM d' : 'EEE, MMM d yyyy')
-}
+// What a screen reader hears for a day button. Spelled out in full, unlike the
+// summary below the grid, because there's no surrounding month heading to lean on.
+const fullDayLabel = (d: string) =>
+  format(new Date(`${d}T12:00:00`), 'EEE, MMM d yyyy')
 
 export default function DateMultiPicker({
   value,
@@ -146,18 +143,17 @@ export default function DateMultiPicker({
         </div>
       </div>
 
-      {/* Every picked date, not only the ones this month can't show. A host
-          listing a run of rounds is choosing across months, and the grid can
-          only ever show them one month at a time — so what's actually been
-          picked has to be readable in one place. */}
+      {/* Every picked date, not only the ones this month can't show — a host
+          listing a run of rounds is choosing across months, and the grid only
+          ever shows one at a time. Summarised rather than enumerated: days in a
+          row collapse to "Aug 4–7", which is both shorter and the thing the
+          reader was trying to work out from a list of thirty. */}
       {value.length > 0 && (
-        <div className="px-3 py-2 border-t border-gray-100 space-y-1">
-          <p className="text-[11px] text-gray-500">
+        <div className="px-3 py-2 border-t border-gray-100 space-y-0.5">
+          <p className="text-[11px] text-gray-700">{summariseDates(value)}</p>
+          <p className="text-[11px] text-gray-400">
             {value.length} date{value.length === 1 ? '' : 's'} picked
             {max ? ` · ${max} max` : ''}
-          </p>
-          <p className="text-[11px] text-gray-400 leading-relaxed">
-            {value.map(fullDayLabel).join(' · ')}
           </p>
         </div>
       )}

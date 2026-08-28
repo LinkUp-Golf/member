@@ -133,6 +133,93 @@ export function eventTeeTimeSortKey(value: string | null | undefined): number {
   return h * 60 + minutes
 }
 
+/**
+ * A run of dates, written the way a person would say it.
+ *
+ * A list of thirty "Sat, Oct 4 · Sun, Oct 5 · Mon, Oct 6" reads as noise, and
+ * the thing it's hiding — that those are three days in a row — is exactly what
+ * the reader is trying to work out. So consecutive days collapse into a range
+ * and the month is named once:
+ *
+ *   ['2026-08-04']                          → 'Sat, Aug 4'
+ *   ['2026-08-04','2026-08-05']             → 'Aug 4–5'
+ *   ['2026-08-04','2026-08-18']             → 'Aug 4, 18'
+ *   ['2026-08-04','2026-08-05','2026-09-01']→ 'Aug 4–5 · Sep 1'
+ *   ['2026-12-30','2027-01-02']             → 'Dec 30 · Jan 2 2027'
+ *
+ * A single date keeps its weekday: one date is short enough to carry it, and
+ * which day of the week it falls on is usually the question. Past that, the
+ * weekdays are what makes the list unreadable.
+ *
+ * Years appear only when they aren't the current one. Input may be in any order
+ * and may repeat; the output is sorted and deduplicated.
+ *
+ * Takes and returns nothing but 'YYYY-MM-DD' strings — no timezone is involved,
+ * because a chosen date isn't a moment.
+ */
+export function summariseDates(dates: string[]): string {
+  // Shape-checked rather than just non-empty: anything else reaching the date
+  // maths comes back out as "Invalid Date", which is worse than being dropped.
+  const sorted = Array.from(
+    new Set(dates.map(d => (d ?? '').trim()).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))),
+  ).sort()
+  if (sorted.length === 0) return ''
+
+  const thisYear = new Date().getFullYear()
+  const parse = (d: string) => {
+    const [y, m, day] = d.split('-').map(Number)
+    return { y: y ?? 0, m: m ?? 1, day: day ?? 1 }
+  }
+  const monthName = (m: number) =>
+    ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1] ?? ''
+
+  if (sorted.length === 1) {
+    const only = sorted[0] as string
+    const { y } = parse(only)
+    // Midday so the string can't be pushed onto the neighbouring day.
+    const weekday = new Date(`${only}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short' })
+    const { m, day } = parse(only)
+    return `${weekday}, ${monthName(m)} ${day}${y === thisYear ? '' : ` ${y}`}`
+  }
+
+  // Consecutive days become one run. Comparing the day-count between two dates
+  // rather than day+1 keeps month and year ends honest (31 Aug → 1 Sep is a run).
+  const dayNumber = (d: string) => Math.round(Date.parse(`${d}T00:00:00Z`) / 86400000)
+  const runs: string[][] = []
+  for (const date of sorted) {
+    const current = runs[runs.length - 1]
+    const previous = current?.[current.length - 1]
+    if (current && previous && dayNumber(date) - dayNumber(previous) === 1) current.push(date)
+    else runs.push([date])
+  }
+
+  // Then grouped by the month they start in, so a month is named once even when
+  // it holds several runs. A run spanning a month boundary belongs to its start.
+  const groups: { y: number; m: number; parts: string[] }[] = []
+  for (const run of runs) {
+    const first = run[0] as string
+    const last = run[run.length - 1] as string
+    const { y, m, day } = parse(first)
+    const end = parse(last)
+
+    const group = groups[groups.length - 1]
+    const target =
+      group && group.y === y && group.m === m
+        ? group
+        : (groups.push({ y, m, parts: [] }), groups[groups.length - 1] as { y: number; m: number; parts: string[] })
+
+    if (run.length === 1) target.parts.push(String(day))
+    else if (end.m === m) target.parts.push(`${day}–${end.day}`)
+    // A run that crosses into the next month has to name it, or "30–2" reads as
+    // a typo.
+    else target.parts.push(`${day} – ${monthName(end.m)} ${end.day}`)
+  }
+
+  return groups
+    .map(g => `${monthName(g.m)} ${g.parts.join(', ')}${g.y === thisYear ? '' : ` ${g.y}`}`)
+    .join(' · ')
+}
+
 export function formatRelativeTime(dateString: string): string {
   return formatDistanceToNow(new Date(dateString), { addSuffix: true })
 }
