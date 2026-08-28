@@ -417,14 +417,19 @@ function PinnedVenueDock({
               // rather than as paint.
               className="group w-full text-left flex items-center gap-3 rounded-2xl px-3 py-3 ring-1 ring-white/10 shadow-lg shadow-green-950/20 transition-opacity active:opacity-80"
               style={{
-                // Two layers, one property — a sheen falling off across the top
-                // left, over the navy. Done as a layered background rather than
-                // an overlay element so there's no extra node to keep behind
-                // the text. Values stay low on purpose: enough to catch the
-                // light, not enough to look wet.
+                // Two layers, one property — a sheen falling off from the
+                // bottom right, over the navy. Done as a layered background
+                // rather than an overlay element so there's no extra node to
+                // keep behind the text. Values stay low on purpose: enough to
+                // catch the light, not enough to look wet.
+                //
+                // Both layers are lit from the same corner. The navy runs from
+                // its lighter end at the bottom right to its darker one at the
+                // top left, so the base agrees with where the highlight says
+                // the light is coming from.
                 background: [
-                  'linear-gradient(155deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.05) 30%, rgba(255,255,255,0) 55%)',
-                  'linear-gradient(135deg, var(--color-green-900) 0%, var(--color-green-950) 100%)',
+                  'linear-gradient(335deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.05) 30%, rgba(255,255,255,0) 55%)',
+                  'linear-gradient(315deg, var(--color-green-900) 0%, var(--color-green-950) 100%)',
                 ].join(', '),
               }}
             >
