@@ -216,8 +216,18 @@ export default function AdminCoursesPage() {
       body: JSON.stringify({ action: 'approve' }),
     })
     const json = await res.json().catch(() => ({}))
-    if (res.ok) showToast('Course approved' + (json.course?.ghl_calendar_id ? ' — GHL calendar created.' : '.'))
-    else showToast(json.error ?? 'Approval failed.', false)
+    if (res.ok) {
+      const published = Number(json.publishedEvents ?? 0)
+      showToast(
+        'Course approved' +
+          (json.course?.ghl_calendar_id ? ' — GHL calendar created.' : '.') +
+          // Said out loud: approving the course publishes the rounds a host was
+          // already waiting on, and an admin should know that happened.
+          (published > 0
+            ? ` ${published} host round${published === 1 ? '' : 's'} published to members.`
+            : ''),
+      )
+    } else showToast(json.error ?? 'Approval failed.', false)
     await loadCourses()
     setProcessing(null)
   }

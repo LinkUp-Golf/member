@@ -7,6 +7,8 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { createGHLCalendar, deleteGHLCalendar, getCalendarBookingRules } from '@/lib/ghl/client'
 import { validateTimezone, sanitiseText } from '@/lib/validation'
 import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
+import { APPROVABLE_STATUSES, canApproveEvent } from '@/lib/hosts/events'
+import { sendPushToMember, NotificationTemplates } from '@/lib/push'
 import { MAX_PINNED_COURSES } from '@/lib/constants'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
@@ -83,6 +85,75 @@ export const PATCH = withAuth(
           .eq('id', id).select().single()
         if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+        // Publish the rounds that were only ever waiting on this.
+        //
+        // A host proposing a venue creates the rounds they want there as real
+        // hosted_events in 'pending_approval', and the one thing holding them
+        // back is the calendar behind them — which approving the course is what
+        // creates. So the events go live here rather than needing a second pass
+        // through the hosted-events queue: the admin has already made the
+        // decision this asks for, and leaving them pending left the host
+        // reading "we're setting up the calendar" about a calendar that now
+        // exists.
+        //
+        // Same gate as approving one by hand (canApproveEvent): only rounds
+        // still awaiting approval, and never one whose date has gone — that
+        // would put something in member browse nobody can attend. Rejecting a
+        // published round still works if an admin wants it down.
+        let publishedEvents = 0
+        try {
+          const { data: waiting } = await admin
+            .from('hosted_events')
+            .select('id, status, event_date, host:hosts(member_id)')
+            .eq('course_id', id)
+            .in('status', [...APPROVABLE_STATUSES])
+
+          const publishable = (waiting ?? []).filter(
+            e => canApproveEvent(e.status as string, e.event_date as string).ok,
+          )
+
+          if (publishable.length) {
+            const { data: published } = await admin
+              .from('hosted_events')
+              .update({
+                status: 'upcoming',
+                reviewed_by: ctx.userId,
+                reviewed_at: new Date().toISOString(),
+                rejection_reason: null,
+              })
+              .in('id', publishable.map(e => e.id))
+              // The status filter is the race guard, exactly as it is on the
+              // single-event route: a host cancelling mid-review must win.
+              .in('status', [...APPROVABLE_STATUSES])
+              .select('id')
+
+            publishedEvents = published?.length ?? 0
+
+            // One piece of news per host, not one per date — a host with five
+            // rounds here doesn't want five notifications. Each is told about
+            // their own soonest date, which is the one they'll act on first.
+            const soonestByHost = new Map<string, string>()
+            for (const e of publishable) {
+              const host = Array.isArray(e.host) ? e.host[0] : e.host
+              const memberId = (host as { member_id?: string } | null)?.member_id
+              if (!memberId) continue
+              const date = String(e.event_date)
+              const held = soonestByHost.get(memberId)
+              if (!held || date < held) soonestByHost.set(memberId, date)
+            }
+            for (const [memberId, date] of soonestByHost) {
+              void sendPushToMember(
+                memberId,
+                NotificationTemplates.hostedEventApproved(data.name, date),
+              ).catch(() => {})
+            }
+          }
+        } catch (err) {
+          // The course is approved either way — the rounds can still be
+          // published by hand from the hosted-events queue.
+          console.error('[courses/approve] Publishing waiting events failed (non-fatal):', err)
+        }
+
         // Grant host access to any host who already has an event at this club —
         // e.g. the host who proposed it while creating one — so their next event
         // here isn't blocked by the venue check. Best-effort; never blocks the
@@ -116,7 +187,7 @@ export const PATCH = withAuth(
           }))
           .catch(err => console.error('[courses/approve] Announcement post failed (non-fatal):', err))
 
-        return NextResponse.json({ course: data })
+        return NextResponse.json({ course: data, publishedEvents })
       }
 
       // reject — the reason is required, not optional. A rejected course is one

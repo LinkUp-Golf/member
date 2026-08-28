@@ -295,7 +295,11 @@ const EventRow = memo(function EventRow({
     awaitingApproval
       ? {
           tone: "text-amber-600",
-          text: "Not visible to members yet — we're setting up the calendar.",
+          // Deliberately vague about what's outstanding. It used to say we were
+          // setting up the calendar, which stopped being true the moment the
+          // venue was approved — and a host looking at a venue that's clearly
+          // live reads that as the app being wrong.
+          text: "Not visible to members yet — waiting on our review.",
         }
       : proof.note
         ? { tone: PROOF_NOTE_CLASS[proof.note.tone], text: proof.note.text }
