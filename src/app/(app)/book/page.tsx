@@ -19,6 +19,7 @@ import BookingSurveySheet, {
 import VenueAvailabilityCalendar, {
   type CalendarVenue,
   type CalendarOpening,
+  type PinnedVenue,
 } from "@/components/calendar/VenueAvailabilityCalendar";
 import {
   VENUE_DOT,
@@ -3674,13 +3675,19 @@ function EventSelectionScreen({
   }, [calVenues, debouncedSearch, locationFilter, calVenueFilters]);
 
   // Venues an admin pinned. Read off the course rows rather than the month
-  // payload: a pinned venue is worth docking even in a month it has nothing
-  // open in, and the availability response only carries the ones that do.
-  const pinnedVenues = useMemo<CalendarVenue[]>(
+  // payload, which carries no logo — and the dock leads with the club's own
+  // mark. A pinned venue with nothing open this month is dropped by the dock.
+  const pinnedVenues = useMemo<PinnedVenue[]>(
     () =>
       events
         .filter((e) => e.pinned)
-        .map((e) => ({ id: e.id, name: e.name, city: e.city, state: e.state })),
+        .map((e) => ({
+          id: e.id,
+          name: e.name,
+          city: e.city,
+          state: e.state,
+          logoUrl: e.logo_url,
+        })),
     [events],
   );
 
