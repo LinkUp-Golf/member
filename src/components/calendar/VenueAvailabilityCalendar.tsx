@@ -319,8 +319,10 @@ export interface PinnedNextOpening {
  * cards lose their location line — the dock holds its place on screen, so every
  * row it grows by is a row of the calendar the member can't see.
  *
- * It still respects the filters above it: a member narrowing the month to one
- * other club is not asking to keep seeing this one.
+ * The filters above don't reach it. Pinning is the one thing on this screen
+ * that isn't the member's own choice of what to look at — a venue we've put in
+ * front of them stays in front of them, which is the whole reason to have it.
+ * So the dock reads the unfiltered month, not the narrowed one.
  */
 function PinnedVenueDock({
   venues, days, month, colourByVenue, nextAvailable, onPickOpening, todayIso,
@@ -573,20 +575,18 @@ function VenueAvailabilityCalendar({
     [agendaDays, visibleDays],
   )
 
-  // A pinned venue the filters have excluded is not what the member asked to
-  // see — the dock drops it rather than overriding them.
-  const visiblePinnedVenues = useMemo(
-    () => (allowed ? pinnedVenues.filter(v => allowed.has(v.id)) : pinnedVenues),
-    [pinnedVenues, allowed],
-  )
-
-  // Colours come from the month's own assignment. A card falling back to a date
-  // in another month has none — it isn't on this calendar to match — and says so
-  // by not wearing one.
-  const pinnedDock = visiblePinnedVenues.length > 0 && (
+  // Colours come from the month's own assignment, which is taken over every
+  // venue rather than the surviving ones — so a pinned venue the filters exclude
+  // still has its own. A card falling back to a date in another month has none:
+  // it isn't on this calendar to match, and says so by not wearing one.
+  //
+  // `days`, not `visibleDays` — the dock is deliberately outside the filters, so
+  // narrowing the month to another club must not turn a pinned venue's real day
+  // this month into a "next open" one in some later month.
+  const pinnedDock = pinnedVenues.length > 0 && (
     <PinnedVenueDock
-      venues={visiblePinnedVenues}
-      days={visibleDays}
+      venues={pinnedVenues}
+      days={days}
       month={month}
       colourByVenue={colourByVenue}
       nextAvailable={pinnedNextAvailable}
@@ -752,35 +752,39 @@ function VenueAvailabilityCalendar({
             </div>
           </div>
         ) : (
-          // No dock here: nothing open in the month means no pinned venue has a
-          // day to offer either, so it would render nothing anyway.
-          <div className="card card-pad text-center py-10">
-            <CalendarDays className="w-8 h-8 mx-auto text-green-900/30" strokeWidth={1.5} />
-            <p className="text-sm text-green-900/60 mt-3">
-              {soleVenueName
-                ? `No tee times at ${soleVenueName} in ${format(month, 'MMMM')}.`
-                : narrowed
-                  ? `Nothing matches your filters in ${format(month, 'MMMM')}.`
-                  : `No tee times open in ${format(month, 'MMMM')}.`}
-            </p>
-            {/* When filters are what emptied the month, clearing them is the
-                likelier fix than skipping forward. */}
-            <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
-              {narrowed && (
+          // The dock belongs here too: an empty month is either a filter that
+          // doesn't apply to a pinned venue, or a quiet month it has a later
+          // date for. Both are exactly when it's worth showing.
+          <div>
+            {pinnedDock}
+            <div className="card card-pad text-center py-10">
+              <CalendarDays className="w-8 h-8 mx-auto text-green-900/30" strokeWidth={1.5} />
+              <p className="text-sm text-green-900/60 mt-3">
+                {soleVenueName
+                  ? `No tee times at ${soleVenueName} in ${format(month, 'MMMM')}.`
+                  : narrowed
+                    ? `Nothing matches your filters in ${format(month, 'MMMM')}.`
+                    : `No tee times open in ${format(month, 'MMMM')}.`}
+              </p>
+              {/* When filters are what emptied the month, clearing them is the
+                  likelier fix than skipping forward. */}
+              <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
+                {narrowed && (
+                  <button
+                    onClick={onClearVenueFilters ?? undefined}
+                    className="btn btn-outline btn-sm"
+                  >
+                    Clear filters
+                  </button>
+                )}
                 <button
-                  onClick={onClearVenueFilters ?? undefined}
+                  onClick={() => onMonthChange(addMonths(month, 1))}
                   className="btn btn-outline btn-sm"
                 >
-                  Clear filters
+                  {format(addMonths(month, 1), 'MMMM')}
+                  <ChevronRight className="w-3.5 h-3.5" strokeWidth={2} />
                 </button>
-              )}
-              <button
-                onClick={() => onMonthChange(addMonths(month, 1))}
-                className="btn btn-outline btn-sm"
-              >
-                {format(addMonths(month, 1), 'MMMM')}
-                <ChevronRight className="w-3.5 h-3.5" strokeWidth={2} />
-              </button>
+              </div>
             </div>
           </div>
         )
