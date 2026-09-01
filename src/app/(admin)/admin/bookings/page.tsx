@@ -236,8 +236,6 @@ function SlotCard({
   onSaveNote,
   savingNote,
   noteRef,
-  processingBookingRequestId,
-  onDecideRequest,
   remindingPayment,
   remindedPaymentIds,
   onRemindPayment,
@@ -257,8 +255,6 @@ function SlotCard({
   onSaveNote: (id: string) => void
   savingNote: string | null
   noteRef: React.RefObject<HTMLTextAreaElement>
-  processingBookingRequestId: string | null
-  onDecideRequest: (id: string, action: 'setup' | 'reject') => void
   remindingPayment: string | null
   remindedPaymentIds: Set<string>
   onRemindPayment: (id: string) => void
@@ -385,47 +381,28 @@ function SlotCard({
 
                   {/* Status + dinner — stacked, right-aligned */}
                   <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                    {b.status === 'awaiting_approval' ? (
-                      <div className="flex gap-1.5">
+                    <div className="flex items-center gap-1.5">
+                      {showRemindCta && (
                         <button
-                          onClick={() => onDecideRequest(b.id, 'setup')}
-                          disabled={processingBookingRequestId === b.id}
-                          className="text-xs font-medium px-2.5 py-1 rounded-lg bg-green-900 text-white disabled:opacity-50 whitespace-nowrap"
+                          type="button"
+                          onClick={() => onRemindPayment(b.id)}
+                          disabled={remindingPayment === b.id || alreadyReminded}
+                          className="text-xs font-medium px-2.5 py-1 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:hover:bg-red-600 whitespace-nowrap transition-colors"
                         >
-                          {processingBookingRequestId === b.id ? '…' : 'Setup'}
+                          {remindingPayment === b.id ? 'Sending…' : alreadyReminded ? '✓ Sent' : 'Send reminder'}
                         </button>
-                        <button
-                          onClick={() => onDecideRequest(b.id, 'reject')}
-                          disabled={processingBookingRequestId === b.id}
-                          className="text-xs font-medium px-2.5 py-1 rounded-lg bg-red-50 text-red-600 disabled:opacity-50 whitespace-nowrap"
-                        >
-                          ✕ Reject
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5">
-                        {showRemindCta && (
-                          <button
-                            type="button"
-                            onClick={() => onRemindPayment(b.id)}
-                            disabled={remindingPayment === b.id || alreadyReminded}
-                            className="text-xs font-medium px-2.5 py-1 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:hover:bg-red-600 whitespace-nowrap transition-colors"
-                          >
-                            {remindingPayment === b.id ? 'Sending…' : alreadyReminded ? '✓ Sent' : 'Send reminder'}
-                          </button>
-                        )}
-                        <select
-                          value={b.status}
-                          disabled={updatingStatus === b.id}
-                          onChange={e => onUpdateStatus(b.id, e.target.value as BookingStatus)}
-                          className={`text-xs font-semibold rounded-lg px-2 py-1 border border-transparent outline-none cursor-pointer disabled:opacity-50 transition-colors max-w-[140px] sm:max-w-none ${sm.colour}`}
-                        >
-                          {(STATUS_ACTIONS.includes(b.status) ? STATUS_ACTIONS : [b.status, ...STATUS_ACTIONS]).map(s => (
-                            <option key={s} value={s}>{STATUS_META[s].label}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
+                      )}
+                      <select
+                        value={b.status}
+                        disabled={updatingStatus === b.id}
+                        onChange={e => onUpdateStatus(b.id, e.target.value as BookingStatus)}
+                        className={`text-xs font-semibold rounded-lg px-2 py-1 border border-transparent outline-none cursor-pointer disabled:opacity-50 transition-colors max-w-[140px] sm:max-w-none ${sm.colour}`}
+                      >
+                        {(STATUS_ACTIONS.includes(b.status) ? STATUS_ACTIONS : [b.status, ...STATUS_ACTIONS]).map(s => (
+                          <option key={s} value={s}>{STATUS_META[s].label}</option>
+                        ))}
+                      </select>
+                    </div>
 
                     {b.dinner_rsvp ? (
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${
@@ -633,7 +610,6 @@ export default function AdminBookingsPage() {
   const [processingMemberId, setProcessingMemberId] = useState<string | null>(null)
   const [addMemberSearch, setAddMemberSearch] = useState('')
 
-  const [processingBookingRequestId, setProcessingBookingRequestId] = useState<string | null>(null)
   const [requestToast, setRequestToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
 
@@ -791,24 +767,6 @@ export default function AdminBookingsPage() {
 
   useEffect(() => { loadBookings() }, [loadBookings])
   useEffect(() => { if (editingNote && noteRef.current) noteRef.current.focus() }, [editingNote])
-
-  async function decideBookingRequest(id: string, action: 'setup' | 'reject') {
-    setProcessingBookingRequestId(id)
-    const res = await fetch(`/api/admin/booking-requests/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action }),
-    })
-    if (res.ok) {
-      setRequestToast({ msg: action === 'setup' ? 'Guest set up, booked, and synced.' : 'Guest request rejected.', ok: true })
-    } else {
-      const json = await res.json().catch(() => ({}))
-      setRequestToast({ msg: json.error ?? 'Action failed. Please try again.', ok: false })
-    }
-    setTimeout(() => setRequestToast(null), 3500)
-    await loadBookings()
-    setProcessingBookingRequestId(null)
-  }
 
   const loadMembers = useCallback(async () => {
     setLoadingMembers(true)
@@ -1106,7 +1064,6 @@ export default function AdminBookingsPage() {
     onEditNote: setEditingNote,
     onNoteChange: (id: string, val: string) => setNoteValues(prev => ({ ...prev, [id]: val })),
     onSaveNote: saveNote, savingNote, noteRef,
-    processingBookingRequestId, onDecideRequest: decideBookingRequest,
     remindingPayment, remindedPaymentIds, onRemindPayment: remindPayment,
     deletingBookingId, onRequestDelete: setDeleteTarget,
   }

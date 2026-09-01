@@ -22,7 +22,8 @@ import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-serv
 import { getAvailableSlots, createBooking, getContactByEmail, resolveMeetingDurationMins } from '@/lib/ghl/client'
 import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { logActivity } from '@/lib/activity/log'
-import { sendPushToMembers, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
+import { provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
+import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
 import { buildCustomSlots } from '@/lib/bookings/availability'
@@ -309,7 +310,6 @@ export async function POST(request: NextRequest) {
   const timeNormalized = `${lp('hour')}:${lp('minute')}:${lp('second')}`
 
   console.log('[booking/create] Resolved in event/Aviara timezone:', { bookingDate, timeNormalized })
-  const memberName = `${member.first_name} ${member.last_name}`
 
   // ---- Validate everyone up front, before touching GHL --------------------
   // Fail fast with a clear message rather than getting partway through and
@@ -469,9 +469,10 @@ export async function POST(request: NextRequest) {
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: null as string | null,
     })),
-    // Non-members are held for admin review: a booking row in 'awaiting_approval'
-    // with no GHL appointment. An admin "sets it up" (creates the GHL contact +
-    // appointment, status → tentative) or rejects it (status → cancelled).
+    // Non-members take a seat on the same terms as anyone else. Their GHL
+    // contact and member row are created below, right after the seats are
+    // reserved — the admin Setup step this used to wait on never decided
+    // anything, it just typed in what the booker had already supplied.
     ...nonMemberPlayers.map((p) => ({
       member_id: user.id,
       course_id: resolvedCourseId,
@@ -481,7 +482,7 @@ export async function POST(request: NextRequest) {
       guest_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email,
       player_member_id: null as string | null,
       additional_players: [p],
-      status: 'awaiting_approval',
+      status: 'tentative',
       amount_charged: BOOKING_PRICE_USD,
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: null as string | null,
@@ -576,7 +577,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to create booking records' }, { status: 500 })
   }
 
-  type InsertedBooking = { id: string; guest_name: string | null; player_member_id: string | null; ghl_booking_id: string | null }
+  type InsertedBooking = {
+    id: string
+    guest_name: string | null
+    player_member_id: string | null
+    ghl_booking_id: string | null
+    additional_players: AdditionalPlayer[] | null
+  }
   const created = insertedBookings as InsertedBooking[]
   console.log('[booking/create] Reserved bookings:', created.map(b => b.id))
 
@@ -611,24 +618,52 @@ export async function POST(request: NextRequest) {
   primaryBooking.ghl_booking_id = primaryGhlId
   console.log('[booking/create] GHL appointment created for primary:', primaryGhlId)
 
-  // Member-guest appointments are non-fatal — a failure just leaves that row
-  // without a GHL appointment. Non-member rows are skipped (awaiting approval).
+  // Guest appointments are non-fatal — a failure just leaves that row without a
+  // GHL appointment, the same as before. Only the booker's is allowed to sink
+  // the booking.
   await Promise.all(
     created
-      .filter(b => b.player_member_id)
+      .filter(b => b.id !== primaryBooking.id)
       .map(async (b) => {
-        const row = b.player_member_id ? memberRowById[b.player_member_id] : undefined
-        if (!row?.ghl_contact_id) return
+        // Branch on what the row IS, not on whether a contact id turned up:
+        // a member guest with no ghl_contact_id must be skipped, never
+        // provisioned, or we'd mint a second GHL contact for someone who
+        // already has one.
+        let contactId: string
+        let email: string
+        let phone: string | null
+
+        if (b.player_member_id) {
+          const memberRow = memberRowById[b.player_member_id]
+          if (!memberRow?.ghl_contact_id) return
+          contactId = memberRow.ghl_contact_id
+          email = memberRow.email
+          phone = memberRow.phone ?? null
+        } else {
+          const guest = b.additional_players?.[0]
+          if (!guest?.email) return
+          try {
+            // Creates the GHL contact, tags it for access, and makes the
+            // member row — the work the admin Setup button used to do.
+            contactId = await provisionNonMemberGuest(guest, adminSupabase)
+          } catch (err) {
+            console.warn('[booking/create] Non-member setup failed (non-fatal):', guest.email, String(err))
+            return
+          }
+          email = guest.email
+          phone = guest.mobile || null
+        }
+
         try {
           const ghlId = await createBooking({
             ...bookingParams,
-            contact: { id: row.ghl_contact_id, email: row.email, phone: row.phone ?? null },
+            contact: { id: contactId, email, phone },
           })
           await adminSupabase.from('bookings').update({ ghl_booking_id: ghlId }).eq('id', b.id)
           b.ghl_booking_id = ghlId // reflect into the response payload (same array ref)
-          console.log('[booking/create] GHL appointment created for guest:', row.email, ghlId)
+          console.log('[booking/create] GHL appointment created for guest:', email, ghlId)
         } catch (err) {
-          console.warn('[booking/create] Guest GHL appointment failed (non-fatal):', row.email, String(err))
+          console.warn('[booking/create] Guest GHL appointment failed (non-fatal):', email, String(err))
         }
       })
   )
@@ -649,19 +684,6 @@ export async function POST(request: NextRequest) {
     ).catch(() => {})
   }
 
-  // Alert admins so they can set up (or reject) each non-member guest. The
-  // 'awaiting_approval' booking rows above are the moderation queue.
-  if (nonMemberPlayers.length) {
-    void sendPushToAdmins(
-      NotificationTemplates.nonMemberBookingRequest(
-        memberName,
-        nonMemberPlayers.length,
-        displayDate,
-        timeNormalized.slice(0, 5)
-      )
-    ).catch(() => {})
-  }
-
   console.log('[booking/create] Success, primaryBookingId:', primaryBookingId)
 
   // Usage tracking — not awaited, and never allowed to affect the booking.
@@ -675,9 +697,7 @@ export async function POST(request: NextRequest) {
     metadata: { players: 1 + rawExtraPlayers.length, bookingDate },
   })
 
-  const message = nonMemberPlayers.length
-    ? `Booking submitted. ${nonMemberPlayers.length} non-member guest${nonMemberPlayers.length !== 1 ? 's' : ''} ${nonMemberPlayers.length !== 1 ? 'are' : 'is'} pending admin approval — we'll confirm availability and send your payment link by email.`
-    : 'Booking submitted. We will confirm availability and send your payment link by email.'
+  const message = 'Booking submitted. We will confirm availability and send your payment link by email.'
 
   // Echo the resolved course onto each row so the client's optimistic prepend
   // renders the real course name (the RPC returns raw rows with no join).
@@ -688,7 +708,6 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     bookingId: primaryBookingId,
     bookings: bookingsWithCourse,
-    pendingNonMembers: nonMemberPlayers.length,
     message,
   })
 }

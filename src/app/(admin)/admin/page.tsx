@@ -24,7 +24,6 @@ interface DashboardData {
   maxRounds: number;
   reservedRounds: number;
   pendingGuestAccess: number;
-  pendingBookingRequests: number;
   recentMembers: Array<{
     id: string;
     first_name: string;
@@ -76,7 +75,6 @@ export default function AdminDashboard() {
       pendingRes,
       roundsRes,
       guestRes,
-      bookingReqRes,
       recentMembersRes,
       recentBookingsRes,
     ] = await Promise.all([
@@ -107,11 +105,6 @@ export default function AdminDashboard() {
         .select("id", { count: "exact" })
         .in("target_course_id", courseIds)
         .eq("status", "pending"),
-      supabase
-        .from("bookings")
-        .select("id", { count: "exact" })
-        .in("course_id", courseIds)
-        .eq("status", "awaiting_approval"),
       supabase
         .from("members")
         .select("id, first_name, last_name, created_at, membership_status")
@@ -146,7 +139,6 @@ export default function AdminDashboard() {
       maxRounds,
       reservedRounds,
       pendingGuestAccess: guestRes.count ?? 0,
-      pendingBookingRequests: bookingReqRes.count ?? 0,
       recentMembers: recentMembersRes.data ?? [],
       recentBookings: (recentBookingsRes.data ??
         []) as unknown as DashboardData["recentBookings"],
@@ -172,10 +164,9 @@ export default function AdminDashboard() {
     );
   }
 
-  const pendingActions =
-    data.pendingGuestAccess +
-    data.pendingBookingRequests +
-    data.pendingCount;
+  // Non-member guests used to queue here for an admin to set up. They're
+  // provisioned at booking time now, so there is no queue and nothing to count.
+  const pendingActions = data.pendingGuestAccess + data.pendingCount;
 
   return (
     <div className="p-4 sm:p-8">
@@ -195,8 +186,6 @@ export default function AdminDashboard() {
             <p className="text-xs text-yellow-600 mt-0.5">
               {data.pendingGuestAccess > 0 &&
                 `${data.pendingGuestAccess} guest access · `}
-              {data.pendingBookingRequests > 0 &&
-                `${data.pendingBookingRequests} booking requests · `}
               {data.pendingCount > 0 &&
                 `${data.pendingCount} member applications`}
             </p>
@@ -204,8 +193,9 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* Stats grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      {/* Stats grid — three since the non-member booking queue went away, so
+          the desktop track count follows rather than leaving a dead column. */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
         <StatCard
           label="Active members"
           value={data.activeMembers}
@@ -231,12 +221,6 @@ export default function AdminDashboard() {
           value={data.pendingGuestAccess}
           sub="Travel requests awaiting approval"
           colour={data.pendingGuestAccess > 0 ? "gold" : "gray"}
-        />
-        <StatCard
-          label="Booking requests"
-          value={data.pendingBookingRequests}
-          sub="Non-member guests awaiting approval"
-          colour={data.pendingBookingRequests > 0 ? "gold" : "gray"}
         />
       </div>
 

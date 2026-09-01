@@ -117,7 +117,6 @@ export default function BookPage() {
     date: string;
     time: string;
     players: number;
-    pendingNonMembers: number;
     bookingId: string | null;
     eventName: string;
   } | null>(null);
@@ -264,10 +263,6 @@ export default function BookPage() {
           date: format(new Date(selectedDate + "T12:00:00"), "EEEE, MMMM d"),
           time: formatSlotTime(selectedSlot.startTime),
           players: 1 + additionalPlayers.length,
-          pendingNonMembers:
-            typeof data.pendingNonMembers === "number"
-              ? data.pendingNonMembers
-              : additionalPlayers.filter((p) => p.isNonMember).length,
           bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
           eventName: selectedEvent?.name ?? "Park Hyatt Aviara",
         });
@@ -1738,7 +1733,6 @@ function SuccessScreen({
     date: string;
     time: string;
     players: number;
-    pendingNonMembers: number;
     bookingId: string | null;
     eventName: string;
   };
@@ -1821,20 +1815,6 @@ function SuccessScreen({
         >
           Your booking is confirmed once payment is complete.
         </p>
-        {booking.pendingNonMembers > 0 && (
-          <p
-            className="text-sm leading-relaxed pt-2 mt-2 border-t"
-            style={{
-              color: "rgba(0,38,105,0.6)",
-              borderColor: "rgba(0,38,105,0.08)",
-            }}
-          >
-            {booking.pendingNonMembers} non-member guest
-            {booking.pendingNonMembers !== 1 ? "s" : ""} need
-            {booking.pendingNonMembers !== 1 ? "" : "s"} admin approval.
-            We&apos;ll let you know once they&apos;re confirmed.
-          </p>
-        )}
       </div>
       {showDinner && (
         <div className="card p-5 w-full max-w-sm mb-8 text-left">
