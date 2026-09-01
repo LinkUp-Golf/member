@@ -20,10 +20,7 @@ import ProofControl, {
   eventProofState,
 } from "@/components/host/ProofControl";
 import { TutorialLink } from "@/components/tutorials/TutorialPlayer";
-import {
-  HOST_EVENT_GUEST_RATE_USD,
-  HOST_MEMBER_PRICE_MARKUP_USD,
-} from "@/lib/constants";
+import { HOST_EVENT_GUEST_RATE_USD } from "@/lib/constants";
 import { formatEventTeeTime as fmtTime, cn } from "@/lib/utils";
 import type {
   HostedEvent,
@@ -558,14 +555,6 @@ function EventDrawer({
   // invalidates whatever was picked at the previous one.
   const courseId = watch("course_id");
 
-  // Read back so the markup notice can name the member price against the rate
-  // the host is typing, rather than leaving them to add ten in their head.
-  const rawNewRate = watch("new_member_guest_rate");
-  const newRateNumber =
-    rawNewRate?.trim() && Number.isFinite(Number(rawNewRate))
-      ? Number(rawNewRate)
-      : null;
-
   // A failed load leaves an empty dropdown with no explanation, so surface it
   // rather than swallowing the error.
   useEffect(() => {
@@ -1091,24 +1080,6 @@ function EventDrawer({
                     </p>
                   )}
                 </div>
-
-                {/* The one term the host doesn't set, so it's stated rather
-                    than asked for — and stated against the number they just
-                    typed, since "we add $10" is easy to read past. */}
-                <div className="rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-xs text-green-900 leading-relaxed">
-                  We add {fmtMoney(HOST_MEMBER_PRICE_MARKUP_USD)} per member on
-                  top of your guest rate.
-                  {newRateNumber !== null && (
-                    <>
-                      {" "}
-                      At {fmtMoney(newRateNumber)}, members are listed at{" "}
-                      <span className="font-semibold">
-                        {fmtMoney(newRateNumber + HOST_MEMBER_PRICE_MARKUP_USD)}
-                      </span>
-                      .
-                    </>
-                  )}
-                </div>
               </>
             )}
 
@@ -1159,21 +1130,13 @@ function EventDrawer({
 
           {/* The terms, stated rather than asked for. Every hosted round at a
               listed club runs on the same ones, so this is information, not a
-              field — including the markup, which is the part a host is most
-              likely to be surprised by later. */}
+              field. The rate named here is the host's own — what the round is
+              listed at and what they earn back in credit. */}
           {!proposing && (
             <div className="rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-xs text-green-900 leading-relaxed">
               Each date is listed with the spots that venue has open that day —
               the number on each date above — at{" "}
-              {fmtMoney(HOST_EVENT_GUEST_RATE_USD)} per round. We add{" "}
-              {fmtMoney(HOST_MEMBER_PRICE_MARKUP_USD)} per member on top, so
-              members are listed at{" "}
-              <span className="font-semibold">
-                {fmtMoney(
-                  HOST_EVENT_GUEST_RATE_USD + HOST_MEMBER_PRICE_MARKUP_USD,
-                )}
-              </span>
-              .
+              {fmtMoney(HOST_EVENT_GUEST_RATE_USD)} per round.
             </div>
           )}
 
