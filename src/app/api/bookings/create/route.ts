@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 // Flow:
 //   1. Validate member
 //   2. Create GHL calendar appointment
-//   3. Write one booking row per player to Supabase (status = 'tentative')
+//   3. Write one booking row per player to Supabase (NEW_BOOKING_STATUS)
 //
 // GET /api/bookings/create?month=YYYY-MM&courseId=...
 //   Returns available tee-time slots from the GHL Aviara calendar.
@@ -36,6 +36,7 @@ import type { AdditionalPlayer } from '@/types'
 const MAX_ADDITIONAL_PLAYERS = 3
 import {
   BOOKING_PRICE_USD,
+  NEW_BOOKING_STATUS,
   AVIARA_TIMEZONE,
   AVIARA_ADDRESS,
   FALLBACK_ROUND_DURATION_MINUTES,
@@ -450,7 +451,7 @@ export async function POST(request: NextRequest) {
       guest_name: null as string | null,
       player_member_id: null as string | null,
       additional_players: [] as typeof extraPlayers,
-      status: 'tentative',
+      status: NEW_BOOKING_STATUS,
       amount_charged: BOOKING_PRICE_USD,
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: null as string | null,
@@ -464,7 +465,7 @@ export async function POST(request: NextRequest) {
       guest_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email,
       player_member_id: p.memberId ?? null,
       additional_players: [p],
-      status: 'tentative',
+      status: NEW_BOOKING_STATUS,
       amount_charged: BOOKING_PRICE_USD,
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: null as string | null,
@@ -482,7 +483,7 @@ export async function POST(request: NextRequest) {
       guest_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email,
       player_member_id: null as string | null,
       additional_players: [p],
-      status: 'tentative',
+      status: NEW_BOOKING_STATUS,
       amount_charged: BOOKING_PRICE_USD,
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: null as string | null,
@@ -697,7 +698,10 @@ export async function POST(request: NextRequest) {
     metadata: { players: 1 + rawExtraPlayers.length, bookingDate },
   })
 
-  const message = 'Booking submitted. We will confirm availability and send your payment link by email.'
+  // Availability was checked against the course's GHL calendar before any of
+  // this ran, so there is nothing left to confirm — the round opens with
+  // payment due.
+  const message = 'Booking confirmed. Payment is due to secure your spot.'
 
   // Echo the resolved course onto each row so the client's optimistic prepend
   // renders the real course name (the RPC returns raw rows with no join).

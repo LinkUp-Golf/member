@@ -41,6 +41,7 @@ import type { AuthContext } from '@/lib/auth/types'
 import type { AdditionalPlayer } from '@/types'
 import {
   BOOKING_PRICE_USD,
+  NEW_BOOKING_STATUS,
   AVIARA_TIMEZONE,
   AVIARA_ADDRESS,
   FALLBACK_ROUND_DURATION_MINUTES,
@@ -273,8 +274,9 @@ export const POST = withAuth(async (
   }
 
   // ---- Build the new rows (one per added player) --------------------------
-  // Every added player is booked in GHL below. A non-member's contact and
-  // member row are created there too — there is no approval step.
+  // Every added player is booked in GHL below, at NEW_BOOKING_STATUS. A
+  // non-member's contact and member row are created there too — there is no
+  // approval step.
   const rows = [
     ...memberPlayers.map((p) => ({
       member_id: ctx.userId,
@@ -285,7 +287,7 @@ export const POST = withAuth(async (
       guest_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email,
       player_member_id: p.memberId ?? null,
       additional_players: [p],
-      status: 'tentative',
+      status: NEW_BOOKING_STATUS,
       amount_charged: BOOKING_PRICE_USD,
       focus_linkup_id: primary.focus_linkup_id ?? null,
       ghl_booking_id: null as string | null,
@@ -299,7 +301,7 @@ export const POST = withAuth(async (
       guest_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email,
       player_member_id: null as string | null,
       additional_players: [p],
-      status: 'tentative',
+      status: NEW_BOOKING_STATUS,
       amount_charged: BOOKING_PRICE_USD,
       focus_linkup_id: primary.focus_linkup_id ?? null,
       ghl_booking_id: null as string | null,
