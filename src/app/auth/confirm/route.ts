@@ -22,6 +22,7 @@ import { randomUUID } from 'crypto'
 import type { EmailOtpType } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
+import { logActivity } from '@/lib/activity/log'
 import { getContactByEmail } from '@/lib/ghl/client'
 import { hasAnyAccessTag, hasPartnerTag, hasHostTag } from '@/lib/ghl/tags'
 import { workspaceLandingPath } from '@/lib/auth/landing'
@@ -111,6 +112,16 @@ export async function GET(request: NextRequest) {
     .from('members')
     .update({ last_sign_in: new Date().toISOString() })
     .eq('id', user.id)
+
+  // Same moment, recorded as activity so the usage report has a live source
+  // for sign-ins rather than only the backfilled last_sign_in snapshot.
+  void logActivity({
+    memberId: user.id,
+    action: 'signed_in',
+    courseId: memberRecord?.home_course_id ?? null,
+    path: '/login',
+    metadata: { method: 'magic_link_confirm' },
+  })
 
   auditLog('LOGIN_SUCCESS', {
     requestId,

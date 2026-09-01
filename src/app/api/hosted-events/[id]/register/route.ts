@@ -10,6 +10,7 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { sendPushToMember, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
+import { logActivity } from '@/lib/activity/log'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(
@@ -78,6 +79,15 @@ export const POST = withAuth(
       action: 'hosted_event.registered',
       userId: ctx.userId,
       metadata: { event_id: id },
+    })
+
+    void logActivity({
+      memberId: ctx.memberId,
+      action: 'hosted_event_registered',
+      courseId: ctx.homeCourseId,
+      targetId: id,
+      targetLabel: course?.name ?? null,
+      path: `/more/hosted-events/${id}`,
     })
 
     return NextResponse.json({ ok: true }, { status: 201 })

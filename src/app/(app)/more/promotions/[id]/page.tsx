@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation'
 import { Gift } from 'lucide-react'
 import { useProfile } from '@/hooks/useProfile'
 import { apiClient } from '@/lib/api-client'
+import { trackActivity } from '@/lib/activity/track'
 import AppShell from '@/components/layout/AppShell'
 import { formatBookingDate } from '@/lib/utils'
 import type { Promotion } from '@/types'
@@ -88,6 +89,15 @@ export default function PromotionDetailPage() {
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn btn-gold inline-flex"
+                  onClick={() =>
+                    // dedupe off: a second tap is a second click, and how
+                    // often an offer is followed is the point of tracking it.
+                    trackActivity('promotion_cta_clicked', {
+                      targetId: promo.id,
+                      targetLabel: promo.title,
+                      dedupe: false,
+                    })
+                  }
                 >
                   {promo.cta_label}
                 </a>

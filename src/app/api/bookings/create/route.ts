@@ -21,6 +21,7 @@ import { cookies } from 'next/headers'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { getAvailableSlots, createBooking, getContactByEmail, resolveMeetingDurationMins } from '@/lib/ghl/client'
 import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
+import { logActivity } from '@/lib/activity/log'
 import { sendPushToMembers, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
@@ -662,6 +663,17 @@ export async function POST(request: NextRequest) {
   }
 
   console.log('[booking/create] Success, primaryBookingId:', primaryBookingId)
+
+  // Usage tracking — not awaited, and never allowed to affect the booking.
+  void logActivity({
+    memberId: member.id,
+    action: 'booking_created',
+    courseId: resolvedCourseId,
+    targetId: primaryBookingId,
+    targetLabel: courseForResponse?.name ?? null,
+    path: '/book',
+    metadata: { players: 1 + rawExtraPlayers.length, bookingDate },
+  })
 
   const message = nonMemberPlayers.length
     ? `Booking submitted. ${nonMemberPlayers.length} non-member guest${nonMemberPlayers.length !== 1 ? 's' : ''} ${nonMemberPlayers.length !== 1 ? 'are' : 'is'} pending admin approval — we'll confirm availability and send your payment link by email.`
