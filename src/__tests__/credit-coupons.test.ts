@@ -217,6 +217,18 @@ describe('bookingAmountDue', () => {
     expect(bookingAmountDue({})).toBe(BOOKING_PRICE_USD)
     expect(bookingAmountDue({ amount_charged: null, cost_per_player: null })).toBe(BOOKING_PRICE_USD)
   })
+
+  // Called with a course row and nothing else, this is "what a round costs at
+  // this venue" — the shape the booking routes use to price amount_charged, and
+  // the confirm screen to quote it before a row exists. A regression here would
+  // charge the house price at a venue that set its own.
+  it('prices a round from the course row alone', () => {
+    expect(bookingAmountDue({ cost_per_player: 210 })).toBe(210)
+    // PostgREST hands back decimal(10,2) as a string.
+    expect(bookingAmountDue({ cost_per_player: '210.00' })).toBe(210)
+    expect(bookingAmountDue({ cost_per_player: null })).toBe(BOOKING_PRICE_USD)
+    expect(bookingAmountDue({ cost_per_player: 0 })).toBe(BOOKING_PRICE_USD)
+  })
 })
 
 // The two 422s GHL actually returns, recorded from live calls. They differ in

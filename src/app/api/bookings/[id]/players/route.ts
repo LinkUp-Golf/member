@@ -35,12 +35,12 @@ import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findMembersWithPendingPayment } from '@/lib/bookings/pending-payment'
 import { provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
+import { bookingAmountDue } from '@/lib/bookings/price'
 import { format } from 'date-fns'
 import { titleCaseName } from '@/lib/utils'
 import type { AuthContext } from '@/lib/auth/types'
 import type { AdditionalPlayer } from '@/types'
 import {
-  BOOKING_PRICE_USD,
   NEW_BOOKING_STATUS,
   AVIARA_TIMEZONE,
   AVIARA_ADDRESS,
@@ -158,7 +158,7 @@ export const POST = withAuth(async (
   // ---- Resolve course + calendar settings ---------------------------------
   const { data: course } = await admin
     .from('courses')
-    .select('id, ghl_calendar_id, timezone, name, address, city, state, payment_url, meeting_duration_mins, max_players_per_day')
+    .select('id, ghl_calendar_id, timezone, name, address, city, state, payment_url, meeting_duration_mins, max_players_per_day, cost_per_player')
     .eq('id', primary.course_id)
     .single()
 
@@ -171,6 +171,10 @@ export const POST = withAuth(async (
   const eventAddress = course.address || course.city || AVIARA_ADDRESS
   const eventCourseName = course.name
   const maxPlayersPerDay = course.max_players_per_day ?? DEFAULT_MAX_PLAYERS_PER_DAY
+  // The venue's own green fee, house default if it hasn't set one — same rule
+  // as the create route, so a player added later is priced like one booked up
+  // front.
+  const pricePerPlayer = bookingAmountDue({ cost_per_player: course.cost_per_player })
   const eventDurationMinutes = await resolveMeetingDurationMins(
     eventCalendarId,
     course.meeting_duration_mins || FALLBACK_ROUND_DURATION_MINUTES,
@@ -288,7 +292,7 @@ export const POST = withAuth(async (
       player_member_id: p.memberId ?? null,
       additional_players: [p],
       status: NEW_BOOKING_STATUS,
-      amount_charged: BOOKING_PRICE_USD,
+      amount_charged: pricePerPlayer,
       focus_linkup_id: primary.focus_linkup_id ?? null,
       ghl_booking_id: null as string | null,
     })),
@@ -302,7 +306,7 @@ export const POST = withAuth(async (
       player_member_id: null as string | null,
       additional_players: [p],
       status: NEW_BOOKING_STATUS,
-      amount_charged: BOOKING_PRICE_USD,
+      amount_charged: pricePerPlayer,
       focus_linkup_id: primary.focus_linkup_id ?? null,
       ghl_booking_id: null as string | null,
     })),
@@ -428,6 +432,7 @@ export const POST = withAuth(async (
     state: course.state,
     payment_url: course.payment_url ?? null,
     timezone: course.timezone,
+    cost_per_player: course.cost_per_player ?? null,
   }
   const bookingsWithCourse = created.map((b) => ({ ...b, course: courseForResponse }))
 

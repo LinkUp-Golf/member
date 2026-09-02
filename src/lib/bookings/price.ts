@@ -13,6 +13,11 @@ import { BOOKING_PRICE_USD } from '@/lib/constants'
  * set; the course's own rate and the house default cover rows created before it
  * was populated.
  *
+ * Called with no amount_charged, this is also "what a round costs at this
+ * venue" — which is how the booking routes size amount_charged in the first
+ * place, so a row's stored price and a price derived from the course row are
+ * the same rule applied at two moments.
+ *
  * Shared with the credit-coupon route so the figure a member is shown and the
  * figure their credit code is sized to can't disagree.
  */

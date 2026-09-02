@@ -14,7 +14,7 @@ import Image from 'next/image'
 import { ChevronRight, MapPin, Globe, Phone, Users, X } from 'lucide-react'
 import { format, addMinutes, parse } from 'date-fns'
 import { cn, formatTeeTime } from '@/lib/utils'
-import { BOOKING_PRICE_USD } from '@/lib/constants'
+import { bookingAmountDue } from '@/lib/bookings/price'
 import type { Course, GHLBookingSlot } from '@/types'
 
 export interface VenueDayDetail {
@@ -127,10 +127,12 @@ export default function VenueDayDetailSheet({
   const { course, date, openSlots, openSpots, pendingCount } = shown
   const location = [course.city, course.state].filter(Boolean).join(', ')
   const longDate = format(new Date(`${date}T12:00:00`), 'EEEE, MMMM d')
-  // Courses carry their own rate; BOOKING_PRICE_USD is the house default the
-  // confirm screen quotes when one isn't set, so the sheet can always name a
-  // price rather than going silent on the question that decides the booking.
-  const pricePerPlayer = course.cost_per_player ?? BOOKING_PRICE_USD
+  // Courses carry their own rate, with a house default behind it, so the sheet
+  // can always name a price rather than going silent on the question that
+  // decides the booking. Through bookingAmountDue because that same rule sizes
+  // the row's amount_charged at booking time — this is the first screen to
+  // quote the figure and every one after it has to agree.
+  const pricePerPlayer = bookingAmountDue({ cost_per_player: course.cost_per_player })
   // The FIFO gate is enforced server-side on POST /api/bookings/create too;
   // this only keeps the member from walking into a rejection.
   const blocked = pendingCount > 0

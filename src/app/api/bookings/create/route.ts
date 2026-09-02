@@ -27,6 +27,7 @@ import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
 import { buildCustomSlots } from '@/lib/bookings/availability'
+import { bookingAmountDue } from '@/lib/bookings/price'
 import { format } from 'date-fns'
 import { titleCaseName } from '@/lib/utils'
 import type { AdditionalPlayer } from '@/types'
@@ -35,7 +36,6 @@ import type { AdditionalPlayer } from '@/types'
 // so at most 3 additional players may accompany the primary booker.
 const MAX_ADDITIONAL_PLAYERS = 3
 import {
-  BOOKING_PRICE_USD,
   NEW_BOOKING_STATUS,
   AVIARA_TIMEZONE,
   AVIARA_ADDRESS,
@@ -255,7 +255,7 @@ export async function POST(request: NextRequest) {
   let resolvedCourseId: string = member.home_course_id
   // Course details echoed back on the created rows so the client can render the
   // correct course name immediately (the create RPC doesn't join `courses`).
-  let courseForResponse: { name: string; city: string; state: string; payment_url: string | null; timezone: string } | null = null
+  let courseForResponse: { name: string; city: string; state: string; payment_url: string | null; timezone: string; cost_per_player: number | null } | null = null
 
   const { data: course } = await adminSupabase
     .from('courses')
@@ -290,6 +290,12 @@ export async function POST(request: NextRequest) {
       .then(() => {}, () => {})
   }
 
+  // What a round costs at THIS venue. Courses carry their own green fee;
+  // BOOKING_PRICE_USD is the house default for one that hasn't set it. Resolved
+  // through bookingAmountDue so the price written onto the row and the price any
+  // later screen derives from the course row are the same rule.
+  const pricePerPlayer = bookingAmountDue({ cost_per_player: course?.cost_per_player })
+
   if (course) {
     courseForResponse = {
       name: course.name,
@@ -297,6 +303,7 @@ export async function POST(request: NextRequest) {
       state: course.state,
       payment_url: course.payment_url ?? null,
       timezone: course.timezone,
+      cost_per_player: course.cost_per_player ?? null,
     }
   }
 
@@ -452,7 +459,7 @@ export async function POST(request: NextRequest) {
       player_member_id: null as string | null,
       additional_players: [] as typeof extraPlayers,
       status: NEW_BOOKING_STATUS,
-      amount_charged: BOOKING_PRICE_USD,
+      amount_charged: pricePerPlayer,
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: null as string | null,
     },
@@ -466,7 +473,7 @@ export async function POST(request: NextRequest) {
       player_member_id: p.memberId ?? null,
       additional_players: [p],
       status: NEW_BOOKING_STATUS,
-      amount_charged: BOOKING_PRICE_USD,
+      amount_charged: pricePerPlayer,
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: null as string | null,
     })),
@@ -484,7 +491,7 @@ export async function POST(request: NextRequest) {
       player_member_id: null as string | null,
       additional_players: [p],
       status: NEW_BOOKING_STATUS,
-      amount_charged: BOOKING_PRICE_USD,
+      amount_charged: pricePerPlayer,
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: null as string | null,
     })),
