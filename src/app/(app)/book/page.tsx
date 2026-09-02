@@ -46,7 +46,6 @@ import type {
   Course,
 } from "@/types";
 import {
-  BOOKING_PRICE_USD,
   POLICY_TIERS,
   GHL_CANCEL_BOOKING_URL,
   AVIARA_TIMEZONE,
@@ -119,6 +118,13 @@ export default function BookPage() {
     players: number;
     bookingId: string | null;
     eventName: string;
+    // Where this round is paid. Every venue takes payment on its own checkout
+    // page, so the link belongs to the course that was just booked — there is
+    // no single house payment link to fall back on.
+    paymentUrl: string | null;
+    // What the member themselves owes. In a group booking each other player
+    // holds a payment-due row of their own, so this is one share, not the bill.
+    amountDue: number;
   } | null>(null);
 
   // My bookings tab
@@ -149,7 +155,14 @@ export default function BookPage() {
   // with nothing to pay, and the wallet is only worth a request once there's a
   // bill on screen — a pending payment, or the bookings list itself.
   const creditWallet = useCreditWallet(
-    !!user && (pendingBookings.length > 0 || activeTab === "myBookings"),
+    !!user &&
+      (pendingBookings.length > 0 ||
+        activeTab === "myBookings" ||
+        // The round just booked is a bill on screen. Waiting for the pending
+        // refetch to land would work — that new row is payment-due, so it
+        // enables this a moment later — but it would pop the credit option in
+        // after the member had already read the screen.
+        step === "success"),
   );
 
   useEffect(() => {
@@ -259,15 +272,34 @@ export default function BookPage() {
 
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
+        const rows: Booking[] = Array.isArray(data.bookings)
+          ? (data.bookings as Booking[])
+          : [];
+        // The booker's own row, so the success screen quotes their share and
+        // not the group's. The create route echoes the resolved course onto
+        // every row it returns; selectedEvent covers the legacy home-course
+        // path, which posts no courseId.
+        const ownRow =
+          rows.find((b) => b.id === data.bookingId) ?? rows.at(0) ?? null;
         setConfirmedBooking({
           date: format(new Date(selectedDate + "T12:00:00"), "EEEE, MMMM d"),
           time: formatSlotTime(selectedSlot.startTime),
           players: 1 + additionalPlayers.length,
           bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
           eventName: selectedEvent?.name ?? "Park Hyatt Aviara",
+          paymentUrl:
+            ownRow?.course?.payment_url ?? selectedEvent?.payment_url ?? null,
+          // The venue's green fee. amount_charged is written from it at
+          // booking time, so it answers first; the course row behind it covers
+          // a response we couldn't read a row out of.
+          amountDue: bookingAmountDue({
+            amount_charged: ownRow?.amount_charged,
+            cost_per_player:
+              ownRow?.course?.cost_per_player ?? selectedEvent?.cost_per_player,
+          }),
         });
-        if (Array.isArray(data.bookings)) {
-          setMyBookings((prev) => [...(data.bookings as Booking[]), ...prev]);
+        if (rows.length) {
+          setMyBookings((prev) => [...rows, ...prev]);
         }
         setStep("success");
         // The calendar remounts when the success screen is dismissed and
@@ -300,6 +332,7 @@ export default function BookPage() {
     return (
       <SuccessScreen
         booking={confirmedBooking}
+        wallet={creditWallet}
         onDone={() => {
           setStep("select");
           setSelectedSlot(null);
@@ -331,6 +364,11 @@ export default function BookPage() {
         inviteMemberId={inviteMemberId}
         bookerEmail={user?.email ?? ""}
         eventName={selectedEvent?.name ?? null}
+        // Same rule the row's amount_charged is written with, so the price
+        // quoted here and the one on the success screen a tap later agree.
+        pricePerPlayer={bookingAmountDue({
+          cost_per_player: selectedEvent?.cost_per_player,
+        })}
       />
     );
   }
@@ -483,15 +521,15 @@ function CreditReadyChip({
       style={{ background: "rgba(146,100,10,0.1)", color: "#92640a" }}
     >
       <span aria-hidden>🎟</span>
-      {formatCredit(amount)}
+      {formatUsd(amount)}
       {!compact && " credit"}
     </button>
   );
 }
 
-// Whole dollars — these chips sit in a row with several other controls, and the
-// cents are never the interesting part of a round's price.
-function formatCredit(amount: number): string {
+// Whole dollars — a round is priced in them, and the credit chips sit in a row
+// with several other controls where cents were never the interesting part.
+function formatUsd(amount: number): string {
   return Number(amount).toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
@@ -805,6 +843,7 @@ function ConfirmScreen({
   inviteMemberId,
   bookerEmail,
   eventName,
+  pricePerPlayer,
 }: {
   slot: GHLBookingSlot;
   date: string;
@@ -816,6 +855,7 @@ function ConfirmScreen({
   inviteMemberId?: string | null;
   bookerEmail: string;
   eventName?: string | null;
+  pricePerPlayer: number;
 }) {
   const maxAdditional = Math.max(0, (slot.spotsOpen ?? 1) - 1);
   const [collapsed, setCollapsed] = useState<boolean[]>([]);
@@ -1081,7 +1121,7 @@ function ConfirmScreen({
                 className="text-xs"
                 style={{ color: "rgba(0,38,105,0.38)" }}
               >
-                ${BOOKING_PRICE_USD} per player
+                {formatUsd(pricePerPlayer)} per player
               </span>
             </div>
           </div>
@@ -1728,6 +1768,7 @@ function SuccessScreen({
   booking,
   onDone,
   onUpdateBooking,
+  wallet,
 }: {
   booking: {
     date: string;
@@ -1735,15 +1776,34 @@ function SuccessScreen({
     players: number;
     bookingId: string | null;
     eventName: string;
+    paymentUrl: string | null;
+    amountDue: number;
   };
   onDone: () => void;
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
+  wallet?: ReturnType<typeof useCreditWallet>;
 }) {
   const [dinnerRsvp, setDinnerRsvp] = useState<"yes" | "no" | "maybe" | null>(
     null,
   );
   const [submitting, setSubmitting] = useState(false);
+  const [payingWithCredit, setPayingWithCredit] = useState(false);
   const showDinner = !!booking.bookingId && isAviaraEvent(booking.eventName);
+
+  // Credit the member could put toward this round. Same rules as the payment
+  // banner: a code is issued against a booking row, and only when the balance
+  // covers the round in full — a part-paying code is refused at the checkout.
+  const heldCoupon = booking.bookingId
+    ? (wallet?.couponForBooking(booking.bookingId) ?? null)
+    : null;
+  const creditBalance = wallet?.balance ?? 0;
+  const creditCovers =
+    !!booking.bookingId && !!wallet?.coversBill(booking.amountDue);
+  // How far a real-but-insufficient balance falls short. Zero when there's no
+  // credit to speak of, so the shortfall line stays off for most members.
+  const creditShortfall = wallet?.canPayWithCredit
+    ? Math.max(0, booking.amountDue - creditBalance)
+    : 0;
 
   async function handleDone() {
     if (booking.bookingId && dinnerRsvp) {
@@ -1781,7 +1841,7 @@ function SuccessScreen({
         className="font-sans font-black mb-2"
         style={{ fontSize: "2rem", color: "var(--color-green-900)" }}
       >
-        Request submitted!
+        Tee time reserved!
       </h1>
       <p className="text-sm mb-1" style={{ color: "rgba(0,38,105,0.5)" }}>
         {booking.date} at {booking.time}
@@ -1806,15 +1866,78 @@ function SuccessScreen({
           className="text-sm leading-relaxed"
           style={{ color: "rgba(0,38,105,0.6)" }}
         >
-          We&apos;ll verify availability with the course and send a payment link
-          to your email.
+          The slot is yours to pay for — your round is confirmed once payment is
+          complete.
         </p>
-        <p
-          className="text-sm leading-relaxed"
-          style={{ color: "rgba(0,38,105,0.6)" }}
-        >
-          Your booking is confirmed once payment is complete.
-        </p>
+        {booking.players > 1 && (
+          <p
+            className="text-sm leading-relaxed"
+            style={{ color: "rgba(0,38,105,0.6)" }}
+          >
+            Each player pays for their own round. The payment banner on the
+            booking screen lists every one still outstanding.
+          </p>
+        )}
+        {/* Payment happens on the venue's own checkout page — each one takes
+            its money separately, so this is that course's link and not a
+            house-wide one. New tab, so this screen (and an unsaved dinner
+            RSVP with it) survives the trip. */}
+        {booking.paymentUrl ? (
+          <a
+            href={booking.paymentUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-gold btn-full !mt-4"
+          >
+            Pay {formatUsd(booking.amountDue)} now →
+          </a>
+        ) : (
+          /* Every bookable course is required to have a payment link, so this
+             is the belt-and-braces case: say what happens instead of showing a
+             dead button. */
+          <p className="text-sm leading-relaxed" style={{ color: "#92640a" }}>
+            We&apos;ll email your payment link for this round.
+          </p>
+        )}
+        {/* Credit is the second way to settle the same bill — the code is a
+            discount typed into the venue's checkout, not a separate way to
+            pay — so it sits under the Pay button rather than replacing it. */}
+        {heldCoupon ? (
+          <>
+            <button
+              type="button"
+              onClick={() => setPayingWithCredit(true)}
+              className="btn btn-outline btn-full"
+            >
+              🎟 {formatUsd(Number(heldCoupon.amount))} credit ready · view code
+            </button>
+            {/* A code on its own is inert until it reaches the checkout, and
+                nothing else here says so. */}
+            <p className="text-xs leading-relaxed" style={{ color: "#92640a" }}>
+              Copy the code, then paste it into the coupon field at checkout —
+              the discount comes off there, not here.
+            </p>
+          </>
+        ) : creditCovers ? (
+          <button
+            type="button"
+            onClick={() => setPayingWithCredit(true)}
+            className="btn btn-outline btn-full"
+          >
+            Pay with credits · {formatUsd(booking.amountDue)}
+          </button>
+        ) : creditShortfall > 0 ? (
+          /* There's credit, just not enough to cover the round. Saying how far
+             off they are beats silently hiding an option they know they have. */
+          <p
+            className="text-xs leading-relaxed"
+            style={{ color: "rgba(0,38,105,0.45)" }}
+          >
+            You have {formatUsd(creditBalance)} in credits —{" "}
+            {formatUsd(creditShortfall)} short of covering this round, so this
+            one has to be paid in full.
+          </p>
+        ) : null}
       </div>
       {showDinner && (
         <div className="card p-5 w-full max-w-sm mb-8 text-left">
@@ -1841,7 +1964,12 @@ function SuccessScreen({
       <button
         onClick={handleDone}
         disabled={(showDinner && dinnerRsvp === null) || submitting}
-        className="btn btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+        className={cn(
+          "btn disabled:opacity-40 disabled:cursor-not-allowed",
+          // Paying is the action that matters here, so it keeps the gold. This
+          // steps back to an outline rather than competing with it.
+          booking.paymentUrl ? "btn-outline" : "btn-primary",
+        )}
       >
         {submitting ? "Saving…" : "Back to booking"}
       </button>
@@ -1849,6 +1977,21 @@ function SuccessScreen({
         <p className="text-xs mt-3" style={{ color: "rgba(0,38,105,0.4)" }}>
           Please let us know about dinner first.
         </p>
+      )}
+
+      {payingWithCredit && booking.bookingId && (
+        <CreditCouponModal
+          target={{ kind: "booking", bookingId: booking.bookingId }}
+          // The same figure the server sizes the code to (bookingAmountDue),
+          // so what the member is shown and what they get can't disagree.
+          price={booking.amountDue}
+          balance={creditBalance}
+          paymentUrl={booking.paymentUrl}
+          roundLabel={`${booking.eventName} on ${booking.date}`}
+          existing={heldCoupon}
+          onIssued={() => wallet?.refetch()}
+          onClose={() => setPayingWithCredit(false)}
+        />
       )}
     </div>
   );
