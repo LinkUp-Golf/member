@@ -84,10 +84,13 @@ export default function HostEventDetailPage() {
           {/* The terms and dinner note used to sit in a "Spots" card above the
               roster, alongside a progress bar counting reservations only —
               which was half the people actually on the round. The roster itself
-              is the headcount now, so this is just the round's terms. */}
+              is the headcount now, so this is just the round's terms.
+
+              What members pay is deliberately not shown beside the credit: the
+              two numbers differ by the markup, and printing them together
+              spells it out as plainly as a sentence would. */}
           <p className="text-xs text-gray-500">
-            Members pay {fmtMoney(event.member_price ?? event.member_guest_rate)}
-            {" · "}your credit for this round {fmtMoney(event.member_guest_rate)}
+            Your credit for this round {fmtMoney(event.member_guest_rate)}
             {event.dinner ? " · dinner included" : ""}
           </p>
 

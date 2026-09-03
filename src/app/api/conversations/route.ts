@@ -4,6 +4,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
+import { logActivity } from '@/lib/activity/log'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import type { AuthContext } from '@/lib/auth/types'
 import { inviteRateLimit } from '@/lib/rateLimit'
@@ -218,6 +219,19 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
         status: (type === 'group' && id !== ctx.userId) ? 'pending' : 'active',
       }))
     )
+
+  // A brand-new direct thread is a member reaching out for the first time —
+  // the one real action the directory offers. Reopening an existing thread
+  // returns above and isn't counted.
+  if (type === 'direct' && participant_ids.length === 1) {
+    void logActivity({
+      memberId: ctx.memberId,
+      action: 'member_message_started',
+      courseId: ctx.homeCourseId,
+      targetId: participant_ids[0],
+      path: `/members/${participant_ids[0]}`,
+    })
+  }
 
   return NextResponse.json({ id: conv.id }, { status: 201 })
 })

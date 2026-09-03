@@ -11,6 +11,7 @@ import { getAvailableSlots } from '@/lib/ghl/client'
 import { getCache, withCache } from '@/lib/cache'
 import { GHL_SLOTS_NS, GHL_SLOTS_TTL_MS, ghlSlotsKey, ghlSlotsMonthKey } from '@/lib/cache/keys'
 import { AVIARA_TIMEZONE, FALLBACK_ROUND_DURATION_MINUTES, DEFAULT_MAX_PLAYERS_PER_DAY } from '@/lib/constants'
+import { bookingAmountDue } from '@/lib/bookings/price'
 import type { createAdminClient } from '@/lib/supabase-server'
 import type { Course, GHLBookingSlot } from '@/types'
 
@@ -182,6 +183,12 @@ export interface CalendarVenue {
   name: string
   city: string | null
   state: string | null
+  /**
+   * The green fee the venue's cards quote, already resolved through
+   * bookingAmountDue — so the figure on a card, on the day sheet, on the
+   * confirm screen and on the row's amount_charged is one rule, not four.
+   */
+  pricePerPlayer: number
 }
 
 /** One bookable tee time, as the calendar and its detail sheet quote it. */
@@ -344,7 +351,13 @@ export async function venueAvailabilityForMonth(
 
   for (const { course, openings } of perCourse) {
     if (openings.length === 0) continue
-    venues.push({ id: course.id, name: course.name, city: course.city, state: course.state })
+    venues.push({
+      id: course.id,
+      name: course.name,
+      city: course.city,
+      state: course.state,
+      pricePerPlayer: bookingAmountDue({ cost_per_player: course.cost_per_player }),
+    })
     for (const { date, opening } of openings) {
       ;(days[date] ??= []).push(opening)
     }

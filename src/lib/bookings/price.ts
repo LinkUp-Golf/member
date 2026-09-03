@@ -13,6 +13,11 @@ import { BOOKING_PRICE_USD } from '@/lib/constants'
  * set; the course's own rate and the house default cover rows created before it
  * was populated.
  *
+ * Called with no amount_charged, this is also "what a round costs at this
+ * venue" — which is how the booking routes size amount_charged in the first
+ * place, so a row's stored price and a price derived from the course row are
+ * the same rule applied at two moments.
+ *
  * Shared with the credit-coupon route so the figure a member is shown and the
  * figure their credit code is sized to can't disagree.
  */
@@ -24,4 +29,21 @@ export function bookingAmountDue(row: {
   if (Number.isFinite(charged) && charged > 0) return charged
   const rate = Number(row.cost_per_player)
   return Number.isFinite(rate) && rate > 0 ? rate : BOOKING_PRICE_USD
+}
+
+/**
+ * The price as a card or a header quotes it.
+ *
+ * Whole dollars stay whole — a green fee is almost always a round number and
+ * "$160.00/player" is noise. But admins enter the rate with step="0.01", so a
+ * venue can set cents, and bare interpolation renders those as "$175.5".
+ */
+export function formatRoundPrice(amount: number): string {
+  const digits = Number.isInteger(amount) ? 0 : 2
+  return amount.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })
 }

@@ -170,6 +170,21 @@ export const AVIARA_TIMEZONE = 'America/Los_Angeles'
 // ---- Booking ------------------------------------------------
 
 export const BOOKING_PRICE_USD           = 160   // per player, USD
+
+// The status every new booking row is written with — the booker's, each member
+// guest's, and each non-member guest's alike.
+//
+// It used to be 'tentative', waiting on availability to be confirmed. The slot
+// is already checked against the course's GHL calendar before any row is
+// written, so that step re-confirmed something the booking flow had established
+// a moment earlier. Rounds now open at 'availability_confirmed' — payment due.
+//
+// Note what this brings forward: 'availability_confirmed' is the one status the
+// FIFO gate counts (see UNPAID_BOOKING_STATUSES), so a member is blocked from
+// booking again the moment they book, rather than once an admin or a GHL
+// webhook moved them on. That is the FIFO rule working from booking time.
+export const NEW_BOOKING_STATUS = 'availability_confirmed' as const
+
 // How long a round runs is a per-course setting owned by that course's GHL
 // calendar (its slotDuration). Read it with getCalendarBookingRules() — never
 // assume a duration. This is only the last-resort fallback for when GHL can't

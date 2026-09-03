@@ -1,7 +1,14 @@
 import AppNav from '@/components/layout/AppNav'
+import ActivityTracker from '@/components/providers/ActivityTracker'
 
 // Server Component — no client JS for this wrapper.
-// Only AppNav (usePathname for active-state) is a client boundary.
+// AppNav (usePathname for active-state) and ActivityTracker (records which
+// areas a member visits) are the only client boundaries.
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  return <AppNav>{children}</AppNav>
+  return (
+    <>
+      <ActivityTracker />
+      <AppNav>{children}</AppNav>
+    </>
+  )
 }

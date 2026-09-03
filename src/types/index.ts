@@ -264,6 +264,8 @@ export interface Booking {
     timezone: string
     /** Round length, used to work out when the round finished. */
     meeting_duration_mins?: number | null
+    /** The venue's green fee — what a payment surface quotes. */
+    cost_per_player?: number | null
   } | null
 }
 

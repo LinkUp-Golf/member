@@ -31,15 +31,17 @@ import {
   resolveMeetingDurationMins,
 } from '@/lib/ghl/client'
 import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
-import { sendPushToMembers, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
+import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findMembersWithPendingPayment } from '@/lib/bookings/pending-payment'
+import { provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
+import { bookingAmountDue } from '@/lib/bookings/price'
 import { format } from 'date-fns'
 import { titleCaseName } from '@/lib/utils'
 import type { AuthContext } from '@/lib/auth/types'
 import type { AdditionalPlayer } from '@/types'
 import {
-  BOOKING_PRICE_USD,
+  NEW_BOOKING_STATUS,
   AVIARA_TIMEZONE,
   AVIARA_ADDRESS,
   FALLBACK_ROUND_DURATION_MINUTES,
@@ -156,7 +158,7 @@ export const POST = withAuth(async (
   // ---- Resolve course + calendar settings ---------------------------------
   const { data: course } = await admin
     .from('courses')
-    .select('id, ghl_calendar_id, timezone, name, address, city, state, payment_url, meeting_duration_mins, max_players_per_day')
+    .select('id, ghl_calendar_id, timezone, name, address, city, state, payment_url, meeting_duration_mins, max_players_per_day, cost_per_player')
     .eq('id', primary.course_id)
     .single()
 
@@ -169,6 +171,10 @@ export const POST = withAuth(async (
   const eventAddress = course.address || course.city || AVIARA_ADDRESS
   const eventCourseName = course.name
   const maxPlayersPerDay = course.max_players_per_day ?? DEFAULT_MAX_PLAYERS_PER_DAY
+  // The venue's own green fee, house default if it hasn't set one — same rule
+  // as the create route, so a player added later is priced like one booked up
+  // front.
+  const pricePerPlayer = bookingAmountDue({ cost_per_player: course.cost_per_player })
   const eventDurationMinutes = await resolveMeetingDurationMins(
     eventCalendarId,
     course.meeting_duration_mins || FALLBACK_ROUND_DURATION_MINUTES,
@@ -272,8 +278,9 @@ export const POST = withAuth(async (
   }
 
   // ---- Build the new rows (one per added player) --------------------------
-  // Member guests are booked in GHL below (status 'tentative'); non-members
-  // are held for admin approval ('awaiting_approval') with no GHL appointment.
+  // Every added player is booked in GHL below, at NEW_BOOKING_STATUS. A
+  // non-member's contact and member row are created there too — there is no
+  // approval step.
   const rows = [
     ...memberPlayers.map((p) => ({
       member_id: ctx.userId,
@@ -284,8 +291,8 @@ export const POST = withAuth(async (
       guest_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email,
       player_member_id: p.memberId ?? null,
       additional_players: [p],
-      status: 'tentative',
-      amount_charged: BOOKING_PRICE_USD,
+      status: NEW_BOOKING_STATUS,
+      amount_charged: pricePerPlayer,
       focus_linkup_id: primary.focus_linkup_id ?? null,
       ghl_booking_id: null as string | null,
     })),
@@ -298,8 +305,8 @@ export const POST = withAuth(async (
       guest_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email,
       player_member_id: null as string | null,
       additional_players: [p],
-      status: 'awaiting_approval',
-      amount_charged: BOOKING_PRICE_USD,
+      status: NEW_BOOKING_STATUS,
+      amount_charged: pricePerPlayer,
       focus_linkup_id: primary.focus_linkup_id ?? null,
       ghl_booking_id: null as string | null,
     })),
@@ -348,26 +355,56 @@ export const POST = withAuth(async (
     return NextResponse.json({ error: 'Failed to add player. Please try again.' }, { status: 500 })
   }
 
-  type InsertedBooking = { id: string; player_member_id: string | null; guest_name: string | null }
+  type InsertedBooking = {
+    id: string
+    player_member_id: string | null
+    guest_name: string | null
+    additional_players: AdditionalPlayer[] | null
+  }
   const created = (insertedRows ?? []) as InsertedBooking[]
 
-  // ---- Create GHL appointments for member guests (non-fatal) --------------
+  // ---- Create GHL appointments for every added player (non-fatal) ---------
   await Promise.all(
-    created
-      .filter((b) => b.player_member_id)
-      .map(async (b) => {
-        const row = b.player_member_id ? memberRowById[b.player_member_id] : undefined
-        if (!row?.ghl_contact_id) return
+    created.map(async (b) => {
+      // Branch on what the row IS, not on whether a contact id turned up: a
+      // member guest with no ghl_contact_id must be skipped, never
+      // provisioned, or we'd mint a second GHL contact for someone who
+      // already has one.
+      let contactId: string
+      let email: string
+      let phone: string | null
+
+      if (b.player_member_id) {
+        const memberRow = memberRowById[b.player_member_id]
+        if (!memberRow?.ghl_contact_id) return
+        contactId = memberRow.ghl_contact_id
+        email = memberRow.email
+        phone = memberRow.phone ?? null
+      } else {
+        const guest = b.additional_players?.[0]
+        if (!guest?.email) return
         try {
-          const ghlId = await createBooking({
-            ...bookingParams,
-            contact: { id: row.ghl_contact_id, email: row.email, phone: row.phone ?? null },
-          })
-          await admin.from('bookings').update({ ghl_booking_id: ghlId }).eq('id', b.id)
+          // Creates the GHL contact, tags it for access, and makes the member
+          // row — the work the admin Setup button used to do.
+          contactId = await provisionNonMemberGuest(guest, admin)
         } catch (err) {
-          console.warn('[booking/players] Guest GHL appointment failed (non-fatal):', row.email, String(err))
+          console.warn('[booking/players] Non-member setup failed (non-fatal):', guest.email, String(err))
+          return
         }
-      }),
+        email = guest.email
+        phone = guest.mobile || null
+      }
+
+      try {
+        const ghlId = await createBooking({
+          ...bookingParams,
+          contact: { id: contactId, email, phone },
+        })
+        await admin.from('bookings').update({ ghl_booking_id: ghlId }).eq('id', b.id)
+      } catch (err) {
+        console.warn('[booking/players] Guest GHL appointment failed (non-fatal):', email, String(err))
+      }
+    }),
   )
 
   const displayDate = format(new Date(`${primary.booking_date}T12:00:00`), 'EEEE, MMMM d')
@@ -387,19 +424,6 @@ export const POST = withAuth(async (
     ).catch(() => {})
   }
 
-  // Alert admins for any non-member guests awaiting approval.
-  if (nonMemberPlayers.length) {
-    const { data: booker } = await admin
-      .from('members')
-      .select('first_name, last_name')
-      .eq('id', ctx.userId)
-      .single()
-    const bookerName = `${booker?.first_name ?? ''} ${booker?.last_name ?? ''}`.trim() || 'A member'
-    void sendPushToAdmins(
-      NotificationTemplates.nonMemberBookingRequest(bookerName, nonMemberPlayers.length, displayDate, displayTime),
-    ).catch(() => {})
-  }
-
   // Echo the resolved course onto each new row so the client can render it
   // immediately (the RPC returns raw rows with no join).
   const courseForResponse = {
@@ -408,14 +432,12 @@ export const POST = withAuth(async (
     state: course.state,
     payment_url: course.payment_url ?? null,
     timezone: course.timezone,
+    cost_per_player: course.cost_per_player ?? null,
   }
   const bookingsWithCourse = created.map((b) => ({ ...b, course: courseForResponse }))
 
   return NextResponse.json({
     bookings: bookingsWithCourse,
-    pendingNonMembers: nonMemberPlayers.length,
-    message: nonMemberPlayers.length
-      ? `Player added. ${nonMemberPlayers.length} non-member guest${nonMemberPlayers.length !== 1 ? 's are' : ' is'} pending admin approval.`
-      : 'Player added.',
+    message: 'Player added.',
   })
 })

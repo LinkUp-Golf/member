@@ -6,6 +6,7 @@ import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { cancelBooking, updateOpportunityStage } from '@/lib/ghl/client'
+import { logActivity } from '@/lib/activity/log'
 import type { AuthContext } from '@/lib/auth/types'
 
 const AVI_PLAY_CANCELLED_STAGE_ID = process.env.GHL_AVI_PLAY_CANCELLED_STAGE_ID ?? ''
@@ -62,6 +63,14 @@ export const PATCH = withAuth(async (
   if (booking.ghl_opportunity_id && AVI_PLAY_CANCELLED_STAGE_ID) {
     await updateOpportunityStage(booking.ghl_opportunity_id, AVI_PLAY_CANCELLED_STAGE_ID, 'lost').catch(() => {})
   }
+
+  void logActivity({
+    memberId: ctx.memberId,
+    action: 'booking_cancelled',
+    courseId: ctx.homeCourseId,
+    targetId: booking.id,
+    path: '/book',
+  })
 
   return NextResponse.json({ success: true })
 })

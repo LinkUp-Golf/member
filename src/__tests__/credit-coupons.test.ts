@@ -5,7 +5,7 @@ import {
   generateCouponCode,
   isCouponUsable,
 } from '@/lib/credits'
-import { bookingAmountDue } from '@/lib/bookings/price'
+import { bookingAmountDue, formatRoundPrice } from '@/lib/bookings/price'
 import { isDuplicateCouponCodeError } from '@/lib/ghl/coupons'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
 import {
@@ -216,6 +216,32 @@ describe('bookingAmountDue', () => {
     expect(bookingAmountDue({ amount_charged: 0 })).toBe(BOOKING_PRICE_USD)
     expect(bookingAmountDue({})).toBe(BOOKING_PRICE_USD)
     expect(bookingAmountDue({ amount_charged: null, cost_per_player: null })).toBe(BOOKING_PRICE_USD)
+  })
+
+  // Called with a course row and nothing else, this is "what a round costs at
+  // this venue" — the shape the booking routes use to price amount_charged, and
+  // the confirm screen to quote it before a row exists. A regression here would
+  // charge the house price at a venue that set its own.
+  it('prices a round from the course row alone', () => {
+    expect(bookingAmountDue({ cost_per_player: 210 })).toBe(210)
+    // PostgREST hands back decimal(10,2) as a string.
+    expect(bookingAmountDue({ cost_per_player: '210.00' })).toBe(210)
+    expect(bookingAmountDue({ cost_per_player: null })).toBe(BOOKING_PRICE_USD)
+    expect(bookingAmountDue({ cost_per_player: 0 })).toBe(BOOKING_PRICE_USD)
+  })
+})
+
+describe('formatRoundPrice', () => {
+  it('keeps a whole green fee whole', () => {
+    expect(formatRoundPrice(160)).toBe('$160')
+    expect(formatRoundPrice(1234)).toBe('$1,234')
+  })
+
+  // Admins enter the rate with step="0.01". Bare interpolation rendered a rate
+  // of 175.5 as "$175.5"; the cards and the day-sheet header all quote this.
+  it('shows cents only when the venue set them', () => {
+    expect(formatRoundPrice(175.5)).toBe('$175.50')
+    expect(formatRoundPrice(175.25)).toBe('$175.25')
   })
 })
 

@@ -39,6 +39,8 @@ import {
   isToday,
 } from "date-fns";
 import { cn, formatTeeTime } from "@/lib/utils";
+import { BOOKING_PRICE_USD } from "@/lib/constants";
+import { formatRoundPrice } from "@/lib/bookings/price";
 import { Spinner } from "@/components/ui/Loading";
 import { useStickyHeaderOffset } from "@/hooks/useStickyHeaderOffset";
 import {
@@ -56,6 +58,8 @@ export interface CalendarVenue {
   name: string;
   city: string | null;
   state: string | null;
+  /** Green fee, already resolved server-side — the cards quote it verbatim. */
+  pricePerPlayer: number;
 }
 
 export interface CalendarTee {
@@ -274,6 +278,10 @@ function AgendaDay({
           const venue = venuesById.get(o.courseId);
           const idx = colourByVenue.get(o.courseId) ?? 0;
           const location = venueLocation(venue);
+          // venuesById is built from the same month payload as these openings,
+          // so the fallback is defensive only — and it's the same house default
+          // the price helper lands on when a venue has set no rate.
+          const price = venue?.pricePerPlayer ?? BOOKING_PRICE_USD;
 
           return (
             <button
@@ -307,8 +315,11 @@ function AgendaDay({
                       </span>
                     </>
                   )}
+                  {/* The price, not the seat count: what decides whether to
+                      open this card is what the round costs, and a day with a
+                      single seat left is still a day worth booking. */}
                   <span className={cn("font-medium", TEXT[idx])}>
-                    {o.openSpots} spot{o.openSpots === 1 ? "" : "s"} open
+                    {formatRoundPrice(price)}/player
                   </span>
                 </span>
                 {location && (
@@ -348,9 +359,8 @@ export interface PinnedVenue extends CalendarVenue {
 export interface PinnedNextOpening {
   /** 'YYYY-MM-DD' at the venue. */
   date: string;
-  /** Bookable tee times that day — what the day sheet's summary quotes. */
+  /** Bookable tee times that day — sizes the day sheet's loading placeholder. */
   openSlots: number;
-  openSpots: number;
   tees: CalendarTee[];
 }
 
@@ -444,7 +454,6 @@ function PinnedVenueDock({
         {
           venue,
           date: here.date,
-          openSpots: here.opening.openSpots,
           tee: here.opening.tees[0],
           inMonth: true,
         },
@@ -456,7 +465,6 @@ function PinnedVenueDock({
       {
         venue,
         date: ahead.date,
-        openSpots: ahead.openSpots,
         tee: ahead.tees[0],
         inMonth: false,
       },
@@ -477,7 +485,7 @@ function PinnedVenueDock({
       style={{ top }}
     >
       <div className="space-y-2">
-        {cards.map(({ venue, date, openSpots, tee, inMonth }) => {
+        {cards.map(({ venue, date, tee, inMonth }) => {
           const location = venueLocation(venue);
           const when = new Date(`${date}T12:00:00`);
           // The year only earns its place once the date isn't in this one —
@@ -549,7 +557,7 @@ function PinnedVenueDock({
                   {/* The number that decides whether it's worth acting on, so
                       it gets the accent rather than the date beside it. */}
                   <span className="font-semibold text-gold">
-                    {openSpots} spot{openSpots === 1 ? "" : "s"} open
+                    {formatRoundPrice(venue.pricePerPlayer)}/player
                   </span>
                 </span>
 
