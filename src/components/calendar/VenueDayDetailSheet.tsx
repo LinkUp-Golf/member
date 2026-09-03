@@ -11,35 +11,24 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Image from 'next/image'
-import { ChevronRight, MapPin, Globe, Phone, Users, X } from 'lucide-react'
-import { format, addMinutes, parse } from 'date-fns'
+import { ChevronRight, MapPin, Globe, Phone, X } from 'lucide-react'
+import { format } from 'date-fns'
 import { cn, formatTeeTime } from '@/lib/utils'
-import { bookingAmountDue } from '@/lib/bookings/price'
+import { bookingAmountDue, formatRoundPrice } from '@/lib/bookings/price'
 import type { Course, GHLBookingSlot } from '@/types'
 
 export interface VenueDayDetail {
   course: Course
   /** YYYY-MM-DD */
   date: string
-  /** Bookable tee times that day. */
+  /** Bookable tee times that day. Sizes the loading placeholder. */
   openSlots: number
-  /** Seats across them, already clamped to the venue's daily cap. */
-  openSpots: number
   /**
    * How many of the member's rounds are still awaiting payment, anywhere. The
    * FIFO gate is global — one unpaid round blocks a new booking at every
    * venue — so this isn't scoped to the course in front of them.
    */
   pendingCount: number
-}
-
-// The month payload only previews a few tee times per venue-day, which is
-// enough to decide whether to open the sheet but not enough to book from. The
-// full day comes from the per-venue month endpoint — the same call the old
-// selection screen made, moved here rather than added.
-function slotEndLabel(startIso: string, durationMins: number): string {
-  const timeStr = startIso.split('T')[1]?.slice(0, 8) ?? '00:00:00'
-  return format(addMinutes(parse(timeStr, 'HH:mm:ss', new Date()), durationMins), 'h:mm a')
 }
 
 const slotTime = (iso: string) => formatTeeTime(iso.split('T')[1]?.slice(0, 8) ?? '')
@@ -59,7 +48,6 @@ export default function VenueDayDetailSheet({
   const [visible, setVisible] = useState(false)
   // The day's full tee-time list, fetched when the sheet opens.
   const [slots, setSlots] = useState<GHLBookingSlot[] | null>(null)
-  const [durationMins, setDurationMins] = useState<number | null>(null)
   const [slotsError, setSlotsError] = useState(false)
   // Held through the close animation so the sheet still has something to render
   // while it slides out.
@@ -80,12 +68,15 @@ export default function VenueDayDetailSheet({
     return () => clearTimeout(t)
   }, [detail])
 
+  // The month payload only previews a few tee times per venue-day, which is
+  // enough to decide whether to open the sheet but not enough to book from. The
+  // full day comes from the per-venue month endpoint — the same call the old
+  // selection screen made, moved here rather than added.
   useEffect(() => {
     if (!detail) return
     const { course, date } = detail
     let current = true
     setSlots(null)
-    setDurationMins(null)
     setSlotsError(false)
     fetch(`/api/bookings/create?month=${date.slice(0, 7)}&courseId=${course.id}`)
       .then(async (r) => {
@@ -97,7 +88,6 @@ export default function VenueDayDetailSheet({
         if (!current) return
         const all: GHLBookingSlot[] = Array.isArray(d.slots?.[date]) ? d.slots[date] : []
         setSlots(all.filter(sl => sl.available && (sl.spotsOpen ?? 0) > 0))
-        setDurationMins(typeof d.durationMins === 'number' ? d.durationMins : null)
       })
       .catch(() => {
         if (!current) return
@@ -124,7 +114,7 @@ export default function VenueDayDetailSheet({
 
   if (!mounted || !shown) return null
 
-  const { course, date, openSlots, openSpots, pendingCount } = shown
+  const { course, date, openSlots, pendingCount } = shown
   const location = [course.city, course.state].filter(Boolean).join(', ')
   const longDate = format(new Date(`${date}T12:00:00`), 'EEEE, MMMM d')
   // Courses carry their own rate, with a house default behind it, so the sheet
@@ -201,7 +191,7 @@ export default function VenueDayDetailSheet({
                 </p>
               )}
               <p className="mt-1 text-xs font-bold" style={{ color: 'var(--color-gold-dark, #92640a)' }}>
-                ${pricePerPlayer}/player
+                {formatRoundPrice(pricePerPlayer)}/player
               </p>
             </div>
           </div>
@@ -212,13 +202,6 @@ export default function VenueDayDetailSheet({
               Selected date
             </p>
             <p className="mt-0.5 font-sans font-black text-base text-green-950">{longDate}</p>
-
-            <div className="mt-2.5 flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                <Users className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
-                {openSpots} spot{openSpots === 1 ? '' : 's'} open
-              </span>
-            </div>
 
             <p className="mt-2 text-[11px] text-green-900/40">
               Times are local to the venue.
@@ -269,19 +252,13 @@ export default function VenueDayDetailSheet({
                       <span className="block font-sans font-black text-xl text-green-950">
                         {slotTime(sl.startTime)}
                       </span>
-                      <span className="mt-0.5 block text-[11px] text-green-900/45">
-                        {durationMins !== null && (
-                          <>until ~{slotEndLabel(sl.startTime, durationMins)} </>
+                      <span
+                        className={cn(
+                          'mt-0.5 block text-[11px] font-medium',
+                          (sl.spotsOpen ?? 0) <= 3 ? 'text-amber-700' : 'text-green-900/45',
                         )}
-                        <span aria-hidden className="text-green-900/25">·</span>{' '}
-                        <span
-                          className={cn(
-                            'font-medium',
-                            (sl.spotsOpen ?? 0) <= 3 ? 'text-amber-700' : 'text-green-900/45',
-                          )}
-                        >
-                          {sl.spotsOpen} spot{sl.spotsOpen === 1 ? '' : 's'} open
-                        </span>
+                      >
+                        {sl.spotsOpen} spot{sl.spotsOpen === 1 ? '' : 's'} open
                       </span>
                     </span>
                     <ChevronRight className="w-4 h-4 flex-shrink-0 text-green-900/25" strokeWidth={2} />

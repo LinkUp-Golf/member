@@ -30,3 +30,20 @@ export function bookingAmountDue(row: {
   const rate = Number(row.cost_per_player)
   return Number.isFinite(rate) && rate > 0 ? rate : BOOKING_PRICE_USD
 }
+
+/**
+ * The price as a card or a header quotes it.
+ *
+ * Whole dollars stay whole — a green fee is almost always a round number and
+ * "$160.00/player" is noise. But admins enter the rate with step="0.01", so a
+ * venue can set cents, and bare interpolation renders those as "$175.5".
+ */
+export function formatRoundPrice(amount: number): string {
+  const digits = Number.isInteger(amount) ? 0 : 2
+  return amount.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })
+}

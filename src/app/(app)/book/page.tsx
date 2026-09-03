@@ -3811,6 +3811,9 @@ function EventSelectionScreen({
           city: e.city,
           state: e.state,
           logoUrl: e.logo_url,
+          // The dock builds its cards from the course list rather than the
+          // month payload, so it resolves the rate itself — same rule.
+          pricePerPlayer: bookingAmountDue({ cost_per_player: e.cost_per_player }),
         })),
     [events],
   );
@@ -3890,7 +3893,6 @@ function EventSelectionScreen({
         course,
         date,
         openSlots: opening.openSlots,
-        openSpots: opening.openSpots,
         // The FIFO gate is global — any unpaid round blocks a new booking at
         // every venue — so this is the whole pending list, not this course's.
         pendingCount: pendingBookings.length,
