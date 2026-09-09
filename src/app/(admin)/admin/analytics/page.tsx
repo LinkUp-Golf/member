@@ -301,7 +301,7 @@ export default function AdminAnalyticsPage() {
   return (
     <div className="p-4 sm:p-8">
       <AdminPageHeader
-        title="Usage & Activity"
+        title="Utilization"
         description="Who is using the app, who isn't, and what they do once they're in."
         action={
           <div className="flex gap-1 bg-gray-100 rounded-xl p-1">

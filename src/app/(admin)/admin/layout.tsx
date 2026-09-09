@@ -18,7 +18,7 @@ const NAV_GROUPS = [
     label: 'Overview',
     items: [
       { href: '/admin',                  label: 'Dashboard',         icon: '▪' },
-      { href: '/admin/analytics',        label: 'Usage & Activity',   icon: '▪' },
+      { href: '/admin/analytics',        label: 'Utilization',       icon: '▪' },
     ],
   },
   {
