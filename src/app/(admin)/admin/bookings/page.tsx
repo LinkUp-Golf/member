@@ -24,7 +24,7 @@ interface BookingRow {
   additional_players?: AdditionalPlayer[] | null
   status: BookingStatus
   amount_charged: number
-  dinner_rsvp: boolean | null
+  dinner_rsvp: 'yes' | 'no' | 'maybe' | null
   admin_notes: string | null
   ghl_opportunity_id: string | null
   member: { first_name: string; last_name: string; email: string } | null
@@ -65,13 +65,10 @@ const STATUS_FILTER_LABELS: Partial<Record<StatusFilter, string>> = {
   payment_overdue: '⚠ Unpaid — payment not yet received',
 }
 
-// The member app asks with a checkbox, so a booking is one of three things:
-// a seat held, a seat declined, or never asked (rounds that predate the prompt,
-// and every venue with no group table).
-const DINNER_FILTERS = ['all', 'yes', 'no', 'none'] as const
+const DINNER_FILTERS = ['all', 'yes', 'no', 'maybe', 'none'] as const
 type DinnerFilter = typeof DINNER_FILTERS[number]
 const DINNER_FILTER_LABELS: Record<DinnerFilter, string> = {
-  all: 'All', yes: '🍽 Yes', no: '🍽 No', none: 'No response',
+  all: 'All', yes: '🍽 Yes', no: '🍽 No', maybe: '🍽 Maybe', none: 'No response',
 }
 
 // How a round was settled. Members can pay cash at the venue's checkout or put
@@ -407,11 +404,13 @@ function SlotCard({
                       </select>
                     </div>
 
-                    {b.dinner_rsvp !== null && b.dinner_rsvp !== undefined ? (
+                    {b.dinner_rsvp ? (
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${
-                        b.dinner_rsvp ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-400'
+                        b.dinner_rsvp === 'yes'   ? 'bg-green-50 text-green-600' :
+                        b.dinner_rsvp === 'maybe' ? 'bg-yellow-50 text-yellow-600' :
+                                                    'bg-gray-100 text-gray-400'
                       }`}>
-                        🍽 {b.dinner_rsvp ? 'Yes' : 'No'}
+                        🍽 {b.dinner_rsvp === 'yes' ? 'Yes' : b.dinner_rsvp === 'no' ? 'No' : 'Maybe'}
                       </span>
                     ) : null}
                   </div>
@@ -703,7 +702,7 @@ export default function AdminBookingsPage() {
       if (statusFilter === 'payment_overdue') q = q.eq('status', 'availability_confirmed')
       else if (statusFilter !== 'all') q = q.eq('status', statusFilter)
       if (dinnerFilter !== 'all') {
-        q = dinnerFilter === 'none' ? q.is('dinner_rsvp', null) : q.eq('dinner_rsvp', dinnerFilter === 'yes')
+        q = dinnerFilter === 'none' ? q.is('dinner_rsvp', null) : q.eq('dinner_rsvp', dinnerFilter)
       }
       return q
         .order('created_at', { ascending: false })
@@ -1049,8 +1048,7 @@ export default function AdminBookingsPage() {
         coupon ? 'Credits' : 'Cash',
         coupon?.code ?? '',
         coupon ? coupon.amount.toFixed(2) : '',
-        b.dinner_rsvp === true ? 'Yes' : b.dinner_rsvp === false ? 'No' : '',
-        b.admin_notes ?? '',
+        b.dinner_rsvp ?? '', b.admin_notes ?? '',
       ]
     })
     const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')

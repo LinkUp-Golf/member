@@ -1783,6 +1783,8 @@ function SuccessScreen({
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
   wallet?: ReturnType<typeof useCreditWallet>;
 }) {
+  // A checkbox here, 'yes'/'no' on the wire: the question the member is asked
+  // changed, the record the admin reads did not.
   const [dinnerRsvp, setDinnerRsvp] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [payingWithCredit, setPayingWithCredit] = useState(false);
@@ -1804,20 +1806,21 @@ function SuccessScreen({
     : 0;
 
   async function handleDone() {
-    // Only worth a request when a seat was actually asked for — an untouched
-    // checkbox is the state the booking is already in.
-    if (showDinner && booking.bookingId && dinnerRsvp) {
+    // Sent either way, as it was when the member had to pick one of three:
+    // an unticked box is a "no", and the venue's headcount is only complete
+    // if it hears both answers.
+    if (showDinner && booking.bookingId) {
+      const rsvp = dinnerRsvp ? "yes" : "no";
       setSubmitting(true);
       const res = await fetch(
         `/api/bookings/${booking.bookingId}/dinner-rsvp`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rsvp: dinnerRsvp }),
+          body: JSON.stringify({ rsvp }),
         },
       );
-      if (res.ok)
-        onUpdateBooking(booking.bookingId, { dinner_rsvp: dinnerRsvp });
+      if (res.ok) onUpdateBooking(booking.bookingId, { dinner_rsvp: rsvp });
       setSubmitting(false);
     }
     onDone();

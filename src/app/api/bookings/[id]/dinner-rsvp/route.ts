@@ -8,6 +8,7 @@ import { formatInTimeZone } from 'date-fns-tz'
 import { sendPushToAdmins } from '@/lib/push'
 import type { AuthContext } from '@/lib/auth/types'
 
+const VALID_RSVP = new Set(['yes', 'no', 'maybe'])
 const DINNER_STATUSES = new Set(['confirmed', 'availability_confirmed', 'payment_confirmed', 'tentative', 'awaiting_approval'])
 
 export const PATCH = withAuth(async (
@@ -18,13 +19,10 @@ export const PATCH = withAuth(async (
   const bookingId = routeCtx?.params?.['id']
   if (!bookingId) return NextResponse.json({ error: 'Missing booking id' }, { status: 400 })
 
-  // One checkbox, so one boolean: true holds a seat at the group table, false
-  // releases it. Anything else is a client that hasn't been updated.
-  const body = await req.json() as { rsvp?: unknown }
-  if (typeof body.rsvp !== 'boolean') {
-    return NextResponse.json({ error: 'rsvp must be true or false' }, { status: 400 })
+  const body = await req.json() as { rsvp?: string }
+  if (!body.rsvp || !VALID_RSVP.has(body.rsvp)) {
+    return NextResponse.json({ error: 'rsvp must be yes, no, or maybe' }, { status: 400 })
   }
-  const rsvp = body.rsvp
 
   // Use admin client so invited-member rows (member_id = booker) aren't blocked by RLS.
   // Authorization is enforced manually via ownsBooking below.
@@ -49,18 +47,18 @@ export const PATCH = withAuth(async (
 
   const { error } = await admin
     .from('bookings')
-    .update({ dinner_rsvp: rsvp })
+    .update({ dinner_rsvp: body.rsvp })
     .eq('id', bookingId)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // Only a held seat is news — it's a headcount for the venue. Unchecking is
-  // the default state and needs nobody's attention.
+  // Notify admins on "yes" (headcount for dinner) and "maybe" (needs follow-up).
   // Push-only — this must never surface in the member announcement feed.
-  if (rsvp) {
+  if (body.rsvp === 'yes' || body.rsvp === 'maybe') {
     // booking_date is a plain calendar date, not an instant — format in UTC
     // explicitly rather than relying on the server runtime's own timezone.
     const dateStr = formatInTimeZone(new Date(booking.booking_date), 'UTC', 'EEE, MMM d')
+    const isYes = body.rsvp === 'yes'
 
     const { data: responder } = await admin
       .from('members')
@@ -70,12 +68,14 @@ export const PATCH = withAuth(async (
     const memberName = responder ? `${responder.first_name} ${responder.last_name}` : 'A member'
 
     sendPushToAdmins({
-      title: 'Dinner RSVP — yes',
-      body: `${memberName} confirmed they're staying for dinner on ${dateStr}.`,
+      title: isYes ? 'Dinner RSVP — yes' : 'Dinner RSVP — maybe',
+      body: isYes
+        ? `${memberName} confirmed they're staying for dinner on ${dateStr}.`
+        : `${memberName} on the ${dateStr} booking is unsure about staying for dinner.`,
       url: '/admin/bookings',
       tag: `dinner-rsvp-${bookingId}`,
     }).catch(() => {})
   }
 
-  return NextResponse.json({ success: true, dinner_rsvp: rsvp })
+  return NextResponse.json({ success: true, dinner_rsvp: body.rsvp })
 })

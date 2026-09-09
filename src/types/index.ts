@@ -252,8 +252,7 @@ export interface Booking {
   amount_charged: number
   stripe_payment_id: string | null
   focus_linkup_id: string | null
-  /** Seat held at the group table after the round. null = never asked/answered. */
-  dinner_rsvp?: boolean | null
+  dinner_rsvp?: 'yes' | 'no' | 'maybe' | null
   admin_notes?: string | null
   created_at: string
   booker_name?: string | null
