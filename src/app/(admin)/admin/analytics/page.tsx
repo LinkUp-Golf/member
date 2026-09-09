@@ -132,7 +132,7 @@ const PAGE_SIZE_OPTIONS: SelectOption[] = PAGE_SIZES.map(size => ({
 }))
 
 const AREA_OPTIONS: SelectOption[] = [
-  { value: 'all', label: 'All areas' },
+  { value: 'all', label: 'App functions' },
   ...ACTIVITY_AREAS.map(name => ({ value: name, label: AREA_LABELS[name] })),
 ]
 
@@ -328,7 +328,7 @@ export default function AdminAnalyticsPage() {
           options={areaOptions}
           value={area}
           onChange={next => setArea(next as ActivityArea | 'all')}
-          searchPlaceholder="Search areas…"
+          searchPlaceholder="Search app functions…"
           className="lg:w-44"
           triggerClassName={TRIGGER_CLASS}
         />
