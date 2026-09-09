@@ -253,7 +253,7 @@ export default function AdminAnalyticsPage() {
     [report]
   )
 
-  /** Exports the whole filtered roster, not the page on screen — a CSV of 25
+  /** Exports the whole filtered roster, not the page on screen — a CSV of 10
    *  rows when the filter matched 400 is a quietly wrong answer. */
   async function exportCsv() {
     if (exporting) return

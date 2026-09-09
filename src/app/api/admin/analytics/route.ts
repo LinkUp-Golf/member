@@ -14,8 +14,8 @@ export const dynamic = 'force-dynamic'
 // ?includeAdmins=1        admins are excluded by default — their app use
 //                         isn't what this report is measuring
 // ?sort=activity|recent|idle|name
-// ?page=1&pageSize=25|50|100   roster page (default 25); pageSize=all
-//                              returns every matching row, for CSV export
+// ?page=1&pageSize=10|25|50|100  roster page (default 10); pageSize=all
+//                                 returns every matching row, for CSV export
 // ============================================================
 
 import type { NextRequest } from 'next/server'
@@ -306,7 +306,7 @@ export const GET = withAuth(
 
     // ---- Paging ---------------------------------------------
     // Applied last, so the summary and the area breakdown still describe the
-    // whole filtered population rather than whichever 25 rows are on screen.
+    // whole filtered population rather than whichever rows are on screen.
     const total = members.length
     const totalPages = exportAll ? 1 : Math.max(1, Math.ceil(total / pageSize))
     // A filter change can shrink the roster below the current page; clamping
