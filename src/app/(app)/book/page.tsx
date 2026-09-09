@@ -1783,9 +1783,7 @@ function SuccessScreen({
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
   wallet?: ReturnType<typeof useCreditWallet>;
 }) {
-  const [dinnerRsvp, setDinnerRsvp] = useState<"yes" | "no" | "maybe" | null>(
-    null,
-  );
+  const [dinnerRsvp, setDinnerRsvp] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [payingWithCredit, setPayingWithCredit] = useState(false);
   const showDinner = !!booking.bookingId && isAviaraEvent(booking.eventName);
@@ -1806,7 +1804,9 @@ function SuccessScreen({
     : 0;
 
   async function handleDone() {
-    if (booking.bookingId && dinnerRsvp) {
+    // Only worth a request when a seat was actually asked for — an untouched
+    // checkbox is the state the booking is already in.
+    if (showDinner && booking.bookingId && dinnerRsvp) {
       setSubmitting(true);
       const res = await fetch(
         `/api/bookings/${booking.bookingId}/dinner-rsvp`,
@@ -1939,31 +1939,30 @@ function SuccessScreen({
           </p>
         ) : null}
       </div>
+      {/* One checkbox, not a three-way answer: the venue either holds a seat
+          at the group table or it doesn't. Leaving it alone is a complete
+          answer, so nothing here blocks the button below. */}
       {showDinner && (
-        <div className="card p-5 w-full max-w-sm mb-8 text-left">
-          <p
-            className="text-xs uppercase tracking-widest mb-3"
-            style={{ color: "rgba(0,38,105,0.35)", letterSpacing: "0.14em" }}
-          >
-            Staying for dinner?
-          </p>
-          <p className="text-sm mb-4" style={{ color: "rgba(0,38,105,0.6)" }}>
-            Should we reserve a seat for you at group table for post-golf
-            drinks/dinner?
-          </p>
-          <DinnerRsvp
-            bookingId={booking.bookingId!}
-            current={dinnerRsvp}
-            layout="horizontal"
-            autoSave={false}
-            onSaved={setDinnerRsvp}
+        <label className="card p-5 w-full max-w-sm mb-8 text-left flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={dinnerRsvp}
+            onChange={(e) => setDinnerRsvp(e.target.checked)}
+            className="mt-0.5 w-5 h-5 flex-shrink-0 rounded accent-green-800"
           />
-        </div>
+          <span
+            className="text-sm leading-relaxed"
+            style={{ color: "rgba(0,38,105,0.7)" }}
+          >
+            Reserve me a seat at the group table for drinks or dinner after the
+            round.
+          </span>
+        </label>
       )}
       {!showDinner && <div className="mb-8" />}
       <button
         onClick={handleDone}
-        disabled={(showDinner && dinnerRsvp === null) || submitting}
+        disabled={submitting}
         className={cn(
           "btn disabled:opacity-40 disabled:cursor-not-allowed",
           // Paying is the action that matters here, so it keeps the gold. This
@@ -1973,11 +1972,6 @@ function SuccessScreen({
       >
         {submitting ? "Saving…" : "Back to booking"}
       </button>
-      {showDinner && dinnerRsvp === null && (
-        <p className="text-xs mt-3" style={{ color: "rgba(0,38,105,0.4)" }}>
-          Please let us know about dinner first.
-        </p>
-      )}
 
       {payingWithCredit && booking.bookingId && (
         <CreditCouponModal
@@ -2448,114 +2442,6 @@ function EditGuestModal({
         >
           {saving ? "Saving…" : "Save changes"}
         </button>
-      </div>
-    </div>
-  );
-}
-
-// ---- Dinner RSVP widget ------------------------------------
-
-function DinnerRsvp({
-  bookingId,
-  current,
-  onSaved,
-  layout = "compact",
-  autoSave = true,
-}: {
-  bookingId: string;
-  current: "yes" | "no" | "maybe" | null;
-  onSaved: (rsvp: "yes" | "no" | "maybe") => void;
-  layout?: "compact" | "horizontal";
-  autoSave?: boolean;
-}) {
-  const [saving, setSaving] = useState<string | null>(null);
-
-  async function pick(rsvp: "yes" | "no" | "maybe") {
-    if (saving) return;
-    if (!autoSave) {
-      onSaved(rsvp);
-      return;
-    }
-    setSaving(rsvp);
-    const res = await fetch(`/api/bookings/${bookingId}/dinner-rsvp`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rsvp }),
-    });
-    if (res.ok) onSaved(rsvp);
-    setSaving(null);
-  }
-
-  const opts = [
-    { value: "yes" as const, label: "Yes" },
-    { value: "no" as const, label: "No" },
-    { value: "maybe" as const, label: "Maybe" },
-  ];
-
-  if (layout === "horizontal") {
-    return (
-      <div className="flex gap-2">
-        {opts.map(({ value, label }) => {
-          const active = current === value;
-          return (
-            <button
-              key={value}
-              onClick={() => pick(value)}
-              disabled={!!saving}
-              className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
-              style={
-                active
-                  ? {
-                      background: "var(--color-green-900)",
-                      color: "var(--color-gold)",
-                    }
-                  : {
-                      background: "rgba(0,38,105,0.06)",
-                      color: "rgba(0,38,105,0.5)",
-                    }
-              }
-            >
-              {saving === value ? "…" : label}
-            </button>
-          );
-        })}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col items-end gap-1 flex-shrink-0">
-      <p
-        className="text-[10px] font-medium"
-        style={{ color: "rgba(0,38,105,0.38)" }}
-      >
-        Dinner?
-      </p>
-      <div className="flex gap-1">
-        {opts.map(({ value, label }) => {
-          const active = current === value;
-          return (
-            <button
-              key={value}
-              onClick={() => pick(value)}
-              disabled={!!saving}
-              className="h-7 px-2.5 rounded-full text-[11px] font-semibold transition-all disabled:opacity-50"
-              style={
-                active
-                  ? {
-                      background: "var(--color-green-900)",
-                      color: "var(--color-gold)",
-                    }
-                  : {
-                      background: "rgba(0,38,105,0.06)",
-                      color: "rgba(0,38,105,0.45)",
-                    }
-              }
-            >
-              {saving === value ? "…" : label}
-            </button>
-          );
-        })}
       </div>
     </div>
   );
