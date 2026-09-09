@@ -29,7 +29,7 @@ import Select, { type SelectOption } from '@/components/ui/Select'
 import ActivityCharts, { type DailyPoint } from '@/components/admin/ActivityCharts'
 import { ContentLoader } from '@/components/ui/Loading'
 import { ACTIVITY_AREAS, AREA_LABELS, FOCUS_AREAS, type ActivityArea } from '@/lib/activity/areas'
-import { PAGE_SIZES, DEFAULT_PAGE_SIZE, type PageSize } from '@/lib/activity/report'
+import { PAGE_SIZES, DEFAULT_PAGE_SIZE, communitiesOf, communityOf, type PageSize } from '@/lib/activity/report'
 import { format, formatDistanceToNow } from 'date-fns'
 
 type RangeKey = '7d' | '30d' | '90d' | 'all'
@@ -103,7 +103,7 @@ interface Report {
   areas: AreaStat[]
   daily: DailyPoint[]
   members: MemberRow[]
-  courses: Array<{ id: string; name: string }>
+  courses: Array<{ id: string; name: string; city: string | null; state: string | null }>
 }
 
 /** Matches the admin field styling used across the other admin panels, passed
@@ -147,6 +147,10 @@ export default function AdminAnalyticsPage() {
   const [area, setArea]                   = useState<ActivityArea | 'all'>('all')
   const [kind, setKind]                   = useState<KindFilter>('all')
   const [courseId, setCourseId]           = useState<string>('all')
+  // The market a club sits in, above the club itself — one community can hold
+  // several courses, and "how is San Diego using the app" is the question that
+  // gets asked before "how is Aviara".
+  const [community, setCommunity]         = useState<string>('all')
   const [includeAdmins, setIncludeAdmins] = useState(false)
 
   // Roster-only controls.
@@ -188,8 +192,8 @@ export default function AdminAnalyticsPage() {
   /** Everything except paging — the server clamps an out-of-range page, but
    *  landing on page 7 of a 2-page result is still a worse read than page 1. */
   const filterKey = useMemo(
-    () => [range, area, kind, courseId, includeAdmins, engagement, tag, debouncedSearch].join('|'),
-    [range, area, kind, courseId, includeAdmins, engagement, tag, debouncedSearch]
+    () => [range, area, kind, community, courseId, includeAdmins, engagement, tag, debouncedSearch].join('|'),
+    [range, area, kind, community, courseId, includeAdmins, engagement, tag, debouncedSearch]
   )
   useEffect(() => { setPage(1) }, [filterKey, pageSize])
 
@@ -197,12 +201,13 @@ export default function AdminAnalyticsPage() {
     const params = new URLSearchParams({ range, sort, engagement })
     if (area !== 'all')     params.set('area', area)
     if (kind !== 'all')     params.set('kind', kind)
+    if (community !== 'all') params.set('community', community)
     if (courseId !== 'all') params.set('courseId', courseId)
     if (tag !== 'all')      params.set('tag', tag)
     if (debouncedSearch)    params.set('search', debouncedSearch)
     if (includeAdmins)      params.set('includeAdmins', '1')
     return params
-  }, [range, sort, engagement, area, kind, courseId, tag, debouncedSearch, includeAdmins])
+  }, [range, sort, engagement, area, kind, community, courseId, tag, debouncedSearch, includeAdmins])
 
   const reportQuery = useMemo(() => {
     const params = baseParams()
@@ -244,17 +249,48 @@ export default function AdminAnalyticsPage() {
     [ghlTags]
   )
 
+  /** Every community the active courses fall into. Derived from the same rows
+   *  the course dropdown is built from, so the two can't disagree about which
+   *  club belongs where. */
+  const communityOptions: SelectOption[] = useMemo(
+    () => [
+      { value: 'all', label: 'Any community' },
+      ...communitiesOf(report?.courses ?? []).map(name => ({ value: name, label: name })),
+    ],
+    [report]
+  )
+
+  /** Narrowed by the community above it: offering a club in another market
+   *  would be offering a combination that resolves to an empty report. */
   const courseOptions: SelectOption[] = useMemo(
     () => [
       { value: 'all', label: 'Any course' },
-      ...(report?.courses ?? []).map(course => ({ value: course.id, label: course.name })),
+      ...(report?.courses ?? [])
+        .filter(course => community === 'all' || communityOf(course) === community)
+        .map(course => ({ value: course.id, label: course.name })),
     ],
-    [report]
+    [report, community]
+  )
+
+  /** Picking a community drops a course that isn't in it, rather than leaving
+   *  a selection the dropdown no longer lists. */
+  const changeCommunity = useCallback(
+    (next: string) => {
+      setCommunity(next)
+      const stillListed =
+        courseId === 'all' ||
+        (report?.courses ?? []).some(
+          c => c.id === courseId && (next === 'all' || communityOf(c) === next)
+        )
+      if (!stillListed) setCourseId('all')
+    },
+    [courseId, report]
   )
 
   const clearFilters = useCallback(() => {
     setArea('all')
     setKind('all')
+    setCommunity('all')
     setCourseId('all')
     setEngagement('all')
     setTag('all')
@@ -369,6 +405,17 @@ export default function AdminAnalyticsPage() {
           triggerClassName={TRIGGER_CLASS}
         />
 
+        {communityOptions.length > 1 && (
+          <Select
+            options={communityOptions}
+            value={community}
+            onChange={changeCommunity}
+            searchPlaceholder="Search communities…"
+            className="lg:w-52"
+            triggerClassName={TRIGGER_CLASS}
+          />
+        )}
+
         {courseOptions.length > 2 && (
           <Select
             options={courseOptions}
@@ -391,7 +438,7 @@ export default function AdminAnalyticsPage() {
             Include admins
           </label>
 
-          {(area !== 'all' || kind !== 'all' || courseId !== 'all' || engagement !== 'all' || tag !== 'all') && (
+          {(area !== 'all' || kind !== 'all' || community !== 'all' || courseId !== 'all' || engagement !== 'all' || tag !== 'all') && (
             <button
               onClick={clearFilters}
               className="text-xs font-medium text-green-800 hover:text-green-900 whitespace-nowrap"
