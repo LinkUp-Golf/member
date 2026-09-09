@@ -745,7 +745,10 @@ export default function AdminAnalyticsPage() {
           {/* ---- Site-wide feed ------------------------------ */}
           <div className="mt-8">
             <AdminCard title="Recent activity">
-              <ActivityFeed query={feedQuery} />
+              {/* Ten, then "Load older activity" — this sits at the bottom of
+                  an already long page, and its job is to show what just
+                  happened, not to be scrolled through. */}
+              <ActivityFeed query={feedQuery} pageSize={10} />
             </AdminCard>
           </div>
         </div>
