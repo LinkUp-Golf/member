@@ -288,7 +288,7 @@ function AgendaDay({
               key={o.courseId}
               type="button"
               onClick={() => onPickOpening(o.courseId, dayIso)}
-              className="w-full text-left flex items-center gap-3 rounded-xl border border-green-900/10 bg-white px-3 py-2.5 transition-colors hover:bg-green-50/50 active:opacity-70"
+              className="group w-full text-left flex items-center gap-3 rounded-xl border border-green-900/10 bg-white px-3 py-2.5 transition-colors hover:bg-green-50/50 active:opacity-70"
             >
               <span
                 className={cn(
@@ -329,15 +329,41 @@ function AgendaDay({
                   </span>
                 )}
               </span>
-              <ChevronRight
-                className="w-4 h-4 flex-shrink-0 text-green-900/25"
-                strokeWidth={2}
-              />
+              <BookIndicator />
             </button>
           );
         })}
       </div>
     </div>
+  );
+}
+
+/**
+ * What the card does, said rather than implied.
+ *
+ * Every venue card on this screen ended in a bare chevron, which announces
+ * "there is more of this" — a detail page, a longer list. What actually
+ * happens is a booking, and a member reading the row had no way to know that
+ * without tapping it. The word is the whole fix; the chevron stays as the
+ * direction of travel.
+ *
+ * Small enough to sit inside a row that also carries a venue name, a time and
+ * a price, so it reads as the row's action rather than a second headline.
+ */
+function BookIndicator({ tone = "light" }: { tone?: "light" | "dark" }) {
+  return (
+    <span
+      className={cn(
+        "flex items-center gap-0.5 rounded-full pl-2.5 pr-1.5 py-1 flex-shrink-0",
+        "text-[11px] font-bold uppercase tracking-wide transition-colors",
+        tone === "dark"
+          ? "bg-white/10 text-gold group-hover:bg-white/20"
+          : "bg-green-50 text-green-800 group-hover:bg-green-100",
+      )}
+    >
+      Book
+      <ChevronRight className="w-3.5 h-3.5" strokeWidth={2.4} />
+    </span>
   );
 }
 
@@ -572,11 +598,10 @@ function PinnedVenueDock({
                 )}
               </span>
 
-              {/* Reads as something to press, which a bare chevron on a card
-                  this size did not. */}
-              <span className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-white/10 text-gold transition-colors group-hover:bg-white/20">
-                <ChevronRight className="w-4 h-4" strokeWidth={2.4} />
-              </span>
+              {/* Same indicator as the agenda rows below, in the dock's own
+                  palette — one card saying "Book" and the next only hinting at
+                  it would read as two different kinds of row. */}
+              <BookIndicator tone="dark" />
             </button>
           );
         })}
