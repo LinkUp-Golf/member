@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
 import { createPortal } from "react-dom";
+import { useDropdownAnchor } from "@/hooks/useDropdownAnchor";
 import { cn } from "@/lib/utils";
 
 export interface SelectOption {
@@ -34,15 +35,21 @@ function Select({
   disabled,
   id,
 }: SelectProps) {
-  const [open, setOpen] = useState(false);
+  // Portal placement, anchoring and outside-click live in the hook; everything
+  // below is this control's own behaviour.
+  const {
+    open,
+    panelStyle,
+    containerRef,
+    triggerRef,
+    dropdownRef,
+    openDropdown: anchorOpen,
+    closeDropdown: anchorClose,
+  } = useDropdownAnchor(disabled);
+
   const [query, setQuery] = useState("");
   const [highlighted, setHighlighted] = useState(0);
-  const [openUp, setOpenUp] = useState(false);
-  const [coords, setCoords] = useState<{ top: number; bottom: number; left: number; width: number } | null>(null);
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const shouldScrollRef = useRef(false);
@@ -63,29 +70,17 @@ function Select({
   );
 
   const closeDropdown = useCallback(() => {
-    setOpen(false);
+    anchorClose();
     setQuery("");
-  }, []);
-
-  // Positioned via a portal (see render below) so the dropdown can escape
-  // any ancestor with overflow-hidden (e.g. the .card container) — coords
-  // are viewport-relative, matching getBoundingClientRect + position: fixed.
-  const updatePosition = useCallback(() => {
-    const rect = triggerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setOpenUp(window.innerHeight - rect.bottom < 280);
-    setCoords({ top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width });
-  }, []);
+  }, [anchorClose]);
 
   const openDropdown = useCallback(() => {
-    if (disabled) return;
-    updatePosition();
-    setOpen(true);
+    if (!anchorOpen()) return;
     setQuery("");
     shouldScrollRef.current = true;
     setHighlighted(options.findIndex((o) => o.value === value) || 0);
     setTimeout(() => searchRef.current?.focus(), 30);
-  }, [disabled, options, value, updatePosition]);
+  }, [anchorOpen, options, value]);
 
   const selectOption = useCallback(
     (opt: SelectOption) => {
@@ -127,39 +122,17 @@ function Select({
         selectOption(filtered[highlighted]);
       }
     },
-    [closeDropdown, filtered, highlighted, selectOption]
+    // triggerRef comes from the hook rather than a local useRef, so the lint
+    // rule can't see that it's stable — it's listed, not because it changes.
+    [closeDropdown, filtered, highlighted, selectOption, triggerRef]
   );
 
-  // Close on outside click / tap — the dropdown is portaled outside
-  // containerRef, so clicks inside it (search input, options) must also
-  // count as "inside" or every interaction would immediately close it.
+  // The hook closes on an outside click, which leaves the search query behind.
+  // Clear it once the panel is gone, so reopening doesn't show yesterday's
+  // filter over the list.
   useEffect(() => {
-    if (!open) return;
-    function handle(e: MouseEvent | TouchEvent) {
-      const target = e.target as Node;
-      if (containerRef.current?.contains(target)) return;
-      if (dropdownRef.current?.contains(target)) return;
-      closeDropdown();
-    }
-    document.addEventListener("mousedown", handle);
-    document.addEventListener("touchstart", handle);
-    return () => {
-      document.removeEventListener("mousedown", handle);
-      document.removeEventListener("touchstart", handle);
-    };
-  }, [open, closeDropdown]);
-
-  // Keep the dropdown anchored to the trigger while open. The capture-phase
-  // scroll listener catches scrolling in any ancestor container, not just window.
-  useEffect(() => {
-    if (!open) return;
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
-    return () => {
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
-    };
-  }, [open, updatePosition]);
+    if (!open) setQuery("");
+  }, [open]);
 
   // Scroll highlighted option into view — only for keyboard nav and on open, not mouse hover
   useEffect(() => {
@@ -206,7 +179,7 @@ function Select({
       {/* Dropdown — portaled to document.body so it can't be clipped by an
           ancestor's overflow-hidden (e.g. .card); positioned via fixed coords
           measured from the trigger. */}
-      {open && coords && typeof document !== "undefined" &&
+      {open && panelStyle && typeof document !== "undefined" &&
         createPortal(
           // eslint-disable-next-line jsx-a11y/interactive-supports-focus
           <div
@@ -214,13 +187,7 @@ function Select({
             role="listbox"
             onKeyDown={handleListKeyDown}
             className="fixed z-50 rounded-xl border border-green-900/10 bg-white shadow-xl overflow-hidden"
-            style={{
-              left: coords.left,
-              width: coords.width,
-              ...(openUp
-                ? { bottom: window.innerHeight - coords.top + 4 }
-                : { top: coords.bottom + 4 }),
-            }}
+            style={panelStyle}
           >
             {/* Search input — font-size 16px prevents iOS zoom */}
             <div className="p-2 border-b border-green-900/08">

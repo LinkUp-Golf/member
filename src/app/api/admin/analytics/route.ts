@@ -9,8 +9,9 @@ export const dynamic = 'force-dynamic'
 // ?area=<area>            narrow every count to one area of the app
 // ?kind=view|action       visits only, or transactions only
 // ?courseId=<uuid>        members of one course
-// ?community=<label>      members of every course in one community — the
-//                         market a club sits in, "City, State"
+// ?community=<label>      members of every course in this community — the
+//                         market a club sits in, "City, State". Repeatable:
+//                         several are a union, none is every community.
 // ?engagement=            active | dormant | never (see ENGAGEMENT below)
 // ?search=                name or email
 // ?tag=<ghl tag>          members carrying this GHL tag (roster only, like
@@ -47,17 +48,21 @@ interface CourseRow {
  *
  * null means every course (and members with no course at all). An empty array
  * means the filters matched no course — a community label nothing answers to,
- * or a course picked from outside the chosen community. That's an empty
+ * or a course picked from outside the chosen communities. That's an empty
  * report, not an unfiltered one, which is why it isn't collapsed to null.
+ *
+ * Several communities are a union: "San Diego or Los Angeles", never both at
+ * once, since a course sits in exactly one.
  */
 function resolveCourseScope(
   courses: CourseRow[],
   courseId: string | null,
-  community: string
+  communities: string[]
 ): string[] | null {
-  if (!community) return courseId ? [courseId] : null
-  const inCommunity = courses.filter(c => communityOf(c) === community).map(c => c.id)
-  return courseId ? inCommunity.filter(id => id === courseId) : inCommunity
+  if (communities.length === 0) return courseId ? [courseId] : null
+  const wanted = new Set(communities)
+  const inCommunities = courses.filter(c => wanted.has(communityOf(c))).map(c => c.id)
+  return courseId ? inCommunities.filter(id => id === courseId) : inCommunities
 }
 type RangeKey = keyof typeof RANGES | 'all'
 
@@ -200,10 +205,11 @@ export const GET = withAuth(
       courseIdParam && validateUUID(courseIdParam, 'courseId').valid ? courseIdParam : null
 
     // A community is a market, not a row in its own table: the courses that
-    // share a "City, State". Resolved against the course list below, so an
+    // share a "City, State". Repeated rather than delimited, because the label
+    // itself contains a comma. Resolved against the course list below, so an
     // unrecognised label narrows to nothing rather than being ignored — a
     // filter that silently doesn't apply is worse than one that shows zero.
-    const community = (params.get('community') ?? '').trim()
+    const communities = params.getAll('community').map(c => c.trim()).filter(Boolean)
 
     const engagementParam = params.get('engagement')
     const engagement: Engagement = ENGAGEMENTS.includes(engagementParam as Engagement)
@@ -250,7 +256,7 @@ export const GET = withAuth(
     // Which courses the report covers. null = every one of them, including
     // members with no home course; an empty array = a filter that matched
     // nothing, which is a real (empty) answer rather than "no filter".
-    const allowedCourseIds = resolveCourseScope(activeCourses, courseId, community)
+    const allowedCourseIds = resolveCourseScope(activeCourses, courseId, communities)
 
     // The three reports read the same window; run them together rather than
     // in sequence.
@@ -418,7 +424,7 @@ export const GET = withAuth(
     return NextResponse.json({
       range: { from: fromIso, to: toIso, key: rangeKey },
       trackingSince: firstEventRes.data?.created_at ?? null,
-      filters: { area, kind, courseId, community, engagement, sort, search, tag, includeAdmins },
+      filters: { area, kind, courseId, communities, engagement, sort, search, tag, includeAdmins },
       pagination: {
         page,
         pageSize: exportAll ? total : pageSize,
