@@ -388,15 +388,21 @@ export default function AdminAnalyticsPage() {
       />
 
       {/* ---- Scope filters: everything below re-cuts against these ---- */}
-      {/* One column on a phone, two on a tablet, a single row on desktop —
-          a wrapped row of half-width dropdowns is the worst of both. */}
-      <div className="-mt-2 mb-5 grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-center gap-2">
+      {/* A grid at every width rather than a flex row that wraps. The admin
+          sidebar takes 240px, so "desktop" here is about 720px of content at
+          lg — not enough for four dropdowns and the admin toggle in a line,
+          and a flex row that wraps breaks wherever it runs out rather than
+          where the columns are. Four across only at xl, where they fit.
+
+          Nothing spans: how many dropdowns render depends on how many courses
+          and communities exist, and a spanning cell leaves a hole beside
+          whichever count is odd. */}
+      <div className="-mt-2 mb-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
         <Select
           options={areaOptions}
           value={area}
           onChange={next => setArea(next as ActivityArea | 'all')}
           searchPlaceholder="Search app functions…"
-          className="lg:w-44"
           triggerClassName={TRIGGER_CLASS}
         />
 
@@ -404,7 +410,6 @@ export default function AdminAnalyticsPage() {
           options={KIND_OPTIONS}
           value={kind}
           onChange={next => setKind(next as KindFilter)}
-          className="lg:w-44"
           triggerClassName={TRIGGER_CLASS}
         />
 
@@ -416,7 +421,6 @@ export default function AdminAnalyticsPage() {
             emptyLabel="Any community"
             countNoun="communities"
             searchPlaceholder="Search communities…"
-            className="lg:w-52"
             triggerClassName={TRIGGER_CLASS}
           />
         )}
@@ -427,12 +431,13 @@ export default function AdminAnalyticsPage() {
             value={courseId}
             onChange={setCourseId}
             searchPlaceholder="Search courses…"
-            className="lg:w-52"
             triggerClassName={TRIGGER_CLASS}
           />
         )}
 
-        <div className="flex items-center justify-between gap-3 sm:col-span-2 lg:col-span-1">
+        {/* Wraps rather than spreading: in a grid cell this narrow, pushing the
+            two to opposite edges reads as two unrelated controls. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 min-h-[38px]">
           <label className="flex items-center gap-2 text-sm text-gray-600 whitespace-nowrap">
             <input
               type="checkbox"
@@ -613,30 +618,36 @@ export default function AdminAnalyticsPage() {
           )}
 
           {/* ---- Member roster ------------------------------- */}
-          <div className="mt-8 mb-3 flex flex-col gap-2 lg:flex-row lg:items-center">
-            <h2 className="text-sm font-semibold text-gray-800 lg:mr-2 whitespace-nowrap">
-              Members
-              {pagination && pagination.total > 0 && (
-                <span className="ml-2 font-normal text-gray-400">
-                  {firstRow}–{lastRow} of {pagination.total}
-                </span>
-              )}
-            </h2>
+          {/* Two lines, always: the count and the search box, then the
+              controls. The single-row version needed about 1150px and had
+              720px to work with at lg — the sidebar eats 240 of the viewport
+              — so it squeezed every dropdown to unreadable and pushed Export
+              off the end. Four across only at xl, where the width is real. */}
+          <div className="mt-8 mb-3 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <h2 className="text-sm font-semibold text-gray-800 sm:mr-2 whitespace-nowrap">
+                Members
+                {pagination && pagination.total > 0 && (
+                  <span className="ml-2 font-normal text-gray-400">
+                    {firstRow}–{lastRow} of {pagination.total}
+                  </span>
+                )}
+              </h2>
 
-            <input
-              type="search"
-              placeholder="Search name or email…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full lg:flex-1 lg:min-w-[200px] px-4 py-2 text-sm border border-gray-200 rounded-xl outline-none focus:border-green-500"
-            />
+              <input
+                type="search"
+                placeholder="Search name or email…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full sm:flex-1 sm:min-w-[180px] px-4 py-2 text-sm border border-gray-200 rounded-xl outline-none focus:border-green-500"
+              />
+            </div>
 
-            <div className="grid grid-cols-2 lg:flex gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
               <Select
                 options={ENGAGEMENT_OPTIONS}
                 value={engagement}
                 onChange={next => setEngagement(next as Engagement)}
-                className="lg:w-52"
                 triggerClassName={TRIGGER_CLASS}
               />
 
@@ -644,25 +655,21 @@ export default function AdminAnalyticsPage() {
                 options={SORT_OPTIONS}
                 value={sort}
                 onChange={next => setSort(next as Sort)}
-                className="lg:w-48"
                 triggerClassName={TRIGGER_CLASS}
               />
 
-              {/* Full width below lg: the two-column grid would otherwise
-                  leave it a hole for a neighbour, since Export spans both. */}
               <Select
                 options={tagOptions}
                 value={tag}
                 onChange={setTag}
                 searchPlaceholder="Search GHL tags…"
-                className="col-span-2 lg:col-span-1 lg:w-48"
                 triggerClassName={TRIGGER_CLASS}
               />
 
               <button
                 onClick={exportCsv}
                 disabled={exporting}
-                className="col-span-2 lg:col-span-1 px-3 py-2 text-sm font-medium rounded-xl bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors whitespace-nowrap disabled:opacity-50"
+                className="px-3 py-2 text-sm font-medium rounded-xl bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors whitespace-nowrap disabled:opacity-50"
               >
                 {exporting ? 'Exporting…' : 'Export CSV'}
               </button>
