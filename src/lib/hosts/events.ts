@@ -5,15 +5,26 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { HOST_MEMBER_PRICE_MARKUP_USD } from '@/lib/constants'
+import { HOST_MEMBER_PRICE_MARKUP_PERCENT } from '@/lib/constants'
 import type { HostedEvent, HostStats } from '@/types'
 import { loadCreditSummary } from '@/lib/credits'
 
 type AdminClient = SupabaseClient
 
-/** The price a member pays: the host's guest rate plus the fixed markup. */
+/**
+ * LinkUp's cut of a hosted round: a percentage of the host's guest rate,
+ * rounded to the cent.
+ *
+ * Rounded here rather than only at the end, so the fee is a figure that can be
+ * quoted on its own and still add up to the price beside it.
+ */
+export function hostMarkup(memberGuestRate: number): number {
+  return Math.round(memberGuestRate * HOST_MEMBER_PRICE_MARKUP_PERCENT) / 100
+}
+
+/** The price a member pays: the host's guest rate plus the markup on it. */
 export function memberPrice(memberGuestRate: number): number {
-  return Math.round((memberGuestRate + HOST_MEMBER_PRICE_MARKUP_USD) * 100) / 100
+  return Math.round((memberGuestRate + hostMarkup(memberGuestRate)) * 100) / 100
 }
 
 /**
