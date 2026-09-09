@@ -11,6 +11,8 @@ export const dynamic = 'force-dynamic'
 // ?courseId=<uuid>        members of one course
 // ?engagement=            active | dormant | never (see ENGAGEMENT below)
 // ?search=                name or email
+// ?tag=<ghl tag>          members carrying this GHL tag (roster only, like
+//                         search — see the roster filters below)
 // ?includeAdmins=1        admins are excluded by default — their app use
 //                         isn't what this report is measuring
 // ?sort=activity|recent|idle|name
@@ -48,6 +50,7 @@ interface RollupRow {
   is_admin: boolean
   home_course_id: string | null
   course_name: string | null
+  ghl_tags: string[] | null
   joined_at: string
   last_sign_in: string | null
   total_events: number
@@ -170,6 +173,11 @@ export const GET = withAuth(
     const search = (params.get('search') ?? '').trim().toLowerCase()
     const includeAdmins = params.get('includeAdmins') === '1'
 
+    // GHL applies its own case rules to a tag name and admins retype them by
+    // hand, so this is matched normalised — the same rule lib/ghl/tags.ts uses
+    // for the access tags.
+    const tag = (params.get('tag') ?? '').trim().toLowerCase()
+
     // pageSize=all is what the CSV export asks for — the whole filtered set,
     // not the page the admin happens to be looking at.
     const pageSizeParam = params.get('pageSize')
@@ -269,13 +277,23 @@ export const GET = withAuth(
     }
 
     // ---- Member rows ----------------------------------------
+    // Roster-only filters, like search: they pick out rows to work through,
+    // they don't change what the report is measuring. The adoption rate and
+    // the area cards above still describe the whole population, which is why
+    // the tag control sits on the roster rather than in the scope row.
     const searched = search
       ? population.filter(row =>
           `${row.first_name} ${row.last_name} ${row.email}`.toLowerCase().includes(search)
         )
       : population
 
-    const engaged = searched.filter(row => {
+    const tagged = tag
+      ? searched.filter(row =>
+          (row.ghl_tags ?? []).some(t => t.trim().toLowerCase() === tag)
+        )
+      : searched
+
+    const engaged = tagged.filter(row => {
       switch (engagement) {
         case 'active':  return row.total_events > 0
         case 'dormant': return row.total_events === 0 && Boolean(row.last_sign_in)
@@ -340,7 +358,7 @@ export const GET = withAuth(
     return NextResponse.json({
       range: { from: fromIso, to: toIso, key: rangeKey },
       trackingSince: firstEventRes.data?.created_at ?? null,
-      filters: { area, kind, courseId, engagement, sort, search, includeAdmins },
+      filters: { area, kind, courseId, engagement, sort, search, tag, includeAdmins },
       pagination: {
         page,
         pageSize: exportAll ? total : pageSize,

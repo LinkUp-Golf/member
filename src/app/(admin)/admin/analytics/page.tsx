@@ -131,6 +131,11 @@ const PAGE_SIZE_OPTIONS: SelectOption[] = PAGE_SIZES.map(size => ({
   label: `${size} per page`,
 }))
 
+/** Placed on the roster row, not in the scope row above: like search and
+ *  engagement, it picks out rows to work through without changing what the
+ *  adoption rate and the area cards are measured against. */
+const TAG_OPTION_ALL: SelectOption = { value: 'all', label: 'Any GHL tag' }
+
 const AREA_OPTIONS: SelectOption[] = [
   { value: 'all', label: 'App functions' },
   ...ACTIVITY_AREAS.map(name => ({ value: name, label: AREA_LABELS[name] })),
@@ -147,9 +152,25 @@ export default function AdminAnalyticsPage() {
   // Roster-only controls.
   const [engagement, setEngagement] = useState<Engagement>('all')
   const [sort, setSort]             = useState<Sort>('activity')
+  const [tag, setTag]               = useState<string>('all')
   const [search, setSearch]         = useState('')
   const [page, setPage]             = useState(1)
   const [pageSize, setPageSize]     = useState<PageSize>(DEFAULT_PAGE_SIZE)
+
+  // The tag list comes from GHL itself, not from the tags our members happen
+  // to carry — an admin filtering on a campaign tag nobody has yet should see
+  // an empty roster, not a missing option.
+  const [ghlTags, setGhlTags] = useState<string[]>([])
+  useEffect(() => {
+    fetch('/api/admin/ghl/tags')
+      .then(r => r.json())
+      .then(d => setGhlTags(((d.tags ?? []) as Array<{ name?: string }>)
+        .map(t => (t.name ?? '').trim())
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b))))
+      // A GHL outage costs the tag filter its options, not the report.
+      .catch(() => setGhlTags([]))
+  }, [])
 
   const [report, setReport]     = useState<Report | null>(null)
   const [loading, setLoading]   = useState(true)
@@ -167,8 +188,8 @@ export default function AdminAnalyticsPage() {
   /** Everything except paging — the server clamps an out-of-range page, but
    *  landing on page 7 of a 2-page result is still a worse read than page 1. */
   const filterKey = useMemo(
-    () => [range, area, kind, courseId, includeAdmins, engagement, debouncedSearch].join('|'),
-    [range, area, kind, courseId, includeAdmins, engagement, debouncedSearch]
+    () => [range, area, kind, courseId, includeAdmins, engagement, tag, debouncedSearch].join('|'),
+    [range, area, kind, courseId, includeAdmins, engagement, tag, debouncedSearch]
   )
   useEffect(() => { setPage(1) }, [filterKey, pageSize])
 
@@ -177,10 +198,11 @@ export default function AdminAnalyticsPage() {
     if (area !== 'all')     params.set('area', area)
     if (kind !== 'all')     params.set('kind', kind)
     if (courseId !== 'all') params.set('courseId', courseId)
+    if (tag !== 'all')      params.set('tag', tag)
     if (debouncedSearch)    params.set('search', debouncedSearch)
     if (includeAdmins)      params.set('includeAdmins', '1')
     return params
-  }, [range, sort, engagement, area, kind, courseId, debouncedSearch, includeAdmins])
+  }, [range, sort, engagement, area, kind, courseId, tag, debouncedSearch, includeAdmins])
 
   const reportQuery = useMemo(() => {
     const params = baseParams()
@@ -217,6 +239,11 @@ export default function AdminAnalyticsPage() {
 
   const areaOptions = AREA_OPTIONS
 
+  const tagOptions: SelectOption[] = useMemo(
+    () => [TAG_OPTION_ALL, ...ghlTags.map(name => ({ value: name, label: name }))],
+    [ghlTags]
+  )
+
   const courseOptions: SelectOption[] = useMemo(
     () => [
       { value: 'all', label: 'Any course' },
@@ -230,6 +257,7 @@ export default function AdminAnalyticsPage() {
     setKind('all')
     setCourseId('all')
     setEngagement('all')
+    setTag('all')
   }, [])
 
   const focusAreas = useMemo(
@@ -363,7 +391,7 @@ export default function AdminAnalyticsPage() {
             Include admins
           </label>
 
-          {(area !== 'all' || kind !== 'all' || courseId !== 'all' || engagement !== 'all') && (
+          {(area !== 'all' || kind !== 'all' || courseId !== 'all' || engagement !== 'all' || tag !== 'all') && (
             <button
               onClick={clearFilters}
               className="text-xs font-medium text-green-800 hover:text-green-900 whitespace-nowrap"
@@ -565,6 +593,17 @@ export default function AdminAnalyticsPage() {
                 value={sort}
                 onChange={next => setSort(next as Sort)}
                 className="lg:w-48"
+                triggerClassName={TRIGGER_CLASS}
+              />
+
+              {/* Full width below lg: the two-column grid would otherwise
+                  leave it a hole for a neighbour, since Export spans both. */}
+              <Select
+                options={tagOptions}
+                value={tag}
+                onChange={setTag}
+                searchPlaceholder="Search GHL tags…"
+                className="col-span-2 lg:col-span-1 lg:w-48"
                 triggerClassName={TRIGGER_CLASS}
               />
 
