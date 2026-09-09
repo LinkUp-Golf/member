@@ -77,7 +77,8 @@ interface RollupRow {
   is_admin: boolean
   home_course_id: string | null
   course_name: string | null
-  ghl_tags: string[] | null
+  /** jsonb on members — an array of tag strings by convention, not by type. */
+  ghl_tags: unknown
   joined_at: string
   last_sign_in: string | null
   total_events: number
@@ -88,6 +89,15 @@ interface RollupRow {
   promotions_events: number
   announcements_events: number
   directory_events: number
+}
+
+/** A member's GHL tags. The column is jsonb, so its shape is a convention the
+ *  sync keeps rather than one the database enforces — a row that isn't an array
+ *  of strings costs that member the tag filter, not the whole report. */
+function memberTags(row: RollupRow): string[] {
+  return Array.isArray(row.ghl_tags)
+    ? row.ghl_tags.filter((t): t is string => typeof t === 'string')
+    : []
 }
 
 interface AreaRow {
@@ -340,9 +350,7 @@ export const GET = withAuth(
       : population
 
     const tagged = tag
-      ? searched.filter(row =>
-          (row.ghl_tags ?? []).some(t => t.trim().toLowerCase() === tag)
-        )
+      ? searched.filter(row => memberTags(row).some(t => t.trim().toLowerCase() === tag))
       : searched
 
     const engaged = tagged.filter(row => {

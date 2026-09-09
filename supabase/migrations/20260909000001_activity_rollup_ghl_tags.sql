@@ -6,6 +6,11 @@
 -- members.ghl_tags, synced from the contact on login, webhook and the daily
 -- reconcile.
 --
+-- Passed through as the jsonb it's stored as, rather than unpacked into
+-- text[]: the column is only an array of strings by convention, and
+-- jsonb_array_elements_text on a row that isn't one would fail the whole
+-- report rather than that member's tags. The caller normalises.
+--
 -- Returned rather than filtered here: the roster's own filters (search,
 -- engagement, tag) are applied in the API route over the same rows, so one
 -- pass over members answers all of them. The signature is unchanged — only the
@@ -30,7 +35,7 @@ returns table (
   is_admin             boolean,
   home_course_id       uuid,
   course_name          text,
-  ghl_tags             text[],
+  ghl_tags             jsonb,
   joined_at            timestamptz,
   last_sign_in         timestamptz,
   total_events         bigint,
@@ -56,7 +61,7 @@ as $$
     m.is_admin,
     m.home_course_id,
     c.name,
-    coalesce(m.ghl_tags, array[]::text[]),
+    coalesce(m.ghl_tags, '[]'::jsonb),
     m.created_at,
     m.last_sign_in,
     coalesce(a.total_events,         0),
