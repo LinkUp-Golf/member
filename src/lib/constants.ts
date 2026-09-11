@@ -79,9 +79,13 @@ export const PAYOUT_METHOD_LABEL: Record<PayoutMethod, string> = {
 // ---- Hosts --------------------------------------------------
 
 // A hosted event's displayed member price is the host's member guest rate plus
-// this fixed markup. Only the guest rate is stored; the host never sets the
-// member price directly, and the earned credit is based on the guest rate.
-export const HOST_MEMBER_PRICE_MARKUP_USD = 10
+// this markup. Only the guest rate is stored; the host never sets the member
+// price directly, and the earned credit is based on the guest rate.
+//
+// A percentage of the guest rate rather than a flat fee: the fee is a share of
+// the round, so a cheap venue shouldn't carry the same charge as an expensive
+// one. At the standard $150 rate it comes to $7.50.
+export const HOST_MEMBER_PRICE_MARKUP_PERCENT = 5
 
 // Every hosted round is listed on the same terms, so a host proposes a venue and
 // dates and nothing else. Two numbers used to be theirs to type, which meant the
@@ -89,8 +93,13 @@ export const HOST_MEMBER_PRICE_MARKUP_USD = 10
 //
 // The guest rate is also what the host earns back in credits once the round is
 // verified (award_host_event_credit defaults the award to it), which is why the
-// form can promise a flat figure. Keep the invariant below in mind if either
-// number moves: rate + markup is the standard round price members already pay.
+// form can promise a flat figure.
+//
+// Rate + markup used to land exactly on BOOKING_PRICE_USD — 150 + 10 = 160, the
+// standard round price members already pay. The percentage markup breaks that
+// on purpose: 150 + 5% is 157.50. Raising this to 152.38 would restore it, and
+// that's a pricing decision rather than a code one, so it stays at 150 until
+// someone makes it.
 export const HOST_EVENT_GUEST_RATE_USD = 150
 
 // Capacity is deliberately NOT a constant. A round is listed with the spots its

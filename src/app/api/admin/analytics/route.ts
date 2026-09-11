@@ -9,13 +9,18 @@ export const dynamic = 'force-dynamic'
 // ?area=<area>            narrow every count to one area of the app
 // ?kind=view|action       visits only, or transactions only
 // ?courseId=<uuid>        members of one course
+// ?community=<label>      members of every course in this community — the
+//                         market a club sits in, "City, State". Repeatable:
+//                         several are a union, none is every community.
 // ?engagement=            active | dormant | never (see ENGAGEMENT below)
 // ?search=                name or email
+// ?tag=<ghl tag>          members carrying this GHL tag (roster only, like
+//                         search — see the roster filters below)
 // ?includeAdmins=1        admins are excluded by default — their app use
 //                         isn't what this report is measuring
 // ?sort=activity|recent|idle|name
-// ?page=1&pageSize=25|50|100   roster page (default 25); pageSize=all
-//                              returns every matching row, for CSV export
+// ?page=1&pageSize=10|25|50|100  roster page (default 10); pageSize=all
+//                                 returns every matching row, for CSV export
 // ============================================================
 
 import type { NextRequest } from 'next/server'
@@ -26,10 +31,39 @@ import { logger } from '@/lib/logger'
 import { validateUUID } from '@/lib/validation'
 import { ACTIVITY_AREAS, AREA_LABELS, type ActivityArea } from '@/lib/activity/areas'
 import { titleCaseName } from '@/lib/utils'
-import { PAGE_SIZES, DEFAULT_PAGE_SIZE, type PageSize } from '@/lib/activity/report'
+import { PAGE_SIZES, DEFAULT_PAGE_SIZE, communityOf, type PageSize } from '@/lib/activity/report'
 import type { AuthContext } from '@/lib/auth/types'
 
 const RANGES = { '7d': 7, '30d': 30, '90d': 90 } as const
+
+interface CourseRow {
+  id: string
+  name: string
+  city: string | null
+  state: string | null
+}
+
+/**
+ * The courses the report covers, as a list the RPCs can be scoped to.
+ *
+ * null means every course (and members with no course at all). An empty array
+ * means the filters matched no course — a community label nothing answers to,
+ * or a course picked from outside the chosen communities. That's an empty
+ * report, not an unfiltered one, which is why it isn't collapsed to null.
+ *
+ * Several communities are a union: "San Diego or Los Angeles", never both at
+ * once, since a course sits in exactly one.
+ */
+function resolveCourseScope(
+  courses: CourseRow[],
+  courseId: string | null,
+  communities: string[]
+): string[] | null {
+  if (communities.length === 0) return courseId ? [courseId] : null
+  const wanted = new Set(communities)
+  const inCommunities = courses.filter(c => wanted.has(communityOf(c))).map(c => c.id)
+  return courseId ? inCommunities.filter(id => id === courseId) : inCommunities
+}
 type RangeKey = keyof typeof RANGES | 'all'
 
 const ENGAGEMENTS = ['all', 'active', 'dormant', 'never'] as const
@@ -48,6 +82,8 @@ interface RollupRow {
   is_admin: boolean
   home_course_id: string | null
   course_name: string | null
+  /** jsonb on members — an array of tag strings by convention, not by type. */
+  ghl_tags: unknown
   joined_at: string
   last_sign_in: string | null
   total_events: number
@@ -58,6 +94,15 @@ interface RollupRow {
   promotions_events: number
   announcements_events: number
   directory_events: number
+}
+
+/** A member's GHL tags. The column is jsonb, so its shape is a convention the
+ *  sync keeps rather than one the database enforces — a row that isn't an array
+ *  of strings costs that member the tag filter, not the whole report. */
+function memberTags(row: RollupRow): string[] {
+  return Array.isArray(row.ghl_tags)
+    ? row.ghl_tags.filter((t): t is string => typeof t === 'string')
+    : []
 }
 
 interface AreaRow {
@@ -159,6 +204,13 @@ export const GET = withAuth(
     const courseId =
       courseIdParam && validateUUID(courseIdParam, 'courseId').valid ? courseIdParam : null
 
+    // A community is a market, not a row in its own table: the courses that
+    // share a "City, State". Repeated rather than delimited, because the label
+    // itself contains a comma. Resolved against the course list below, so an
+    // unrecognised label narrows to nothing rather than being ignored — a
+    // filter that silently doesn't apply is worse than one that shows zero.
+    const communities = params.getAll('community').map(c => c.trim()).filter(Boolean)
+
     const engagementParam = params.get('engagement')
     const engagement: Engagement = ENGAGEMENTS.includes(engagementParam as Engagement)
       ? (engagementParam as Engagement)
@@ -169,6 +221,11 @@ export const GET = withAuth(
 
     const search = (params.get('search') ?? '').trim().toLowerCase()
     const includeAdmins = params.get('includeAdmins') === '1'
+
+    // GHL applies its own case rules to a tag name and admins retype them by
+    // hand, so this is matched normalised — the same rule lib/ghl/tags.ts uses
+    // for the access tags.
+    const tag = (params.get('tag') ?? '').trim().toLowerCase()
 
     // pageSize=all is what the CSV export asks for — the whole filtered set,
     // not the page the admin happens to be looking at.
@@ -184,9 +241,26 @@ export const GET = withAuth(
     const fromIso = from.toISOString()
     const toIso = to.toISOString()
 
-    // All three reports read the same window; run them together rather than
+    // Ahead of the reports rather than beside them: a community is a set of
+    // courses, so the aggregates below can't be scoped until this has landed.
+    // It's a handful of rows off a small table — cheaper than the branch that
+    // would keep it parallel for the unfiltered case.
+    const coursesRes = await admin
+      .from('courses')
+      .select('id, name, city, state')
+      .eq('active', true)
+      .order('name')
+
+    const activeCourses = (coursesRes.data ?? []) as CourseRow[]
+
+    // Which courses the report covers. null = every one of them, including
+    // members with no home course; an empty array = a filter that matched
+    // nothing, which is a real (empty) answer rather than "no filter".
+    const allowedCourseIds = resolveCourseScope(activeCourses, courseId, communities)
+
+    // The three reports read the same window; run them together rather than
     // in sequence.
-    const [rollupRes, areasRes, dailyRes, coursesRes, firstEventRes] = await Promise.all([
+    const [rollupRes, areasRes, dailyRes, firstEventRes] = await Promise.all([
       admin.rpc('member_activity_rollup', {
         p_from: fromIso,
         p_to: toIso,
@@ -200,7 +274,7 @@ export const GET = withAuth(
         p_from: fromIso,
         p_to: toIso,
         p_kind: kind,
-        p_course_id: courseId,
+        p_course_ids: allowedCourseIds,
         // The RPCs still take a membership-status filter, but nothing asks for
         // one: a report about whether people open the app reads the same for a
         // waitlisted member as an active one. Left in the signature so bringing
@@ -213,11 +287,10 @@ export const GET = withAuth(
         p_to: toIso,
         p_area: area,
         p_kind: kind,
-        p_course_id: courseId,
+        p_course_ids: allowedCourseIds,
         p_status: null,
         p_include_admins: includeAdmins,
       }),
-      admin.from('courses').select('id, name').eq('active', true).order('name'),
       // Live rows only. The seeder backfills sign-ins and past transactions,
       // so the earliest row overall predates tracking by months — quoting that
       // as the tracking-start date would claim measurement that never happened.
@@ -245,9 +318,12 @@ export const GET = withAuth(
     // Every rate below is measured against this set, so the admin and course
     // filters narrow the denominator too — 40% of a course is a different
     // claim from 40% of the membership.
+    const allowedCourseSet = allowedCourseIds ? new Set(allowedCourseIds) : null
     const population = allRows.filter(row => {
       if (!includeAdmins && row.is_admin) return false
-      if (courseId && row.home_course_id !== courseId) return false
+      if (allowedCourseSet && (!row.home_course_id || !allowedCourseSet.has(row.home_course_id))) {
+        return false
+      }
       return true
     })
 
@@ -269,13 +345,21 @@ export const GET = withAuth(
     }
 
     // ---- Member rows ----------------------------------------
+    // Roster-only filters, like search: they pick out rows to work through,
+    // they don't change what the report is measuring. The adoption rate and
+    // the area cards above still describe the whole population, which is why
+    // the tag control sits on the roster rather than in the scope row.
     const searched = search
       ? population.filter(row =>
           `${row.first_name} ${row.last_name} ${row.email}`.toLowerCase().includes(search)
         )
       : population
 
-    const engaged = searched.filter(row => {
+    const tagged = tag
+      ? searched.filter(row => memberTags(row).some(t => t.trim().toLowerCase() === tag))
+      : searched
+
+    const engaged = tagged.filter(row => {
       switch (engagement) {
         case 'active':  return row.total_events > 0
         case 'dormant': return row.total_events === 0 && Boolean(row.last_sign_in)
@@ -306,7 +390,7 @@ export const GET = withAuth(
 
     // ---- Paging ---------------------------------------------
     // Applied last, so the summary and the area breakdown still describe the
-    // whole filtered population rather than whichever 25 rows are on screen.
+    // whole filtered population rather than whichever rows are on screen.
     const total = members.length
     const totalPages = exportAll ? 1 : Math.max(1, Math.ceil(total / pageSize))
     // A filter change can shrink the roster below the current page; clamping
@@ -340,7 +424,7 @@ export const GET = withAuth(
     return NextResponse.json({
       range: { from: fromIso, to: toIso, key: rangeKey },
       trackingSince: firstEventRes.data?.created_at ?? null,
-      filters: { area, kind, courseId, engagement, sort, search, includeAdmins },
+      filters: { area, kind, courseId, communities, engagement, sort, search, tag, includeAdmins },
       pagination: {
         page,
         pageSize: exportAll ? total : pageSize,
@@ -372,7 +456,7 @@ export const GET = withAuth(
         announcements: Number(row.announcements_events),
         directory:     Number(row.directory_events),
       })),
-      courses: (coursesRes.data ?? []) as Array<{ id: string; name: string }>,
+      courses: activeCourses,
     })
   },
   { requireAdmin: true, skipGHLCheck: true }

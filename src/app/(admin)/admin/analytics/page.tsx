@@ -25,17 +25,28 @@ import {
   Badge,
 } from '@/components/admin/AdminUI'
 import ActivityFeed from '@/components/admin/ActivityFeed'
+import PlayingPartners from '@/components/admin/PlayingPartners'
 import Select, { type SelectOption } from '@/components/ui/Select'
+import MultiSelect from '@/components/ui/MultiSelect'
 import ActivityCharts, { type DailyPoint } from '@/components/admin/ActivityCharts'
 import { ContentLoader } from '@/components/ui/Loading'
 import { ACTIVITY_AREAS, AREA_LABELS, FOCUS_AREAS, type ActivityArea } from '@/lib/activity/areas'
-import { PAGE_SIZES, DEFAULT_PAGE_SIZE, type PageSize } from '@/lib/activity/report'
+import { PAGE_SIZES, DEFAULT_PAGE_SIZE, communitiesOf, communityOf, type PageSize } from '@/lib/activity/report'
 import { format, formatDistanceToNow } from 'date-fns'
 
 type RangeKey = '7d' | '30d' | '90d' | 'all'
 type KindFilter = 'all' | 'view' | 'action'
 type Engagement = 'all' | 'active' | 'dormant' | 'never'
 type Sort = 'activity' | 'recent' | 'idle' | 'name'
+
+/** The two questions the per-member panel answers: what they did in the app,
+ *  and who they met through it. */
+type PanelTab = 'trail' | 'partners'
+
+const PANEL_TABS: ReadonlyArray<readonly [PanelTab, string]> = [
+  ['trail',    'Activity trail'],
+  ['partners', 'Playing partners'],
+]
 
 const RANGE_LABELS: Record<RangeKey, string> = {
   '7d':  'Last 7 days',
@@ -103,7 +114,7 @@ interface Report {
   areas: AreaStat[]
   daily: DailyPoint[]
   members: MemberRow[]
-  courses: Array<{ id: string; name: string }>
+  courses: Array<{ id: string; name: string; city: string | null; state: string | null }>
 }
 
 /** Matches the admin field styling used across the other admin panels, passed
@@ -131,8 +142,13 @@ const PAGE_SIZE_OPTIONS: SelectOption[] = PAGE_SIZES.map(size => ({
   label: `${size} per page`,
 }))
 
+/** Placed on the roster row, not in the scope row above: like search and
+ *  engagement, it picks out rows to work through without changing what the
+ *  adoption rate and the area cards are measured against. */
+const TAG_OPTION_ALL: SelectOption = { value: 'all', label: 'Any GHL tag' }
+
 const AREA_OPTIONS: SelectOption[] = [
-  { value: 'all', label: 'All areas' },
+  { value: 'all', label: 'App functions' },
   ...ACTIVITY_AREAS.map(name => ({ value: name, label: AREA_LABELS[name] })),
 ]
 
@@ -142,20 +158,49 @@ export default function AdminAnalyticsPage() {
   const [area, setArea]                   = useState<ActivityArea | 'all'>('all')
   const [kind, setKind]                   = useState<KindFilter>('all')
   const [courseId, setCourseId]           = useState<string>('all')
+  // The market a club sits in, above the club itself — one community can hold
+  // several courses, and "how is San Diego using the app" is the question that
+  // gets asked before "how is Aviara". Several at once, because comparing two
+  // markets against one another is the next question after that; empty means
+  // every one of them.
+  const [communities, setCommunities]     = useState<string[]>([])
   const [includeAdmins, setIncludeAdmins] = useState(false)
 
   // Roster-only controls.
   const [engagement, setEngagement] = useState<Engagement>('all')
   const [sort, setSort]             = useState<Sort>('activity')
+  const [tag, setTag]               = useState<string>('all')
   const [search, setSearch]         = useState('')
   const [page, setPage]             = useState(1)
   const [pageSize, setPageSize]     = useState<PageSize>(DEFAULT_PAGE_SIZE)
+
+  // The tag list comes from GHL itself, not from the tags our members happen
+  // to carry — an admin filtering on a campaign tag nobody has yet should see
+  // an empty roster, not a missing option.
+  const [ghlTags, setGhlTags] = useState<string[]>([])
+  useEffect(() => {
+    fetch('/api/admin/ghl/tags')
+      .then(r => r.json())
+      .then(d => setGhlTags(((d.tags ?? []) as Array<{ name?: string }>)
+        .map(t => (t.name ?? '').trim())
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b))))
+      // A GHL outage costs the tag filter its options, not the report.
+      .catch(() => setGhlTags([]))
+  }, [])
 
   const [report, setReport]     = useState<Report | null>(null)
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState<string | null>(null)
   const [selected, setSelected] = useState<MemberRow | null>(null)
+  const [panelTab, setPanelTab] = useState<PanelTab>('trail')
   const [exporting, setExporting] = useState(false)
+
+  // Each member opens on their trail. Carrying the previous member's tab over
+  // would answer a question nobody asked of this one.
+  useEffect(() => {
+    setPanelTab('trail')
+  }, [selected?.memberId])
 
   // Typing shouldn't refire the report on every keystroke.
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -167,8 +212,8 @@ export default function AdminAnalyticsPage() {
   /** Everything except paging — the server clamps an out-of-range page, but
    *  landing on page 7 of a 2-page result is still a worse read than page 1. */
   const filterKey = useMemo(
-    () => [range, area, kind, courseId, includeAdmins, engagement, debouncedSearch].join('|'),
-    [range, area, kind, courseId, includeAdmins, engagement, debouncedSearch]
+    () => [range, area, kind, communities.join(','), courseId, includeAdmins, engagement, tag, debouncedSearch].join('|'),
+    [range, area, kind, communities, courseId, includeAdmins, engagement, tag, debouncedSearch]
   )
   useEffect(() => { setPage(1) }, [filterKey, pageSize])
 
@@ -176,11 +221,15 @@ export default function AdminAnalyticsPage() {
     const params = new URLSearchParams({ range, sort, engagement })
     if (area !== 'all')     params.set('area', area)
     if (kind !== 'all')     params.set('kind', kind)
+    // Appended one at a time rather than joined: a community label is
+    // "City, State", so any delimiter worth reading is already in the value.
+    communities.forEach(name => params.append('community', name))
     if (courseId !== 'all') params.set('courseId', courseId)
+    if (tag !== 'all')      params.set('tag', tag)
     if (debouncedSearch)    params.set('search', debouncedSearch)
     if (includeAdmins)      params.set('includeAdmins', '1')
     return params
-  }, [range, sort, engagement, area, kind, courseId, debouncedSearch, includeAdmins])
+  }, [range, sort, engagement, area, kind, communities, courseId, tag, debouncedSearch, includeAdmins])
 
   const reportQuery = useMemo(() => {
     const params = baseParams()
@@ -217,19 +266,54 @@ export default function AdminAnalyticsPage() {
 
   const areaOptions = AREA_OPTIONS
 
+  const tagOptions: SelectOption[] = useMemo(
+    () => [TAG_OPTION_ALL, ...ghlTags.map(name => ({ value: name, label: name }))],
+    [ghlTags]
+  )
+
+  /** Every community the active courses fall into. Derived from the same rows
+   *  the course dropdown is built from, so the two can't disagree about which
+   *  club belongs where. */
+  const communityOptions: SelectOption[] = useMemo(
+    () => communitiesOf(report?.courses ?? []).map(name => ({ value: name, label: name })),
+    [report]
+  )
+
+  /** Narrowed by the communities above it: offering a club in a market that
+   *  isn't selected would be offering a combination that resolves to an empty
+   *  report. */
   const courseOptions: SelectOption[] = useMemo(
     () => [
       { value: 'all', label: 'Any course' },
-      ...(report?.courses ?? []).map(course => ({ value: course.id, label: course.name })),
+      ...(report?.courses ?? [])
+        .filter(course => communities.length === 0 || communities.includes(communityOf(course)))
+        .map(course => ({ value: course.id, label: course.name })),
     ],
-    [report]
+    [report, communities]
+  )
+
+  /** Narrowing the communities drops a course that's no longer among them,
+   *  rather than leaving a selection the dropdown doesn't list. */
+  const changeCommunities = useCallback(
+    (next: string[]) => {
+      setCommunities(next)
+      const stillListed =
+        courseId === 'all' ||
+        (report?.courses ?? []).some(
+          c => c.id === courseId && (next.length === 0 || next.includes(communityOf(c)))
+        )
+      if (!stillListed) setCourseId('all')
+    },
+    [courseId, report]
   )
 
   const clearFilters = useCallback(() => {
     setArea('all')
     setKind('all')
+    setCommunities([])
     setCourseId('all')
     setEngagement('all')
+    setTag('all')
   }, [])
 
   const focusAreas = useMemo(
@@ -253,7 +337,7 @@ export default function AdminAnalyticsPage() {
     [report]
   )
 
-  /** Exports the whole filtered roster, not the page on screen — a CSV of 25
+  /** Exports the whole filtered roster, not the page on screen — a CSV of 10
    *  rows when the filter matched 400 is a quietly wrong answer. */
   async function exportCsv() {
     if (exporting) return
@@ -301,7 +385,7 @@ export default function AdminAnalyticsPage() {
   return (
     <div className="p-4 sm:p-8">
       <AdminPageHeader
-        title="Usage & Activity"
+        title="Utilization"
         description="Who is using the app, who isn't, and what they do once they're in."
         action={
           <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
@@ -321,15 +405,21 @@ export default function AdminAnalyticsPage() {
       />
 
       {/* ---- Scope filters: everything below re-cuts against these ---- */}
-      {/* One column on a phone, two on a tablet, a single row on desktop —
-          a wrapped row of half-width dropdowns is the worst of both. */}
-      <div className="-mt-2 mb-5 grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-center gap-2">
+      {/* A grid at every width rather than a flex row that wraps. The admin
+          sidebar takes 240px, so "desktop" here is about 720px of content at
+          lg — not enough for four dropdowns and the admin toggle in a line,
+          and a flex row that wraps breaks wherever it runs out rather than
+          where the columns are. Four across only at xl, where they fit.
+
+          Nothing spans: how many dropdowns render depends on how many courses
+          and communities exist, and a spanning cell leaves a hole beside
+          whichever count is odd. */}
+      <div className="-mt-2 mb-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
         <Select
           options={areaOptions}
           value={area}
           onChange={next => setArea(next as ActivityArea | 'all')}
-          searchPlaceholder="Search areas…"
-          className="lg:w-44"
+          searchPlaceholder="Search app functions…"
           triggerClassName={TRIGGER_CLASS}
         />
 
@@ -337,9 +427,20 @@ export default function AdminAnalyticsPage() {
           options={KIND_OPTIONS}
           value={kind}
           onChange={next => setKind(next as KindFilter)}
-          className="lg:w-44"
           triggerClassName={TRIGGER_CLASS}
         />
+
+        {communityOptions.length > 0 && (
+          <MultiSelect
+            options={communityOptions}
+            values={communities}
+            onChange={changeCommunities}
+            emptyLabel="Any community"
+            countNoun="communities"
+            searchPlaceholder="Search communities…"
+            triggerClassName={TRIGGER_CLASS}
+          />
+        )}
 
         {courseOptions.length > 2 && (
           <Select
@@ -347,12 +448,13 @@ export default function AdminAnalyticsPage() {
             value={courseId}
             onChange={setCourseId}
             searchPlaceholder="Search courses…"
-            className="lg:w-52"
             triggerClassName={TRIGGER_CLASS}
           />
         )}
 
-        <div className="flex items-center justify-between gap-3 sm:col-span-2 lg:col-span-1">
+        {/* Wraps rather than spreading: in a grid cell this narrow, pushing the
+            two to opposite edges reads as two unrelated controls. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 min-h-[38px]">
           <label className="flex items-center gap-2 text-sm text-gray-600 whitespace-nowrap">
             <input
               type="checkbox"
@@ -363,7 +465,7 @@ export default function AdminAnalyticsPage() {
             Include admins
           </label>
 
-          {(area !== 'all' || kind !== 'all' || courseId !== 'all' || engagement !== 'all') && (
+          {(area !== 'all' || kind !== 'all' || communities.length > 0 || courseId !== 'all' || engagement !== 'all' || tag !== 'all') && (
             <button
               onClick={clearFilters}
               className="text-xs font-medium text-green-800 hover:text-green-900 whitespace-nowrap"
@@ -533,30 +635,36 @@ export default function AdminAnalyticsPage() {
           )}
 
           {/* ---- Member roster ------------------------------- */}
-          <div className="mt-8 mb-3 flex flex-col gap-2 lg:flex-row lg:items-center">
-            <h2 className="text-sm font-semibold text-gray-800 lg:mr-2 whitespace-nowrap">
-              Members
-              {pagination && pagination.total > 0 && (
-                <span className="ml-2 font-normal text-gray-400">
-                  {firstRow}–{lastRow} of {pagination.total}
-                </span>
-              )}
-            </h2>
+          {/* Two lines, always: the count and the search box, then the
+              controls. The single-row version needed about 1150px and had
+              720px to work with at lg — the sidebar eats 240 of the viewport
+              — so it squeezed every dropdown to unreadable and pushed Export
+              off the end. Four across only at xl, where the width is real. */}
+          <div className="mt-8 mb-3 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <h2 className="text-sm font-semibold text-gray-800 sm:mr-2 whitespace-nowrap">
+                Members
+                {pagination && pagination.total > 0 && (
+                  <span className="ml-2 font-normal text-gray-400">
+                    {firstRow}–{lastRow} of {pagination.total}
+                  </span>
+                )}
+              </h2>
 
-            <input
-              type="search"
-              placeholder="Search name or email…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full lg:flex-1 lg:min-w-[200px] px-4 py-2 text-sm border border-gray-200 rounded-xl outline-none focus:border-green-500"
-            />
+              <input
+                type="search"
+                placeholder="Search name or email…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full sm:flex-1 sm:min-w-[180px] px-4 py-2 text-sm border border-gray-200 rounded-xl outline-none focus:border-green-500"
+              />
+            </div>
 
-            <div className="grid grid-cols-2 lg:flex gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
               <Select
                 options={ENGAGEMENT_OPTIONS}
                 value={engagement}
                 onChange={next => setEngagement(next as Engagement)}
-                className="lg:w-52"
                 triggerClassName={TRIGGER_CLASS}
               />
 
@@ -564,14 +672,21 @@ export default function AdminAnalyticsPage() {
                 options={SORT_OPTIONS}
                 value={sort}
                 onChange={next => setSort(next as Sort)}
-                className="lg:w-48"
+                triggerClassName={TRIGGER_CLASS}
+              />
+
+              <Select
+                options={tagOptions}
+                value={tag}
+                onChange={setTag}
+                searchPlaceholder="Search GHL tags…"
                 triggerClassName={TRIGGER_CLASS}
               />
 
               <button
                 onClick={exportCsv}
                 disabled={exporting}
-                className="col-span-2 lg:col-span-1 px-3 py-2 text-sm font-medium rounded-xl bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors whitespace-nowrap disabled:opacity-50"
+                className="px-3 py-2 text-sm font-medium rounded-xl bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors whitespace-nowrap disabled:opacity-50"
               >
                 {exporting ? 'Exporting…' : 'Export CSV'}
               </button>
@@ -745,7 +860,10 @@ export default function AdminAnalyticsPage() {
           {/* ---- Site-wide feed ------------------------------ */}
           <div className="mt-8">
             <AdminCard title="Recent activity">
-              <ActivityFeed query={feedQuery} />
+              {/* Ten, then "Load older activity" — this sits at the bottom of
+                  an already long page, and its job is to show what just
+                  happened, not to be scrolled through. */}
+              <ActivityFeed query={feedQuery} pageSize={10} />
             </AdminCard>
           </div>
         </div>
@@ -779,14 +897,54 @@ export default function AdminAnalyticsPage() {
               <Fact label="Member since" value={format(new Date(selected.joinedAt), 'd MMM yyyy')} />
             </div>
 
+            {/* Two separate bodies of evidence about the same person, not
+                two views of one — the trail is this report's window, the
+                partners list is every round they've ever been on. Tabs keep
+                that boundary visible instead of running them together. */}
             <div className="px-5 py-4">
-              <p className="text-xs uppercase tracking-widest text-gray-400 mb-3">Activity trail</p>
-              <ActivityFeed
-                query={`${feedQuery}&memberId=${selected.memberId}`}
-                showMember={false}
-                emptyLabel="Nothing recorded for this member in this window."
-                pageSize={30}
-              />
+              <div
+                className="flex rounded-xl bg-gray-100 p-1 mb-4"
+                role="tablist"
+                aria-label="Member detail"
+              >
+                {PANEL_TABS.map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    id={`member-panel-tab-${key}`}
+                    aria-selected={panelTab === key}
+                    aria-controls={`member-panel-${key}`}
+                    onClick={() => setPanelTab(key)}
+                    className={`flex-1 rounded-lg py-2 text-xs font-semibold transition-colors ${
+                      panelTab === key
+                        ? 'bg-white text-green-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {panelTab === 'trail' ? (
+                <div role="tabpanel" id="member-panel-trail" aria-labelledby="member-panel-tab-trail">
+                  <ActivityFeed
+                    query={`${feedQuery}&memberId=${selected.memberId}`}
+                    showMember={false}
+                    emptyLabel="Nothing recorded for this member in this window."
+                    pageSize={30}
+                  />
+                </div>
+              ) : (
+                <div role="tabpanel" id="member-panel-partners" aria-labelledby="member-panel-tab-partners">
+                  {/* Deliberately outside the report's date range — see the
+                      route. Said here so the figures aren't read as a cut of
+                      the window the rest of the panel uses. */}
+                  <p className="text-xs text-gray-400 mb-3">Every round to date, whatever the range above.</p>
+                  <PlayingPartners memberId={selected.memberId} />
+                </div>
+              )}
             </div>
           </aside>
         </div>

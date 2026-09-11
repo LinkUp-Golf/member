@@ -541,7 +541,7 @@ export interface HostedEvent {
   created_at: string
   updated_at: string
   // Enriched in API responses
-  /** member_guest_rate + HOST_MEMBER_PRICE_MARKUP_USD. */
+  /** member_guest_rate plus HOST_MEMBER_PRICE_MARKUP_PERCENT of it. */
   member_price?: number
   filled_spots?: number
   remaining_spots?: number

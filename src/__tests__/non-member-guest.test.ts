@@ -14,7 +14,7 @@ vi.mock('@/lib/sync', () => ({
 import { getContactByEmail, createContact, addTagToContact } from '@/lib/ghl/client'
 import { syncMember } from '@/lib/sync'
 import { provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
-import { ALL_ACCESS_TAGS } from '@/lib/ghl/tags'
+import { ALL_ACCESS_TAGS, MEMBER_GUEST_TAG } from '@/lib/ghl/tags'
 
 const mockedLookup = vi.mocked(getContactByEmail)
 const mockedCreate = vi.mocked(createContact)
@@ -79,8 +79,25 @@ describe('provisionNonMemberGuest', () => {
     expect(contactId).toBe('contact-new')
     expect(mockedCreate).toHaveBeenCalledOnce()
     // Every access tag, or the app won't recognise them and GHL's membership
-    // workflows won't fire.
-    expect(mockedTag).toHaveBeenCalledTimes(ALL_ACCESS_TAGS.length)
+    // workflows won't fire — plus member-guest, so GHL can tell someone a
+    // member brought along from someone who bought a membership.
+    expect(mockedTag).toHaveBeenCalledTimes(ALL_ACCESS_TAGS.length + 1)
+    for (const tag of [...ALL_ACCESS_TAGS, MEMBER_GUEST_TAG]) {
+      expect(mockedTag).toHaveBeenCalledWith('contact-new', tag)
+    }
+  })
+
+  it('mirrors the guest tag onto the member row it syncs', async () => {
+    // members.ghl_tags is what the app reads; a tag that only exists in GHL
+    // until the next full sync is a tag the app can't act on today.
+    const { supabase } = fakeSupabase()
+
+    await provisionNonMemberGuest(GUEST, supabase)
+
+    expect(mockedSync).toHaveBeenCalledOnce()
+    const [{ contact }] = mockedSync.mock.calls[0] as [{ contact: { tags: string[] } }]
+    expect(contact.tags).toContain(MEMBER_GUEST_TAG)
+    for (const tag of ALL_ACCESS_TAGS) expect(contact.tags).toContain(tag)
   })
 
   it('reuses an existing contact rather than creating a second one', async () => {

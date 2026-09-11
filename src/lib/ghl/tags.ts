@@ -39,6 +39,21 @@ export const PARTNER_ROLE_TAG = 'referral-partner'
 export const HOST_ROLE_TAG = 'host'
 export const ROLE_ACCESS_TAGS = [PARTNER_ROLE_TAG, HOST_ROLE_TAG] as const
 
+// ---- Guest tag ----------------------------------------------
+// Someone a member brought onto a round who wasn't in GHL at all — added by
+// name and email at booking time, then provisioned a contact and a member row
+// so they can be booked and reminded like anyone else.
+//
+// They carry the course access tags (they're playing), which makes them
+// indistinguishable in GHL from someone who bought a membership. This marks
+// how they arrived, so GHL can work them as the leads they are rather than
+// nurture them as members who never paid.
+//
+// Deliberately NOT in ALL_ACCESS_TAGS or ROLE_ACCESS_TAGS: it grants nothing
+// and gates nothing. It's a provenance label, and adding it to the login gate
+// would let a removed membership keep its access.
+export const MEMBER_GUEST_TAG = 'member-guest'
+
 /** Every tag that lets someone into the app — course/membership tags plus roles. */
 export const ALL_LOGIN_TAGS = [...ALL_ACCESS_TAGS, ...ROLE_ACCESS_TAGS] as string[]
 
@@ -103,6 +118,11 @@ export function hasPartnerTag(tags: string[]): boolean {
 /** Whether the person carries the host role tag. */
 export function hasHostTag(tags: string[]): boolean {
   return holds(tags, HOST_ROLE_TAG)
+}
+
+/** Whether the person came in as a member's guest rather than as a member. */
+export function hasMemberGuestTag(tags: string[]): boolean {
+  return holds(tags, MEMBER_GUEST_TAG)
 }
 
 /**
