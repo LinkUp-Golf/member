@@ -25,6 +25,7 @@ import {
   Badge,
 } from '@/components/admin/AdminUI'
 import ActivityFeed from '@/components/admin/ActivityFeed'
+import PlayingPartners from '@/components/admin/PlayingPartners'
 import Select, { type SelectOption } from '@/components/ui/Select'
 import MultiSelect from '@/components/ui/MultiSelect'
 import ActivityCharts, { type DailyPoint } from '@/components/admin/ActivityCharts'
@@ -37,6 +38,15 @@ type RangeKey = '7d' | '30d' | '90d' | 'all'
 type KindFilter = 'all' | 'view' | 'action'
 type Engagement = 'all' | 'active' | 'dormant' | 'never'
 type Sort = 'activity' | 'recent' | 'idle' | 'name'
+
+/** The two questions the per-member panel answers: what they did in the app,
+ *  and who they met through it. */
+type PanelTab = 'trail' | 'partners'
+
+const PANEL_TABS: ReadonlyArray<readonly [PanelTab, string]> = [
+  ['trail',    'Activity trail'],
+  ['partners', 'Playing partners'],
+]
 
 const RANGE_LABELS: Record<RangeKey, string> = {
   '7d':  'Last 7 days',
@@ -183,7 +193,14 @@ export default function AdminAnalyticsPage() {
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState<string | null>(null)
   const [selected, setSelected] = useState<MemberRow | null>(null)
+  const [panelTab, setPanelTab] = useState<PanelTab>('trail')
   const [exporting, setExporting] = useState(false)
+
+  // Each member opens on their trail. Carrying the previous member's tab over
+  // would answer a question nobody asked of this one.
+  useEffect(() => {
+    setPanelTab('trail')
+  }, [selected?.memberId])
 
   // Typing shouldn't refire the report on every keystroke.
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -880,14 +897,54 @@ export default function AdminAnalyticsPage() {
               <Fact label="Member since" value={format(new Date(selected.joinedAt), 'd MMM yyyy')} />
             </div>
 
+            {/* Two separate bodies of evidence about the same person, not
+                two views of one — the trail is this report's window, the
+                partners list is every round they've ever been on. Tabs keep
+                that boundary visible instead of running them together. */}
             <div className="px-5 py-4">
-              <p className="text-xs uppercase tracking-widest text-gray-400 mb-3">Activity trail</p>
-              <ActivityFeed
-                query={`${feedQuery}&memberId=${selected.memberId}`}
-                showMember={false}
-                emptyLabel="Nothing recorded for this member in this window."
-                pageSize={30}
-              />
+              <div
+                className="flex rounded-xl bg-gray-100 p-1 mb-4"
+                role="tablist"
+                aria-label="Member detail"
+              >
+                {PANEL_TABS.map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    id={`member-panel-tab-${key}`}
+                    aria-selected={panelTab === key}
+                    aria-controls={`member-panel-${key}`}
+                    onClick={() => setPanelTab(key)}
+                    className={`flex-1 rounded-lg py-2 text-xs font-semibold transition-colors ${
+                      panelTab === key
+                        ? 'bg-white text-green-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {panelTab === 'trail' ? (
+                <div role="tabpanel" id="member-panel-trail" aria-labelledby="member-panel-tab-trail">
+                  <ActivityFeed
+                    query={`${feedQuery}&memberId=${selected.memberId}`}
+                    showMember={false}
+                    emptyLabel="Nothing recorded for this member in this window."
+                    pageSize={30}
+                  />
+                </div>
+              ) : (
+                <div role="tabpanel" id="member-panel-partners" aria-labelledby="member-panel-tab-partners">
+                  {/* Deliberately outside the report's date range — see the
+                      route. Said here so the figures aren't read as a cut of
+                      the window the rest of the panel uses. */}
+                  <p className="text-xs text-gray-400 mb-3">Every round to date, whatever the range above.</p>
+                  <PlayingPartners memberId={selected.memberId} />
+                </div>
+              )}
             </div>
           </aside>
         </div>
