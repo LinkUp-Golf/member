@@ -29,6 +29,7 @@ import {
 import VenueDayDetailSheet, {
   type VenueDayDetail,
 } from "@/components/calendar/VenueDayDetailSheet";
+import type { CalendarPlayer } from "@/lib/bookings/players";
 import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
 import { bookingAmountDue } from "@/lib/bookings/price";
 import {
@@ -3870,6 +3871,25 @@ function EventSelectionScreen({
     };
   }, [calMonth]);
 
+  // Who's playing, for the same month. Its own request: availability waits on
+  // every venue's GHL calendar, and the faces on a day shouldn't. A failed load
+  // just means no faces — the calendar is still the thing a member came for.
+  const [calPlayers, setCalPlayers] = useState<Record<string, CalendarPlayer[]>>({});
+  useEffect(() => {
+    let current = true;
+    setCalPlayers({});
+    fetch(`/api/bookings/playing?month=${format(calMonth, "yyyy-MM")}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!current || !d?.days || typeof d.days !== "object") return;
+        setCalPlayers(d.days as Record<string, CalendarPlayer[]>);
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [calMonth]);
+
   // Colours are assigned over the whole month's venue list, exactly as the grid
   // does it, so a chip in the drawer matches its dots on the calendar.
   //
@@ -4197,6 +4217,7 @@ function EventSelectionScreen({
             pinnedVenues={pinnedVenues}
             pinnedNextAvailable={pinnedNext}
             onPickOpening={openDayDetail}
+            players={calPlayers}
           />
         )}
 
