@@ -13,6 +13,7 @@ import { openSpotsByDate } from '@/lib/bookings/availability'
 import { sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
 import { HOST_EVENT_GUEST_RATE_USD } from '@/lib/constants'
+import { parsePaymentOptions, coursePaymentOptions } from '@/lib/bookings/payment-options'
 import type { Course, HostedEvent } from '@/types'
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
@@ -79,6 +80,13 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     teeTime = typeof body.tee_time === 'string' && body.tee_time.trim()
       ? sanitiseText(body.tee_time.trim())
       : null
+
+    // How members pay at this venue. Optional — an older client doesn't send
+    // it, and then the venue's setting is left alone — but if sent it has to be
+    // a real, non-empty set, because it's written onto the course below.
+    if (body.payment_options !== undefined && !parsePaymentOptions(body.payment_options)) {
+      return NextResponse.json({ error: 'Choose at least one payment option.' }, { status: 400 })
+    }
 
     // A host scoped to specific venues can only propose events there. An empty
     // set means unrestricted (legacy hosts), matching the event form's fallback.
@@ -188,6 +196,25 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
         )
       }
       spotsFor.set(date, spots)
+    }
+  }
+
+  // Payment options belong to the venue, not to these rounds: every booking at
+  // the course follows them. The host sets them from the event form — the
+  // venue checks above are what entitle them to — so they're written before the
+  // rounds, and a failure stops here rather than listing rounds on terms the
+  // host didn't choose.
+  const paymentOptions = parsePaymentOptions(body.payment_options)
+  if (
+    paymentOptions &&
+    paymentOptions.join(',') !== coursePaymentOptions(course).join(',')
+  ) {
+    const { error: optionsError } = await admin
+      .from('courses')
+      .update({ payment_options: paymentOptions })
+      .eq('id', courseId)
+    if (optionsError) {
+      return NextResponse.json({ error: optionsError.message }, { status: 500 })
     }
   }
 

@@ -11,6 +11,7 @@ import { APPROVABLE_STATUSES, canApproveEvent } from '@/lib/hosts/events'
 import { openSpotsByDate } from '@/lib/bookings/availability'
 import { sendPushToMember, NotificationTemplates } from '@/lib/push'
 import { MAX_PINNED_COURSES } from '@/lib/constants'
+import { parsePaymentOptions } from '@/lib/bookings/payment-options'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 import type { Course } from '@/types'
@@ -339,6 +340,15 @@ export const PATCH = withAuth(
       }
     }
 
+    // At least one known option — a course with no way to pay can't be booked.
+    if ('payment_options' in body) {
+      const options = parsePaymentOptions(body.payment_options)
+      if (!options) {
+        return NextResponse.json({ error: 'Choose at least one payment option' }, { status: 400 })
+      }
+      body.payment_options = options
+    }
+
     // Calendar uniqueness on edit: reject if the new calendar is already used by a different course
     if ('ghl_calendar_id' in body && body.ghl_calendar_id) {
       const { data: calConflict } = await admin
@@ -362,7 +372,7 @@ export const PATCH = withAuth(
       'booking_rules', 'booking_url', 'payment_url', 'required_tags', 'meeting_interval_mins',
       'meeting_duration_mins', 'min_scheduling_notice_mins', 'date_range_days',
       'pre_buffer_mins', 'post_buffer_mins', 'seats_per_class', 'max_players_per_day',
-      'custom_slots_enabled', 'pinned',
+      'custom_slots_enabled', 'pinned', 'payment_options',
     ]
     const updates: Record<string, unknown> = {}
     for (const key of allowed) {

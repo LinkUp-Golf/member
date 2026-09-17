@@ -18,7 +18,7 @@ export const GET = withHostAuth(async (_req: NextRequest, ctx: HostAuthContext) 
 
   const { data, error } = await admin
     .from('host_venues')
-    .select('course:courses(id, name, city, state, address, logo_url, map_link, booking_url, cost_per_player, description, approval_status, active)')
+    .select('course:courses(id, name, city, state, address, logo_url, map_link, booking_url, cost_per_player, description, approval_status, payment_options, active)')
     .eq('host_id', ctx.host.id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -43,6 +43,7 @@ export const GET = withHostAuth(async (_req: NextRequest, ctx: HostAuthContext) 
     cost_per_player: number | null
     description: string | null
     approval_status: string
+    payment_options: string[] | null
     active: boolean
   }
 

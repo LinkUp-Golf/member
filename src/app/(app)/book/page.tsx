@@ -31,6 +31,13 @@ import VenueDayDetailSheet, {
 } from "@/components/calendar/VenueDayDetailSheet";
 import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
 import { bookingAmountDue } from "@/lib/bookings/price";
+import {
+  coursePaymentOptions,
+  isPaidAtClub,
+  offersPayAtClub,
+  offersPayNow,
+  type PaymentOption,
+} from "@/lib/bookings/payment-options";
 import CreditCouponModal from "@/components/credits/CreditCouponModal";
 import { useCreditWallet } from "@/hooks/useCreditWallet";
 import {
@@ -75,6 +82,8 @@ interface PendingPayment {
   booking_date: string;
   tee_time: string;
   payment_url: string | null;
+  // Which CTAs this row gets — the venue's checkout, the club, or both.
+  payment_options: PaymentOption[];
   status: string;
   player_name: string;
   target_member_id: string | null;
@@ -86,6 +95,22 @@ interface PendingPayment {
 
 function formatSlotTime(isoString: string): string {
   return formatTeeTime(isoString.split("T")[1]?.slice(0, 8) ?? "");
+}
+
+// Records that this round will be settled with the club on the day. Resolves to
+// an error to show, or null once the server has it — every surface that offers
+// "Pay at club" goes through here so they fail the same way.
+async function markPayAtClub(bookingId: string): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/bookings/${bookingId}/pay-at-club`, {
+      method: "POST",
+    });
+    if (res.ok) return null;
+    const data = await res.json().catch(() => ({}));
+    return data.error ?? "Couldn't record that. Try again.";
+  } catch {
+    return "Network error. Check your connection and try again.";
+  }
 }
 
 export default function BookPage() {
@@ -122,6 +147,8 @@ export default function BookPage() {
     // page, so the link belongs to the course that was just booked — there is
     // no single house payment link to fall back on.
     paymentUrl: string | null;
+    // Which ways the venue takes payment — decides the CTAs on the screen.
+    paymentOptions: PaymentOption[];
     // What the member themselves owes. In a group booking each other player
     // holds a payment-due row of their own, so this is one share, not the bill.
     amountDue: number;
@@ -253,6 +280,17 @@ export default function BookPage() {
     }
   }
 
+  // A round the member chose to pay at the club stops being "payment due", so
+  // the list holding it and the banner both need to hear about it.
+  function handlePaidAtClub(bookingId: string) {
+    setMyBookings((prev) =>
+      prev.map((b) =>
+        b.id === bookingId ? { ...b, payment_method: "pay_at_club" } : b,
+      ),
+    );
+    loadPendingPayment();
+  }
+
   async function submitBooking(additionalPlayers: AdditionalPlayer[]) {
     if (!selectedSlot || !user || !selectedDate) return;
     setSubmitting(true);
@@ -289,6 +327,7 @@ export default function BookPage() {
           eventName: selectedEvent?.name ?? "Park Hyatt Aviara",
           paymentUrl:
             ownRow?.course?.payment_url ?? selectedEvent?.payment_url ?? null,
+          paymentOptions: coursePaymentOptions(ownRow?.course ?? selectedEvent),
           // The venue's green fee. amount_charged is written from it at
           // booking time, so it answers first; the course row behind it covers
           // a response we couldn't read a row out of.
@@ -333,6 +372,7 @@ export default function BookPage() {
       <SuccessScreen
         booking={confirmedBooking}
         wallet={creditWallet}
+        onPaidAtClub={handlePaidAtClub}
         onDone={() => {
           setStep("select");
           setSelectedSlot(null);
@@ -418,6 +458,7 @@ export default function BookPage() {
           loadingPendingBookings={loadingPendingBookings}
           refreshingPending={refreshingPending}
           wallet={creditWallet}
+          onPaidAtClub={handlePaidAtClub}
         />
       ) : (
         <MyBookingsTab
@@ -433,6 +474,7 @@ export default function BookPage() {
             setMyBookings((prev) => [...rows, ...prev])
           }
           wallet={creditWallet}
+          onPaidAtClub={handlePaidAtClub}
         />
       )}
     </AppShell>
@@ -542,6 +584,7 @@ function PendingPaymentBanner({
   pending,
   refreshing = false,
   wallet,
+  onPaidAtClub,
 }: {
   pending: PendingPayment[];
   // True while the parent is re-checking the pending-payment list (e.g. right
@@ -551,6 +594,8 @@ function PendingPaymentBanner({
   // The member's credit, so a host who earned it can settle a round with it
   // instead of cash. Absent (or empty) simply means no credit option is offered.
   wallet?: ReturnType<typeof useCreditWallet>;
+  /** A row was marked to be paid at the club — the parent refetches the list. */
+  onPaidAtClub?: (bookingId: string) => void;
 }) {
   const router = useRouter();
   const [index, setIndex] = useState(0);
@@ -560,6 +605,21 @@ function PendingPaymentBanner({
   const [messageError, setMessageError] = useState("");
   // The row whose credit modal is open — one at a time, keyed by booking id.
   const [creditRow, setCreditRow] = useState<PendingPayment | null>(null);
+  // The row whose "Pay at club" request is in flight.
+  const [markingId, setMarkingId] = useState<string | null>(null);
+  const [payError, setPayError] = useState("");
+
+  async function payAtClub(row: PendingPayment) {
+    setMarkingId(row.id);
+    setPayError("");
+    const error = await markPayAtClub(row.id);
+    setMarkingId(null);
+    if (error) {
+      setPayError(error);
+      return;
+    }
+    onPaidAtClub?.(row.id);
+  }
 
   const groups = groupPendingPayments(pending);
   const current = groups[Math.min(index, groups.length - 1)];
@@ -697,9 +757,11 @@ function PendingPaymentBanner({
                     <MessageCircle className="w-3.5 h-3.5" strokeWidth={2} />
                   </button>
                 )}
-                {/* Credit is the other way to settle this row. Once a code
-                    exists the chip reports that instead of offering it again. */}
-                {(() => {
+                {/* Credit is the other way to settle this row through the
+                    checkout. Once a code exists the chip reports that instead
+                    of offering it again. A venue that doesn't take payment
+                    online has no checkout to spend it at. */}
+                {offersPayNow(row) && (() => {
                   const held = wallet?.couponForBooking(row.id) ?? null;
                   if (held) {
                     return (
@@ -725,30 +787,50 @@ function PendingPaymentBanner({
                     </button>
                   );
                 })()}
-                {row.payment_url ? (
-                  <a
-                    href={row.payment_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-disabled={refreshing}
-                    onClick={(e) => {
-                      if (refreshing) e.preventDefault();
-                    }}
-                    className={`text-xs font-semibold px-3 py-1.5 rounded-lg flex-shrink-0 ${
-                      refreshing ? "opacity-50 pointer-events-none" : ""
-                    }`}
-                    style={{ background: "var(--color-gold)", color: "var(--color-green-900)" }}
+                {/* Settling at the club is offered only where the venue takes
+                    it. It sits left of Pay so Pay stays the rightmost element
+                    on every row — unless it's the only way, when it takes the
+                    gold itself. */}
+                {offersPayAtClub(row) && (
+                  <button
+                    type="button"
+                    onClick={() => payAtClub(row)}
+                    disabled={refreshing || markingId === row.id}
+                    className="text-xs font-semibold px-2.5 py-1.5 rounded-lg flex-shrink-0 disabled:opacity-50"
+                    style={
+                      offersPayNow(row)
+                        ? { background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }
+                        : { background: "var(--color-gold)", color: "var(--color-green-900)" }
+                    }
                   >
-                    Pay →
-                  </a>
-                ) : (
-                  <span
-                    className="text-xs flex-shrink-0"
-                    style={{ color: "rgba(0,38,105,0.4)" }}
-                  >
-                    Payment link unavailable
-                  </span>
+                    {markingId === row.id ? "Saving…" : "Pay at club"}
+                  </button>
                 )}
+                {offersPayNow(row) &&
+                  (row.payment_url ? (
+                    <a
+                      href={row.payment_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-disabled={refreshing}
+                      onClick={(e) => {
+                        if (refreshing) e.preventDefault();
+                      }}
+                      className={`text-xs font-semibold px-3 py-1.5 rounded-lg flex-shrink-0 ${
+                        refreshing ? "opacity-50 pointer-events-none" : ""
+                      }`}
+                      style={{ background: "var(--color-gold)", color: "var(--color-green-900)" }}
+                    >
+                      Pay →
+                    </a>
+                  ) : (
+                    <span
+                      className="text-xs flex-shrink-0"
+                      style={{ color: "rgba(0,38,105,0.4)" }}
+                    >
+                      Payment link unavailable
+                    </span>
+                  ))}
               </div>
             ))}
           </div>
@@ -798,6 +880,11 @@ function PendingPaymentBanner({
           {messageError && (
             <p className="text-xs mt-1" style={{ color: "#b91c1c" }}>
               {messageError}
+            </p>
+          )}
+          {payError && (
+            <p className="text-xs mt-1" style={{ color: "#b91c1c" }}>
+              {payError}
             </p>
           )}
         </div>
@@ -1768,6 +1855,7 @@ function SuccessScreen({
   booking,
   onDone,
   onUpdateBooking,
+  onPaidAtClub,
   wallet,
 }: {
   booking: {
@@ -1777,10 +1865,12 @@ function SuccessScreen({
     bookingId: string | null;
     eventName: string;
     paymentUrl: string | null;
+    paymentOptions: PaymentOption[];
     amountDue: number;
   };
   onDone: () => void;
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
+  onPaidAtClub: (bookingId: string) => void;
   wallet?: ReturnType<typeof useCreditWallet>;
 }) {
   // A checkbox here, 'yes'/'no' on the wire: the question the member is asked
@@ -1789,6 +1879,31 @@ function SuccessScreen({
   const [submitting, setSubmitting] = useState(false);
   const [payingWithCredit, setPayingWithCredit] = useState(false);
   const showDinner = !!booking.bookingId && isAviaraEvent(booking.eventName);
+
+  // Which ways this venue takes payment. Pay now is the checkout link (and the
+  // only place credit can be spent); Pay at club marks the round and is done.
+  const venue = { payment_options: booking.paymentOptions };
+  const payNow = offersPayNow(venue);
+  const payAtClub = offersPayAtClub(venue) && !!booking.bookingId;
+  const [paidAtClub, setPaidAtClub] = useState(false);
+  const [markingAtClub, setMarkingAtClub] = useState(false);
+  const [atClubError, setAtClubError] = useState("");
+
+  async function handlePayAtClub() {
+    if (!booking.bookingId || markingAtClub) return;
+    setMarkingAtClub(true);
+    setAtClubError("");
+    const error = await markPayAtClub(booking.bookingId);
+    setMarkingAtClub(false);
+    if (error) {
+      setAtClubError(error);
+      return;
+    }
+    setPaidAtClub(true);
+    onPaidAtClub(booking.bookingId);
+  }
+  // Something to pay still on screen — the Back button steps down to outline.
+  const hasPayCta = !paidAtClub && ((payNow && !!booking.paymentUrl) || payAtClub);
 
   // Credit the member could put toward this round. Same rules as the payment
   // banner: a code is issued against a booking row, and only when the balance
@@ -1869,8 +1984,11 @@ function SuccessScreen({
           className="text-sm leading-relaxed"
           style={{ color: "rgba(0,38,105,0.6)" }}
         >
-          The slot is yours to pay for — your round is confirmed once payment is
-          complete.
+          {paidAtClub
+            ? "You're paying at the club — settle your round with them on the day."
+            : payNow
+              ? "The slot is yours to pay for — your round is confirmed once payment is complete."
+              : "The slot is yours — choose Pay at club below and settle your round with the club on the day."}
         </p>
         {booking.players > 1 && (
           <p
@@ -1885,27 +2003,56 @@ function SuccessScreen({
             its money separately, so this is that course's link and not a
             house-wide one. New tab, so this screen (and an unsaved dinner
             RSVP with it) survives the trip. */}
-        {booking.paymentUrl ? (
-          <a
-            href={booking.paymentUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn-gold btn-full !mt-4"
+        {paidAtClub ? (
+          <p
+            className="!mt-4 text-sm font-semibold rounded-xl px-3 py-2.5 text-center"
+            style={{ background: "rgba(34,197,94,0.08)", color: "#166534" }}
           >
-            Pay {formatUsd(booking.amountDue)} now →
-          </a>
-        ) : (
-          /* Every bookable course is required to have a payment link, so this
-             is the belt-and-braces case: say what happens instead of showing a
-             dead button. */
-          <p className="text-sm leading-relaxed" style={{ color: "#92640a" }}>
-            We&apos;ll email your payment link for this round.
+            ✓ Paid at club
+          </p>
+        ) : payNow ? (
+          booking.paymentUrl ? (
+            <a
+              href={booking.paymentUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-gold btn-full !mt-4"
+            >
+              Pay {formatUsd(booking.amountDue)} now →
+            </a>
+          ) : (
+            /* Every bookable course is required to have a payment link, so this
+               is the belt-and-braces case: say what happens instead of showing a
+               dead button. */
+            <p className="text-sm leading-relaxed" style={{ color: "#92640a" }}>
+              We&apos;ll email your payment link for this round.
+            </p>
+          )
+        ) : null}
+        {/* The other way this venue takes payment, when it takes it. Gold only
+            when it's the sole option — otherwise it sits under Pay now. */}
+        {!paidAtClub && payAtClub && (
+          <button
+            type="button"
+            onClick={handlePayAtClub}
+            disabled={markingAtClub}
+            className={cn(
+              "btn btn-full disabled:opacity-50",
+              payNow ? "btn-outline" : "btn-gold !mt-4",
+            )}
+          >
+            {markingAtClub ? "Saving…" : `Pay ${formatUsd(booking.amountDue)} at club`}
+          </button>
+        )}
+        {atClubError && (
+          <p className="text-xs" style={{ color: "#b91c1c" }}>
+            {atClubError}
           </p>
         )}
         {/* Credit is the second way to settle the same bill — the code is a
             discount typed into the venue's checkout, not a separate way to
             pay — so it sits under the Pay button rather than replacing it. */}
-        {heldCoupon ? (
+        {!payNow || paidAtClub ? null : heldCoupon ? (
           <>
             <button
               type="button"
@@ -1970,7 +2117,7 @@ function SuccessScreen({
           "btn disabled:opacity-40 disabled:cursor-not-allowed",
           // Paying is the action that matters here, so it keeps the gold. This
           // steps back to an outline rather than competing with it.
-          booking.paymentUrl ? "btn-outline" : "btn-primary",
+          hasPayCta ? "btn-outline" : "btn-primary",
         )}
       >
         {submitting ? "Saving…" : "Back to booking"}
@@ -2020,6 +2167,13 @@ const STATUS_LABELS: Record<
     color: "#166534",
     bg: "rgba(34,197,94,0.08)",
   },
+  // Not a booking status: an availability_confirmed row the member chose to
+  // settle at the club (payment_method 'pay_at_club'). See bookingDisplayStatus.
+  paid_at_club: {
+    label: "Paid at club",
+    color: "#166534",
+    bg: "rgba(34,197,94,0.08)",
+  },
   confirmed: {
     label: "Confirmed",
     color: "#166534",
@@ -2032,6 +2186,18 @@ const STATUS_LABELS: Record<
     bg: "rgba(107,114,128,0.08)",
   },
 };
+
+// What a row's badge says. A round being paid at the club keeps its pipeline
+// status underneath, but "Payment due" would be wrong for it — until GHL moves
+// it on, it reads "Paid at club".
+function bookingDisplayStatus(row: {
+  status: string;
+  payment_method?: string | null;
+}): string {
+  return row.status === "availability_confirmed" && isPaidAtClub(row)
+    ? "paid_at_club"
+    : row.status;
+}
 
 function BookingStatusBadge({ status }: { status: string }) {
   const s = STATUS_LABELS[status] ?? {
@@ -2495,12 +2661,14 @@ function MyBookingsTab({
   onUpdateBooking,
   onPlayersAdded,
   wallet,
+  onPaidAtClub,
 }: {
   bookings: Booking[];
   onRefresh: () => void;
   onSwitchToBook: () => void;
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
   onPlayersAdded: (rows: Booking[]) => void;
+  onPaidAtClub: (bookingId: string) => void;
   // Passed down rather than fetched here: the page already holds the member's
   // credit for the payment banner, and two copies would mean two requests.
   wallet?: ReturnType<typeof useCreditWallet>;
@@ -2630,6 +2798,7 @@ function MyBookingsTab({
                 onEditGuest={setEditTarget}
                 onAddPlayer={setAddTarget}
                 wallet={wallet}
+                onPaidAtClub={onPaidAtClub}
               />
             ))}
           </div>
@@ -2729,12 +2898,14 @@ function BookingCard({
   onEditGuest,
   onAddPlayer,
   wallet,
+  onPaidAtClub,
 }: {
   group: BookingGroup;
   userId: string | undefined;
   onCancel: (target: CancelTarget) => void;
   onEditGuest: (target: EditGuestTarget) => void;
   onAddPlayer: (target: AddPlayerTarget) => void;
+  onPaidAtClub: (bookingId: string) => void;
   // Credit, so a payable row here offers the same choice the payment banner
   // does. Undefined means the member has none and nothing extra is rendered.
   wallet?: ReturnType<typeof useCreditWallet>;
@@ -2745,6 +2916,24 @@ function BookingCard({
     id: string;
     amountDue: number;
   } | null>(null);
+  // The row whose "Pay at club" request is in flight, and what went wrong last.
+  const [markingId, setMarkingId] = useState<string | null>(null);
+  const [payError, setPayError] = useState("");
+  // How this venue takes payment — every row in the group is at the same one.
+  const payNow = offersPayNow(group.primary.course);
+  const payAtClub = offersPayAtClub(group.primary.course);
+
+  async function payRowAtClub(rowId: string) {
+    setMarkingId(rowId);
+    setPayError("");
+    const error = await markPayAtClub(rowId);
+    setMarkingId(null);
+    if (error) {
+      setPayError(error);
+      return;
+    }
+    onPaidAtClub(rowId);
+  }
 
   const iAmBooker = group.primary.member_id === userId;
   const activePlayers = group.players.filter((p) => p.status !== "cancelled");
@@ -2791,10 +2980,12 @@ function BookingCard({
         {
           id: group.primary.id,
           name: "You",
-          status: group.primary.status,
+          status: bookingDisplayStatus(group.primary),
           ghlBookingId: group.primary.ghl_booking_id ?? null,
           canCancel: canCancelPrimary,
-          canPay: group.primary.status === "availability_confirmed",
+          canPay:
+            group.primary.status === "availability_confirmed" &&
+            !isPaidAtClub(group.primary),
           amountDue: bookingAmountDue(group.primary),
           isYou: true,
           adminNotes: group.primary.admin_notes ?? null,
@@ -2803,10 +2994,10 @@ function BookingCard({
         ...activePlayers.map((p) => ({
           id: p.id,
           name: p.guest_name ?? "Guest",
-          status: p.status,
+          status: bookingDisplayStatus(p),
           ghlBookingId: p.ghl_booking_id ?? null,
           canCancel: hoursUntil > 0 && CANCELLABLE.includes(p.status),
-          canPay: p.status === "availability_confirmed",
+          canPay: p.status === "availability_confirmed" && !isPaidAtClub(p),
           amountDue: bookingAmountDue(p),
           isYou: false,
           adminNotes: p.admin_notes ?? null,
@@ -2826,12 +3017,13 @@ function BookingCard({
           {
             id: myRow?.id ?? group.primary.id,
             name: "You",
-            status: myRow?.status ?? group.primary.status,
+            status: bookingDisplayStatus(myRow ?? group.primary),
             ghlBookingId: myRow?.ghl_booking_id ?? null,
             canCancel: myRow
               ? hoursUntil > 0 && CANCELLABLE.includes(myRow.status)
               : false,
-            canPay: myRow?.status === "availability_confirmed",
+            canPay:
+              myRow?.status === "availability_confirmed" && !isPaidAtClub(myRow),
             amountDue: bookingAmountDue(myRow ?? group.primary),
             isYou: true,
             adminNotes: myRow?.admin_notes ?? null,
@@ -2840,7 +3032,7 @@ function BookingCard({
           {
             id: group.primary.id,
             name: myRow?.booker_name ?? "Booker",
-            status: group.primary.status,
+            status: bookingDisplayStatus(group.primary),
             ghlBookingId: null,
             canCancel: false,
             canPay: false,
@@ -2852,7 +3044,7 @@ function BookingCard({
           ...otherPlayers.map((p) => ({
             id: p.id,
             name: p.guest_name ?? "Guest",
-            status: p.status,
+            status: bookingDisplayStatus(p),
             ghlBookingId: null,
             canCancel: false,
             editablePlayer: null as AdditionalPlayer | null,
@@ -2998,7 +3190,7 @@ function BookingCard({
                 {!canPay && <BookingStatusBadge status={row.status} />}
                 {/* Credit, offered on the same row as the Pay link — or the code
                     already covering it, which is what the member needs by then. */}
-                {canPay && (() => {
+                {canPay && payNow && (() => {
                   const held = wallet?.couponForBooking(row.id) ?? null;
                   // Same rule as the payment banner: credit is only offered when
                   // it covers the row in full.
@@ -3020,7 +3212,28 @@ function BookingCard({
                     </button>
                   );
                 })()}
-                {canPay &&
+                {/* Pay at club, where the venue takes it. Shortened beside
+                    Pay → — this row also carries Edit and Cancel. */}
+                {canPay && payAtClub && (
+                  <button
+                    type="button"
+                    onClick={() => payRowAtClub(row.id)}
+                    disabled={markingId === row.id}
+                    className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0 disabled:opacity-50"
+                    style={
+                      payNow
+                        ? { background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }
+                        : { background: "rgba(146,100,10,0.1)", color: "#92640a" }
+                    }
+                  >
+                    {markingId === row.id
+                      ? "Saving…"
+                      : payNow
+                        ? "At club"
+                        : "Pay at club"}
+                  </button>
+                )}
+                {canPay && payNow &&
                   (group.primary.course?.payment_url ? (
                     <a
                       href={group.primary.course.payment_url}
@@ -3085,6 +3298,15 @@ function BookingCard({
               </div>
             );
           })}
+
+          {payError && (
+            <p
+              className="px-4 py-2 text-xs border-t"
+              style={{ color: "#b91c1c", borderColor: "rgba(0,38,105,0.06)" }}
+            >
+              {payError}
+            </p>
+          )}
 
           {/* Add player — booker only, upcoming & not full */}
           {canAddPlayers && (
@@ -3557,6 +3779,7 @@ function EventSelectionScreen({
   loadingPendingBookings,
   refreshingPending,
   wallet,
+  onPaidAtClub,
 }: {
   /** Venue, day and tee time all chosen at once — this goes to confirmation. */
   onSelect: (course: Course, date: string, slot: GHLBookingSlot) => void;
@@ -3565,6 +3788,8 @@ function EventSelectionScreen({
   refreshingPending: boolean;
   /** Credit, for the payment banner's "use credits" option. */
   wallet?: ReturnType<typeof useCreditWallet>;
+  /** A banner row was marked to be paid at the club. */
+  onPaidAtClub: (bookingId: string) => void;
 }) {
   // Every bookable venue, fetched once. The calendar plots availability, but
   // the venue's own details — price, address, rules, links — live on these
@@ -3889,6 +4114,7 @@ function EventSelectionScreen({
             pending={pendingBookings}
             refreshing={refreshingPending}
             wallet={wallet}
+            onPaidAtClub={onPaidAtClub}
           />
         )
       )}

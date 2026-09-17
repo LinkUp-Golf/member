@@ -36,6 +36,7 @@ import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findMembersWithPendingPayment } from '@/lib/bookings/pending-payment'
 import { provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
 import { bookingAmountDue } from '@/lib/bookings/price'
+import { coursePaymentOptions } from '@/lib/bookings/payment-options'
 import { format } from 'date-fns'
 import { titleCaseName } from '@/lib/utils'
 import type { AuthContext } from '@/lib/auth/types'
@@ -158,7 +159,7 @@ export const POST = withAuth(async (
   // ---- Resolve course + calendar settings ---------------------------------
   const { data: course } = await admin
     .from('courses')
-    .select('id, ghl_calendar_id, timezone, name, address, city, state, payment_url, meeting_duration_mins, max_players_per_day, cost_per_player')
+    .select('id, ghl_calendar_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, max_players_per_day, cost_per_player')
     .eq('id', primary.course_id)
     .single()
 
@@ -431,6 +432,7 @@ export const POST = withAuth(async (
     city: course.city,
     state: course.state,
     payment_url: course.payment_url ?? null,
+    payment_options: coursePaymentOptions(course),
     timezone: course.timezone,
     cost_per_player: course.cost_per_player ?? null,
   }

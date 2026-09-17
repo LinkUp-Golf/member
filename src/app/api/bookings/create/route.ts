@@ -28,6 +28,7 @@ import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
 import { buildCustomSlots } from '@/lib/bookings/availability'
 import { bookingAmountDue } from '@/lib/bookings/price'
+import { coursePaymentOptions, type PaymentOption } from '@/lib/bookings/payment-options'
 import { format } from 'date-fns'
 import { titleCaseName } from '@/lib/utils'
 import type { AdditionalPlayer } from '@/types'
@@ -255,11 +256,11 @@ export async function POST(request: NextRequest) {
   let resolvedCourseId: string = member.home_course_id
   // Course details echoed back on the created rows so the client can render the
   // correct course name immediately (the create RPC doesn't join `courses`).
-  let courseForResponse: { name: string; city: string; state: string; payment_url: string | null; timezone: string; cost_per_player: number | null } | null = null
+  let courseForResponse: { name: string; city: string; state: string; payment_url: string | null; payment_options: PaymentOption[]; timezone: string; cost_per_player: number | null } | null = null
 
   const { data: course } = await adminSupabase
     .from('courses')
-    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, meeting_duration_mins, cost_per_player')
+    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, cost_per_player')
     .eq('id', courseId || resolvedCourseId)
     .eq('approval_status', 'active')
     .single()
@@ -302,6 +303,7 @@ export async function POST(request: NextRequest) {
       city: course.city,
       state: course.state,
       payment_url: course.payment_url ?? null,
+      payment_options: coursePaymentOptions(course),
       timezone: course.timezone,
       cost_per_player: course.cost_per_player ?? null,
     }

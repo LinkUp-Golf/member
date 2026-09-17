@@ -22,6 +22,7 @@ import { canRedeemCredit, loadCreditSummary, loadMemberCoupons } from '@/lib/cre
 import { issueCreditCoupon, syncCreditCoupons, type CouponTarget } from '@/lib/credits/coupons'
 import { UNPAID_BOOKING_STATUSES } from '@/lib/bookings/pending-payment'
 import { bookingAmountDue } from '@/lib/bookings/price'
+import { isPaidAtClub, offersPayNow } from '@/lib/bookings/payment-options'
 import { memberPrice } from '@/lib/hosts/events'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -65,7 +66,7 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     // ---- Against a tee time awaiting payment ---------------------------
     const { data: booking } = await admin
       .from('bookings')
-      .select('id, member_id, player_member_id, course_id, status, amount_charged, course:courses!bookings_course_id_fkey(cost_per_player)')
+      .select('id, member_id, player_member_id, course_id, status, amount_charged, payment_method, course:courses!bookings_course_id_fkey(cost_per_player, payment_options)')
       .eq('id', bookingId)
       .maybeSingle()
 
@@ -83,10 +84,27 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
       )
     }
 
-    const course = Array.isArray(booking.course) ? booking.course[0] : booking.course
+    // A round settled at the club isn't paid through the checkout, which is the
+    // only place a credit code can be spent — so neither case can take one.
+    if (isPaidAtClub(booking)) {
+      return NextResponse.json(
+        { error: 'That round is being paid at the club.' },
+        { status: 409 }
+      )
+    }
+
+    const course = (Array.isArray(booking.course) ? booking.course[0] : booking.course) as
+      { cost_per_player: number | null; payment_options: string[] | null } | null
+    if (!offersPayNow(course)) {
+      return NextResponse.json(
+        { error: 'This venue doesn\'t take payment online, so credit can\'t be used here.' },
+        { status: 409 }
+      )
+    }
+
     const price = bookingAmountDue({
       amount_charged: booking.amount_charged as number | null,
-      cost_per_player: (course as { cost_per_player: number | null } | null)?.cost_per_player,
+      cost_per_player: course?.cost_per_player,
     })
 
     target = {

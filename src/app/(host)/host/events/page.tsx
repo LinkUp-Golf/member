@@ -14,6 +14,7 @@ import { Spinner, ContentLoader } from "@/components/ui/Loading";
 import Select, { type SelectOption } from "@/components/ui/Select";
 import VenueDateSelector from "@/components/host/VenueDateSelector";
 import DateMultiPicker from "@/components/host/DateMultiPicker";
+import PaymentOptionsPicker from "@/components/payments/PaymentOptionsPicker";
 import ProofControl, {
   PROOF_NOTE_CLASS,
   currentProof,
@@ -22,6 +23,11 @@ import ProofControl, {
 import { TutorialLink } from "@/components/tutorials/TutorialPlayer";
 import { HOST_EVENT_GUEST_RATE_USD } from "@/lib/constants";
 import { formatEventTeeTime as fmtTime, cn } from "@/lib/utils";
+import {
+  DEFAULT_PAYMENT_OPTIONS,
+  coursePaymentOptions,
+  type PaymentOption,
+} from "@/lib/bookings/payment-options";
 import type {
   HostedEvent,
   HostedEventStatus,
@@ -473,6 +479,12 @@ interface EventFormValues {
   /** '' means "no fixed tee time". */
   tee_time: string;
   dinner: boolean;
+  /**
+   * How members pay for rounds at the venue — courses.payment_options. Set on
+   * the venue itself, so on Current LinkUps it opens on what the venue already
+   * offers.
+   */
+  payment_options: PaymentOption[];
   // ---- New LinkUp only ----
   /** The club being proposed. */
   new_event_name: string;
@@ -498,6 +510,7 @@ type VenueDetail = Pick<Course, "id" | "name" | "city"> & {
   cost_per_player?: number | null;
   description?: string | null;
   approval_status?: string;
+  payment_options?: string[] | null;
 };
 
 function EventDrawer({
@@ -546,6 +559,7 @@ function EventDrawer({
       course_id: event?.course_id ?? "",
       tee_time: event?.tee_time ?? NO_TEE_TIME,
       dinner: event?.dinner ?? false,
+      payment_options: [...DEFAULT_PAYMENT_OPTIONS],
       new_event_name: "",
       new_website: "",
       new_slots_per_day: "",
@@ -578,7 +592,10 @@ function EventDrawer({
         setVenuesUnrestricted(venuesJson.unrestricted === true);
         // Pre-populate the course for a brand-new event when the host has a
         // single venue — nothing to choose.
-        if (!isEdit && vs.length === 1) setValue("course_id", vs[0].id);
+        if (!isEdit && vs.length === 1) {
+          setValue("course_id", vs[0].id);
+          setValue("payment_options", coursePaymentOptions(vs[0]));
+        }
       })
       .catch(() => {
         if (!cancelled)
@@ -673,6 +690,7 @@ function EventDrawer({
         event_dates: [...dates].sort(),
         total_spots: Number(values.new_slots_per_day),
         member_guest_rate: Number(values.new_member_guest_rate),
+        payment_options: values.payment_options,
       }),
     });
     const eventsJson = await eventsRes.json().catch(() => ({}));
@@ -705,6 +723,8 @@ function EventDrawer({
       ...(isEdit ? { event_date: allDates[0] } : { event_dates: allDates }),
       tee_time: values.tee_time || null,
       dinner: values.dinner,
+      // Only on create — the edit form acts on one round and doesn't show them.
+      ...(isEdit ? {} : { payment_options: values.payment_options }),
     };
 
     const res =
@@ -810,6 +830,14 @@ function EventDrawer({
                   aria-selected={tab === key}
                   onClick={() => {
                     setTab(key);
+                    // A proposed club starts on the default; a listed one on
+                    // whatever the venue picked on that tab already offers.
+                    setValue(
+                      "payment_options",
+                      key === "new"
+                        ? [...DEFAULT_PAYMENT_OPTIONS]
+                        : coursePaymentOptions(selectedVenue),
+                    );
                     // The two tabs pick from different things — one from a
                     // venue's open days, one from the whole calendar — so a
                     // selection can't carry across.
@@ -847,6 +875,14 @@ function EventDrawer({
                     value={f.value}
                     onChange={(next) => {
                       f.onChange(next);
+                      // Payment options are the venue's own setting, so the
+                      // form starts from what the picked venue already offers.
+                      setValue(
+                        "payment_options",
+                        coursePaymentOptions(
+                          courseChoices.find((c) => c.id === next),
+                        ),
+                      );
                       // Open days belong to a venue, so a change invalidates
                       // anything picked at the previous one rather than
                       // carrying dates that club may not have.
@@ -1159,6 +1195,30 @@ function EventDrawer({
                   Dinner is included with this event
                 </span>
               </label>
+            </div>
+          )}
+
+          {/* How members pay for rounds at this venue. It's the venue's
+              setting rather than this round's — every booking there follows
+              it — so on Current LinkUps it opens on what the venue already
+              offers, and saving updates it. */}
+          {!isEdit && (
+            <div>
+              <span className={labelCls}>Payment options *</span>
+              <Controller
+                name="payment_options"
+                control={control}
+                render={({ field: f }) => (
+                  <PaymentOptionsPicker
+                    value={f.value}
+                    onChange={f.onChange}
+                    idPrefix="ev-payment-option"
+                  />
+                )}
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Members see these ways to pay when they book this venue.
+              </p>
             </div>
           )}
         </form>

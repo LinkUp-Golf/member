@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient, createRouteHandlerClient } from '@/lib/supabase-server'
+import { coursePaymentOptions } from '@/lib/bookings/payment-options'
 import type { AuthContext } from '@/lib/auth/types'
 
 // GET /api/bookings
@@ -102,7 +103,7 @@ async function attachCourses(rows: Array<Record<string, unknown>>) {
     .from('courses')
     // meeting_duration_mins lets the client work out when a round finished —
     // My Bookings uses it to decide when to offer "Rate round".
-    .select('id, name, city, state, payment_url, timezone, meeting_duration_mins')
+    .select('id, name, city, state, payment_url, payment_options, timezone, meeting_duration_mins')
     .in('id', courseIds)
 
   const byId = new Map((courses ?? []).map(c => [c.id as string, c]))
@@ -116,6 +117,7 @@ async function attachCourses(rows: Array<Record<string, unknown>>) {
             city: c.city,
             state: c.state,
             payment_url: c.payment_url ?? null,
+            payment_options: coursePaymentOptions(c),
             timezone: c.timezone,
             meeting_duration_mins: c.meeting_duration_mins ?? null,
           }

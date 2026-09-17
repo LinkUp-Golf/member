@@ -26,6 +26,8 @@ interface BookingRow {
   amount_charged: number
   dinner_rsvp: 'yes' | 'no' | 'maybe' | null
   admin_notes: string | null
+  /** 'pay_at_club' when the member chose to settle with the club. */
+  payment_method: 'pay_at_club' | null
   ghl_opportunity_id: string | null
   member: { first_name: string; last_name: string; email: string } | null
   player?: { id: string; first_name: string; last_name: string; email: string } | null
@@ -191,6 +193,8 @@ function playerInfo(b: BookingRow): { name: string; sub: string; badge?: string 
 // time is (past-due rows read "Overdue").
 function paymentDaysLeftLabel(b: BookingRow): string | null {
   if (b.status !== 'tentative' && b.status !== 'availability_confirmed') return null
+  // Being settled at the club — there's no online payment to count down to.
+  if (b.payment_method === 'pay_at_club') return null
   const daysLeft = differenceInCalendarDays(new Date(`${b.booking_date}T12:00:00`), new Date())
   if (daysLeft < 0) return 'Overdue'
   if (daysLeft === 0) return 'Due today'
@@ -359,6 +363,11 @@ function SlotCard({
                       {daysLeftLabel && (
                         <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 flex-shrink-0 whitespace-nowrap">
                           ⏳ {daysLeftLabel}
+                        </span>
+                      )}
+                      {b.payment_method === 'pay_at_club' && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 flex-shrink-0 whitespace-nowrap">
+                          Paid at club
                         </span>
                       )}
                       {/* Credit put toward this row. The code is here because
@@ -689,7 +698,7 @@ export default function AdminBookingsPage() {
 
     if (matchingCourseIds.length === 0) { setBookings([]); setLoading(false); return }
 
-    const SELECT = 'id, member_id, created_at, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name, meeting_duration_mins)'
+    const SELECT = 'id, member_id, created_at, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, payment_method, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name, meeting_duration_mins)'
     const SELECT_NO_DINNER = SELECT.replace('dinner_rsvp, ', '')
 
     function buildQuery(select: string) {
@@ -699,7 +708,8 @@ export default function AdminBookingsPage() {
         .in('course_id', matchingCourseIds)
       if (rangeStart) q = q.gte('booking_date', rangeStart)
       if (rangeEnd) q = q.lte('booking_date', rangeEnd)
-      if (statusFilter === 'payment_overdue') q = q.eq('status', 'availability_confirmed')
+      // A round being paid at the club isn't waiting on an online payment.
+      if (statusFilter === 'payment_overdue') q = q.eq('status', 'availability_confirmed').is('payment_method', null)
       else if (statusFilter !== 'all') q = q.eq('status', statusFilter)
       if (dinnerFilter !== 'all') {
         q = dinnerFilter === 'none' ? q.is('dinner_rsvp', null) : q.eq('dinner_rsvp', dinnerFilter)
