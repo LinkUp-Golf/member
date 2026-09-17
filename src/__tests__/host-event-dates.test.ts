@@ -110,3 +110,31 @@ describe('validateHostedEventPayload with multiple dates', () => {
     expect(r.valid).toBe(true)
   })
 })
+
+describe('validateHostedEventPayload with a tee time per date', () => {
+  const base = {
+    course_id: '3f2504e0-4f89-11d3-9a0c-0305e82c3301',
+    event_dates: ['2099-06-01', '2099-06-08'],
+  }
+
+  it('accepts a tee time for each date, blanks included', () => {
+    const r = validateHostedEventPayload({
+      ...base,
+      tee_times: { '2099-06-01': '8:30 AM', '2099-06-08': '' },
+    })
+    expect(r.valid).toBe(true)
+  })
+
+  it('rejects tee times that are not keyed by date', () => {
+    expect(validateHostedEventPayload({ ...base, tee_times: ['8:30 AM'] }).valid).toBe(false)
+    expect(validateHostedEventPayload({ ...base, tee_times: { monday: '8:30 AM' } }).valid).toBe(false)
+  })
+
+  it('holds each tee time to the same length bound as the single field', () => {
+    const r = validateHostedEventPayload({
+      ...base,
+      tee_times: { '2099-06-01': 'x'.repeat(51) },
+    })
+    expect(r.valid).toBe(false)
+  })
+})

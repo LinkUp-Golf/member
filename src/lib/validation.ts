@@ -405,6 +405,28 @@ export function validateHostedEventPayload(
     if (!teeResult.valid) errors.push(...teeResult.errors)
   }
 
+  // A tee time per date, when a create lists several — `{ 'YYYY-MM-DD': '8:30
+  // AM' }`. Same bound as the single field; a blank value is "no fixed time".
+  if ('tee_times' in b && b.tee_times !== undefined && b.tee_times !== null) {
+    const teeTimes = b.tee_times
+    if (typeof teeTimes !== 'object' || Array.isArray(teeTimes)) {
+      errors.push('Tee times must be listed by date')
+    } else {
+      for (const [date, value] of Object.entries(teeTimes as Record<string, unknown>)) {
+        if (!validateDate(date, 'Tee time date').valid) {
+          errors.push('Tee times must be listed by date')
+          break
+        }
+        if (value === null || value === '') continue
+        const teeResult = validateString(value, 'Tee time', { max: 50, required: false })
+        if (!teeResult.valid) {
+          errors.push(...teeResult.errors)
+          break
+        }
+      }
+    }
+  }
+
   // Neither is the client's to send: the rate is a fixed term and capacity comes
   // from what the venue has open that day, so a payload that omits both is
   // complete. They're still checked when present, because an older client may

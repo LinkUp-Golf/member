@@ -19,7 +19,7 @@ import {
   addDays, addMonths, endOfMonth, endOfWeek, format,
   isSameMonth, isToday, startOfMonth, startOfWeek,
 } from 'date-fns'
-import { cn, summariseDates } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'] as const
 
@@ -143,20 +143,9 @@ export default function DateMultiPicker({
         </div>
       </div>
 
-      {/* Every picked date, not only the ones this month can't show — a host
-          listing a run of rounds is choosing across months, and the grid only
-          ever shows one at a time. Summarised rather than enumerated: days in a
-          row collapse to "Aug 4–7", which is both shorter and the thing the
-          reader was trying to work out from a list of thirty. */}
-      {value.length > 0 && (
-        <div className="px-3 py-2 border-t border-gray-100 space-y-0.5">
-          <p className="text-[11px] text-gray-700">{summariseDates(value)}</p>
-          <p className="text-[11px] text-gray-400">
-            {value.length} date{value.length === 1 ? '' : 's'} picked
-            {max ? ` · ${max} max` : ''}
-          </p>
-        </div>
-      )}
+      {/* No summary of what's picked under the grid: the host form lists every
+          picked date beneath the picker, each with its own tee time
+          (DateTeeTimeList), which is where a host reads them back. */}
     </div>
   )
 }

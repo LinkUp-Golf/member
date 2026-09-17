@@ -52,9 +52,10 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
   // supplies from the venue itself. Existing events created that way still edit
   // and cancel.
   let courseId: string
-  /** One event per date, sharing the course, tee time and dinner setting. */
+  /** One event per date, sharing the course and dinner setting. */
   let eventDates: string[]
-  let teeTime: string | null
+  /** Each date's tee time — see teeTimeFor below. */
+  let teeTimeFor: (date: string) => string | null
 
   /** The dates asked for, rejecting any that have already passed. */
   const resolveDates = (): { dates?: string[]; error?: string } => {
@@ -77,9 +78,16 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     eventDates = resolved.dates
     courseId = String(body.course_id)
     // Free text the host typed — sanitise like any other free-form field.
-    teeTime = typeof body.tee_time === 'string' && body.tee_time.trim()
-      ? sanitiseText(body.tee_time.trim())
-      : null
+    // Each date carries its own (`tee_times`, keyed by date), since two days at
+    // a club rarely tee off at the same time. `tee_time` is the one-for-all
+    // form an older client sends, and fills any date the map doesn't name.
+    const clean = (v: unknown) =>
+      typeof v === 'string' && v.trim() ? sanitiseText(v.trim()) : null
+    const shared = clean(body.tee_time)
+    const perDate = (body.tee_times && typeof body.tee_times === 'object' && !Array.isArray(body.tee_times)
+      ? body.tee_times
+      : {}) as Record<string, unknown>
+    teeTimeFor = (date) => (date in perDate ? clean(perDate[date]) : shared)
 
     // How members pay at this venue. Optional — an older client doesn't send
     // it, and then the venue's setting is left alone — but if sent it has to be
@@ -224,7 +232,7 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       host_id: ctx.host.id,
       course_id: courseId,
       event_date: date,
-      tee_time: teeTime,
+      tee_time: teeTimeFor(date),
       total_spots: spotsFor.get(date) ?? 1,
       member_guest_rate: rate,
       dinner,

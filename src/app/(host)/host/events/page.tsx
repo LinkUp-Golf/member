@@ -14,6 +14,7 @@ import { Spinner, ContentLoader } from "@/components/ui/Loading";
 import Select, { type SelectOption } from "@/components/ui/Select";
 import VenueDateSelector from "@/components/host/VenueDateSelector";
 import DateMultiPicker from "@/components/host/DateMultiPicker";
+import DateTeeTimeList from "@/components/host/DateTeeTimeList";
 import PaymentOptionsPicker from "@/components/payments/PaymentOptionsPicker";
 import ProofControl, {
   PROOF_NOTE_CLASS,
@@ -476,8 +477,6 @@ type LinkupTab = "existing" | "new";
 
 interface EventFormValues {
   course_id: string;
-  /** '' means "no fixed tee time". */
-  tee_time: string;
   dinner: boolean;
   /**
    * How members pay for rounds at the venue — courses.payment_options. Set on
@@ -493,8 +492,6 @@ interface EventFormValues {
   new_slots_per_day: string;
   new_member_guest_rate: string;
 }
-
-const NO_TEE_TIME = "";
 
 /**
  * A venue as the form needs it: enough to name it in the dropdown and to show
@@ -534,11 +531,18 @@ function EventDrawer({
   const [venuesUnrestricted, setVenuesUnrestricted] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   // Every day being listed, chosen from what the venue actually has open.
-  // Everything else (course, tee time, spots, rate, dinner) is shared, so
-  // listing a week of rounds is one form rather than five. Editing acts on a
-  // single existing event, so the picker runs in single-select there.
+  // Course, spots, rate and dinner are shared, so listing a week of rounds is
+  // one form rather than five. Editing acts on a single existing event, so the
+  // picker runs in single-select there.
   const [dates, setDates] = useState<string[]>(
     event?.event_date ? [event.event_date.slice(0, 10)] : [],
+  );
+  // The tee time for each of those dates — each becomes its own event, and two
+  // days at a club rarely tee off at the same time. '' is "no fixed time".
+  const [teeTimes, setTeeTimes] = useState<Record<string, string>>(() =>
+    event?.event_date
+      ? { [event.event_date.slice(0, 10)]: event.tee_time ?? "" }
+      : {},
   );
   const [dateError, setDateError] = useState<string | null>(null);
   // Editing acts on an event that already exists at a club that already exists,
@@ -557,7 +561,6 @@ function EventDrawer({
   } = useForm<EventFormValues>({
     defaultValues: {
       course_id: event?.course_id ?? "",
-      tee_time: event?.tee_time ?? NO_TEE_TIME,
       dinner: event?.dinner ?? false,
       payment_options: [...DEFAULT_PAYMENT_OPTIONS],
       new_event_name: "",
@@ -646,6 +649,41 @@ function EventDrawer({
   const errCls = "text-xs text-red-500 mt-1";
 
   /**
+   * A new set of picked dates. Tee times follow their dates; on the edit form
+   * the one event moving to another day keeps the tee time it had.
+   */
+  const changeDates = (next: string[]) => {
+    setTeeTimes((prev) => {
+      if (isEdit) {
+        // One event, one tee time, whichever day it lands on — kept through a
+        // moment with no day picked, too.
+        const kept = Object.values(prev)[0] ?? event?.tee_time ?? "";
+        return next[0] ? { [next[0]]: kept } : prev;
+      }
+      return Object.fromEntries(next.map((d) => [d, prev[d] ?? ""]));
+    });
+    setDates(next);
+    if (next.length) setDateError(null);
+  };
+
+  /** Dates picked somewhere else (another tab, another venue) don't carry. */
+  const clearDates = () => {
+    setDates([]);
+    setTeeTimes({});
+    setDateError(null);
+  };
+
+  const setTeeTime = (date: string, value: string) =>
+    setTeeTimes((prev) => ({ ...prev, [date]: value }));
+
+  const removeDate = (date: string) =>
+    changeDates(dates.filter((d) => d !== date));
+
+  /** date → trimmed tee time, for every date being listed. */
+  const teeTimesFor = (list: string[]) =>
+    Object.fromEntries(list.map((d) => [d, (teeTimes[d] ?? "").trim()]));
+
+  /**
    * Proposing a venue we don't have, and the rounds the host wants there.
    *
    * Two steps, in order, because the second needs the first's id:
@@ -688,6 +726,7 @@ function EventDrawer({
       body: JSON.stringify({
         course_id: courseJson.course.id,
         event_dates: [...dates].sort(),
+        tee_times: teeTimesFor(dates),
         total_spots: Number(values.new_slots_per_day),
         member_guest_rate: Number(values.new_member_guest_rate),
         payment_options: values.payment_options,
@@ -719,9 +758,14 @@ function EventDrawer({
     // same terms, so they aren't in this body at all.
     const payload = {
       course_id: values.course_id,
-      // PATCH takes a single date; only create fans out.
-      ...(isEdit ? { event_date: allDates[0] } : { event_dates: allDates }),
-      tee_time: values.tee_time || null,
+      // PATCH takes a single date and its tee time; only create fans out, with
+      // a tee time per date.
+      ...(isEdit
+        ? {
+            event_date: allDates[0],
+            tee_time: (teeTimes[allDates[0] as string] ?? "").trim() || null,
+          }
+        : { event_dates: allDates, tee_times: teeTimesFor(allDates) }),
       dinner: values.dinner,
       // Only on create — the edit form acts on one round and doesn't show them.
       ...(isEdit ? {} : { payment_options: values.payment_options }),
@@ -841,8 +885,7 @@ function EventDrawer({
                     // The two tabs pick from different things — one from a
                     // venue's open days, one from the whole calendar — so a
                     // selection can't carry across.
-                    setDates([]);
-                    setDateError(null);
+                    clearDates();
                   }}
                   className={cn(
                     "flex-1 rounded-lg py-2 text-xs font-semibold transition-colors",
@@ -886,8 +929,7 @@ function EventDrawer({
                       // Open days belong to a venue, so a change invalidates
                       // anything picked at the previous one rather than
                       // carrying dates that club may not have.
-                      setDates([]);
-                      setDateError(null);
+                      clearDates();
                     }}
                     placeholder="Select an event…"
                     searchPlaceholder="Search events…"
@@ -1047,15 +1089,22 @@ function EventDrawer({
                       this venue has open until we've set it up. */}
                   <DateMultiPicker
                     value={dates}
-                    onChange={(next) => {
-                      setDates(next);
-                      if (next.length) setDateError(null);
-                    }}
+                    onChange={changeDates}
                     max={MAX_DATES_PER_EVENT}
                   />
+                  <DateTeeTimeList
+                    dates={dates}
+                    teeTimes={teeTimes}
+                    onTeeTimeChange={setTeeTime}
+                    onRemove={removeDate}
+                    max={MAX_DATES_PER_EVENT}
+                    idPrefix="ev-new-tee"
+                  />
                   <p className="text-[11px] text-gray-400 mt-1">
-                    Each date becomes its own event. We&apos;ll confirm them with
-                    the venue while we set it up.
+                    Each date becomes its own event, with its own tee time —
+                    type it however you like, or leave it blank if there&apos;s
+                    no fixed time. We&apos;ll confirm them with the venue while
+                    we set it up.
                   </p>
                   {dateError && <p className={errCls}>{dateError}</p>}
                 </div>
@@ -1129,40 +1178,28 @@ function EventDrawer({
               <VenueDateSelector
                 courseId={courseId || null}
                 value={dates}
-                onChange={(next: string[]) => {
-                  setDates(next);
-                  if (next.length) setDateError(null);
-                }}
+                onChange={changeDates}
                 single={isEdit}
                 max={isEdit ? 1 : MAX_DATES_PER_EVENT}
                 exceptEventId={event?.id}
+                showPickedElsewhere={false}
+              />
+              {/* Every picked date with its own tee time, right under the
+                  picker. The edit form is one event, so its date is changed
+                  from the picker rather than removed here. */}
+              <DateTeeTimeList
+                dates={dates}
+                teeTimes={teeTimes}
+                onTeeTimeChange={setTeeTime}
+                onRemove={isEdit ? undefined : removeDate}
+                idPrefix="ev-tee"
               />
               <p className="text-[11px] text-gray-400 mt-1">
                 {isEdit
-                  ? "Only days this venue still has open can be chosen."
-                  : "Only days this venue has open and doesn't already have a round on are shown; the number is spots left. Each date becomes its own event."}
+                  ? "Only days this venue still has open can be chosen. Type the tee time however you like, or leave it blank if there's no fixed time."
+                  : "Only days this venue has open and doesn't already have a round on are shown; the number is spots left. Each date becomes its own event, with its own tee time — leave it blank if there's no fixed time."}
               </p>
               {dateError && <p className={errCls}>{dateError}</p>}
-            </div>
-            )}
-
-            {!proposing && (
-            <div>
-              <label htmlFor="ev-time" className={labelCls}>
-                Tee time
-              </label>
-              <input
-                id="ev-time"
-                type="text"
-                className={field}
-                placeholder="e.g. 8:30 AM or morning/afternoon"
-                maxLength={50}
-                {...register("tee_time")}
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Type the tee time however you like, or leave it blank if
-                there&apos;s no fixed time.
-              </p>
             </div>
             )}
 
