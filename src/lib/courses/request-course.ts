@@ -5,6 +5,7 @@
 // calendar, logo and payment link on approval.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import type { PaymentOption } from '@/lib/bookings/payment-options'
 
 export interface RequestedCourse {
   id: string
@@ -32,6 +33,12 @@ export async function requestPendingCourse(params: {
   website?: string | null
   /** members.id of the requester. */
   requestedBy: string
+  /**
+   * How members will pay there, when the requester said. Only set on a course
+   * this call creates — an already-pending one someone else proposed keeps its
+   * own. Omitted, the column default (Pay now) applies.
+   */
+  paymentOptions?: PaymentOption[] | null
 }): Promise<RequestCourseResult> {
   const { admin, requestedBy } = params
   const name = params.name.trim()
@@ -73,6 +80,7 @@ export async function requestPendingCourse(params: {
       booking_url: website,
       approval_status: 'pending',
       requested_by: requestedBy,
+      ...(params.paymentOptions ? { payment_options: params.paymentOptions } : {}),
     })
     .select('id, name, city, approval_status')
     .single()

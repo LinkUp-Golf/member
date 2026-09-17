@@ -5,18 +5,18 @@ export const dynamic = 'force-dynamic'
 // and lands in the admin golf-events "Pending" queue for an admin to set up and
 // approve into a live, bookable course.
 //
-// Both host surfaces that can name a club call this one endpoint — the become-a-
-// host application (AddVenueControl) and the "New LinkUp" tab on the host's own
-// event form — so the same club proposed from either place produces the same
-// row. Neither submits a proposed club as part of its own payload: they propose
-// it here first, which is why the application and event validators can insist on
-// a real course id.
+// Both host surfaces that can name a club call this one endpoint — the New
+// LinkUp on the become-a-host application and the "New LinkUp" tab on the host's
+// own event form, which share their fields (NewLinkupFields) — so the same club
+// proposed from either place produces the same row. Neither submits a proposed
+// club as part of its own payload: they propose it here first, which is why the
+// application and event validators can insist on a real course id.
 //
-// The event form's "New LinkUp" tab calls this first and then POSTs the rounds
-// it wants to /api/host/events against the course id this returns. That's what
-// ties the host to the events: they're real hosted_events rows from the start,
-// waiting on the same admin approval as any other, rather than a note for
-// someone to retype.
+// Then each sends the rounds against the course id this returns: the event form
+// to /api/host/events, the application inside its own POST (as rounds at that
+// venue, carrying the applicant's number of guests and rate). That's what ties
+// the host to the events: real rows from the start, waiting on the same admin
+// approval as any other, rather than a note for someone to retype.
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
@@ -24,11 +24,16 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateProposedClub } from '@/lib/validation'
 import { requestPendingCourse } from '@/lib/courses/request-course'
+import { parsePaymentOptions } from '@/lib/bookings/payment-options'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
-  const body = (await req.json().catch(() => ({}))) as { name?: string; website?: string }
+  const body = (await req.json().catch(() => ({}))) as {
+    name?: string
+    website?: string
+    payment_options?: unknown
+  }
 
   // One rule for every caller, so the same club proposed from the event form and
   // from the application can't come out different. The website stays optional: an
@@ -39,12 +44,20 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
   const website = typeof body.website === 'string' && body.website.trim() ? body.website.trim() : null
 
+  // Optional — the applicant's New LinkUp sends how members will pay there. If
+  // sent it has to be a real set, since it's written onto the course.
+  const paymentOptions = body.payment_options === undefined ? null : parsePaymentOptions(body.payment_options)
+  if (body.payment_options !== undefined && !paymentOptions) {
+    return NextResponse.json({ error: 'Choose at least one payment option.' }, { status: 400 })
+  }
+
   const admin = createAdminClient()
   const result = await requestPendingCourse({
     admin,
     name: (body.name ?? '').trim(),
     website,
     requestedBy: ctx.memberId,
+    paymentOptions,
   })
 
   if (result.error || !result.course) {

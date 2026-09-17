@@ -8,6 +8,7 @@
 // request without anything failing.
 
 import type { HostApplicationEventInput } from '@/types'
+import { newLinkupRounds, type NewLinkupValues } from '@/lib/hosts/new-linkup'
 
 export const NAME_MIN = 2
 export const NAME_MAX = 120
@@ -66,10 +67,11 @@ export interface ApplicationValues {
 
 /**
  * One kind of venue: a course that already exists. Naming a club we don't have
- * is possible again (AddVenueControl), but it creates the pending course before
- * the application is submitted rather than as part of submitting it — so by the
- * time this payload is built there is no second kind, only a course id whose
- * course happens to be pending. That's what lets the server insist on a real id.
+ * is possible (the application's New LinkUp), but it creates the pending course
+ * before the application is submitted rather than as part of submitting it — so
+ * by the time this payload is built there is no second kind, only a course id
+ * whose course happens to be pending. That's what lets the server insist on a
+ * real id.
  *
  * The union is kept so `roundAt` still reads as a lookup by kind rather than a
  * bare field.
@@ -131,5 +133,29 @@ export function buildApplicationPayload(data: ApplicationValues): SubmitValues {
     name: data.name.trim(),
     course_ids: data.existing.map(v => v.courseId),
     events,
+  }
+}
+
+/**
+ * Adds a New LinkUp to the request body, once its club exists as a pending
+ * course: the course joins the venues applied for, and each picked date becomes
+ * a round there carrying the applicant's own number of guests and rate — the
+ * one kind of venue where the server takes them, since there's no calendar to
+ * read them from.
+ */
+export function withNewLinkup(
+  payload: SubmitValues,
+  courseId: string,
+  values: NewLinkupValues,
+): SubmitValues {
+  return {
+    ...payload,
+    course_ids: payload.course_ids.includes(courseId)
+      ? payload.course_ids
+      : [...payload.course_ids, courseId],
+    events: [
+      ...payload.events,
+      ...newLinkupRounds(values).map(round => ({ ...round, venue: courseId })),
+    ],
   }
 }

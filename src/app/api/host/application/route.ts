@@ -171,22 +171,43 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   // A round whose day has since filled is dropped rather than rejected: an
   // application is a proposal an admin reviews, so losing one date shouldn't
   // cost the applicant the whole submission.
+  //
+  // A club we don't have yet (a pending course, from the application's New
+  // LinkUp) has no calendar to ask, so its rounds carry the applicant's own
+  // number of guests and rate instead — the same exception POST /api/host/events
+  // makes for a host proposing one. A round there without them is dropped, as
+  // it was before an applicant could send them.
   const spotsByCourse = new Map<string, Map<string, number>>()
   for (const courseId of new Set(kept.map(r => r.courseId))) {
     const course = coursesById.get(courseId)
-    if (!course) continue
+    if (!course || course.approval_status === 'pending') continue
     const datesForCourse = kept.filter(r => r.courseId === courseId).map(r => String(r.ev.event_date))
     spotsByCourse.set(courseId, await openSpotsByDate(admin, course, datesForCourse))
   }
 
+  const proposedTerms = (ev: ProposedRoundInput) => {
+    const spots = Number(ev.total_spots)
+    const rate = Number(ev.member_guest_rate)
+    return Number.isInteger(spots) && spots >= 1 && Number.isFinite(rate) && rate >= 0
+      ? { spots, rate }
+      : null
+  }
+
   const rounds = kept
-    .map(({ ev, courseId }) => ({
-      ev,
-      courseId,
-      spots: spotsByCourse.get(courseId)?.get(String(ev.event_date)) ?? 0,
-    }))
+    .map(({ ev, courseId }) => {
+      if (coursesById.get(courseId)?.approval_status === 'pending') {
+        const terms = proposedTerms(ev)
+        return { ev, courseId, spots: terms?.spots ?? 0, rate: terms?.rate ?? HOST_EVENT_GUEST_RATE_USD }
+      }
+      return {
+        ev,
+        courseId,
+        spots: spotsByCourse.get(courseId)?.get(String(ev.event_date)) ?? 0,
+        rate: HOST_EVENT_GUEST_RATE_USD,
+      }
+    })
     .filter(r => r.spots > 0)
-    .map(({ ev, courseId, spots }) => ({
+    .map(({ ev, courseId, spots, rate }) => ({
       application_id: data.id,
       course_id: courseId,
       event_date: String(ev.event_date),
@@ -195,10 +216,11 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
         ? sanitiseText(ev.tee_time.trim())
         : null,
       total_spots: spots,
-      // A fixed term, same as a hosted event created directly — these rows
-      // become hosted_events on approval, so they can't be listed at a
-      // different rate from one another.
-      member_guest_rate: HOST_EVENT_GUEST_RATE_USD,
+      // A fixed term at a listed venue, same as a hosted event created directly
+      // — these rows become hosted_events on approval, so they can't be listed
+      // at a different rate from one another. The applicant's own at a club we
+      // don't have yet.
+      member_guest_rate: rate,
       dinner: ev.dinner === true,
     }))
 

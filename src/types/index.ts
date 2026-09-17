@@ -479,16 +479,17 @@ export interface HostApplicationEvent {
 /**
  * What the applicant submits per proposed round (no ids yet).
  *
- * Narrower than the row it becomes: total_spots and member_guest_rate are set by
- * the server — capacity from what the venue has open that day, the rate from the
- * fixed term — exactly as they are for an event a host creates directly. The
- * columns still exist on HostApplicationEvent; they just aren't the applicant's
- * to send.
+ * At a listed venue, total_spots and member_guest_rate are the server's to set —
+ * capacity from what the venue has open that day, the rate from the fixed term —
+ * exactly as they are for an event a host creates directly, and anything sent is
+ * ignored. At a club we don't have yet (a pending course, proposed through the
+ * application's New LinkUp) nothing else can supply them, so the applicant does.
  */
 export type HostApplicationEventInput = Pick<
   HostApplicationEvent,
   'course_id' | 'event_date' | 'tee_time' | 'dinner'
->
+> &
+  Partial<Pick<HostApplicationEvent, 'total_spots' | 'member_guest_rate'>>
 
 export interface HostApplication {
   id: string

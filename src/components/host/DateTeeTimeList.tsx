@@ -25,6 +25,7 @@ export default function DateTeeTimeList({
   onTeeTimeChange,
   onRemove,
   max,
+  tone = 'neutral',
   idPrefix = 'tee-time',
 }: {
   /** Picked dates, YYYY-MM-DD. */
@@ -36,6 +37,8 @@ export default function DateTeeTimeList({
   onRemove?: (date: string) => void
   /** Cap on dates, to say so once it's reached. */
   max?: number
+  /** 'member' matches the member app's navy-on-cream forms. */
+  tone?: 'neutral' | 'member'
   idPrefix?: string
 }) {
   if (dates.length === 0) return null
@@ -49,7 +52,10 @@ export default function DateTeeTimeList({
           <div key={date} className="flex items-center gap-2">
             <label
               htmlFor={id}
-              className="w-28 flex-shrink-0 text-xs font-medium text-gray-700 tabular-nums"
+              className={cn(
+                'w-24 flex-shrink-0 text-xs font-medium tabular-nums',
+                tone === 'member' ? 'text-green-900/80' : 'text-gray-700',
+              )}
             >
               {dateLabel(date)}
             </label>
@@ -57,7 +63,8 @@ export default function DateTeeTimeList({
               id={id}
               type="text"
               className="input text-sm flex-1 min-w-0"
-              placeholder="Tee time, e.g. 8:30 AM"
+              placeholder="e.g. 8:30 AM"
+              aria-label={`Tee time, ${dateLabel(date)}`}
               maxLength={TEE_TIME_MAX_LENGTH}
               value={teeTimes[date] ?? ''}
               onChange={e => onTeeTimeChange(date, e.target.value)}
