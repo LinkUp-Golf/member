@@ -461,9 +461,10 @@ function CancelPanel({
 /**
  * Which of the drawer's two tabs is open.
  *
- * 'existing' lists rounds at a club already on LinkUp: pick the venue, pick from
- * the days it actually has open. 'new' proposes a club we don't have — there is
- * no calendar to ask, so the host types what they want and an admin sets it up.
+ * 'existing' (Current LinkUps) lists rounds at a club already on LinkUp: pick
+ * the venue, pick from the days it actually has open. 'new' (New LinkUp)
+ * proposes a club we don't have — there is no calendar to ask, so the host
+ * types what they want and an admin sets it up.
  */
 type LinkupTab = "existing" | "new";
 
@@ -528,8 +529,9 @@ function EventDrawer({
   );
   const [dateError, setDateError] = useState<string | null>(null);
   // Editing acts on an event that already exists at a club that already exists,
-  // so the proposal tab has nothing to offer there.
-  const [tab, setTab] = useState<LinkupTab>("existing");
+  // so the proposal tab has nothing to offer there. A new event opens on the
+  // first tab, New LinkUp — an unselected tab on the left reads as broken.
+  const [tab, setTab] = useState<LinkupTab>("new");
   const proposing = !isEdit && tab === "new";
 
   const {
@@ -797,8 +799,8 @@ function EventDrawer({
             >
               {(
                 [
-                  ["existing", "LinkUps"],
                   ["new", "New LinkUp"],
+                  ["existing", "Current LinkUps"],
                 ] as const
               ).map(([key, label]) => (
                 <button
@@ -1024,7 +1026,7 @@ function EventDrawer({
 
                 <div>
                   <label htmlFor="ev-new-slots" className={labelCls}>
-                    Slots per day *
+                    Number of guests *
                   </label>
                   <input
                     id="ev-new-slots"

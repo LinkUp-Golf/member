@@ -14,7 +14,7 @@
 // it comes back.
 //
 // Removing asks first. It destroys the file, and unlike replacing it leaves the
-// host with nothing — a mis-tap next to "Replace proof" should not silently undo
+// host with nothing — a mis-tap next to "Replace pic" should not silently undo
 // their submission.
 
 import { useRef, useState } from 'react'
@@ -88,7 +88,7 @@ export default function ProofControl({
     }
     // Say which of the two things just happened — a host who meant to replace a
     // photo needs to know the new one landed, not that "proof was submitted".
-    onToast(hasProof ? 'Proof replaced.' : 'Proof submitted for approval.')
+    onToast(hasProof ? 'Pic replaced.' : 'Pic submitted for approval.')
     onDone()
   }
 

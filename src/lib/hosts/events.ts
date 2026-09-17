@@ -135,8 +135,8 @@ export type ProofNoteTone = 'pending' | 'rejected' | 'sent'
 export interface ProofState {
   hasProof: boolean
   canUpload: boolean
-  /** Button label. 'Replace proof' the moment one is in. */
-  label: 'Upload proof' | 'Replace proof'
+  /** Button label. 'Replace pic' the moment one is in. */
+  label: 'Upload pic' | 'Replace pic'
   note: { tone: ProofNoteTone; text: string } | null
 }
 
@@ -146,7 +146,7 @@ export interface ProofState {
  * Exists because the status alone can't answer it. A same-day upload leaves the
  * event in `upcoming` on purpose (see canUploadProof), so status said nothing
  * had happened while a photo was sitting in the table — the button kept reading
- * "Upload proof" and no line anywhere said one had been submitted. And a proof
+ * "Upload pic" and no line anywhere said one had been submitted. And a proof
  * an admin sends back returns the event to `completed`, which is
  * indistinguishable from never having uploaded at all unless the rejection
  * reason is surfaced.
@@ -166,7 +166,7 @@ export function proofState(params: {
   const { status, eventDate, hasProof } = params
   const reason = params.rejectionReason?.trim() || null
   const canUpload = canUploadProof(status, eventDate, params.today)
-  const label = hasProof ? 'Replace proof' : 'Upload proof'
+  const label = hasProof ? 'Replace pic' : 'Upload pic'
 
   // Awaiting the credit decision. Say that replacing is still possible — it is,
   // and a host who spots a bad photo shouldn't assume it's too late.

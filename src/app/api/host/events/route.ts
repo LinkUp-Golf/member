@@ -22,7 +22,7 @@ export const GET = withHostAuth(async (_req: NextRequest, ctx: HostAuthContext) 
 
   // Proofs come along because the list is where a host looks to see whether
   // they've already submitted one. Without them every row's button read
-  // "Upload proof" no matter what had been sent — the status can't answer it,
+  // "Upload pic" no matter what had been sent — the status can't answer it,
   // since a same-day upload deliberately leaves the event 'upcoming'.
   const { data, error } = await admin
     .from('hosted_events')
@@ -141,7 +141,7 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     // they have to BE present, which only applies on this path.
     if (!Number.isInteger(hostSetSpots) || hostSetSpots < 1) {
       return NextResponse.json(
-        { error: 'Tell us how many slots a day this venue can take.' },
+        { error: 'Tell us the number of guests this venue can take.' },
         { status: 400 }
       )
     }
