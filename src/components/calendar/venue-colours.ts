@@ -2,8 +2,8 @@
 // appears in a calendar — dots on mobile, name chips on wider screens, and the
 // legend all share one index.
 //
-// Shared by the hosted-events calendar and the /book availability calendar so
-// the two never drift into different palettes.
+// Shared by the /book availability calendar and its filters drawer so a chip
+// and its dots never drift into different palettes.
 
 export const VENUE_DOT = [
   'bg-emerald-500', 'bg-sky-500', 'bg-violet-500', 'bg-orange-500',

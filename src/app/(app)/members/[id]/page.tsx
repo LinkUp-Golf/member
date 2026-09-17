@@ -44,8 +44,9 @@ export default function MemberProfilePage() {
     if (id) loadMember();
   }, [id, loadMember]);
 
-  // Events this member is hosting (if they're a host) — surfaced so others can
-  // discover and reserve a spot from the profile.
+  // Events this member is hosting (if they're a host). Shown for what they are,
+  // not linked: there's no member page for a hosted event any more — a member
+  // joins one by booking the venue that day.
   useEffect(() => {
     if (!id) return;
     fetch(`/api/hosted-events?host_member_id=${id}`)
@@ -279,20 +280,16 @@ export default function MemberProfilePage() {
               {hostedEvents.map(e => {
                 const remaining = e.remaining_spots ?? 0;
                 return (
-                  <Link
+                  <div
                     key={e.id}
-                    href={`/more/hosted-events/${e.id}`}
-                    className="flex items-center justify-between gap-3 bg-green-50 rounded-xl px-3 py-2.5 border border-green-900/10"
+                    className="bg-green-50 rounded-xl px-3 py-2.5 border border-green-900/10"
                   >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-green-950 truncate">{e.course?.name ?? "Hosted event"}</p>
-                      <p className="text-xs text-green-900/50">
-                        {new Date(`${e.event_date.slice(0, 10)}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                        {" · "}{remaining > 0 ? `${remaining} spot${remaining === 1 ? "" : "s"} left` : "Full"}
-                      </p>
-                    </div>
-                    <span className="text-xs font-medium text-green-800 flex-shrink-0">View →</span>
-                  </Link>
+                    <p className="text-sm font-medium text-green-950 truncate">{e.course?.name ?? "Hosted event"}</p>
+                    <p className="text-xs text-green-900/50">
+                      {new Date(`${e.event_date.slice(0, 10)}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      {" · "}{remaining > 0 ? `${remaining} spot${remaining === 1 ? "" : "s"} left` : "Full"}
+                    </p>
+                  </div>
                 );
               })}
             </div>

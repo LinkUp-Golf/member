@@ -44,6 +44,14 @@ const nextConfig = {
         destination: 'https://app.linkup.golf/:path*',
         permanent: true,
       },
+      // The member hosted-events pages are gone — a member reaches a hosted
+      // round by booking the venue that day. Old links (push notifications,
+      // bookmarks) land on the booking calendar rather than a 404.
+      {
+        source: '/more/hosted-events/:path*',
+        destination: '/book',
+        permanent: false,
+      },
     ]
   },
 

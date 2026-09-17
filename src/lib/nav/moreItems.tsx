@@ -1,4 +1,4 @@
-import { Gift, Bell, Smartphone, FileText, Settings, BadgeDollarSign, ShieldCheck, Flag, CalendarDays } from 'lucide-react'
+import { Gift, Bell, Smartphone, FileText, Settings, BadgeDollarSign, ShieldCheck, Flag } from 'lucide-react'
 import Icon, { type IconName } from '@/components/ui/Icon'
 import { FEATURES } from '@/lib/features'
 import type { MemberRoles } from '@/hooks/useMemberRoles'
@@ -76,7 +76,6 @@ export const MORE_ITEMS: MoreGroup[] = [
     group: 'Community',
     items: [
       { href: '/more/events', label: 'Member Events', icon: svgIcon('next-round'), desc: 'Browse and submit community events' },
-      { href: '/more/hosted-events', label: 'Hosted Events', icon: <CalendarDays className="w-5 h-5" strokeWidth={1.9} />, desc: 'Reserve a spot at a member-hosted round' },
       { href: '/more/announcements', label: 'Announcements', icon: svgIcon('announcement'), desc: 'Community news and updates' },
       { href: '/more/promotions', label: 'Member Offers', icon: <Gift className="w-5 h-5" strokeWidth={1.9} />, desc: 'Exclusive deals for members' },
     ],
