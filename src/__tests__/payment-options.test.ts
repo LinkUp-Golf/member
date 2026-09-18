@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
   coursePaymentOptions,
-  isPaidAtClub,
+  isPayAtClub,
   offersPayAtClub,
   offersPayNow,
   parsePaymentOptions,
+  payAtClubStage,
 } from '@/lib/bookings/payment-options'
 
 // A venue's payment options decide which CTAs a member sees and what the
@@ -57,11 +58,31 @@ describe('parsePaymentOptions', () => {
   })
 })
 
-describe('isPaidAtClub', () => {
+describe('isPayAtClub', () => {
   it('is true only for a row marked pay_at_club', () => {
-    expect(isPaidAtClub({ payment_method: 'pay_at_club' })).toBe(true)
-    expect(isPaidAtClub({ payment_method: null })).toBe(false)
-    expect(isPaidAtClub({})).toBe(false)
-    expect(isPaidAtClub(null)).toBe(false)
+    expect(isPayAtClub({ payment_method: 'pay_at_club' })).toBe(true)
+    expect(isPayAtClub({ payment_method: null })).toBe(false)
+    expect(isPayAtClub({})).toBe(false)
+    expect(isPayAtClub(null)).toBe(false)
+  })
+})
+
+describe('payAtClubStage', () => {
+  const club = (status: string) => ({ status, payment_method: 'pay_at_club' })
+
+  it("reads 'paying' until the payment is confirmed — choosing the club isn't paying", () => {
+    expect(payAtClubStage(club('availability_confirmed'))).toBe('paying')
+    expect(payAtClubStage(club('tentative'))).toBe('paying')
+  })
+
+  it("reads 'paid' once the payment is confirmed", () => {
+    expect(payAtClubStage(club('payment_confirmed'))).toBe('paid')
+    expect(payAtClubStage(club('confirmed'))).toBe('paid')
+  })
+
+  it('says nothing for a round that is not going ahead, or not paid at the club', () => {
+    expect(payAtClubStage(club('cancelled'))).toBeNull()
+    expect(payAtClubStage({ status: 'payment_confirmed', payment_method: null })).toBeNull()
+    expect(payAtClubStage(null)).toBeNull()
   })
 })

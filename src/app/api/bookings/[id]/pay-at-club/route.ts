@@ -18,7 +18,7 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { UNPAID_BOOKING_STATUSES } from '@/lib/bookings/pending-payment'
-import { PAY_AT_CLUB, isPaidAtClub, offersPayAtClub } from '@/lib/bookings/payment-options'
+import { PAY_AT_CLUB, isPayAtClub, offersPayAtClub } from '@/lib/bookings/payment-options'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -48,7 +48,7 @@ export const POST = withAuth(async (
   if (!isMine) return NextResponse.json({ error: 'That booking isn\'t yours to pay for.' }, { status: 403 })
 
   // Already chosen — answer as if it had just been set, so a double tap is harmless.
-  if (isPaidAtClub(booking)) {
+  if (isPayAtClub(booking)) {
     return NextResponse.json({ ok: true, payment_method: PAY_AT_CLUB })
   }
 

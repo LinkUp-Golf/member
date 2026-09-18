@@ -8,8 +8,9 @@
 //                into that checkout.
 //   pay_at_club  the member settles with the club on the day. Choosing it marks
 //                the booking (bookings.payment_method = 'pay_at_club'), which
-//                takes the round off the member's "payment due" list — it
-//                reads "Paid at club" from then on.
+//                takes the round off the member's "payment due" list. It reads
+//                "Paying at club" until the payment is confirmed, then "Paid at
+//                club" — see payAtClubStage.
 //
 // Dependency-free on purpose, like ./price: the payment banner, the bookings
 // card, the host event form and the routes that enforce these rules all read it.
@@ -65,6 +66,32 @@ export function parsePaymentOptions(value: unknown): PaymentOption[] | null {
   return PAYMENT_OPTIONS.filter((o) => value.includes(o))
 }
 
-/** Whether a booking row has been marked as settled at the club. */
-export const isPaidAtClub = (row: { payment_method?: string | null } | null | undefined) =>
+/** Whether the member chose to settle this booking at the club — paid or not yet. */
+export const isPayAtClub = (row: { payment_method?: string | null } | null | undefined) =>
   row?.payment_method === PAY_AT_CLUB
+
+/** Statuses that mean a round's payment has come in. */
+const PAYMENT_RECEIVED_STATUSES: readonly string[] = ['payment_confirmed', 'confirmed']
+/** Statuses where the round isn't going ahead, so there's nothing to settle. */
+const NOT_GOING_AHEAD_STATUSES: readonly string[] = ['cancelled', 'waitlist']
+
+export type PayAtClubStage = 'paying' | 'paid'
+
+export const PAY_AT_CLUB_STAGE_LABELS: Record<PayAtClubStage, string> = {
+  paying: 'Paying at club',
+  paid: 'Paid at club',
+}
+
+/**
+ * Where a pay-at-club booking has got to: 'paying' until its payment is
+ * confirmed — choosing to pay at the club isn't paying — then 'paid'. null for a
+ * booking not being settled at the club, or one that isn't going ahead.
+ */
+export function payAtClubStage(
+  row: { status: string; payment_method?: string | null } | null | undefined,
+): PayAtClubStage | null {
+  if (!row || !isPayAtClub(row)) return null
+  if (PAYMENT_RECEIVED_STATUSES.includes(row.status)) return 'paid'
+  if (NOT_GOING_AHEAD_STATUSES.includes(row.status)) return null
+  return 'paying'
+}

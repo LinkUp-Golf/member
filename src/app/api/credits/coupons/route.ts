@@ -22,7 +22,7 @@ import { canRedeemCredit, loadCreditSummary, loadMemberCoupons } from '@/lib/cre
 import { issueCreditCoupon, syncCreditCoupons, type CouponTarget } from '@/lib/credits/coupons'
 import { UNPAID_BOOKING_STATUSES } from '@/lib/bookings/pending-payment'
 import { bookingAmountDue } from '@/lib/bookings/price'
-import { isPaidAtClub, offersPayNow } from '@/lib/bookings/payment-options'
+import { isPayAtClub, offersPayNow } from '@/lib/bookings/payment-options'
 import { memberPrice } from '@/lib/hosts/events'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -86,7 +86,7 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
     // A round settled at the club isn't paid through the checkout, which is the
     // only place a credit code can be spent — so neither case can take one.
-    if (isPaidAtClub(booking)) {
+    if (isPayAtClub(booking)) {
       return NextResponse.json(
         { error: 'That round is being paid at the club.' },
         { status: 409 }

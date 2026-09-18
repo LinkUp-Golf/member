@@ -34,9 +34,11 @@ import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
 import { bookingAmountDue } from "@/lib/bookings/price";
 import {
   coursePaymentOptions,
-  isPaidAtClub,
+  isPayAtClub,
   offersPayAtClub,
   offersPayNow,
+  payAtClubStage,
+  PAY_AT_CLUB_STAGE_LABELS,
   type PaymentOption,
 } from "@/lib/bookings/payment-options";
 import CreditCouponModal from "@/components/credits/CreditCouponModal";
@@ -283,7 +285,7 @@ export default function BookPage() {
 
   // A round the member chose to pay at the club stops being "payment due", so
   // the list holding it and the banner both need to hear about it.
-  function handlePaidAtClub(bookingId: string) {
+  function handleChosePayAtClub(bookingId: string) {
     setMyBookings((prev) =>
       prev.map((b) =>
         b.id === bookingId ? { ...b, payment_method: "pay_at_club" } : b,
@@ -373,7 +375,7 @@ export default function BookPage() {
       <SuccessScreen
         booking={confirmedBooking}
         wallet={creditWallet}
-        onPaidAtClub={handlePaidAtClub}
+        onChosePayAtClub={handleChosePayAtClub}
         onDone={() => {
           setStep("select");
           setSelectedSlot(null);
@@ -459,7 +461,7 @@ export default function BookPage() {
           loadingPendingBookings={loadingPendingBookings}
           refreshingPending={refreshingPending}
           wallet={creditWallet}
-          onPaidAtClub={handlePaidAtClub}
+          onChosePayAtClub={handleChosePayAtClub}
         />
       ) : (
         <MyBookingsTab
@@ -475,7 +477,7 @@ export default function BookPage() {
             setMyBookings((prev) => [...rows, ...prev])
           }
           wallet={creditWallet}
-          onPaidAtClub={handlePaidAtClub}
+          onChosePayAtClub={handleChosePayAtClub}
         />
       )}
     </AppShell>
@@ -585,7 +587,7 @@ function PendingPaymentBanner({
   pending,
   refreshing = false,
   wallet,
-  onPaidAtClub,
+  onChosePayAtClub,
 }: {
   pending: PendingPayment[];
   // True while the parent is re-checking the pending-payment list (e.g. right
@@ -596,7 +598,7 @@ function PendingPaymentBanner({
   // instead of cash. Absent (or empty) simply means no credit option is offered.
   wallet?: ReturnType<typeof useCreditWallet>;
   /** A row was marked to be paid at the club — the parent refetches the list. */
-  onPaidAtClub?: (bookingId: string) => void;
+  onChosePayAtClub?: (bookingId: string) => void;
 }) {
   const router = useRouter();
   const [index, setIndex] = useState(0);
@@ -619,7 +621,7 @@ function PendingPaymentBanner({
       setPayError(error);
       return;
     }
-    onPaidAtClub?.(row.id);
+    onChosePayAtClub?.(row.id);
   }
 
   const groups = groupPendingPayments(pending);
@@ -1856,7 +1858,7 @@ function SuccessScreen({
   booking,
   onDone,
   onUpdateBooking,
-  onPaidAtClub,
+  onChosePayAtClub,
   wallet,
 }: {
   booking: {
@@ -1871,7 +1873,7 @@ function SuccessScreen({
   };
   onDone: () => void;
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
-  onPaidAtClub: (bookingId: string) => void;
+  onChosePayAtClub: (bookingId: string) => void;
   wallet?: ReturnType<typeof useCreditWallet>;
 }) {
   // A checkbox here, 'yes'/'no' on the wire: the question the member is asked
@@ -1886,7 +1888,7 @@ function SuccessScreen({
   const venue = { payment_options: booking.paymentOptions };
   const payNow = offersPayNow(venue);
   const payAtClub = offersPayAtClub(venue) && !!booking.bookingId;
-  const [paidAtClub, setPaidAtClub] = useState(false);
+  const [payingAtClub, setPayingAtClub] = useState(false);
   const [markingAtClub, setMarkingAtClub] = useState(false);
   const [atClubError, setAtClubError] = useState("");
 
@@ -1900,11 +1902,11 @@ function SuccessScreen({
       setAtClubError(error);
       return;
     }
-    setPaidAtClub(true);
-    onPaidAtClub(booking.bookingId);
+    setPayingAtClub(true);
+    onChosePayAtClub(booking.bookingId);
   }
   // Something to pay still on screen — the Back button steps down to outline.
-  const hasPayCta = !paidAtClub && ((payNow && !!booking.paymentUrl) || payAtClub);
+  const hasPayCta = !payingAtClub && ((payNow && !!booking.paymentUrl) || payAtClub);
 
   // Credit the member could put toward this round. Same rules as the payment
   // banner: a code is issued against a booking row, and only when the balance
@@ -1985,7 +1987,7 @@ function SuccessScreen({
           className="text-sm leading-relaxed"
           style={{ color: "rgba(0,38,105,0.6)" }}
         >
-          {paidAtClub
+          {payingAtClub
             ? "You're paying at the club — settle your round with them on the day."
             : payNow
               ? "The slot is yours to pay for — your round is confirmed once payment is complete."
@@ -2004,12 +2006,12 @@ function SuccessScreen({
             its money separately, so this is that course's link and not a
             house-wide one. New tab, so this screen (and an unsaved dinner
             RSVP with it) survives the trip. */}
-        {paidAtClub ? (
+        {payingAtClub ? (
           <p
             className="!mt-4 text-sm font-semibold rounded-xl px-3 py-2.5 text-center"
             style={{ background: "rgba(34,197,94,0.08)", color: "#166534" }}
           >
-            ✓ Paid at club
+            ✓ {PAY_AT_CLUB_STAGE_LABELS.paying}
           </p>
         ) : payNow ? (
           booking.paymentUrl ? (
@@ -2032,7 +2034,7 @@ function SuccessScreen({
         ) : null}
         {/* The other way this venue takes payment, when it takes it. Gold only
             when it's the sole option — otherwise it sits under Pay now. */}
-        {!paidAtClub && payAtClub && (
+        {!payingAtClub && payAtClub && (
           <button
             type="button"
             onClick={handlePayAtClub}
@@ -2053,7 +2055,7 @@ function SuccessScreen({
         {/* Credit is the second way to settle the same bill — the code is a
             discount typed into the venue's checkout, not a separate way to
             pay — so it sits under the Pay button rather than replacing it. */}
-        {!payNow || paidAtClub ? null : heldCoupon ? (
+        {!payNow || payingAtClub ? null : heldCoupon ? (
           <>
             <button
               type="button"
@@ -2168,10 +2170,16 @@ const STATUS_LABELS: Record<
     color: "#166534",
     bg: "rgba(34,197,94,0.08)",
   },
-  // Not a booking status: an availability_confirmed row the member chose to
-  // settle at the club (payment_method 'pay_at_club'). See bookingDisplayStatus.
+  // Not booking statuses: a row the member chose to settle at the club
+  // (payment_method 'pay_at_club'), before and after its payment is confirmed.
+  // See bookingDisplayStatus.
+  paying_at_club: {
+    label: PAY_AT_CLUB_STAGE_LABELS.paying,
+    color: "#92640a",
+    bg: "rgba(234,179,8,0.08)",
+  },
   paid_at_club: {
-    label: "Paid at club",
+    label: PAY_AT_CLUB_STAGE_LABELS.paid,
     color: "#166534",
     bg: "rgba(34,197,94,0.08)",
   },
@@ -2188,16 +2196,19 @@ const STATUS_LABELS: Record<
   },
 };
 
-// What a row's badge says. A round being paid at the club keeps its pipeline
-// status underneath, but "Payment due" would be wrong for it — until GHL moves
-// it on, it reads "Paid at club".
+// What a row's badge says. A round being settled at the club keeps its
+// pipeline status underneath, but "Payment due" would be wrong for it: it reads
+// "Paying at club" until its payment is confirmed, then "Paid at club".
 function bookingDisplayStatus(row: {
   status: string;
   payment_method?: string | null;
 }): string {
-  return row.status === "availability_confirmed" && isPaidAtClub(row)
-    ? "paid_at_club"
-    : row.status;
+  const stage = payAtClubStage(row);
+  return stage === "paying"
+    ? "paying_at_club"
+    : stage === "paid"
+      ? "paid_at_club"
+      : row.status;
 }
 
 function BookingStatusBadge({ status }: { status: string }) {
@@ -2662,14 +2673,14 @@ function MyBookingsTab({
   onUpdateBooking,
   onPlayersAdded,
   wallet,
-  onPaidAtClub,
+  onChosePayAtClub,
 }: {
   bookings: Booking[];
   onRefresh: () => void;
   onSwitchToBook: () => void;
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
   onPlayersAdded: (rows: Booking[]) => void;
-  onPaidAtClub: (bookingId: string) => void;
+  onChosePayAtClub: (bookingId: string) => void;
   // Passed down rather than fetched here: the page already holds the member's
   // credit for the payment banner, and two copies would mean two requests.
   wallet?: ReturnType<typeof useCreditWallet>;
@@ -2799,7 +2810,7 @@ function MyBookingsTab({
                 onEditGuest={setEditTarget}
                 onAddPlayer={setAddTarget}
                 wallet={wallet}
-                onPaidAtClub={onPaidAtClub}
+                onChosePayAtClub={onChosePayAtClub}
               />
             ))}
           </div>
@@ -2899,14 +2910,14 @@ function BookingCard({
   onEditGuest,
   onAddPlayer,
   wallet,
-  onPaidAtClub,
+  onChosePayAtClub,
 }: {
   group: BookingGroup;
   userId: string | undefined;
   onCancel: (target: CancelTarget) => void;
   onEditGuest: (target: EditGuestTarget) => void;
   onAddPlayer: (target: AddPlayerTarget) => void;
-  onPaidAtClub: (bookingId: string) => void;
+  onChosePayAtClub: (bookingId: string) => void;
   // Credit, so a payable row here offers the same choice the payment banner
   // does. Undefined means the member has none and nothing extra is rendered.
   wallet?: ReturnType<typeof useCreditWallet>;
@@ -2933,7 +2944,7 @@ function BookingCard({
       setPayError(error);
       return;
     }
-    onPaidAtClub(rowId);
+    onChosePayAtClub(rowId);
   }
 
   const iAmBooker = group.primary.member_id === userId;
@@ -2986,7 +2997,7 @@ function BookingCard({
           canCancel: canCancelPrimary,
           canPay:
             group.primary.status === "availability_confirmed" &&
-            !isPaidAtClub(group.primary),
+            !isPayAtClub(group.primary),
           amountDue: bookingAmountDue(group.primary),
           isYou: true,
           adminNotes: group.primary.admin_notes ?? null,
@@ -2998,7 +3009,7 @@ function BookingCard({
           status: bookingDisplayStatus(p),
           ghlBookingId: p.ghl_booking_id ?? null,
           canCancel: hoursUntil > 0 && CANCELLABLE.includes(p.status),
-          canPay: p.status === "availability_confirmed" && !isPaidAtClub(p),
+          canPay: p.status === "availability_confirmed" && !isPayAtClub(p),
           amountDue: bookingAmountDue(p),
           isYou: false,
           adminNotes: p.admin_notes ?? null,
@@ -3024,7 +3035,7 @@ function BookingCard({
               ? hoursUntil > 0 && CANCELLABLE.includes(myRow.status)
               : false,
             canPay:
-              myRow?.status === "availability_confirmed" && !isPaidAtClub(myRow),
+              myRow?.status === "availability_confirmed" && !isPayAtClub(myRow),
             amountDue: bookingAmountDue(myRow ?? group.primary),
             isYou: true,
             adminNotes: myRow?.admin_notes ?? null,
@@ -3780,7 +3791,7 @@ function EventSelectionScreen({
   loadingPendingBookings,
   refreshingPending,
   wallet,
-  onPaidAtClub,
+  onChosePayAtClub,
 }: {
   /** Venue, day and tee time all chosen at once — this goes to confirmation. */
   onSelect: (course: Course, date: string, slot: GHLBookingSlot) => void;
@@ -3790,7 +3801,7 @@ function EventSelectionScreen({
   /** Credit, for the payment banner's "use credits" option. */
   wallet?: ReturnType<typeof useCreditWallet>;
   /** A banner row was marked to be paid at the club. */
-  onPaidAtClub: (bookingId: string) => void;
+  onChosePayAtClub: (bookingId: string) => void;
 }) {
   // Every bookable venue, fetched once. The calendar plots availability, but
   // the venue's own details — price, address, rules, links — live on these
@@ -4134,7 +4145,7 @@ function EventSelectionScreen({
             pending={pendingBookings}
             refreshing={refreshingPending}
             wallet={wallet}
-            onPaidAtClub={onPaidAtClub}
+            onChosePayAtClub={onChosePayAtClub}
           />
         )
       )}

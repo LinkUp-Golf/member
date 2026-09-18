@@ -8,6 +8,7 @@ import Select from '@/components/ui/Select'
 import { format, addDays, subDays, isToday, differenceInCalendarDays } from 'date-fns'
 import { formatTeeTime } from '@/lib/utils'
 import { tagsOverlap } from '@/lib/ghl/tags'
+import { payAtClubStage, PAY_AT_CLUB_STAGE_LABELS } from '@/lib/bookings/payment-options'
 import type { AdditionalPlayer } from '@/types'
 
 type BookingStatus = 'tentative' | 'availability_confirmed' | 'payment_confirmed' | 'confirmed' | 'pending' | 'cancelled' | 'waitlist' | 'awaiting_approval'
@@ -346,6 +347,7 @@ function SlotCard({
             const info = playerInfo(b)
             const sm = STATUS_META[b.status] ?? STATUS_META.tentative
             const daysLeftLabel = paymentDaysLeftLabel(b)
+            const clubStage = payAtClubStage(b)
             const showRemindCta = !!daysLeftLabel && canRemindPayment(b)
             const alreadyReminded = remindedPaymentIds.has(b.id)
             return (
@@ -365,9 +367,12 @@ function SlotCard({
                           ⏳ {daysLeftLabel}
                         </span>
                       )}
-                      {b.payment_method === 'pay_at_club' && (
+                      {/* Choosing to pay at the club isn't paying: "Paying at
+                          club" until the payment is confirmed, "Paid at club"
+                          after. */}
+                      {clubStage && (
                         <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 flex-shrink-0 whitespace-nowrap">
-                          Paid at club
+                          {PAY_AT_CLUB_STAGE_LABELS[clubStage]}
                         </span>
                       )}
                       {/* Credit put toward this row. The code is here because
