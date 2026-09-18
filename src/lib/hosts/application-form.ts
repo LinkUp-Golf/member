@@ -9,6 +9,7 @@
 
 import type { HostApplicationEventInput } from '@/types'
 import { newLinkupRounds, type NewLinkupValues } from '@/lib/hosts/new-linkup'
+import { normaliseTeeTime } from '@/lib/hosts/tee-time'
 
 export const NAME_MIN = 2
 export const NAME_MAX = 120
@@ -46,7 +47,7 @@ export type SubmitValues = {
  */
 export interface RoundFields {
   dates: { value: string }[]
-  /** date → tee time as typed; absent or '' means no fixed time. */
+  /** date → "HH:MM"; every picked date needs one. */
   tee_times: Record<string, string>
   dinner: boolean
 }
@@ -124,8 +125,9 @@ export function buildApplicationPayload(data: ApplicationValues): SubmitValues {
         venue,
         event_date: date,
         // That date's own tee time — each date becomes its own event, and the
-        // row it becomes stores the time it was given.
-        tee_time: (round.tee_times?.[date] ?? '').trim() || null,
+        // row it becomes stores the time it was given. Required, so this is
+        // only ever '' for a round that failed validation.
+        tee_time: normaliseTeeTime(round.tee_times?.[date]),
         dinner: round.dinner,
       })
     }

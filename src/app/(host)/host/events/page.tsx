@@ -32,6 +32,7 @@ import {
   type NewLinkupErrors,
   type NewLinkupValues,
 } from "@/lib/hosts/new-linkup";
+import { missingTeeTimes, normaliseTeeTime } from "@/lib/hosts/tee-time";
 import {
   DEFAULT_PAYMENT_OPTIONS,
   coursePaymentOptions,
@@ -539,13 +540,19 @@ function EventDrawer({
     event?.event_date ? [event.event_date.slice(0, 10)] : [],
   );
   // The tee time for each of those dates — each becomes its own event, and two
-  // days at a club rarely tee off at the same time. '' is "no fixed time".
+  // days at a club rarely tee off at the same time. Every date needs one; an
+  // event stored with a free-text time from before starts blank, since the time
+  // input can't show it.
   const [teeTimes, setTeeTimes] = useState<Record<string, string>>(() =>
     event?.event_date
-      ? { [event.event_date.slice(0, 10)]: event.tee_time ?? "" }
+      ? { [event.event_date.slice(0, 10)]: normaliseTeeTime(event.tee_time) }
       : {},
   );
   const [dateError, setDateError] = useState<string | null>(null);
+  // Dates whose tee time was left empty when the host tried to submit. Marked
+  // on the list itself rather than said once above it, so a host with a week of
+  // dates can see which row is the problem.
+  const [missingTees, setMissingTees] = useState<string[]>([]);
   // Editing acts on an event that already exists at a club that already exists,
   // so the proposal tab has nothing to offer there. A new event opens on the
   // first tab, New LinkUp — an unselected tab on the left reads as broken.
@@ -658,12 +665,14 @@ function EventDrawer({
       if (isEdit) {
         // One event, one tee time, whichever day it lands on — kept through a
         // moment with no day picked, too.
-        const kept = Object.values(prev)[0] ?? event?.tee_time ?? "";
+        const kept =
+          Object.values(prev)[0] ?? normaliseTeeTime(event?.tee_time);
         return next[0] ? { [next[0]]: kept } : prev;
       }
       return Object.fromEntries(next.map((d) => [d, prev[d] ?? ""]));
     });
     setDates(next);
+    setMissingTees((prev) => prev.filter((d) => next.includes(d)));
     if (next.length) setDateError(null);
   };
 
@@ -671,18 +680,23 @@ function EventDrawer({
   const clearDates = () => {
     setDates([]);
     setTeeTimes({});
+    setMissingTees([]);
     setDateError(null);
   };
 
-  const setTeeTime = (date: string, value: string) =>
+  const setTeeTime = (date: string, value: string) => {
     setTeeTimes((prev) => ({ ...prev, [date]: value }));
+    // Stop marking a row the moment it has a time, rather than at the next
+    // submit.
+    if (value) setMissingTees((prev) => prev.filter((d) => d !== date));
+  };
 
   const removeDate = (date: string) =>
     changeDates(dates.filter((d) => d !== date));
 
-  /** date → trimmed tee time, for every date being listed. */
+  /** date → "HH:MM", for every date being listed. */
   const teeTimesFor = (list: string[]) =>
-    Object.fromEntries(list.map((d) => [d, (teeTimes[d] ?? "").trim()]));
+    Object.fromEntries(list.map((d) => [d, normaliseTeeTime(teeTimes[d])]));
 
   /**
    * Proposing a venue we don't have, and the rounds the host wants there.
@@ -732,7 +746,7 @@ function EventDrawer({
           course_id: courseJson.course.id,
           event_dates: rounds.map((r) => r.event_date),
           tee_times: Object.fromEntries(
-            rounds.map((r) => [r.event_date, r.tee_time ?? ""]),
+            rounds.map((r) => [r.event_date, r.tee_time]),
           ),
           total_spots: rounds[0]?.total_spots,
           member_guest_rate: rounds[0]?.member_guest_rate,
@@ -771,7 +785,7 @@ function EventDrawer({
       ...(isEdit
         ? {
             event_date: allDates[0],
-            tee_time: (teeTimes[allDates[0] as string] ?? "").trim() || null,
+            tee_time: normaliseTeeTime(teeTimes[allDates[0] as string]),
           }
         : { event_dates: allDates, tee_times: teeTimesFor(allDates) }),
       dinner: values.dinner,
@@ -826,6 +840,10 @@ function EventDrawer({
         return;
       }
       setDateError(null);
+      // Every picked date has to say what time it tees off at.
+      const missing = missingTeeTimes(dates, teeTimes);
+      setMissingTees(missing);
+      if (missing.length > 0) return;
       return save(v);
     })();
 
@@ -1066,12 +1084,13 @@ function EventDrawer({
                 teeTimes={teeTimes}
                 onTeeTimeChange={setTeeTime}
                 onRemove={isEdit ? undefined : removeDate}
+                invalidDates={missingTees}
                 idPrefix="ev-tee"
               />
               <p className="text-[11px] text-gray-400 mt-1">
                 {isEdit
-                  ? "Only days this venue still has open can be chosen. Type the tee time however you like, or leave it blank if there's no fixed time."
-                  : "Only days this venue has open and doesn't already have a round on are shown; the number is spots left. Each date becomes its own event, with its own tee time — leave it blank if there's no fixed time."}
+                  ? "Only days this venue still has open can be chosen. Set the time the round tees off."
+                  : "Only days this venue has open and doesn't already have a round on are shown; the number is spots left. Each date becomes its own event, with its own tee time."}
               </p>
               {dateError && <p className={errCls}>{dateError}</p>}
             </div>

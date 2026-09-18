@@ -36,6 +36,7 @@ import {
   buildApplicationPayload,
   withNewLinkup,
   newRound,
+  roundAt,
   MAX_DATES_PER_ROUND,
   NAME_MAX,
   NAME_MIN,
@@ -43,6 +44,7 @@ import {
   type RoundFields,
   type SubmitValues,
 } from "@/lib/hosts/application-form";
+import { TEE_TIME_REQUIRED, missingTeeTimes } from "@/lib/hosts/tee-time";
 import type { Host, HostApplication, Course } from "@/types";
 
 const fmtMoney = (n: number) =>
@@ -156,7 +158,7 @@ export default function HostApplicationPage() {
               />
               <Step
                 n={2}
-                text={`Pick the dates you'd like to host — we show you the days that club actually has open, and how many spots each one has. If you don't know the exact tee time, just enter "morning" or "afternoon". You may pick just one date or several.`}
+                text="Pick the dates you'd like to host — we show you the days that club actually has open, and how many spots each one has. Set the tee time for each date; we'll confirm it with the club. You may pick just one date or several."
               />
               <Step
                 n={3}
@@ -682,6 +684,16 @@ function VenueCard({
       Object.fromEntries(next.map((d) => [d, teeTimes[d] ?? ""])),
     );
 
+  /**
+   * Re-check the round after its dates change. Tee times are only re-checked
+   * once they've already been complained about — before that, a date would be
+   * marked as missing a time the instant it was picked.
+   */
+  const revalidate = () =>
+    void trigger(
+      roundErrors?.tee_times ? [datesName, teeTimesName] : datesName,
+    );
+
   return (
     <div className="rounded-xl border border-green-900/20 bg-green-50/40 px-3 py-3 space-y-2">
       <div className="flex items-center gap-2">
@@ -724,7 +736,7 @@ function VenueCard({
             onChange={(next: string[]) => {
               f.onChange(next.map(value => ({ value })));
               setPicked(next);
-              void trigger(datesName);
+              revalidate();
             }}
             max={MAX_DATES_PER_ROUND}
             showPickedElsewhere={false}
@@ -737,22 +749,43 @@ function VenueCard({
 
       {/* Each picked date with its own tee time — it becomes its own event, and
           two days at a club rarely tee off at the same time. This is also the
-          one place every picked date is listed, whichever month it's in. */}
-      <DateTeeTimeList
-        dates={picked}
-        teeTimes={teeTimes}
-        onTeeTimeChange={(date, value) =>
-          setValue(teeTimesName, { ...teeTimes, [date]: value })
-        }
-        onRemove={(date) => {
-          const next = picked.filter((d) => d !== date);
-          setValue(datesName, next.map((value) => ({ value })));
-          setPicked(next);
-          void trigger(datesName);
+          one place every picked date is listed, whichever month it's in.
+          A field of the form rather than a loose control, so "every date has a
+          time" is a rule the submit is held to like any other. */}
+      <Controller
+        control={control}
+        name={teeTimesName}
+        rules={{
+          validate: (value, values) => {
+            // The dates as they stand at validation time, read from the form
+            // rather than a captured render — same reason roundAt exists.
+            const dates = (roundAt(values, "existing", index)?.dates ?? [])
+              .map((d) => d.value)
+              .filter(Boolean);
+            return missingTeeTimes(dates, value).length === 0 || TEE_TIME_REQUIRED;
+          },
         }}
-        max={MAX_DATES_PER_ROUND}
-        tone="member"
-        idPrefix={`apply-${index}-tee`}
+        render={({ field: f }) => (
+          <DateTeeTimeList
+            dates={picked}
+            teeTimes={f.value ?? {}}
+            onTeeTimeChange={(date, value) =>
+              f.onChange({ ...(f.value ?? {}), [date]: value })
+            }
+            onRemove={(date) => {
+              const next = picked.filter((d) => d !== date);
+              setValue(datesName, next.map((value) => ({ value })));
+              setPicked(next);
+              revalidate();
+            }}
+            invalidDates={
+              roundErrors?.tee_times ? missingTeeTimes(picked, f.value) : []
+            }
+            max={MAX_DATES_PER_ROUND}
+            tone="member"
+            idPrefix={`apply-${index}-tee`}
+          />
+        )}
       />
 
       {/* The terms, stated rather than asked for — the same two numbers the

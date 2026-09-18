@@ -5,7 +5,7 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { sanitiseText } from '@/lib/validation'
+import { normaliseTeeTime } from '@/lib/hosts/tee-time'
 import { HOST_MEMBER_PRICE_MARKUP_PERCENT } from '@/lib/constants'
 import type { HostedEvent, HostStats } from '@/types'
 import { loadCreditSummary } from '@/lib/credits'
@@ -66,16 +66,18 @@ export async function hostCanUseCourse(admin: AdminClient, hostId: string, cours
  * club rarely tee off at the same time — and each date becomes its own
  * hosted_events row, so each stores the time it was given. `tee_times` is that
  * map, keyed by date; `tee_time` is the one-for-all form an older client sends,
- * filling any date the map doesn't name. Blank means no fixed time (null).
+ * filling any date the map doesn't name.
  *
- * Free text either way, so it's sanitised here like every other typed field.
+ * Every date has one by the time this runs — validateHostedEventPayload insists
+ * — so null is only reachable for a caller that skipped it. Normalising rather
+ * than sanitising is what makes that safe: what comes out is "HH:MM" or nothing,
+ * never text that has to be escaped.
  */
 export function resolveTeeTimes(
   dates: string[],
   body: { tee_time?: unknown; tee_times?: unknown },
 ): Map<string, string | null> {
-  const clean = (v: unknown) =>
-    typeof v === 'string' && v.trim() ? sanitiseText(v.trim()) : null
+  const clean = (v: unknown) => normaliseTeeTime(v) || null
 
   const shared = clean(body.tee_time)
   const perDate =

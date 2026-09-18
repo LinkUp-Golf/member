@@ -13,6 +13,7 @@ import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateHostedEventPayload, sanitiseText } from '@/lib/validation'
 import { enrichHostedEvents, hostCanUseCourse } from '@/lib/hosts/events'
+import { normaliseTeeTime } from '@/lib/hosts/tee-time'
 import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
 import type { HostedEvent } from '@/types'
@@ -217,9 +218,9 @@ export const PATCH = withHostAuth(
       patch.event_date = String(body.event_date)
     }
     if ('tee_time' in body) {
-      patch.tee_time = typeof body.tee_time === 'string' && body.tee_time.trim()
-        ? sanitiseText(body.tee_time.trim())
-        : null
+      // Stored the same way a create stores it — a clock value or nothing, which
+      // is what keeps what's in the column the shape the time input can show.
+      patch.tee_time = normaliseTeeTime(body.tee_time) || null
     }
     if ('member_guest_rate' in body) patch.member_guest_rate = Number(body.member_guest_rate)
     if ('dinner' in body) patch.dinner = body.dinner === true

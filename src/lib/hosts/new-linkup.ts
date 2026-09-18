@@ -11,6 +11,7 @@
 // the website is required — it's the whole of what we'll have to work from.
 
 import { DEFAULT_PAYMENT_OPTIONS, type PaymentOption } from '@/lib/bookings/payment-options'
+import { TEE_TIME_REQUIRED, missingTeeTimes, normaliseTeeTime } from '@/lib/hosts/tee-time'
 
 export const NEW_LINKUP_NAME_MIN = 2
 export const NEW_LINKUP_NAME_MAX = 120
@@ -24,7 +25,7 @@ export interface NewLinkupValues {
   website: string
   /** YYYY-MM-DD, one event each. */
   dates: string[]
-  /** date → tee time as typed; '' is no fixed time. */
+  /** date → "HH:MM"; every picked date needs one. */
   teeTimes: Record<string, string>
   /** Number of guests a day, as typed. */
   guests: string
@@ -34,7 +35,7 @@ export interface NewLinkupValues {
   paymentOptions: PaymentOption[]
 }
 
-export type NewLinkupField = 'name' | 'website' | 'dates' | 'guests' | 'rate'
+export type NewLinkupField = 'name' | 'website' | 'dates' | 'teeTimes' | 'guests' | 'rate'
 export type NewLinkupErrors = Partial<Record<NewLinkupField, string>>
 
 export const emptyNewLinkup = (): NewLinkupValues => ({
@@ -73,6 +74,10 @@ export function validateNewLinkup(v: NewLinkupValues): NewLinkupErrors {
   else if (website.length > NEW_LINKUP_WEBSITE_MAX) errors.website = `At most ${NEW_LINKUP_WEBSITE_MAX} characters`
 
   if (v.dates.length === 0) errors.dates = 'Pick the dates you want to host.'
+  // A date with no tee time is a round nobody can turn up to, so each one the
+  // host picked has to carry a time. The message lives on the list itself,
+  // against the rows that are missing one — this only has to block the submit.
+  else if (missingTeeTimes(v.dates, v.teeTimes).length > 0) errors.teeTimes = TEE_TIME_REQUIRED
 
   const guests = Number(v.guests)
   if (v.guests.trim() === '' || !Number.isInteger(guests) || guests < 1 || guests > NEW_LINKUP_GUESTS_MAX) {
@@ -90,14 +95,16 @@ export const hasNewLinkupErrors = (errors: NewLinkupErrors) => Object.keys(error
 /** One round per date, in date order, carrying the host's own spots and rate. */
 export function newLinkupRounds(v: NewLinkupValues): {
   event_date: string
-  tee_time: string | null
+  tee_time: string
   total_spots: number
   member_guest_rate: number
   dinner: boolean
 }[] {
   return [...v.dates].sort().map(date => ({
     event_date: date,
-    tee_time: (v.teeTimes[date] ?? '').trim() || null,
+    // Validated by the time this runs, so every date has one; anything that
+    // isn't a clock value falls to '' and the route refuses it.
+    tee_time: normaliseTeeTime(v.teeTimes[date]),
     total_spots: Number(v.guests),
     member_guest_rate: Number(v.rate),
     dinner: false,

@@ -11,6 +11,7 @@ import DateMultiPicker from '@/components/host/DateMultiPicker'
 import DateTeeTimeList from '@/components/host/DateTeeTimeList'
 import PaymentOptionsPicker from '@/components/payments/PaymentOptionsPicker'
 import { cn } from '@/lib/utils'
+import { missingTeeTimes } from '@/lib/hosts/tee-time'
 import {
   NEW_LINKUP_GUESTS_MAX,
   NEW_LINKUP_NAME_MAX,
@@ -108,13 +109,16 @@ export default function NewLinkupFields({
           teeTimes={value.teeTimes}
           onTeeTimeChange={(date, t) => set({ teeTimes: { ...value.teeTimes, [date]: t } })}
           onRemove={date => setDates(value.dates.filter(d => d !== date))}
+          // Only once the form has been submitted — the rule is "every date has
+          // a time", and marking a date the moment it's picked would be telling
+          // someone off for not having typed yet.
+          invalidDates={errors.teeTimes ? missingTeeTimes(value.dates, value.teeTimes) : []}
           max={maxDates}
           tone={tone}
           idPrefix={`${idPrefix}-tee`}
         />
         <p className={hintCls}>
-          Each date becomes its own event, with its own tee time — type it however
-          you like, or leave it blank if there&apos;s no fixed time. We&apos;ll
+          Each date becomes its own event, with its own tee time. We&apos;ll
           confirm them with the venue while we set it up.
         </p>
         {errors.dates && <p className={errCls}>{errors.dates}</p>}

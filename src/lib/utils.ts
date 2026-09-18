@@ -8,6 +8,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { AVIARA_TIMEZONE, DEFAULT_LANDING_PATH } from '@/lib/constants'
 import { getBrowserTimezone } from '@/lib/timezone'
+import { isTeeTime } from '@/lib/hosts/tee-time'
 
 // ---- Class name helper --------------------------------------
 export function cn(...inputs: ClassValue[]) {
@@ -92,15 +93,15 @@ export function formatTeeTime(timeString: string): string {
   return `${h12}:${minutes} ${period}`
 }
 
-// A hosted event's tee time is free text — a host can type "8:30 AM", "Shotgun
-// 9am", or leave it blank — but events listed from a real booking (and legacy
-// rows) still store a "HH:MM[:SS]" clock value. Format the clock case to a 12h
-// label; show anything else exactly as the host wrote it.
-const CLOCK_RE = /^([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/
+// A hosted event's tee time is a clock value — it's picked with a time input,
+// and events listed from a real booking store "HH:MM[:SS]" too. Format that to
+// a 12h label. Rows written while it was free text ("Shotgun 9am") are still
+// out there, so anything that isn't a clock value shows exactly as it was
+// written rather than disappearing.
 export function formatEventTeeTime(value: string | null | undefined): string | null {
   const t = value?.trim()
   if (!t) return null
-  if (!CLOCK_RE.test(t)) return t
+  if (!isTeeTime(t)) return t
   const [hours = '0', minutes = '00'] = t.split(':')
   const h = parseInt(hours, 10)
   const period = h >= 12 ? 'PM' : 'AM'

@@ -49,8 +49,11 @@ describe('normaliseEventDates', () => {
 })
 
 describe('validateHostedEventPayload with multiple dates', () => {
+  // A tee time every date can fall back on, so these exercise the date rules
+  // rather than the "every date needs a time" one below.
   const base = {
     course_id: '3f2504e0-4f89-11d3-9a0c-0305e82c3301',
+    tee_time: '08:30',
     total_spots: 4,
     member_guest_rate: 150,
   }
@@ -118,25 +121,56 @@ describe('validateHostedEventPayload with a tee time per date', () => {
     event_dates: ['2099-06-01', '2099-06-08'],
   }
 
-  it('accepts a tee time for each date, blanks included', () => {
+  it('accepts a clock value for each date', () => {
     const r = validateHostedEventPayload({
       ...base,
-      tee_times: { '2099-06-01': '8:30 AM', '2099-06-08': '' },
+      tee_times: { '2099-06-01': '08:30', '2099-06-08': '13:05' },
     })
     expect(r.valid).toBe(true)
   })
 
-  it('rejects tee times that are not keyed by date', () => {
-    expect(validateHostedEventPayload({ ...base, tee_times: ['8:30 AM'] }).valid).toBe(false)
-    expect(validateHostedEventPayload({ ...base, tee_times: { monday: '8:30 AM' } }).valid).toBe(false)
-  })
-
-  it('holds each tee time to the same length bound as the single field', () => {
+  it('refuses a date left without a tee time', () => {
+    // The rule that makes the input required: a date with no time is a round
+    // nobody can turn up to.
     const r = validateHostedEventPayload({
       ...base,
-      tee_times: { '2099-06-01': 'x'.repeat(51) },
+      tee_times: { '2099-06-01': '08:30', '2099-06-08': '' },
     })
     expect(r.valid).toBe(false)
+    expect(r.errors.some(e => /tee time/i.test(e))).toBe(true)
+  })
+
+  it('refuses a date the map never names, with nothing shared to fall back on', () => {
+    expect(validateHostedEventPayload({ ...base, tee_times: { '2099-06-01': '08:30' } }).valid)
+      .toBe(false)
+  })
+
+  it('takes the single tee_time field for any date the map skips', () => {
+    const r = validateHostedEventPayload({
+      ...base,
+      tee_time: '07:00',
+      tee_times: { '2099-06-08': '13:05' },
+    })
+    expect(r.valid).toBe(true)
+  })
+
+  it('refuses free text, which is what hosts used to be able to type', () => {
+    expect(validateHostedEventPayload({ ...base, tee_time: 'Shotgun 9am' }).valid).toBe(false)
+    expect(
+      validateHostedEventPayload({
+        ...base,
+        tee_times: { '2099-06-01': '8:30 AM', '2099-06-08': '08:30' },
+      }).valid,
+    ).toBe(false)
+  })
+
+  it('rejects tee times that are not keyed by date', () => {
+    expect(validateHostedEventPayload({ ...base, tee_times: ['08:30'] }).valid).toBe(false)
+    expect(validateHostedEventPayload({ ...base, tee_times: { monday: '08:30' } }).valid).toBe(false)
+  })
+
+  it('asks for none on a partial (PATCH) payload carrying no dates', () => {
+    expect(validateHostedEventPayload({ dinner: true }, { partial: true }).valid).toBe(true)
   })
 })
 
@@ -147,15 +181,15 @@ describe('resolveTeeTimes', () => {
     // The whole point of asking per date: each becomes its own hosted_events
     // row, and each row stores its own time.
     const times = resolveTeeTimes(dates, {
-      tee_times: { '2099-06-01': ' 8:30 AM ', '2099-06-08': 'afternoon' },
+      tee_times: { '2099-06-01': ' 08:30 ', '2099-06-08': '13:05' },
     })
-    expect(times.get('2099-06-01')).toBe('8:30 AM')
-    expect(times.get('2099-06-08')).toBe('afternoon')
-    // Not named, and nothing shared to fall back on: no fixed time.
+    expect(times.get('2099-06-01')).toBe('08:30')
+    expect(times.get('2099-06-08')).toBe('13:05')
+    // Not named, and nothing shared to fall back on: no time.
     expect(times.get('2099-06-15')).toBeNull()
   })
 
-  it('reads a blank tee time as no fixed time', () => {
+  it('reads a blank tee time as none', () => {
     const times = resolveTeeTimes(dates, { tee_times: { '2099-06-01': '   ' } })
     expect(times.get('2099-06-01')).toBeNull()
   })
@@ -164,21 +198,32 @@ describe('resolveTeeTimes', () => {
     // What an older client sends, and what the edit form still sends for its
     // single date.
     const times = resolveTeeTimes(dates, {
-      tee_time: 'morning',
-      tee_times: { '2099-06-08': '1:00 PM' },
+      tee_time: '07:00',
+      tee_times: { '2099-06-08': '13:05' },
     })
-    expect([...times.values()]).toEqual(['morning', '1:00 PM', 'morning'])
+    expect([...times.values()]).toEqual(['07:00', '13:05', '07:00'])
   })
 
-  it('sanitises what the host typed, like every other free-text field', () => {
-    const times = resolveTeeTimes(['2099-06-01'], {
-      tee_times: { '2099-06-01': '<script>8:30</script>' },
+  it('stores a clock value in one shape, whatever shape it arrived in', () => {
+    const times = resolveTeeTimes(['2099-06-01', '2099-06-08'], {
+      tee_times: { '2099-06-01': '8:30', '2099-06-08': '13:05:00' },
     })
-    expect(times.get('2099-06-01')).not.toContain('<script>')
+    expect(times.get('2099-06-01')).toBe('08:30')
+    expect(times.get('2099-06-08')).toBe('13:05')
+  })
+
+  it('drops anything that is not a time of day', () => {
+    // The route refuses these before they get here; this is what keeps a caller
+    // that skipped validation from writing text into the column.
+    const times = resolveTeeTimes(['2099-06-01', '2099-06-08'], {
+      tee_times: { '2099-06-01': '<script>8:30</script>', '2099-06-08': 'Shotgun 9am' },
+    })
+    expect(times.get('2099-06-01')).toBeNull()
+    expect(times.get('2099-06-08')).toBeNull()
   })
 
   it('ignores a tee_times that is not a map', () => {
-    expect([...resolveTeeTimes(dates, { tee_times: ['8:30 AM'] }).values()]).toEqual([
+    expect([...resolveTeeTimes(dates, { tee_times: ['08:30'] }).values()]).toEqual([
       null, null, null,
     ])
   })

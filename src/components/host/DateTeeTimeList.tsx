@@ -13,9 +13,7 @@
 import { X } from 'lucide-react'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
-
-/** Bound on a typed tee time — matches the server's validation. */
-export const TEE_TIME_MAX_LENGTH = 50
+import { TEE_TIME_REQUIRED } from '@/lib/hosts/tee-time'
 
 const dateLabel = (iso: string) => format(new Date(`${iso}T12:00:00`), 'MMM d, yyyy')
 
@@ -24,17 +22,24 @@ export default function DateTeeTimeList({
   teeTimes,
   onTeeTimeChange,
   onRemove,
+  invalidDates = [],
   max,
   tone = 'neutral',
   idPrefix = 'tee-time',
 }: {
   /** Picked dates, YYYY-MM-DD. */
   dates: string[]
-  /** date → what the host typed; absent or '' means no fixed time. */
+  /** date → "HH:MM"; absent or '' means not set yet, which won't submit. */
   teeTimes: Record<string, string>
   onTeeTimeChange: (date: string, value: string) => void
   /** Omit to hide the remove buttons (editing a single event). */
   onRemove?: (date: string) => void
+  /**
+   * Dates whose tee time is missing, once the form has been told to say so.
+   * Passing them marks those rows and prints the reason — kept here so all
+   * three forms that ask for tee times word it the same way.
+   */
+  invalidDates?: string[]
   /** Cap on dates, to say so once it's reached. */
   max?: number
   /** 'member' matches the member app's navy-on-cream forms. */
@@ -43,6 +48,7 @@ export default function DateTeeTimeList({
 }) {
   if (dates.length === 0) return null
   const sorted = [...dates].sort()
+  const invalid = new Set(invalidDates)
 
   return (
     <div className="mt-2 space-y-1.5">
@@ -61,11 +67,14 @@ export default function DateTeeTimeList({
             </label>
             <input
               id={id}
-              type="text"
-              className="input text-sm flex-1 min-w-0"
-              placeholder="e.g. 8:30 AM"
+              type="time"
+              required
+              className={cn(
+                'input text-sm flex-1 min-w-0',
+                invalid.has(date) && 'border-red-400 focus:border-red-400',
+              )}
               aria-label={`Tee time, ${dateLabel(date)}`}
-              maxLength={TEE_TIME_MAX_LENGTH}
+              aria-invalid={invalid.has(date) || undefined}
               value={teeTimes[date] ?? ''}
               onChange={e => onTeeTimeChange(date, e.target.value)}
             />
@@ -85,6 +94,8 @@ export default function DateTeeTimeList({
           </div>
         )
       })}
+
+      {invalid.size > 0 && <p className="text-xs text-red-500">{TEE_TIME_REQUIRED}</p>}
 
       {max && dates.length >= max && (
         <p className="text-[11px] text-amber-600">
