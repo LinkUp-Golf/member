@@ -121,7 +121,7 @@ export default function HostOverviewPage() {
             <ul className="text-sm text-gray-600 space-y-2 list-disc pl-5">
               <li>Create an event, then run it on the day.</li>
               <li>
-                Upload proof the event happened from the event&apos;s page.
+                Upload a pic of the round from the event&apos;s page.
               </li>
               <li>
                 An admin reviews your proof and approves the credit — based on

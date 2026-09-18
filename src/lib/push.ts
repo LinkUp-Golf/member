@@ -424,7 +424,7 @@ export const NotificationTemplates = {
   hostedEventCancelled: (courseName: string, date: string, reason?: string): PushPayload => ({
     title: 'A hosted event was cancelled',
     body:  `The ${courseName} event on ${date} has been cancelled.${reason ? ` ${reason}` : ''} Your spot has been released.`,
-    url:   '/more/hosted-events',
+    url:   '/book',
     tag:   'hosted-event-cancelled',
   }),
 
@@ -432,7 +432,7 @@ export const NotificationTemplates = {
   hostedEventUpdated: (courseName: string, date: string): PushPayload => ({
     title: 'A hosted event was updated',
     body:  `Details changed for the ${courseName} event on ${date}. Open it to see the latest.`,
-    url:   '/more/hosted-events',
+    url:   '/book',
     tag:   'hosted-event-updated',
   }),
 

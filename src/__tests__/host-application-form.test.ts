@@ -19,10 +19,11 @@ const round = (overrides: Partial<RoundFields> = {}): RoundFields => ({
   ...overrides,
 })
 
+/** A round at the given dates, every one teeing off at 8:30. */
 const filled = (dates: string[]): RoundFields =>
   round({
     dates: dates.map(value => ({ value })),
-    tee_time: '8:30 AM',
+    tee_times: Object.fromEntries(dates.map(d => [d, '08:30'])),
   })
 
 const COURSE_A = '3f2504e0-4f89-11d3-9a0c-0305e82c3301'
@@ -41,12 +42,14 @@ describe('roundStarted', () => {
 
   it('is true once any field the applicant owns is filled', () => {
     expect(roundStarted(round({ dates: [{ value: '2099-06-01' }] }))).toBe(true)
-    expect(roundStarted(round({ tee_time: 'morning' }))).toBe(true)
+    expect(roundStarted(round({ tee_times: { '2099-06-01': '08:30' } }))).toBe(true)
     expect(roundStarted(round({ dinner: true }))).toBe(true)
   })
 
   it('ignores whitespace-only entries', () => {
-    expect(roundStarted(round({ dates: [{ value: '   ' }], tee_time: '  ' }))).toBe(false)
+    expect(
+      roundStarted(round({ dates: [{ value: '   ' }], tee_times: { '2099-06-01': '  ' } })),
+    ).toBe(false)
   })
 
   it('is false for a missing round', () => {
@@ -59,7 +62,7 @@ describe('roundAt', () => {
     const values = form({
       existing: [{ courseId: COURSE_A, label: 'Aviara', pending: false, round: filled(['2099-06-01']) }],
     })
-    expect(roundAt(values, 'existing', 0)?.tee_time).toBe('8:30 AM')
+    expect(roundAt(values, 'existing', 0)?.tee_times['2099-06-01']).toBe('08:30')
   })
 
   it('returns undefined for an index that is gone', () => {
@@ -92,9 +95,34 @@ describe('buildApplicationPayload', () => {
     expect(payload.events.map(e => e.event_date)).toEqual([
       '2099-06-01', '2099-06-08', '2099-06-15',
     ])
-    // Everything but the date is shared across them.
+    // The venue is shared across them; the tee time is per date.
     expect(new Set(payload.events.map(e => e.venue))).toEqual(new Set([COURSE_A]))
-    expect(payload.events.every(e => e.tee_time === '8:30 AM')).toBe(true)
+    expect(payload.events.every(e => e.tee_time === '08:30')).toBe(true)
+  })
+
+  it('carries the tee time each date was given', () => {
+    // The point of asking per date: two days at a club rarely tee off at the
+    // same time, and each date becomes its own event row.
+    const payload = buildApplicationPayload(
+      form({
+        existing: [{
+          courseId: COURSE_A,
+          label: 'Aviara',
+          pending: false,
+          round: round({
+            dates: [{ value: '2099-06-01' }, { value: '2099-06-08' }, { value: '2099-06-15' }],
+            tee_times: { '2099-06-01': ' 08:30 ', '2099-06-08': '13:05' },
+          }),
+        }],
+      }),
+    )
+    expect(payload.events.map(e => [e.event_date, e.tee_time])).toEqual([
+      ['2099-06-01', '08:30'],
+      ['2099-06-08', '13:05'],
+      // Never given one — sent empty rather than inheriting a sibling's, which
+      // is what the server refuses the round for.
+      ['2099-06-15', ''],
+    ])
   })
 
   it('sends neither spots nor a guest rate', () => {
@@ -130,18 +158,22 @@ describe('buildApplicationPayload', () => {
     expect(payload.events).toHaveLength(1)
   })
 
-  it('sends a blank tee time as null, not empty string', () => {
+  it('is rejected by the server when a date was left without a tee time', () => {
+    // Every date needs one — the form asks for it with a time input and the
+    // server insists, so a round that slipped through says so on arrival
+    // rather than being created with no time on it.
     const payload = buildApplicationPayload(
       form({
         existing: [{
           courseId: COURSE_A,
           label: 'Aviara',
           pending: false,
-          round: round({ dates: [{ value: '2099-06-01' }] }),
+          round: round({ dates: [{ value: '2099-06-01' }], tee_times: { '2099-06-01': '' } }),
         }],
       }),
     )
-    expect(payload.events[0]?.tee_time).toBeNull()
+    expect(payload.events[0]?.tee_time).toBe('')
+    expect(validateHostApplicationPayload(payload).valid).toBe(false)
   })
 
   it('trims the host name', () => {

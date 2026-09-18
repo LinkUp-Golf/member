@@ -6,6 +6,7 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateTimezone } from '@/lib/validation'
 import { AVIARA_TIMEZONE } from '@/lib/constants'
+import { DEFAULT_PAYMENT_OPTIONS, parsePaymentOptions } from '@/lib/bookings/payment-options'
 import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
 import type { AuthContext } from '@/lib/auth/types'
 import type { Course } from '@/types'
@@ -45,6 +46,14 @@ export const POST = withAuth(
     if (!body.payment_url?.trim()) return NextResponse.json({ error: 'A payment link is required' }, { status: 400 })
     if (!isValidUrl(body.payment_url.trim())) {
       return NextResponse.json({ error: 'Payment link must be a valid URL (e.g. https://example.com)' }, { status: 400 })
+    }
+
+    // Omitted means the default (Pay now), exactly as the column does.
+    const paymentOptions = body.payment_options === undefined
+      ? [...DEFAULT_PAYMENT_OPTIONS]
+      : parsePaymentOptions(body.payment_options)
+    if (!paymentOptions) {
+      return NextResponse.json({ error: 'Choose at least one payment option' }, { status: 400 })
     }
 
     const slug = body.slug?.trim() || toSlug(body.name)
@@ -112,6 +121,7 @@ export const POST = withAuth(
         booking_rules: body.booking_rules ?? null,
         booking_url: body.booking_url?.trim() || null,
         payment_url: body.payment_url.trim(),
+        payment_options: paymentOptions,
         required_tags: requiredTags,
         max_players_per_day: body.max_players_per_day ?? undefined,
         approval_status: 'active',

@@ -2,6 +2,8 @@
 // LinkUp Golf — Core TypeScript Types
 // ============================================================
 
+import type { PaymentOption } from '@/lib/bookings/payment-options'
+
 // ---- Enums --------------------------------------------------
 
 export type MembershipStatus = 'active' | 'waitlist' | 'pending' | 'suspended' | 'cancelled' | 'non_member'
@@ -134,6 +136,10 @@ export interface Course {
   // Payment link members are sent to for confirmed bookings — required per course
   payment_url: string | null
 
+  // How members can pay for a round here — 'pay_now' (payment_url) and/or
+  // 'pay_at_club'. See src/lib/bookings/payment-options.ts.
+  payment_options: PaymentOption[]
+
   // GHL Calendar Group for this course (auto-created on course creation)
   ghl_group_id: string | null
 
@@ -254,6 +260,8 @@ export interface Booking {
   focus_linkup_id: string | null
   dinner_rsvp?: 'yes' | 'no' | 'maybe' | null
   admin_notes?: string | null
+  /** 'pay_at_club' once the member chose to settle with the club; null = checkout. */
+  payment_method?: 'pay_at_club' | null
   created_at: string
   booker_name?: string | null
   course?: {
@@ -261,6 +269,7 @@ export interface Booking {
     city: string
     state: string
     payment_url: string | null
+    payment_options?: PaymentOption[]
     timezone: string
     /** Round length, used to work out when the round finished. */
     meeting_duration_mins?: number | null
@@ -470,16 +479,17 @@ export interface HostApplicationEvent {
 /**
  * What the applicant submits per proposed round (no ids yet).
  *
- * Narrower than the row it becomes: total_spots and member_guest_rate are set by
- * the server — capacity from what the venue has open that day, the rate from the
- * fixed term — exactly as they are for an event a host creates directly. The
- * columns still exist on HostApplicationEvent; they just aren't the applicant's
- * to send.
+ * At a listed venue, total_spots and member_guest_rate are the server's to set —
+ * capacity from what the venue has open that day, the rate from the fixed term —
+ * exactly as they are for an event a host creates directly, and anything sent is
+ * ignored. At a club we don't have yet (a pending course, proposed through the
+ * application's New LinkUp) nothing else can supply them, so the applicant does.
  */
 export type HostApplicationEventInput = Pick<
   HostApplicationEvent,
   'course_id' | 'event_date' | 'tee_time' | 'dinner'
->
+> &
+  Partial<Pick<HostApplicationEvent, 'total_spots' | 'member_guest_rate'>>
 
 export interface HostApplication {
   id: string

@@ -120,7 +120,7 @@ describe('validateHostApplicationPayload', () => {
     const round = {
       venue: '3f2504e0-4f89-11d3-9a0c-0305e82c3301',
       event_date: '2099-06-01',
-      tee_time: '8:30 AM',
+      tee_time: '08:30',
       total_spots: 4,
       member_guest_rate: 150,
       dinner: false,
@@ -158,8 +158,11 @@ describe('validateHostApplicationPayload', () => {
       expect(validateHostApplicationPayload({ ...base, events: [{ ...round, event_date: '06/01/2099' }] }).valid).toBe(false)
     })
 
-    it('allows a round with no tee time', () => {
-      expect(validateHostApplicationPayload({ ...base, events: [{ ...round, tee_time: null }] }).valid).toBe(true)
+    it('refuses a round with no tee time, or one that is not a time of day', () => {
+      // Each proposed round becomes a real event on approval, and a round with
+      // no tee time is one nobody can turn up to.
+      expect(validateHostApplicationPayload({ ...base, events: [{ ...round, tee_time: null }] }).valid).toBe(false)
+      expect(validateHostApplicationPayload({ ...base, events: [{ ...round, tee_time: 'morning' }] }).valid).toBe(false)
     })
 
     it('names which round failed so a list stays actionable', () => {

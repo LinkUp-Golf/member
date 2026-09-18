@@ -41,7 +41,7 @@ describe('canUploadProof', () => {
 
 // proofState is the answer to "has a proof been sent, and what do we say about
 // it" — a question the status alone cannot answer, which is how the button came
-// to read "Upload proof" over an event that already had one.
+// to read "Upload pic" over an event that already had one.
 
 describe('proofState', () => {
   const today = '2026-08-14'
@@ -50,10 +50,10 @@ describe('proofState', () => {
 
   it('labels the button by whether a proof exists, not by status', () => {
     // The reported bug: a same-day upload leaves the event 'upcoming', so any
-    // label derived from status alone keeps saying "Upload proof" forever.
-    expect(state({ status: 'upcoming', eventDate: today, hasProof: false }).label).toBe('Upload proof')
-    expect(state({ status: 'upcoming', eventDate: today, hasProof: true }).label).toBe('Replace proof')
-    expect(state({ status: 'pending_credit_approval', hasProof: true }).label).toBe('Replace proof')
+    // label derived from status alone keeps saying "Upload pic" forever.
+    expect(state({ status: 'upcoming', eventDate: today, hasProof: false }).label).toBe('Upload pic')
+    expect(state({ status: 'upcoming', eventDate: today, hasProof: true }).label).toBe('Replace pic')
+    expect(state({ status: 'pending_credit_approval', hasProof: true }).label).toBe('Replace pic')
   })
 
   it('confirms a same-day submission on a still-live event', () => {

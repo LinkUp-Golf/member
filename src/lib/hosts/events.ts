@@ -5,6 +5,7 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { normaliseTeeTime } from '@/lib/hosts/tee-time'
 import { HOST_MEMBER_PRICE_MARKUP_PERCENT } from '@/lib/constants'
 import type { HostedEvent, HostStats } from '@/types'
 import { loadCreditSummary } from '@/lib/credits'
@@ -56,6 +57,37 @@ export async function hostCanUseCourse(admin: AdminClient, hostId: string, cours
     .maybeSingle()
 
   return !!data
+}
+
+/**
+ * The tee time each date being listed should be stored with.
+ *
+ * A host picks dates and gives each one its own time, because two days at a
+ * club rarely tee off at the same time — and each date becomes its own
+ * hosted_events row, so each stores the time it was given. `tee_times` is that
+ * map, keyed by date; `tee_time` is the one-for-all form an older client sends,
+ * filling any date the map doesn't name.
+ *
+ * Every date has one by the time this runs — validateHostedEventPayload insists
+ * — so null is only reachable for a caller that skipped it. Normalising rather
+ * than sanitising is what makes that safe: what comes out is "HH:MM" or nothing,
+ * never text that has to be escaped.
+ */
+export function resolveTeeTimes(
+  dates: string[],
+  body: { tee_time?: unknown; tee_times?: unknown },
+): Map<string, string | null> {
+  const clean = (v: unknown) => normaliseTeeTime(v) || null
+
+  const shared = clean(body.tee_time)
+  const perDate =
+    body.tee_times && typeof body.tee_times === 'object' && !Array.isArray(body.tee_times)
+      ? (body.tee_times as Record<string, unknown>)
+      : {}
+
+  return new Map(
+    dates.map(date => [date, date in perDate ? clean(perDate[date]) : shared]),
+  )
 }
 
 /** Statuses in which a member can still reserve a spot. */
@@ -135,8 +167,8 @@ export type ProofNoteTone = 'pending' | 'rejected' | 'sent'
 export interface ProofState {
   hasProof: boolean
   canUpload: boolean
-  /** Button label. 'Replace proof' the moment one is in. */
-  label: 'Upload proof' | 'Replace proof'
+  /** Button label. 'Replace pic' the moment one is in. */
+  label: 'Upload pic' | 'Replace pic'
   note: { tone: ProofNoteTone; text: string } | null
 }
 
@@ -146,7 +178,7 @@ export interface ProofState {
  * Exists because the status alone can't answer it. A same-day upload leaves the
  * event in `upcoming` on purpose (see canUploadProof), so status said nothing
  * had happened while a photo was sitting in the table — the button kept reading
- * "Upload proof" and no line anywhere said one had been submitted. And a proof
+ * "Upload pic" and no line anywhere said one had been submitted. And a proof
  * an admin sends back returns the event to `completed`, which is
  * indistinguishable from never having uploaded at all unless the rejection
  * reason is surfaced.
@@ -166,7 +198,7 @@ export function proofState(params: {
   const { status, eventDate, hasProof } = params
   const reason = params.rejectionReason?.trim() || null
   const canUpload = canUploadProof(status, eventDate, params.today)
-  const label = hasProof ? 'Replace proof' : 'Upload proof'
+  const label = hasProof ? 'Replace pic' : 'Upload pic'
 
   // Awaiting the credit decision. Say that replacing is still possible — it is,
   // and a host who spots a bad photo shouldn't assume it's too late.

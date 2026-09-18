@@ -4,18 +4,19 @@ import { useState, useEffect, useCallback } from "react";
 import {
   useForm,
   useFieldArray,
+  useWatch,
   Controller,
   type Control,
   type FieldErrors,
   type UseFormRegister,
+  type UseFormSetValue,
   type UseFormTrigger,
 } from "react-hook-form";
 import Link from "next/link";
-import { Flag, X } from "lucide-react";
+import { Flag, Plus, X } from "lucide-react";
 import VenueDateSelector from "@/components/host/VenueDateSelector";
-import AddVenueControl, {
-  type ProposedVenue,
-} from "@/components/host/AddVenueControl";
+import DateTeeTimeList from "@/components/host/DateTeeTimeList";
+import NewLinkupFields from "@/components/host/NewLinkupFields";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
 import { Spinner } from "@/components/ui/Loading";
@@ -24,16 +25,26 @@ import { formatRelativeTime } from "@/lib/utils";
 import { TutorialLink } from "@/components/tutorials/TutorialPlayer";
 import { HOST_EVENT_GUEST_RATE_USD } from "@/lib/constants";
 import {
+  emptyNewLinkup,
+  hasNewLinkupErrors,
+  newLinkupStarted,
+  validateNewLinkup,
+  type NewLinkupErrors,
+  type NewLinkupValues,
+} from "@/lib/hosts/new-linkup";
+import {
   buildApplicationPayload,
+  withNewLinkup,
   newRound,
+  roundAt,
   MAX_DATES_PER_ROUND,
   NAME_MAX,
   NAME_MIN,
-  TEE_TIME_MAX,
   type ApplicationValues,
   type RoundFields,
   type SubmitValues,
 } from "@/lib/hosts/application-form";
+import { TEE_TIME_REQUIRED, missingTeeTimes } from "@/lib/hosts/tee-time";
 import type { Host, HostApplication, Course } from "@/types";
 
 const fmtMoney = (n: number) =>
@@ -147,7 +158,7 @@ export default function HostApplicationPage() {
               />
               <Step
                 n={2}
-                text={`Pick the dates you'd like to host — we show you the days that club actually has open, and how many spots each one has. If you don't know the exact tee time, just enter "morning" or "afternoon". You may pick just one date or several.`}
+                text="Pick the dates you'd like to host — we show you the days that club actually has open, and how many spots each one has. Set the tee time for each date; we'll confirm it with the club. You may pick just one date or several."
               />
               <Step
                 n={3}
@@ -334,6 +345,7 @@ function ApplicationForm({
     handleSubmit,
     reset,
     setError,
+    setValue,
     clearErrors,
     trigger,
     formState: { errors, isSubmitting },
@@ -348,8 +360,23 @@ function ApplicationForm({
 
   const [venues, setVenues] = useState<VenueOption[]>([]);
   const [venuesLoaded, setVenuesLoaded] = useState(false);
-  // What just happened to a club the applicant proposed from this form.
-  const [venueNotice, setVenueNotice] = useState<string | null>(null);
+
+  // A New LinkUp — rounds at a club we don't have yet. The same fields as the
+  // host event form's New LinkUp tab, from the same component. Closed until the
+  // applicant asks for it; most apply at clubs already listed.
+  const [newLinkupOpen, setNewLinkupOpen] = useState(false);
+  const [newLinkup, setNewLinkup] = useState<NewLinkupValues>(emptyNewLinkup);
+  const [newErrors, setNewErrors] = useState<NewLinkupErrors>({});
+  // Proposing the club itself failed — said beside the fields, not as the
+  // application's error, since nothing was submitted.
+  const [clubError, setClubError] = useState<string | null>(null);
+
+  const closeNewLinkup = () => {
+    setNewLinkupOpen(false);
+    setNewLinkup(emptyNewLinkup());
+    setNewErrors({});
+    setClubError(null);
+  };
 
   useEffect(() => {
     apiClient.get<{ courses: VenueOption[] }>("/api/courses").then((res) => {
@@ -380,35 +407,6 @@ function ApplicationForm({
     clearErrors("root.venues");
   };
 
-  /**
-   * A club the applicant just proposed. It's a real (pending) course now, so it
-   * goes onto the application exactly like a listed venue — the server accepts
-   * pending course ids for this reason. Ticked straight away, since asking for
-   * it and then having to find it in the list would be a step for nothing.
-   */
-  const handleVenueAdded = (
-    venue: ProposedVenue,
-    alreadyRequested: boolean,
-  ) => {
-    const added: VenueOption = {
-      id: venue.id,
-      name: venue.name,
-      city: venue.city,
-      approval_status: venue.approval_status as VenueOption["approval_status"],
-    };
-    setVenues((prev) =>
-      prev.some((v) => v.id === added.id) ? prev : [...prev, added],
-    );
-    if (!existing.fields.some((f) => f.courseId === added.id)) {
-      toggleVenue(added);
-    }
-    setVenueNotice(
-      alreadyRequested
-        ? `${added.name} was already requested — it's on your application.`
-        : `${added.name} is with us to set up. It's on your application either way.`,
-    );
-  };
-
   // Only what's left to pick — anything chosen has moved up into a card, so the
   // list below never shows the same venue twice.
   const unselectedVenues = venues.filter(
@@ -416,19 +414,51 @@ function ApplicationForm({
   );
 
   const submit = handleSubmit(async (data) => {
-    // The one rule that isn't a field's own, so it's the one thing still
-    // checked here.
-    if (data.existing.length === 0) {
+    // A New LinkUp counts once anything's in it; an opened, untouched one is
+    // skipped rather than failing the application.
+    const proposing = newLinkupOpen && newLinkupStarted(newLinkup);
+    if (proposing) {
+      const errs = validateNewLinkup(newLinkup);
+      setNewErrors(errs);
+      if (hasNewLinkupErrors(errs)) return;
+    }
+
+    // The one venue rule that isn't a field's own: somewhere to host, listed or
+    // proposed.
+    if (data.existing.length === 0 && !proposing) {
       setError("root.venues", {
-        message: "Choose at least one venue you want to host at.",
+        message: "Choose at least one venue you want to host at, or add a New LinkUp.",
       });
       return;
     }
 
-    const ok = await onSubmit(buildApplicationPayload(data));
+    let payload = buildApplicationPayload(data);
+
+    // The club goes in first, as a pending course, so the application can name
+    // it by id like any other venue. Retrying after a failed submission finds
+    // the same pending course rather than filing a second one.
+    if (proposing) {
+      setClubError(null);
+      const res = await apiClient.post<{ course: { id: string } }>(
+        "/api/courses/request",
+        {
+          name: newLinkup.name.trim(),
+          website: newLinkup.website.trim() || null,
+          payment_options: newLinkup.paymentOptions,
+        },
+      );
+      const courseId = res.data?.course?.id;
+      if (res.error || !courseId) {
+        setClubError(res.error?.message ?? "Could not add that club. Try again.");
+        return;
+      }
+      payload = withNewLinkup(payload, courseId, newLinkup);
+    }
+
+    const ok = await onSubmit(payload);
     if (ok) {
       reset({ name: "", existing: [] });
-      setVenueNotice(null);
+      closeNewLinkup();
     }
   });
 
@@ -483,6 +513,7 @@ function ApplicationForm({
                 courseId={field.courseId}
                 control={control}
                 register={register}
+                setValue={setValue}
                 trigger={trigger}
                 roundErrors={errors.existing?.[index]?.round}
                 onRemove={() => existing.remove(index)}
@@ -523,17 +554,58 @@ function ApplicationForm({
         )}
         {/* Applying is the first time most hosts say where they want to host,
             so it's the likeliest place for a club we don't have to come up.
-            Proposing it puts it on the application as a pending venue; rounds
-            there stay optional, because there are no open days to pick yet. */}
+            It's asked exactly as the host event form's New LinkUp tab asks it:
+            the club, real dates with a tee time each, the number of guests and
+            the rate — there's no calendar behind the club to supply those. The
+            club is filed as a pending course when the application is sent. */}
         <div className="mt-2.5">
-          <AddVenueControl onAdded={handleVenueAdded} />
-        </div>
+          {newLinkupOpen ? (
+            <div className="rounded-xl border border-green-900/15 bg-white p-3 space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-xs font-semibold text-green-950">New LinkUp</p>
+                  <p className="text-[11px] text-green-900/45 leading-snug mt-0.5">
+                    A club that isn&apos;t on LinkUp yet. We&apos;ll set it up,
+                    then publish your rounds to members.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeNewLinkup}
+                  aria-label="Remove the New LinkUp"
+                  className="focus-ring -mt-0.5 -mr-0.5 p-0.5 rounded text-green-900/35 hover:text-green-900/70"
+                >
+                  <X className="w-3.5 h-3.5" strokeWidth={2.2} />
+                </button>
+              </div>
 
-        {venueNotice && (
-          <p className="mt-2 rounded-xl bg-amber-50 border border-amber-100 px-3 py-2 text-[11px] text-amber-800 leading-snug">
-            {venueNotice}
-          </p>
-        )}
+              <NewLinkupFields
+                value={newLinkup}
+                onChange={(next) => {
+                  setNewLinkup(next);
+                  if (hasNewLinkupErrors(newErrors)) setNewErrors({});
+                  setClubError(null);
+                  clearErrors("root.venues");
+                }}
+                errors={newErrors}
+                maxDates={MAX_DATES_PER_ROUND}
+                tone="member"
+                idPrefix="apply-new"
+              />
+
+              {clubError && <p className="text-xs text-red-500">{clubError}</p>}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setNewLinkupOpen(true)}
+              className="focus-ring inline-flex items-center gap-1.5 text-xs font-semibold text-green-800 hover:text-green-900"
+            >
+              <Plus className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={2.2} />
+              Can&apos;t find your club? Add a New LinkUp
+            </button>
+          )}
+        </div>
 
         {errors.root?.venues && (
           <p className="text-xs text-red-500 mt-1.5">
@@ -573,6 +645,7 @@ function VenueCard({
   courseId,
   control,
   register,
+  setValue,
   trigger,
   roundErrors,
   onRemove,
@@ -584,11 +657,42 @@ function VenueCard({
   courseId: string;
   control: Control<ApplicationValues>;
   register: UseFormRegister<ApplicationValues>;
+  setValue: UseFormSetValue<ApplicationValues>;
   trigger: UseFormTrigger<ApplicationValues>;
   roundErrors?: FieldErrors<RoundFields>;
   onRemove: () => void;
 }) {
   const prefix = `existing.${index}` as const;
+  const datesName = `${prefix}.round.dates` as const;
+  const teeTimesName = `${prefix}.round.tee_times` as const;
+
+  // The dates picked at this venue, and the tee time each one carries. Watched
+  // rather than held locally so the list below the picker and the values the
+  // form submits are the same thing.
+  const picked = ((useWatch({ control, name: datesName }) ?? []) as { value: string }[])
+    .map((d) => d.value)
+    .filter(Boolean);
+  const teeTimes = (useWatch({ control, name: teeTimesName }) ?? {}) as Record<
+    string,
+    string
+  >;
+
+  /** Tee times follow their dates: one dropped takes its tee time with it. */
+  const setPicked = (next: string[]) =>
+    setValue(
+      teeTimesName,
+      Object.fromEntries(next.map((d) => [d, teeTimes[d] ?? ""])),
+    );
+
+  /**
+   * Re-check the round after its dates change. Tee times are only re-checked
+   * once they've already been complained about — before that, a date would be
+   * marked as missing a time the instant it was picked.
+   */
+  const revalidate = () =>
+    void trigger(
+      roundErrors?.tee_times ? [datesName, teeTimesName] : datesName,
+    );
 
   return (
     <div className="rounded-xl border border-green-900/20 bg-green-50/40 px-3 py-3 space-y-2">
@@ -631,9 +735,11 @@ function VenueCard({
             value={(f.value ?? []).map((d: { value: string }) => d.value).filter(Boolean)}
             onChange={(next: string[]) => {
               f.onChange(next.map(value => ({ value })));
-              void trigger(`${prefix}.round.dates` as const);
+              setPicked(next);
+              revalidate();
             }}
             max={MAX_DATES_PER_ROUND}
+            showPickedElsewhere={false}
           />
         )}
       />
@@ -641,20 +747,46 @@ function VenueCard({
         <p className="text-xs text-red-500">{roundErrors.dates.message}</p>
       )}
 
-      <input
-        type="text"
-        className="input"
-        placeholder="e.g. 8:30 AM (optional)"
-        {...register(`${prefix}.round.tee_time` as const, {
-          maxLength: {
-            value: TEE_TIME_MAX,
-            message: `At most ${TEE_TIME_MAX} characters`,
+      {/* Each picked date with its own tee time — it becomes its own event, and
+          two days at a club rarely tee off at the same time. This is also the
+          one place every picked date is listed, whichever month it's in.
+          A field of the form rather than a loose control, so "every date has a
+          time" is a rule the submit is held to like any other. */}
+      <Controller
+        control={control}
+        name={teeTimesName}
+        rules={{
+          validate: (value, values) => {
+            // The dates as they stand at validation time, read from the form
+            // rather than a captured render — same reason roundAt exists.
+            const dates = (roundAt(values, "existing", index)?.dates ?? [])
+              .map((d) => d.value)
+              .filter(Boolean);
+            return missingTeeTimes(dates, value).length === 0 || TEE_TIME_REQUIRED;
           },
-        })}
+        }}
+        render={({ field: f }) => (
+          <DateTeeTimeList
+            dates={picked}
+            teeTimes={f.value ?? {}}
+            onTeeTimeChange={(date, value) =>
+              f.onChange({ ...(f.value ?? {}), [date]: value })
+            }
+            onRemove={(date) => {
+              const next = picked.filter((d) => d !== date);
+              setValue(datesName, next.map((value) => ({ value })));
+              setPicked(next);
+              revalidate();
+            }}
+            invalidDates={
+              roundErrors?.tee_times ? missingTeeTimes(picked, f.value) : []
+            }
+            max={MAX_DATES_PER_ROUND}
+            tone="member"
+            idPrefix={`apply-${index}-tee`}
+          />
+        )}
       />
-      {roundErrors?.tee_time && (
-        <p className="text-xs text-red-500">{roundErrors.tee_time.message}</p>
-      )}
 
       {/* The terms, stated rather than asked for — the same two numbers the
           host's own event form declines to collect. Spots come from the venue's

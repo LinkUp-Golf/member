@@ -13,7 +13,9 @@ import { AdminPageHeader, AdminCard } from "@/components/admin/AdminUI";
 import { Spinner, ContentLoader } from "@/components/ui/Loading";
 import Select, { type SelectOption } from "@/components/ui/Select";
 import VenueDateSelector from "@/components/host/VenueDateSelector";
-import DateMultiPicker from "@/components/host/DateMultiPicker";
+import NewLinkupFields from "@/components/host/NewLinkupFields";
+import DateTeeTimeList from "@/components/host/DateTeeTimeList";
+import PaymentOptionsPicker from "@/components/payments/PaymentOptionsPicker";
 import ProofControl, {
   PROOF_NOTE_CLASS,
   currentProof,
@@ -22,6 +24,20 @@ import ProofControl, {
 import { TutorialLink } from "@/components/tutorials/TutorialPlayer";
 import { HOST_EVENT_GUEST_RATE_USD } from "@/lib/constants";
 import { formatEventTeeTime as fmtTime, cn } from "@/lib/utils";
+import {
+  emptyNewLinkup,
+  hasNewLinkupErrors,
+  newLinkupRounds,
+  validateNewLinkup,
+  type NewLinkupErrors,
+  type NewLinkupValues,
+} from "@/lib/hosts/new-linkup";
+import { missingTeeTimes, normaliseTeeTime } from "@/lib/hosts/tee-time";
+import {
+  DEFAULT_PAYMENT_OPTIONS,
+  coursePaymentOptions,
+  type PaymentOption,
+} from "@/lib/bookings/payment-options";
 import type {
   HostedEvent,
   HostedEventStatus,
@@ -461,27 +477,23 @@ function CancelPanel({
 /**
  * Which of the drawer's two tabs is open.
  *
- * 'existing' lists rounds at a club already on LinkUp: pick the venue, pick from
- * the days it actually has open. 'new' proposes a club we don't have — there is
- * no calendar to ask, so the host types what they want and an admin sets it up.
+ * 'existing' (Current LinkUps) lists rounds at a club already on LinkUp: pick
+ * the venue, pick from the days it actually has open. 'new' (New LinkUp)
+ * proposes a club we don't have — there is no calendar to ask, so the host
+ * types what they want and an admin sets it up.
  */
 type LinkupTab = "existing" | "new";
 
 interface EventFormValues {
   course_id: string;
-  /** '' means "no fixed tee time". */
-  tee_time: string;
   dinner: boolean;
-  // ---- New LinkUp only ----
-  /** The club being proposed. */
-  new_event_name: string;
-  /** Optional — the one field on this tab that is. */
-  new_website: string;
-  new_slots_per_day: string;
-  new_member_guest_rate: string;
+  /**
+   * How members pay for rounds at the venue — courses.payment_options. Set on
+   * the venue itself, so it opens on what the venue already offers. (New
+   * LinkUp carries its own, in NewLinkupValues.)
+   */
+  payment_options: PaymentOption[];
 }
-
-const NO_TEE_TIME = "";
 
 /**
  * A venue as the form needs it: enough to name it in the dropdown and to show
@@ -497,6 +509,7 @@ type VenueDetail = Pick<Course, "id" | "name" | "city"> & {
   cost_per_player?: number | null;
   description?: string | null;
   approval_status?: string;
+  payment_options?: string[] | null;
 };
 
 function EventDrawer({
@@ -520,17 +533,36 @@ function EventDrawer({
   const [venuesUnrestricted, setVenuesUnrestricted] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   // Every day being listed, chosen from what the venue actually has open.
-  // Everything else (course, tee time, spots, rate, dinner) is shared, so
-  // listing a week of rounds is one form rather than five. Editing acts on a
-  // single existing event, so the picker runs in single-select there.
+  // Course, spots, rate and dinner are shared, so listing a week of rounds is
+  // one form rather than five. Editing acts on a single existing event, so the
+  // picker runs in single-select there.
   const [dates, setDates] = useState<string[]>(
     event?.event_date ? [event.event_date.slice(0, 10)] : [],
   );
+  // The tee time for each of those dates — each becomes its own event, and two
+  // days at a club rarely tee off at the same time. Every date needs one; an
+  // event stored with a free-text time from before starts blank, since the time
+  // input can't show it.
+  const [teeTimes, setTeeTimes] = useState<Record<string, string>>(() =>
+    event?.event_date
+      ? { [event.event_date.slice(0, 10)]: normaliseTeeTime(event.tee_time) }
+      : {},
+  );
   const [dateError, setDateError] = useState<string | null>(null);
+  // Dates whose tee time was left empty when the host tried to submit. Marked
+  // on the list itself rather than said once above it, so a host with a week of
+  // dates can see which row is the problem.
+  const [missingTees, setMissingTees] = useState<string[]>([]);
   // Editing acts on an event that already exists at a club that already exists,
-  // so the proposal tab has nothing to offer there.
-  const [tab, setTab] = useState<LinkupTab>("existing");
+  // so the proposal tab has nothing to offer there. A new event opens on the
+  // first tab, New LinkUp — an unselected tab on the left reads as broken.
+  const [tab, setTab] = useState<LinkupTab>("new");
   const proposing = !isEdit && tab === "new";
+  // The New LinkUp tab's own values — its dates and tee times included, since
+  // they're picked from every day rather than from a venue's open ones. Kept
+  // while the host flips between tabs.
+  const [newLinkup, setNewLinkup] = useState<NewLinkupValues>(emptyNewLinkup);
+  const [newErrors, setNewErrors] = useState<NewLinkupErrors>({});
 
   const {
     register,
@@ -542,12 +574,8 @@ function EventDrawer({
   } = useForm<EventFormValues>({
     defaultValues: {
       course_id: event?.course_id ?? "",
-      tee_time: event?.tee_time ?? NO_TEE_TIME,
       dinner: event?.dinner ?? false,
-      new_event_name: "",
-      new_website: "",
-      new_slots_per_day: "",
-      new_member_guest_rate: "",
+      payment_options: [...DEFAULT_PAYMENT_OPTIONS],
     },
   });
 
@@ -576,7 +604,10 @@ function EventDrawer({
         setVenuesUnrestricted(venuesJson.unrestricted === true);
         // Pre-populate the course for a brand-new event when the host has a
         // single venue — nothing to choose.
-        if (!isEdit && vs.length === 1) setValue("course_id", vs[0].id);
+        if (!isEdit && vs.length === 1) {
+          setValue("course_id", vs[0].id);
+          setValue("payment_options", coursePaymentOptions(vs[0]));
+        }
       })
       .catch(() => {
         if (!cancelled)
@@ -622,9 +653,50 @@ function EventDrawer({
     [courseChoices, courseId],
   );
 
-  const field = "input text-sm";
   const labelCls = "block text-xs font-medium text-gray-600 mb-1";
   const errCls = "text-xs text-red-500 mt-1";
+
+  /**
+   * A new set of picked dates. Tee times follow their dates; on the edit form
+   * the one event moving to another day keeps the tee time it had.
+   */
+  const changeDates = (next: string[]) => {
+    setTeeTimes((prev) => {
+      if (isEdit) {
+        // One event, one tee time, whichever day it lands on — kept through a
+        // moment with no day picked, too.
+        const kept =
+          Object.values(prev)[0] ?? normaliseTeeTime(event?.tee_time);
+        return next[0] ? { [next[0]]: kept } : prev;
+      }
+      return Object.fromEntries(next.map((d) => [d, prev[d] ?? ""]));
+    });
+    setDates(next);
+    setMissingTees((prev) => prev.filter((d) => next.includes(d)));
+    if (next.length) setDateError(null);
+  };
+
+  /** Dates picked somewhere else (another tab, another venue) don't carry. */
+  const clearDates = () => {
+    setDates([]);
+    setTeeTimes({});
+    setMissingTees([]);
+    setDateError(null);
+  };
+
+  const setTeeTime = (date: string, value: string) => {
+    setTeeTimes((prev) => ({ ...prev, [date]: value }));
+    // Stop marking a row the moment it has a time, rather than at the next
+    // submit.
+    if (value) setMissingTees((prev) => prev.filter((d) => d !== date));
+  };
+
+  const removeDate = (date: string) =>
+    changeDates(dates.filter((d) => d !== date));
+
+  /** date → "HH:MM", for every date being listed. */
+  const teeTimesFor = (list: string[]) =>
+    Object.fromEntries(list.map((d) => [d, normaliseTeeTime(teeTimes[d])]));
 
   /**
    * Proposing a venue we don't have, and the rounds the host wants there.
@@ -646,15 +718,15 @@ function EventDrawer({
    * venue is the part that takes a person to action, and the host can list the
    * dates once it's live.
    */
-  async function propose(values: EventFormValues) {
-    const name = values.new_event_name.trim();
+  async function propose(values: NewLinkupValues) {
+    const name = values.name.trim();
 
     const courseRes = await fetch("/api/courses/request", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name,
-        website: values.new_website.trim() || null,
+        website: values.website.trim() || null,
       }),
     });
     const courseJson = await courseRes.json().catch(() => ({}));
@@ -666,12 +738,21 @@ function EventDrawer({
     const eventsRes = await fetch("/api/host/events", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        course_id: courseJson.course.id,
-        event_dates: [...dates].sort(),
-        total_spots: Number(values.new_slots_per_day),
-        member_guest_rate: Number(values.new_member_guest_rate),
-      }),
+      // Spots and rate are the host's here, and the same on every date, so
+      // they're read off the first round rather than sent per date.
+      body: (() => {
+        const rounds = newLinkupRounds(values);
+        return JSON.stringify({
+          course_id: courseJson.course.id,
+          event_dates: rounds.map((r) => r.event_date),
+          tee_times: Object.fromEntries(
+            rounds.map((r) => [r.event_date, r.tee_time]),
+          ),
+          total_spots: rounds[0]?.total_spots,
+          member_guest_rate: rounds[0]?.member_guest_rate,
+          payment_options: values.paymentOptions,
+        });
+      })(),
     });
     const eventsJson = await eventsRes.json().catch(() => ({}));
     if (!eventsRes.ok) {
@@ -685,7 +766,7 @@ function EventDrawer({
 
     const created = Array.isArray(eventsJson.events)
       ? eventsJson.events.length
-      : dates.length;
+      : values.dates.length;
     onSaved(
       `${name} requested with ${created} date${created === 1 ? "" : "s"}. We'll set the venue up, then publish your rounds to members.`,
     );
@@ -699,10 +780,17 @@ function EventDrawer({
     // same terms, so they aren't in this body at all.
     const payload = {
       course_id: values.course_id,
-      // PATCH takes a single date; only create fans out.
-      ...(isEdit ? { event_date: allDates[0] } : { event_dates: allDates }),
-      tee_time: values.tee_time || null,
+      // PATCH takes a single date and its tee time; only create fans out, with
+      // a tee time per date.
+      ...(isEdit
+        ? {
+            event_date: allDates[0],
+            tee_time: normaliseTeeTime(teeTimes[allDates[0] as string]),
+          }
+        : { event_dates: allDates, tee_times: teeTimesFor(allDates) }),
       dinner: values.dinner,
+      // Only on create — the edit form acts on one round and doesn't show them.
+      ...(isEdit ? {} : { payment_options: values.payment_options }),
     };
 
     const res =
@@ -737,19 +825,26 @@ function EventDrawer({
 
   const submit = () =>
     handleSubmit((v) => {
-      // Dates come from a picker rather than an RHF field on both tabs, so the
-      // "at least one" rule lives here either way. Duplicates aren't possible —
-      // both pickers toggle.
+      // New LinkUp's fields aren't RHF's — they're the shared component's, and
+      // checked by the shared rules.
+      if (proposing) {
+        const errs = validateNewLinkup(newLinkup);
+        setNewErrors(errs);
+        if (hasNewLinkupErrors(errs)) return;
+        return propose(newLinkup);
+      }
+      // Dates come from a picker rather than an RHF field, so the "at least
+      // one" rule lives here. Duplicates aren't possible — the picker toggles.
       if (dates.length === 0) {
-        setDateError(
-          proposing
-            ? "Pick the dates you want to host."
-            : "Choose at least one date from the venue's open days.",
-        );
+        setDateError("Choose at least one date from the venue's open days.");
         return;
       }
       setDateError(null);
-      return proposing ? propose(v) : save(v);
+      // Every picked date has to say what time it tees off at.
+      const missing = missingTeeTimes(dates, teeTimes);
+      setMissingTees(missing);
+      if (missing.length > 0) return;
+      return save(v);
     })();
 
   return (
@@ -797,8 +892,8 @@ function EventDrawer({
             >
               {(
                 [
-                  ["existing", "LinkUps"],
                   ["new", "New LinkUp"],
+                  ["existing", "Current LinkUps"],
                 ] as const
               ).map(([key, label]) => (
                 <button
@@ -811,8 +906,7 @@ function EventDrawer({
                     // The two tabs pick from different things — one from a
                     // venue's open days, one from the whole calendar — so a
                     // selection can't carry across.
-                    setDates([]);
-                    setDateError(null);
+                    clearDates();
                   }}
                   className={cn(
                     "flex-1 rounded-lg py-2 text-xs font-semibold transition-colors",
@@ -845,11 +939,18 @@ function EventDrawer({
                     value={f.value}
                     onChange={(next) => {
                       f.onChange(next);
+                      // Payment options are the venue's own setting, so the
+                      // form starts from what the picked venue already offers.
+                      setValue(
+                        "payment_options",
+                        coursePaymentOptions(
+                          courseChoices.find((c) => c.id === next),
+                        ),
+                      );
                       // Open days belong to a venue, so a change invalidates
                       // anything picked at the previous one rather than
                       // carrying dates that club may not have.
-                      setDates([]);
-                      setDateError(null);
+                      clearDates();
                     }}
                     placeholder="Select an event…"
                     searchPlaceholder="Search events…"
@@ -946,141 +1047,19 @@ function EventDrawer({
                 A club we don't have has no calendar, so nothing here can be
                 asked of it — no venue to pick, and no open days to offer. The
                 host writes what they want to run and an admin sets the club up
-                against it. Everything but the website is required: this is the
-                whole of what we'll have to work from. */}
+                against it. The same fields the become-a-host application asks,
+                from the same component. */}
             {proposing && (
-              <>
-                <div>
-                  <label htmlFor="ev-new-name" className={labelCls}>
-                    Event *
-                  </label>
-                  <input
-                    id="ev-new-name"
-                    type="text"
-                    className={field}
-                    placeholder="Name of the event you want to host"
-                    maxLength={120}
-                    {...register("new_event_name", {
-                      validate: (v) =>
-                        !proposing ||
-                        v.trim().length >= 2 ||
-                        "Enter the event name",
-                    })}
-                  />
-                  {errors.new_event_name && (
-                    <p className={errCls}>{errors.new_event_name.message}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label htmlFor="ev-new-website" className={labelCls}>
-                    Website
-                  </label>
-                  <input
-                    id="ev-new-website"
-                    type="url"
-                    className={field}
-                    placeholder="https://… (optional)"
-                    maxLength={200}
-                    {...register("new_website", {
-                      validate: (v) =>
-                        !proposing ||
-                        !v.trim() ||
-                        /^https?:\/\/.+/i.test(v.trim()) ||
-                        "Website must start with https://",
-                    })}
-                  />
-                  {errors.new_website && (
-                    <p className={errCls}>{errors.new_website.message}</p>
-                  )}
-                  <p className="text-[11px] text-gray-400 mt-1">
-                    Optional, but it saves us looking the event up ourselves.
-                  </p>
-                </div>
-
-                <div>
-                  {/* A span, not a label: the control is a grid of day buttons,
-                      so there is nothing for a label to point at. */}
-                  <span className={labelCls}>Dates *</span>
-                  {/* Real dates, not a description of them — that's what lets
-                      each one become an event with this host's name on it,
-                      rather than a note someone has to read and retype. Every
-                      upcoming day is offered: there's no calendar to ask what
-                      this venue has open until we've set it up. */}
-                  <DateMultiPicker
-                    value={dates}
-                    onChange={(next) => {
-                      setDates(next);
-                      if (next.length) setDateError(null);
-                    }}
-                    max={MAX_DATES_PER_EVENT}
-                  />
-                  <p className="text-[11px] text-gray-400 mt-1">
-                    Each date becomes its own event. We&apos;ll confirm them with
-                    the venue while we set it up.
-                  </p>
-                  {dateError && <p className={errCls}>{dateError}</p>}
-                </div>
-
-                <div>
-                  <label htmlFor="ev-new-slots" className={labelCls}>
-                    Slots per day *
-                  </label>
-                  <input
-                    id="ev-new-slots"
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    max={200}
-                    className={field}
-                    placeholder="e.g. 12"
-                    {...register("new_slots_per_day", {
-                      validate: (v) => {
-                        if (!proposing) return true;
-                        const n = Number(v);
-                        return (
-                          (Number.isInteger(n) && n >= 1 && n <= 200) ||
-                          "A whole number between 1 and 200"
-                        );
-                      },
-                    })}
-                  />
-                  {errors.new_slots_per_day && (
-                    <p className={errCls}>
-                      {errors.new_slots_per_day.message}
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <label htmlFor="ev-new-rate" className={labelCls}>
-                    Member guest rate *
-                  </label>
-                  <input
-                    id="ev-new-rate"
-                    type="number"
-                    inputMode="decimal"
-                    min={0}
-                    step="0.01"
-                    className={field}
-                    placeholder="e.g. 150"
-                    {...register("new_member_guest_rate", {
-                      validate: (v) => {
-                        if (!proposing) return true;
-                        const n = Number(v);
-                        return (
-                          (Number.isFinite(n) && n >= 0) || "0 or more"
-                        );
-                      },
-                    })}
-                  />
-                  {errors.new_member_guest_rate && (
-                    <p className={errCls}>
-                      {errors.new_member_guest_rate.message}
-                    </p>
-                  )}
-                </div>
-              </>
+              <NewLinkupFields
+                value={newLinkup}
+                onChange={(next) => {
+                  setNewLinkup(next);
+                  if (hasNewLinkupErrors(newErrors)) setNewErrors({});
+                }}
+                errors={newErrors}
+                maxDates={MAX_DATES_PER_EVENT}
+                idPrefix="ev-new"
+              />
             )}
 
             {!proposing && (
@@ -1091,40 +1070,29 @@ function EventDrawer({
               <VenueDateSelector
                 courseId={courseId || null}
                 value={dates}
-                onChange={(next: string[]) => {
-                  setDates(next);
-                  if (next.length) setDateError(null);
-                }}
+                onChange={changeDates}
                 single={isEdit}
                 max={isEdit ? 1 : MAX_DATES_PER_EVENT}
                 exceptEventId={event?.id}
+                showPickedElsewhere={false}
+              />
+              {/* Every picked date with its own tee time, right under the
+                  picker. The edit form is one event, so its date is changed
+                  from the picker rather than removed here. */}
+              <DateTeeTimeList
+                dates={dates}
+                teeTimes={teeTimes}
+                onTeeTimeChange={setTeeTime}
+                onRemove={isEdit ? undefined : removeDate}
+                invalidDates={missingTees}
+                idPrefix="ev-tee"
               />
               <p className="text-[11px] text-gray-400 mt-1">
                 {isEdit
-                  ? "Only days this venue still has open can be chosen."
-                  : "Only days this venue has open and doesn't already have a round on are shown; the number is spots left. Each date becomes its own event."}
+                  ? "Only days this venue still has open can be chosen. Set the time the round tees off."
+                  : "Only days this venue has open and doesn't already have a round on are shown; the number is spots left. Each date becomes its own event, with its own tee time."}
               </p>
               {dateError && <p className={errCls}>{dateError}</p>}
-            </div>
-            )}
-
-            {!proposing && (
-            <div>
-              <label htmlFor="ev-time" className={labelCls}>
-                Tee time
-              </label>
-              <input
-                id="ev-time"
-                type="text"
-                className={field}
-                placeholder="e.g. 8:30 AM or morning/afternoon"
-                maxLength={50}
-                {...register("tee_time")}
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Type the tee time however you like, or leave it blank if
-                there&apos;s no fixed time.
-              </p>
             </div>
             )}
 
@@ -1157,6 +1125,30 @@ function EventDrawer({
                   Dinner is included with this event
                 </span>
               </label>
+            </div>
+          )}
+
+          {/* How members pay for rounds at this venue. It's the venue's
+              setting rather than this round's — every booking there follows
+              it — so it opens on what the venue already offers, and saving
+              updates it. New LinkUp asks the same inside its own fields. */}
+          {!isEdit && !proposing && (
+            <div>
+              <span className={labelCls}>Payment options *</span>
+              <Controller
+                name="payment_options"
+                control={control}
+                render={({ field: f }) => (
+                  <PaymentOptionsPicker
+                    value={f.value}
+                    onChange={f.onChange}
+                    idPrefix="ev-payment-option"
+                  />
+                )}
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Members see these ways to pay when they book this venue.
+              </p>
             </div>
           )}
         </form>

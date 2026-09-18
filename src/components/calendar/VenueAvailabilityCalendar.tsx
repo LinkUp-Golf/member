@@ -18,7 +18,7 @@
 // day panel under the grid. Below md it simply carries the whole month when no
 // day is selected, so a member always has something readable to scroll.
 
-import { memo, useMemo } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import Image from "next/image";
 import {
   ChevronLeft,
@@ -49,6 +49,8 @@ import {
   VENUE_CHIP as CHIP,
   buildVenueColours,
 } from "@/components/calendar/venue-colours";
+import WhosPlayingSheet from "@/components/calendar/WhosPlayingSheet";
+import type { CalendarPlayer } from "@/lib/bookings/players";
 
 // Mirrors CalendarVenue / CalendarOpening from @/lib/bookings/availability —
 // declared here too so the component stays a pure presentational unit that a
@@ -96,11 +98,46 @@ const iso = (d: Date) => format(d, "yyyy-MM-dd");
 const EMPTY: CalendarOpening[] = [];
 const EMPTY_VENUES: PinnedVenue[] = [];
 const EMPTY_NEXT: Record<string, PinnedNextOpening | null> = {};
+const EMPTY_PLAYERS: CalendarPlayer[] = [];
+const EMPTY_PLAYER_DAYS: Record<string, CalendarPlayer[]> = {};
 
 const venueLocation = (v: CalendarVenue | undefined) =>
   [v?.city, v?.state].filter(Boolean).join(", ");
 
 // ---- One day cell (memoized) --------------------------------
+
+/** How many circles the who's-playing stack holds before the last becomes "+n". */
+const MAX_FACES = 3;
+
+// One size for a face and the "+n" that stands in for the rest, so the stack
+// reads as one row. Small enough to sit beside the day number at md.
+const FACE_SIZE = "w-3 h-3 md:w-4 md:h-4";
+
+/**
+ * A member's face at thumbnail size — the photo, or their initial on navy.
+ * Ringed in white so an overlapping stack still reads as separate people.
+ */
+function MiniAvatar({ player }: { player: CalendarPlayer }) {
+  return player.avatarUrl ? (
+    <Image
+      src={player.avatarUrl}
+      alt=""
+      width={16}
+      height={16}
+      className={cn(FACE_SIZE, "rounded-full object-cover ring-1 ring-white bg-green-100")}
+    />
+  ) : (
+    <span
+      className={cn(
+        FACE_SIZE,
+        "rounded-full ring-1 ring-white bg-green-900 text-white",
+        "flex items-center justify-center text-[6px] md:text-[8px] font-bold uppercase leading-none",
+      )}
+    >
+      {player.firstName.charAt(0) || "?"}
+    </span>
+  );
+}
 
 interface DayCellProps {
   date: Date;
@@ -110,9 +147,12 @@ interface DayCellProps {
   past: boolean;
   selected: boolean;
   openings: CalendarOpening[];
+  /** Members booked that day at the venues on show. */
+  players: CalendarPlayer[];
   colourByVenue: Map<string, number>;
   nameByVenue: Map<string, string>;
   onSelect: (dayIso: string) => void;
+  onShowPlayers: (dayIso: string) => void;
 }
 
 const DayCell = memo(function DayCell({
@@ -123,9 +163,11 @@ const DayCell = memo(function DayCell({
   past,
   selected,
   openings,
+  players,
   colourByVenue,
   nameByVenue,
   onSelect,
+  onShowPlayers,
 }: DayCellProps) {
   const has = openings.length > 0;
   // Any upcoming day in the month opens — landing on an empty one and being
@@ -138,101 +180,168 @@ const DayCell = memo(function DayCell({
       : "nothing open"
   }`;
 
-  // Three chips is what a cell holds at md without the row growing; the rest
-  // roll up into a count that the agenda below spells out.
+  // Three chips (or dots, below md) is what a cell holds without the row
+  // growing; past that the third becomes a count that the agenda below spells
+  // out. The faces follow the same rule.
   const shown = openings.length > 3 ? openings.slice(0, 2) : openings;
   const extra = openings.length - shown.length;
 
+  // One face per person — a member with two tee times that day is still one
+  // member playing. Only on days still to come: a past day is dimmed and shut.
+  const faces = useMemo(() => {
+    const seen = new Set<string>();
+    return players.filter((p) =>
+      seen.has(p.memberId) ? false : (seen.add(p.memberId), true),
+    );
+  }, [players]);
+  const showPlayers = selectable && faces.length > 0;
+  // The same rule as the chips: three circles, and past three the last one is
+  // the count of everyone not shown.
+  const shownFaces =
+    faces.length > MAX_FACES ? faces.slice(0, MAX_FACES - 1) : faces;
+  const moreFaces = faces.length - shownFaces.length;
+
   return (
-    <button
-      type="button"
-      disabled={!selectable}
-      aria-label={label}
-      aria-pressed={selected}
-      aria-current={today ? "date" : undefined}
-      onClick={() => onSelect(dayIso)}
+    // The styling lives on this wrapper rather than the day button, because the
+    // avatars are a second button laid over the same cell — a button can't
+    // hold another one.
+    <div
       className={cn(
-        "flex flex-col rounded-lg transition-colors text-left",
-        "min-h-[3rem] p-1 items-center",
-        "md:min-h-[6.5rem] md:p-1.5 md:items-stretch md:border md:border-green-900/[0.07]",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-1",
+        "relative flex flex-col rounded-lg transition-colors",
+        "min-h-[3rem]",
+        "md:min-h-[6.5rem] md:border md:border-green-900/[0.07]",
         !inMonth && "invisible",
         past && inMonth && "opacity-40",
         selected && "md:border-green-900 md:bg-green-50/40",
         selectable && !selected && "hover:bg-green-50/70",
       )}
     >
-      {/* Date number — centred over the dots on mobile, top-left of the cell at
-          md where the chips need the width. */}
-      <span className="flex-1 flex items-center justify-center md:flex-none md:justify-start md:mb-1">
-        <span
-          className={cn(
-            "w-6 h-6 md:w-6 md:h-6 rounded-full flex items-center justify-center",
-            "text-[11px] md:text-xs leading-none tabular-nums",
-            selected
-              ? "bg-green-900 text-white font-semibold"
-              : today
-                ? "ring-1 ring-green-700/60 text-green-800 font-bold"
-                : has
-                  ? "text-green-950 font-semibold"
-                  : "text-green-900/40 font-medium",
-          )}
-        >
-          {format(date, "d")}
-        </span>
-      </span>
-
-      {/* Below md — a dot per venue. The slot is reserved even on empty days so
-          every date in a row sits at the same height. */}
-      <span className="md:hidden h-2.5 flex items-center justify-center gap-0.5">
-        {openings.slice(0, 3).map((o) => (
-          <span
-            key={o.courseId}
-            className={cn(
-              "w-1.5 h-1.5 rounded-full",
-              DOT[colourByVenue.get(o.courseId) ?? 0],
-            )}
-          />
-        ))}
-        {openings.length > 3 && (
-          <span className="text-[9px] font-medium leading-none text-green-900/50">
-            +{openings.length - 3}
-          </span>
+      <button
+        type="button"
+        disabled={!selectable}
+        aria-label={label}
+        aria-pressed={selected}
+        aria-current={today ? "date" : undefined}
+        onClick={() => onSelect(dayIso)}
+        className={cn(
+          "flex-1 flex flex-col text-left rounded-lg",
+          "p-1 items-center",
+          "md:p-1.5 md:items-stretch",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-1",
         )}
-      </span>
+      >
+        {/* Below md the day number is centred, so there's no room beside it for
+            faces: they get a strip across the top instead. Reserved on every
+            day, not just ones with players, so the numbers in a week line up. */}
+        <span aria-hidden className="md:hidden h-3 w-full flex-shrink-0" />
 
-      {/* md and up — the venue names themselves, which is what makes the grid
-          worth showing at this width. */}
-      <span className="hidden md:flex flex-col gap-0.5 overflow-hidden">
-        {shown.map((o) => {
-          const idx = colourByVenue.get(o.courseId) ?? 0;
-          return (
+        {/* Date number — centred over the dots on mobile, top-left of the cell
+            at md, where the faces sit to its right and the chips below. */}
+        <span className="flex-1 flex items-center justify-center md:flex-none md:justify-start md:mb-1">
+          <span
+            className={cn(
+              "w-6 h-6 md:w-6 md:h-6 rounded-full flex items-center justify-center",
+              "text-[11px] md:text-xs leading-none tabular-nums",
+              selected
+                ? "bg-green-900 text-white font-semibold"
+                : today
+                  ? "ring-1 ring-green-700/60 text-green-800 font-bold"
+                  : has
+                    ? "text-green-950 font-semibold"
+                    : "text-green-900/40 font-medium",
+            )}
+          >
+            {format(date, "d")}
+          </span>
+        </span>
+
+        {/* Below md — a dot per venue. The slot is reserved even on empty days
+            so every date in a row sits at the same height. */}
+        <span className="md:hidden h-2.5 flex items-center justify-center gap-0.5">
+          {shown.map((o) => (
             <span
               key={o.courseId}
               className={cn(
-                "flex items-center gap-1 rounded px-1 py-0.5 border text-[10px] leading-tight",
-                CHIP[idx],
+                "w-1.5 h-1.5 rounded-full",
+                DOT[colourByVenue.get(o.courseId) ?? 0],
               )}
-            >
+            />
+          ))}
+          {extra > 0 && (
+            <span className="text-[9px] font-medium leading-none text-green-900/50">
+              +{extra}
+            </span>
+          )}
+        </span>
+
+        {/* md and up — the venue names themselves, which is what makes the
+            grid worth showing at this width. */}
+        <span className="hidden md:flex flex-col gap-0.5 min-w-0 overflow-hidden">
+          {shown.map((o) => {
+            const idx = colourByVenue.get(o.courseId) ?? 0;
+            return (
+              <span
+                key={o.courseId}
+                className={cn(
+                  "flex items-center gap-1 min-w-0 rounded px-1 py-0.5 border text-[10px] leading-tight",
+                  CHIP[idx],
+                )}
+              >
+                <span
+                  className={cn(
+                    "w-1.5 h-1.5 rounded-full flex-shrink-0",
+                    DOT[idx],
+                  )}
+                />
+                <span className={cn("truncate font-medium", TEXT[idx])}>
+                  {nameByVenue.get(o.courseId) ?? "Venue"}
+                </span>
+              </span>
+            );
+          })}
+          {extra > 0 && (
+            <span className="text-[10px] leading-tight font-medium text-green-900/50 px-1">
+              +{extra} more
+            </span>
+          )}
+        </span>
+      </button>
+
+      {/* Who's playing — the faces of the members booked that day, anchored
+          top-right: in the strip above the number on a phone, level with the
+          number from md. Only on a day that has any. */}
+      {showPlayers && (
+        <button
+          type="button"
+          onClick={() => onShowPlayers(dayIso)}
+          aria-label={`Who's playing on ${format(date, "EEEE, MMMM d")} — ${faces.length} member${faces.length === 1 ? "" : "s"}`}
+          className={cn(
+            "absolute z-10 flex items-center justify-end rounded-full",
+            "top-0.5 right-0.5 p-0.5",
+            "md:top-1.5 md:right-1.5 md:h-6 md:px-0.5 md:py-0",
+            "hover:bg-green-900/[0.06]",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700",
+          )}
+        >
+          <span className="flex -space-x-1 md:-space-x-0.5">
+            {shownFaces.map((p) => (
+              <MiniAvatar key={p.memberId} player={p} />
+            ))}
+            {moreFaces > 0 && (
               <span
                 className={cn(
-                  "w-1.5 h-1.5 rounded-full flex-shrink-0",
-                  DOT[idx],
+                  FACE_SIZE,
+                  "rounded-full ring-1 ring-white bg-green-100 text-green-900",
+                  "flex items-center justify-center text-[6px] md:text-[8px] font-bold leading-none tabular-nums",
                 )}
-              />
-              <span className={cn("truncate font-medium", TEXT[idx])}>
-                {nameByVenue.get(o.courseId) ?? "Venue"}
+              >
+                +{moreFaces}
               </span>
-            </span>
-          );
-        })}
-        {extra > 0 && (
-          <span className="text-[10px] leading-tight text-green-900/50 px-1">
-            +{extra} more
+            )}
           </span>
-        )}
-      </span>
-    </button>
+        </button>
+      )}
+    </div>
   );
 });
 
@@ -649,6 +758,12 @@ interface VenueAvailabilityCalendarProps {
   pinnedNextAvailable?: Record<string, PinnedNextOpening | null>;
   /** Booking a specific venue on a specific day. */
   onPickOpening: (courseId: string, date: string) => void;
+  /**
+   * 'YYYY-MM-DD' → the members booked that day, from GET /api/bookings/playing.
+   * Narrowed by the same venue filters as the grid, so a day's faces are the
+   * people at the clubs on show.
+   */
+  players?: Record<string, CalendarPlayer[]>;
 }
 
 function VenueAvailabilityCalendar({
@@ -665,8 +780,13 @@ function VenueAvailabilityCalendar({
   onPickOpening,
   pinnedVenues = EMPTY_VENUES,
   pinnedNextAvailable = EMPTY_NEXT,
+  players = EMPTY_PLAYER_DAYS,
 }: VenueAvailabilityCalendarProps) {
   const todayIso = useMemo(() => iso(new Date()), []);
+  // The day whose "Who's playing" sheet is open.
+  const [playersDate, setPlayersDate] = useState<string | null>(null);
+  const showPlayers = useCallback((d: string) => setPlayersDate(d), []);
+  const closePlayers = useCallback(() => setPlayersDate(null), []);
 
   const { colourByVenue, nameByVenue, venuesById } = useMemo(() => {
     // Colours follow the venue list — sorted by name server-side — so a venue
@@ -693,6 +813,27 @@ function VenueAvailabilityCalendar({
     }
     return out;
   }, [days, allowed]);
+
+  // Players at the venues the filters leave on show — the same allow-list as
+  // the openings, so a face on a day is someone at a club the grid is plotting.
+  const visiblePlayers = useMemo(() => {
+    if (!allowed) return players;
+    const out: Record<string, CalendarPlayer[]> = {};
+    for (const [day, list] of Object.entries(players)) {
+      const kept = list.filter((p) => allowed.has(p.courseId));
+      if (kept.length) out[day] = kept;
+    }
+    return out;
+  }, [players, allowed]);
+
+  // Memoised so the sheet sees a stable day while it's open.
+  const playersDay = useMemo(
+    () =>
+      playersDate
+        ? { date: playersDate, players: visiblePlayers[playersDate] ?? EMPTY_PLAYERS }
+        : null,
+    [playersDate, visiblePlayers],
+  );
 
   // A fixed 6-week grid would keep the height stable, but an agenda sits right
   // below it — trailing blank weeks would just push it down, so the grid ends
@@ -754,6 +895,13 @@ function VenueAvailabilityCalendar({
 
   return (
     <div className="space-y-4">
+      <WhosPlayingSheet
+        day={playersDay}
+        venueNames={nameByVenue}
+        colourByVenue={colourByVenue}
+        onClose={closePlayers}
+      />
+
       <div className="card card-pad">
         {/* Month navigation */}
         <div className="flex items-center justify-between mb-3">
@@ -832,6 +980,10 @@ function VenueAvailabilityCalendar({
                   past={dayIso < todayIso}
                   selected={selectedDate === dayIso}
                   openings={inMonth ? (visibleDays[dayIso] ?? EMPTY) : EMPTY}
+                  players={
+                    inMonth ? (visiblePlayers[dayIso] ?? EMPTY_PLAYERS) : EMPTY_PLAYERS
+                  }
+                  onShowPlayers={showPlayers}
                   colourByVenue={colourByVenue}
                   nameByVenue={nameByVenue}
                   onSelect={

@@ -68,6 +68,8 @@ export const ACTIVITY_ACTIONS = {
 
   // ---- Calendars ------------------------------------------
   calendar_viewed:          { area: 'calendars',     kind: 'view',   label: 'Opened the tee-time calendar',   client: true  },
+  // No longer emitted — the member hosted-events pages were removed. Kept so
+  // rows already recorded still resolve to an area and a label in the report.
   host_calendar_viewed:     { area: 'calendars',     kind: 'view',   label: 'Opened the hosted events calendar', client: true },
   booking_created:          { area: 'calendars',     kind: 'action', label: 'Booked a tee time',              client: false },
   booking_cancelled:        { area: 'calendars',     kind: 'action', label: 'Cancelled a booking',            client: false },
@@ -92,6 +94,7 @@ export const ACTIVITY_ACTIONS = {
   more_viewed:              { area: 'other',         kind: 'view',   label: 'Opened the more menu',           client: true  },
   messages_viewed:          { area: 'messages',      kind: 'view',   label: 'Opened messages',                client: true  },
   events_viewed:            { area: 'events',        kind: 'view',   label: 'Browsed events',                 client: true  },
+  // No longer emitted (see host_calendar_viewed); kept for recorded rows.
   hosted_event_opened:      { area: 'events',        kind: 'action', label: 'Opened an event',                client: true  },
   profile_viewed:           { area: 'profile',       kind: 'view',   label: 'Opened profile or settings',     client: true  },
 } as const satisfies Record<string, ActivitySpec>
@@ -151,11 +154,6 @@ export function activityForPath(pathname: string): { action: ActivityAction; tar
     case 'announcements': {
       const target = id(third)
       return target ? { action: 'announcement_opened', targetId: target } : { action: 'announcements_viewed' }
-    }
-    case 'hosted-events': {
-      if (third === 'calendar') return { action: 'host_calendar_viewed' }
-      const target = id(third)
-      return target ? { action: 'hosted_event_opened', targetId: target } : { action: 'events_viewed' }
     }
     case 'events':
       return { action: 'events_viewed' }

@@ -8,10 +8,11 @@
 // request without anything failing.
 
 import type { HostApplicationEventInput } from '@/types'
+import { newLinkupRounds, type NewLinkupValues } from '@/lib/hosts/new-linkup'
+import { normaliseTeeTime } from '@/lib/hosts/tee-time'
 
 export const NAME_MIN = 2
 export const NAME_MAX = 120
-export const TEE_TIME_MAX = 50
 export const MAX_DATES_PER_ROUND = 30
 
 /** A round as submitted: `venue` is the course id it sits at. */
@@ -38,13 +39,16 @@ export type SubmitValues = {
  * /api/host/application — which is why asking for them here produced two numbers
  * that were collected, validated, and then thrown away.
  *
- * Several dates on one round become one event each, sharing the tee time and
- * dinner setting. That's why a venue needs only one round: two rounds at the
- * same club were only ever two dates.
+ * Several dates on one round become one event each, sharing the dinner setting
+ * but not the tee time: two days at a club rarely tee off at the same time, so
+ * each date carries its own (`tee_times`, keyed by date) exactly as the host's
+ * own event form asks for them. That's why a venue needs only one round: two
+ * rounds at the same club were only ever two dates.
  */
 export interface RoundFields {
   dates: { value: string }[]
-  tee_time: string
+  /** date → "HH:MM"; every picked date needs one. */
+  tee_times: Record<string, string>
   dinner: boolean
 }
 
@@ -66,10 +70,11 @@ export interface ApplicationValues {
 
 /**
  * One kind of venue: a course that already exists. Naming a club we don't have
- * is possible again (AddVenueControl), but it creates the pending course before
- * the application is submitted rather than as part of submitting it — so by the
- * time this payload is built there is no second kind, only a course id whose
- * course happens to be pending. That's what lets the server insist on a real id.
+ * is possible (the application's New LinkUp), but it creates the pending course
+ * before the application is submitted rather than as part of submitting it — so
+ * by the time this payload is built there is no second kind, only a course id
+ * whose course happens to be pending. That's what lets the server insist on a
+ * real id.
  *
  * The union is kept so `roundAt` still reads as a lookup by kind rather than a
  * bare field.
@@ -78,7 +83,7 @@ export type VenueKind = 'existing'
 
 export const newRound = (): RoundFields => ({
   dates: [{ value: '' }],
-  tee_time: '',
+  tee_times: {},
   dinner: false,
 })
 
@@ -91,7 +96,7 @@ export const newRound = (): RoundFields => ({
 export const roundStarted = (r: RoundFields | undefined): boolean =>
   !!r &&
   (r.dates.some(d => d.value.trim() !== '') ||
-    r.tee_time.trim() !== '' ||
+    Object.values(r.tee_times ?? {}).some(t => t.trim() !== '') ||
     r.dinner)
 
 /**
@@ -119,7 +124,10 @@ export function buildApplicationPayload(data: ApplicationValues): SubmitValues {
       events.push({
         venue,
         event_date: date,
-        tee_time: round.tee_time.trim() || null,
+        // That date's own tee time — each date becomes its own event, and the
+        // row it becomes stores the time it was given. Required, so this is
+        // only ever '' for a round that failed validation.
+        tee_time: normaliseTeeTime(round.tee_times?.[date]),
         dinner: round.dinner,
       })
     }
@@ -131,5 +139,29 @@ export function buildApplicationPayload(data: ApplicationValues): SubmitValues {
     name: data.name.trim(),
     course_ids: data.existing.map(v => v.courseId),
     events,
+  }
+}
+
+/**
+ * Adds a New LinkUp to the request body, once its club exists as a pending
+ * course: the course joins the venues applied for, and each picked date becomes
+ * a round there carrying the applicant's own number of guests and rate — the
+ * one kind of venue where the server takes them, since there's no calendar to
+ * read them from.
+ */
+export function withNewLinkup(
+  payload: SubmitValues,
+  courseId: string,
+  values: NewLinkupValues,
+): SubmitValues {
+  return {
+    ...payload,
+    course_ids: payload.course_ids.includes(courseId)
+      ? payload.course_ids
+      : [...payload.course_ids, courseId],
+    events: [
+      ...payload.events,
+      ...newLinkupRounds(values).map(round => ({ ...round, venue: courseId })),
+    ],
   }
 }

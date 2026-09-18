@@ -21,9 +21,9 @@ describe('activityForPath', () => {
     expect(activityForPath('/book')).toEqual({ action: 'calendar_viewed' })
   })
 
-  it('separates the hosted-events calendar from the events list', () => {
-    expect(activityForPath('/more/hosted-events/calendar')).toEqual({ action: 'host_calendar_viewed' })
-    expect(activityForPath('/more/hosted-events')).toEqual({ action: 'events_viewed' })
+  it('no longer tracks the removed hosted-events pages', () => {
+    expect(activityForPath('/more/hosted-events')).toBeNull()
+    expect(activityForPath('/more/hosted-events/calendar')).toBeNull()
   })
 
   it('treats the directory listing and a single profile as different activity', () => {
@@ -129,7 +129,6 @@ describe('registry integrity', () => {
       '/home', '/book', '/members', `/members/${PROMO_ID}`, '/messages',
       '/more', '/more/promotions', `/more/promotions/${PROMO_ID}`,
       '/more/announcements', `/more/announcements/${PROMO_ID}`,
-      '/more/hosted-events', '/more/hosted-events/calendar', `/more/hosted-events/${PROMO_ID}`,
       '/more/events', '/more/profile', '/more/settings',
     ]
     for (const path of paths) {

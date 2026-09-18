@@ -25,13 +25,17 @@ export const POST = withAuth(
 
     const { data: booking, error } = await admin
       .from('bookings')
-      .select('id, member_id, player_member_id, guest_name, additional_players, booking_date, tee_time, status, course:courses!bookings_course_id_fkey(name, payment_url)')
+      .select('id, member_id, player_member_id, guest_name, additional_players, booking_date, tee_time, status, payment_method, course:courses!bookings_course_id_fkey(name, payment_url)')
       .eq('id', id)
       .single()
 
     if (error || !booking) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     if (booking.status !== 'tentative' && booking.status !== 'availability_confirmed') {
       return NextResponse.json({ error: 'Booking is not awaiting payment' }, { status: 400 })
+    }
+    // The member is settling this one with the club — there's no link to chase.
+    if (booking.payment_method === 'pay_at_club') {
+      return NextResponse.json({ error: 'This round is being paid at the club' }, { status: 400 })
     }
 
     // Resolve the player's name + email for the webhook. The GHL workflow

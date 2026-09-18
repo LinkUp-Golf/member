@@ -5,6 +5,10 @@
 // ============================================================
 
 import { isValidTimezone } from '@/lib/timezone'
+import { TEE_TIME_REQUIRED, isTeeTime } from '@/lib/hosts/tee-time'
+
+/** Said when a tee time arrives as something other than a time of day. */
+const TEE_TIME_INVALID = 'Tee time must be a time of day, like 08:30'
 
 export interface ValidationResult {
   valid: boolean
@@ -378,8 +382,8 @@ export function validateHostedEventPayload(
   // event, sharing everything else on the payload — and `event_date` is the
   // single-date shorthand that predates it. Both go through the same rules so a
   // one-date submission can't behave differently from the first of many.
+  const dates = normaliseEventDates(b)
   if (!partial || 'event_date' in b || 'event_dates' in b) {
-    const dates = normaliseEventDates(b)
     if (dates === null || dates.length === 0) {
       errors.push('Choose at least one date')
     } else if (dates.length > MAX_EVENT_DATES) {
@@ -397,12 +401,42 @@ export function validateHostedEventPayload(
     }
   }
 
-  // Optional free text in both create and edit — null/'' means no fixed tee
-  // time. A host types whatever suits ("8:30 AM", "Shotgun 9am"); we only bound
-  // the length.
-  if ('tee_time' in b && b.tee_time !== null && b.tee_time !== '') {
-    const teeResult = validateString(b.tee_time, 'Tee time', { max: 50, required: false })
-    if (!teeResult.valid) errors.push(...teeResult.errors)
+  // Tee times, which are asked for with <input type="time"> and so arrive as
+  // clock values. `tee_times` names one per date — `{ 'YYYY-MM-DD': '08:30' }`,
+  // the form a create with several dates sends — and `tee_time` is the
+  // single-date field, which an older client also sends for the whole set.
+  let perDate: Record<string, unknown> | null = null
+  if ('tee_times' in b && b.tee_times !== undefined && b.tee_times !== null) {
+    if (typeof b.tee_times !== 'object' || Array.isArray(b.tee_times)) {
+      errors.push('Tee times must be listed by date')
+    } else {
+      perDate = b.tee_times as Record<string, unknown>
+      for (const date of Object.keys(perDate)) {
+        if (!validateDate(date, 'Tee time date').valid) {
+          errors.push('Tee times must be listed by date')
+          perDate = null
+          break
+        }
+      }
+    }
+  }
+
+  if ('tee_time' in b && b.tee_time !== null && b.tee_time !== '' && !isTeeTime(b.tee_time)) {
+    errors.push(TEE_TIME_INVALID)
+  }
+
+  // Every date needs one. A date listed with no tee time is a round nobody can
+  // turn up to — hosts used to be able to leave it blank, and the rounds that
+  // produced had to be chased. Only checked where the payload carries dates, so
+  // a PATCH of something else (dinner, say) isn't held to it.
+  if (dates && dates.length > 0) {
+    for (const date of dates) {
+      const value = perDate && date in perDate ? perDate[date] : b.tee_time
+      if (!isTeeTime(value)) {
+        errors.push(value === null || value === undefined || value === '' ? TEE_TIME_REQUIRED : TEE_TIME_INVALID)
+        break
+      }
+    }
   }
 
   // Neither is the client's to send: the rate is a fixed term and capacity comes

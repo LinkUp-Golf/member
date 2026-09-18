@@ -7,12 +7,13 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { validateHostedEventPayload, normaliseEventDates, sanitiseText } from '@/lib/validation'
-import { enrichHostedEvents, hostCanUseCourse } from '@/lib/hosts/events'
+import { validateHostedEventPayload, normaliseEventDates } from '@/lib/validation'
+import { enrichHostedEvents, hostCanUseCourse, resolveTeeTimes } from '@/lib/hosts/events'
 import { openSpotsByDate } from '@/lib/bookings/availability'
 import { sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
 import { HOST_EVENT_GUEST_RATE_USD } from '@/lib/constants'
+import { parsePaymentOptions, coursePaymentOptions } from '@/lib/bookings/payment-options'
 import type { Course, HostedEvent } from '@/types'
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
@@ -22,7 +23,7 @@ export const GET = withHostAuth(async (_req: NextRequest, ctx: HostAuthContext) 
 
   // Proofs come along because the list is where a host looks to see whether
   // they've already submitted one. Without them every row's button read
-  // "Upload proof" no matter what had been sent — the status can't answer it,
+  // "Upload pic" no matter what had been sent — the status can't answer it,
   // since a same-day upload deliberately leaves the event 'upcoming'.
   const { data, error } = await admin
     .from('hosted_events')
@@ -51,9 +52,10 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
   // supplies from the venue itself. Existing events created that way still edit
   // and cancel.
   let courseId: string
-  /** One event per date, sharing the course, tee time and dinner setting. */
+  /** One event per date, sharing the course and dinner setting. */
   let eventDates: string[]
-  let teeTime: string | null
+  /** Each date's own tee time, keyed by date — see resolveTeeTimes. */
+  let teeTimes: Map<string, string | null>
 
   /** The dates asked for, rejecting any that have already passed. */
   const resolveDates = (): { dates?: string[]; error?: string } => {
@@ -75,10 +77,15 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     }
     eventDates = resolved.dates
     courseId = String(body.course_id)
-    // Free text the host typed — sanitise like any other free-form field.
-    teeTime = typeof body.tee_time === 'string' && body.tee_time.trim()
-      ? sanitiseText(body.tee_time.trim())
-      : null
+    // What each date tees off at, sanitised — the row per date stores its own.
+    teeTimes = resolveTeeTimes(eventDates, body)
+
+    // How members pay at this venue. Optional — an older client doesn't send
+    // it, and then the venue's setting is left alone — but if sent it has to be
+    // a real, non-empty set, because it's written onto the course below.
+    if (body.payment_options !== undefined && !parsePaymentOptions(body.payment_options)) {
+      return NextResponse.json({ error: 'Choose at least one payment option.' }, { status: 400 })
+    }
 
     // A host scoped to specific venues can only propose events there. An empty
     // set means unrestricted (legacy hosts), matching the event form's fallback.
@@ -141,7 +148,7 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     // they have to BE present, which only applies on this path.
     if (!Number.isInteger(hostSetSpots) || hostSetSpots < 1) {
       return NextResponse.json(
-        { error: 'Tell us how many slots a day this venue can take.' },
+        { error: 'Tell us the number of guests this venue can take.' },
         { status: 400 }
       )
     }
@@ -191,13 +198,32 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     }
   }
 
+  // Payment options belong to the venue, not to these rounds: every booking at
+  // the course follows them. The host sets them from the event form — the
+  // venue checks above are what entitle them to — so they're written before the
+  // rounds, and a failure stops here rather than listing rounds on terms the
+  // host didn't choose.
+  const paymentOptions = parsePaymentOptions(body.payment_options)
+  if (
+    paymentOptions &&
+    paymentOptions.join(',') !== coursePaymentOptions(course).join(',')
+  ) {
+    const { error: optionsError } = await admin
+      .from('courses')
+      .update({ payment_options: paymentOptions })
+      .eq('id', courseId)
+    if (optionsError) {
+      return NextResponse.json({ error: optionsError.message }, { status: 500 })
+    }
+  }
+
   const { data: created, error } = await admin
     .from('hosted_events')
     .insert(orderedDates.map(date => ({
       host_id: ctx.host.id,
       course_id: courseId,
       event_date: date,
-      tee_time: teeTime,
+      tee_time: teeTimes.get(date) ?? null,
       total_spots: spotsFor.get(date) ?? 1,
       member_guest_rate: rate,
       dinner,

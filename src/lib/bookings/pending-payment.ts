@@ -2,6 +2,7 @@ import { format } from 'date-fns'
 import { titleCaseName } from '@/lib/utils'
 import { validateUUID } from '@/lib/validation'
 import { bookingAmountDue } from './price'
+import { coursePaymentOptions, type PaymentOption } from './payment-options'
 import type { createAdminClient } from '@/lib/supabase-server'
 
 // Only 'availability_confirmed' — GHL has confirmed the slot and a payment
@@ -11,6 +12,11 @@ import type { createAdminClient } from '@/lib/supabase-server'
 // confirmed. LinkUp allows a member to hold at most one round awaiting
 // payment at a time — they must pay (or have it cancelled) before they can
 // book another, at any course.
+//
+// A round the member chose to pay at the club (payment_method 'pay_at_club')
+// keeps its status but is no longer owed through the app, so every query here
+// also requires payment_method to be null. create_bookings_for_day applies the
+// same rule in SQL.
 export const UNPAID_BOOKING_STATUSES = ['availability_confirmed'] as const
 
 export interface PendingPaymentBooking {
@@ -20,6 +26,8 @@ export interface PendingPaymentBooking {
   booking_date: string
   tee_time: string
   payment_url: string | null
+  // How this venue takes payment — decides which CTAs the banner offers.
+  payment_options: PaymentOption[]
   status: string
   // Whose round this specific row's payment is for. Each player in a group
   // booking gets their own GHL appointment and moves through the payment
@@ -111,14 +119,15 @@ export async function findPendingPaymentBookings(
 ): Promise<PendingPaymentBooking[]> {
   const { data } = await admin
     .from('bookings')
-    .select('id, member_id, course_id, booking_date, tee_time, status, guest_name, player_member_id, amount_charged, booker:members!bookings_member_id_fkey(first_name, last_name), course:courses!bookings_course_id_fkey(name, payment_url, cost_per_player)')
+    .select('id, member_id, course_id, booking_date, tee_time, status, guest_name, player_member_id, amount_charged, booker:members!bookings_member_id_fkey(first_name, last_name), course:courses!bookings_course_id_fkey(name, payment_url, payment_options, cost_per_player)')
     .or(`member_id.eq.${memberId},player_member_id.eq.${memberId}`)
     .in('status', UNPAID_BOOKING_STATUSES)
+    .is('payment_method', null)
     .gte('booking_date', todayStr())
     .order('booking_date', { ascending: true })
 
   return (data ?? []).map((row) => {
-    const course = row.course as unknown as { name: string; payment_url: string | null; cost_per_player: number | null } | null
+    const course = row.course as unknown as { name: string; payment_url: string | null; payment_options: string[] | null; cost_per_player: number | null } | null
     // The querying member's own round is either their primary row (no guest
     // name) or one where they were the invited player, regardless of who
     // booked it.
@@ -138,6 +147,7 @@ export async function findPendingPaymentBookings(
       booking_date: row.booking_date,
       tee_time: row.tee_time,
       payment_url: course?.payment_url ?? null,
+      payment_options: coursePaymentOptions(course),
       status: row.status,
       player_name: isOwnRound ? 'You' : (row.guest_name as string),
       target_member_id: isOwnRound ? null : row.player_member_id,
@@ -182,6 +192,7 @@ export async function findMembersWithPendingPayment(
     .select('member_id, player_member_id')
     .or(orClause)
     .in('status', UNPAID_BOOKING_STATUSES)
+    .is('payment_method', null)
     .gte('booking_date', todayStr())
 
   const idSet = new Set(ids)

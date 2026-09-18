@@ -9,6 +9,8 @@ import {
 } from '@/components/admin/AdminUI'
 import Select from '@/components/ui/Select'
 import MediaUpload from '@/components/ui/MediaUpload'
+import PaymentOptionsPicker from '@/components/payments/PaymentOptionsPicker'
+import { coursePaymentOptions, type PaymentOption } from '@/lib/bookings/payment-options'
 import { MAX_PINNED_COURSES } from '@/lib/constants'
 import type { Course, CourseApprovalStatus } from '@/types'
 
@@ -918,6 +920,7 @@ type CourseFormValues = {
   booking_rules: string
   booking_url: string
   payment_url: string
+  payment_options: PaymentOption[]
   required_tags: string[]
   custom_slots_enabled: boolean
 }
@@ -954,6 +957,8 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
       booking_rules: editingCourse?.booking_rules ?? '',
       booking_url: editingCourse?.booking_url ?? '',
       payment_url: editingCourse?.payment_url ?? '',
+      // A new course starts on the default (Pay now), like every existing one.
+      payment_options: coursePaymentOptions(editingCourse),
       required_tags: editingCourse?.required_tags ?? [],
       custom_slots_enabled: editingCourse?.custom_slots_enabled ?? false,
     },
@@ -1288,6 +1293,26 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
                   ? <p className={errMsg}>{errors.payment_url.message}</p>
                   : <p className={infoText}>Members are sent here to pay for confirmed bookings.</p>
                 }
+              </div>
+
+              <div>
+                {/* A span: the control is a pair of checkboxes with their own labels. */}
+                <span className={labelCls}>Payment options *</span>
+                <Controller
+                  name="payment_options"
+                  control={control}
+                  render={({ field: f }) => (
+                    <PaymentOptionsPicker
+                      value={f.value}
+                      onChange={f.onChange}
+                      idPrefix="course-payment-option"
+                    />
+                  )}
+                />
+                <p className={infoText}>
+                  The ways members can pay for a round here. Credit can only be
+                  spent through Pay now.
+                </p>
               </div>
             </div>
           </section>

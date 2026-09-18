@@ -42,6 +42,7 @@ export default function VenueDateSelector({
   max,
   disabled = false,
   exceptEventId,
+  showPickedElsewhere = true,
 }: {
   /** null until a venue is chosen — there is nothing to ask about before that. */
   courseId: string | null
@@ -58,6 +59,11 @@ export default function VenueDateSelector({
    * list, which would otherwise hide the very date this form is editing.
    */
   exceptEventId?: string
+  /**
+   * List the days picked in months not on screen. Off where the form lists
+   * every picked date itself (DateTeeTimeList), so they aren't shown twice.
+   */
+  showPickedElsewhere?: boolean
 }) {
   const [month, setMonth] = useState<Date>(() => startOfMonth(new Date()))
   const [dates, setDates] = useState<AvailableDate[] | null>(null)
@@ -229,7 +235,7 @@ export default function VenueDateSelector({
           </div>
         )}
 
-        {offMonth.length > 0 && (
+        {showPickedElsewhere && offMonth.length > 0 && (
           <div className="mt-3 pt-2 border-t border-gray-100">
             <p className="text-[11px] text-gray-400 mb-1.5">
               Also picked in other months
