@@ -106,26 +106,32 @@ const venueLocation = (v: CalendarVenue | undefined) =>
 
 // ---- One day cell (memoized) --------------------------------
 
+/** How many circles the who's-playing stack holds before the last becomes "+n". */
+const MAX_FACES = 3;
+
+// One size for a face and the "+n" that stands in for the rest, so the stack
+// reads as one row. Small enough to sit beside the day number at md.
+const FACE_SIZE = "w-3 h-3 md:w-4 md:h-4";
+
 /**
  * A member's face at thumbnail size — the photo, or their initial on navy.
  * Ringed in white so an overlapping stack still reads as separate people.
  */
 function MiniAvatar({ player }: { player: CalendarPlayer }) {
-  const size = "w-4 h-4 md:w-5 md:h-5";
   return player.avatarUrl ? (
     <Image
       src={player.avatarUrl}
       alt=""
-      width={20}
-      height={20}
-      className={cn(size, "rounded-full object-cover ring-1 ring-white bg-green-100")}
+      width={16}
+      height={16}
+      className={cn(FACE_SIZE, "rounded-full object-cover ring-1 ring-white bg-green-100")}
     />
   ) : (
     <span
       className={cn(
-        size,
+        FACE_SIZE,
         "rounded-full ring-1 ring-white bg-green-900 text-white",
-        "flex items-center justify-center text-[7px] md:text-[9px] font-bold uppercase",
+        "flex items-center justify-center text-[6px] md:text-[8px] font-bold uppercase leading-none",
       )}
     >
       {player.firstName.charAt(0) || "?"}
@@ -174,8 +180,9 @@ const DayCell = memo(function DayCell({
       : "nothing open"
   }`;
 
-  // Three chips is what a cell holds at md without the row growing; the rest
-  // roll up into a count that the agenda below spells out.
+  // Three chips (or dots, below md) is what a cell holds without the row
+  // growing; past that the third becomes a count that the agenda below spells
+  // out. The faces follow the same rule.
   const shown = openings.length > 3 ? openings.slice(0, 2) : openings;
   const extra = openings.length - shown.length;
 
@@ -188,14 +195,19 @@ const DayCell = memo(function DayCell({
     );
   }, [players]);
   const showPlayers = selectable && faces.length > 0;
+  // The same rule as the chips: three circles, and past three the last one is
+  // the count of everyone not shown.
+  const shownFaces =
+    faces.length > MAX_FACES ? faces.slice(0, MAX_FACES - 1) : faces;
+  const moreFaces = faces.length - shownFaces.length;
 
   return (
     // The styling lives on this wrapper rather than the day button, because the
-    // avatars are a second button inside the same cell — a button can't hold
-    // another one.
+    // avatars are a second button laid over the same cell — a button can't
+    // hold another one.
     <div
       className={cn(
-        "flex flex-col rounded-lg transition-colors",
+        "relative flex flex-col rounded-lg transition-colors",
         "min-h-[3rem]",
         "md:min-h-[6.5rem] md:border md:border-green-900/[0.07]",
         !inMonth && "invisible",
@@ -218,8 +230,13 @@ const DayCell = memo(function DayCell({
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-1",
         )}
       >
+        {/* Below md the day number is centred, so there's no room beside it for
+            faces: they get a strip across the top instead. Reserved on every
+            day, not just ones with players, so the numbers in a week line up. */}
+        <span aria-hidden className="md:hidden h-3 w-full flex-shrink-0" />
+
         {/* Date number — centred over the dots on mobile, top-left of the cell
-            at md where the chips need the width. */}
+            at md, where the faces sit to its right and the chips below. */}
         <span className="flex-1 flex items-center justify-center md:flex-none md:justify-start md:mb-1">
           <span
             className={cn(
@@ -241,7 +258,7 @@ const DayCell = memo(function DayCell({
         {/* Below md — a dot per venue. The slot is reserved even on empty days
             so every date in a row sits at the same height. */}
         <span className="md:hidden h-2.5 flex items-center justify-center gap-0.5">
-          {openings.slice(0, 3).map((o) => (
+          {shown.map((o) => (
             <span
               key={o.courseId}
               className={cn(
@@ -250,23 +267,23 @@ const DayCell = memo(function DayCell({
               )}
             />
           ))}
-          {openings.length > 3 && (
+          {extra > 0 && (
             <span className="text-[9px] font-medium leading-none text-green-900/50">
-              +{openings.length - 3}
+              +{extra}
             </span>
           )}
         </span>
 
         {/* md and up — the venue names themselves, which is what makes the
             grid worth showing at this width. */}
-        <span className="hidden md:flex flex-col gap-0.5 overflow-hidden">
+        <span className="hidden md:flex flex-col gap-0.5 min-w-0 overflow-hidden">
           {shown.map((o) => {
             const idx = colourByVenue.get(o.courseId) ?? 0;
             return (
               <span
                 key={o.courseId}
                 className={cn(
-                  "flex items-center gap-1 rounded px-1 py-0.5 border text-[10px] leading-tight",
+                  "flex items-center gap-1 min-w-0 rounded px-1 py-0.5 border text-[10px] leading-tight",
                   CHIP[idx],
                 )}
               >
@@ -283,45 +300,45 @@ const DayCell = memo(function DayCell({
             );
           })}
           {extra > 0 && (
-            <span className="text-[10px] leading-tight text-green-900/50 px-1">
+            <span className="text-[10px] leading-tight font-medium text-green-900/50 px-1">
               +{extra} more
             </span>
           )}
         </span>
       </button>
 
-      {/* Who's playing — the faces of the members booked that day. Only on a
-          day that has any. Two fit a phone's cell, four a desktop one; the
-          rest are a count. */}
+      {/* Who's playing — the faces of the members booked that day, anchored
+          top-right: in the strip above the number on a phone, level with the
+          number from md. Only on a day that has any. */}
       {showPlayers && (
         <button
           type="button"
           onClick={() => onShowPlayers(dayIso)}
           aria-label={`Who's playing on ${format(date, "EEEE, MMMM d")} — ${faces.length} member${faces.length === 1 ? "" : "s"}`}
           className={cn(
-            "flex items-center justify-center md:justify-start",
-            "mx-auto md:mx-1.5 mb-1 md:mb-1.5 px-0.5 rounded-full",
+            "absolute z-10 flex items-center justify-end rounded-full",
+            "top-0.5 right-0.5 p-0.5",
+            "md:top-1.5 md:right-1.5 md:h-6 md:px-0.5 md:py-0",
             "hover:bg-green-900/[0.06]",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700",
           )}
         >
-          <span className="flex -space-x-1">
-            {faces.slice(0, 4).map((p, i) => (
-              <span key={p.memberId} className={i >= 2 ? "hidden md:flex" : "flex"}>
-                <MiniAvatar player={p} />
-              </span>
+          <span className="flex -space-x-1 md:-space-x-0.5">
+            {shownFaces.map((p) => (
+              <MiniAvatar key={p.memberId} player={p} />
             ))}
+            {moreFaces > 0 && (
+              <span
+                className={cn(
+                  FACE_SIZE,
+                  "rounded-full ring-1 ring-white bg-green-100 text-green-900",
+                  "flex items-center justify-center text-[6px] md:text-[8px] font-bold leading-none tabular-nums",
+                )}
+              >
+                +{moreFaces}
+              </span>
+            )}
           </span>
-          {faces.length > 2 && (
-            <span className="md:hidden ml-0.5 text-[9px] font-semibold leading-none text-green-900/60">
-              +{faces.length - 2}
-            </span>
-          )}
-          {faces.length > 4 && (
-            <span className="hidden md:inline ml-1 text-[10px] font-semibold leading-none text-green-900/60">
-              +{faces.length - 4}
-            </span>
-          )}
         </button>
       )}
     </div>
