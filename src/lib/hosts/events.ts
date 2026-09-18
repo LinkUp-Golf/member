@@ -5,6 +5,7 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { sanitiseText } from '@/lib/validation'
 import { HOST_MEMBER_PRICE_MARKUP_PERCENT } from '@/lib/constants'
 import type { HostedEvent, HostStats } from '@/types'
 import { loadCreditSummary } from '@/lib/credits'
@@ -56,6 +57,35 @@ export async function hostCanUseCourse(admin: AdminClient, hostId: string, cours
     .maybeSingle()
 
   return !!data
+}
+
+/**
+ * The tee time each date being listed should be stored with.
+ *
+ * A host picks dates and gives each one its own time, because two days at a
+ * club rarely tee off at the same time — and each date becomes its own
+ * hosted_events row, so each stores the time it was given. `tee_times` is that
+ * map, keyed by date; `tee_time` is the one-for-all form an older client sends,
+ * filling any date the map doesn't name. Blank means no fixed time (null).
+ *
+ * Free text either way, so it's sanitised here like every other typed field.
+ */
+export function resolveTeeTimes(
+  dates: string[],
+  body: { tee_time?: unknown; tee_times?: unknown },
+): Map<string, string | null> {
+  const clean = (v: unknown) =>
+    typeof v === 'string' && v.trim() ? sanitiseText(v.trim()) : null
+
+  const shared = clean(body.tee_time)
+  const perDate =
+    body.tee_times && typeof body.tee_times === 'object' && !Array.isArray(body.tee_times)
+      ? (body.tee_times as Record<string, unknown>)
+      : {}
+
+  return new Map(
+    dates.map(date => [date, date in perDate ? clean(perDate[date]) : shared]),
+  )
 }
 
 /** Statuses in which a member can still reserve a spot. */

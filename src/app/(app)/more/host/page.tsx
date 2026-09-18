@@ -4,15 +4,18 @@ import { useState, useEffect, useCallback } from "react";
 import {
   useForm,
   useFieldArray,
+  useWatch,
   Controller,
   type Control,
   type FieldErrors,
   type UseFormRegister,
+  type UseFormSetValue,
   type UseFormTrigger,
 } from "react-hook-form";
 import Link from "next/link";
 import { Flag, Plus, X } from "lucide-react";
 import VenueDateSelector from "@/components/host/VenueDateSelector";
+import DateTeeTimeList from "@/components/host/DateTeeTimeList";
 import NewLinkupFields from "@/components/host/NewLinkupFields";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
@@ -36,7 +39,6 @@ import {
   MAX_DATES_PER_ROUND,
   NAME_MAX,
   NAME_MIN,
-  TEE_TIME_MAX,
   type ApplicationValues,
   type RoundFields,
   type SubmitValues,
@@ -341,6 +343,7 @@ function ApplicationForm({
     handleSubmit,
     reset,
     setError,
+    setValue,
     clearErrors,
     trigger,
     formState: { errors, isSubmitting },
@@ -508,6 +511,7 @@ function ApplicationForm({
                 courseId={field.courseId}
                 control={control}
                 register={register}
+                setValue={setValue}
                 trigger={trigger}
                 roundErrors={errors.existing?.[index]?.round}
                 onRemove={() => existing.remove(index)}
@@ -639,6 +643,7 @@ function VenueCard({
   courseId,
   control,
   register,
+  setValue,
   trigger,
   roundErrors,
   onRemove,
@@ -650,11 +655,32 @@ function VenueCard({
   courseId: string;
   control: Control<ApplicationValues>;
   register: UseFormRegister<ApplicationValues>;
+  setValue: UseFormSetValue<ApplicationValues>;
   trigger: UseFormTrigger<ApplicationValues>;
   roundErrors?: FieldErrors<RoundFields>;
   onRemove: () => void;
 }) {
   const prefix = `existing.${index}` as const;
+  const datesName = `${prefix}.round.dates` as const;
+  const teeTimesName = `${prefix}.round.tee_times` as const;
+
+  // The dates picked at this venue, and the tee time each one carries. Watched
+  // rather than held locally so the list below the picker and the values the
+  // form submits are the same thing.
+  const picked = ((useWatch({ control, name: datesName }) ?? []) as { value: string }[])
+    .map((d) => d.value)
+    .filter(Boolean);
+  const teeTimes = (useWatch({ control, name: teeTimesName }) ?? {}) as Record<
+    string,
+    string
+  >;
+
+  /** Tee times follow their dates: one dropped takes its tee time with it. */
+  const setPicked = (next: string[]) =>
+    setValue(
+      teeTimesName,
+      Object.fromEntries(next.map((d) => [d, teeTimes[d] ?? ""])),
+    );
 
   return (
     <div className="rounded-xl border border-green-900/20 bg-green-50/40 px-3 py-3 space-y-2">
@@ -697,9 +723,11 @@ function VenueCard({
             value={(f.value ?? []).map((d: { value: string }) => d.value).filter(Boolean)}
             onChange={(next: string[]) => {
               f.onChange(next.map(value => ({ value })));
-              void trigger(`${prefix}.round.dates` as const);
+              setPicked(next);
+              void trigger(datesName);
             }}
             max={MAX_DATES_PER_ROUND}
+            showPickedElsewhere={false}
           />
         )}
       />
@@ -707,20 +735,25 @@ function VenueCard({
         <p className="text-xs text-red-500">{roundErrors.dates.message}</p>
       )}
 
-      <input
-        type="text"
-        className="input"
-        placeholder="e.g. 8:30 AM (optional)"
-        {...register(`${prefix}.round.tee_time` as const, {
-          maxLength: {
-            value: TEE_TIME_MAX,
-            message: `At most ${TEE_TIME_MAX} characters`,
-          },
-        })}
+      {/* Each picked date with its own tee time — it becomes its own event, and
+          two days at a club rarely tee off at the same time. This is also the
+          one place every picked date is listed, whichever month it's in. */}
+      <DateTeeTimeList
+        dates={picked}
+        teeTimes={teeTimes}
+        onTeeTimeChange={(date, value) =>
+          setValue(teeTimesName, { ...teeTimes, [date]: value })
+        }
+        onRemove={(date) => {
+          const next = picked.filter((d) => d !== date);
+          setValue(datesName, next.map((value) => ({ value })));
+          setPicked(next);
+          void trigger(datesName);
+        }}
+        max={MAX_DATES_PER_ROUND}
+        tone="member"
+        idPrefix={`apply-${index}-tee`}
       />
-      {roundErrors?.tee_time && (
-        <p className="text-xs text-red-500">{roundErrors.tee_time.message}</p>
-      )}
 
       {/* The terms, stated rather than asked for — the same two numbers the
           host's own event form declines to collect. Spots come from the venue's

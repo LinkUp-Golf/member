@@ -7,8 +7,8 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { validateHostedEventPayload, normaliseEventDates, sanitiseText } from '@/lib/validation'
-import { enrichHostedEvents, hostCanUseCourse } from '@/lib/hosts/events'
+import { validateHostedEventPayload, normaliseEventDates } from '@/lib/validation'
+import { enrichHostedEvents, hostCanUseCourse, resolveTeeTimes } from '@/lib/hosts/events'
 import { openSpotsByDate } from '@/lib/bookings/availability'
 import { sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
@@ -54,8 +54,8 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
   let courseId: string
   /** One event per date, sharing the course and dinner setting. */
   let eventDates: string[]
-  /** Each date's tee time — see teeTimeFor below. */
-  let teeTimeFor: (date: string) => string | null
+  /** Each date's own tee time, keyed by date — see resolveTeeTimes. */
+  let teeTimes: Map<string, string | null>
 
   /** The dates asked for, rejecting any that have already passed. */
   const resolveDates = (): { dates?: string[]; error?: string } => {
@@ -77,17 +77,8 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     }
     eventDates = resolved.dates
     courseId = String(body.course_id)
-    // Free text the host typed — sanitise like any other free-form field.
-    // Each date carries its own (`tee_times`, keyed by date), since two days at
-    // a club rarely tee off at the same time. `tee_time` is the one-for-all
-    // form an older client sends, and fills any date the map doesn't name.
-    const clean = (v: unknown) =>
-      typeof v === 'string' && v.trim() ? sanitiseText(v.trim()) : null
-    const shared = clean(body.tee_time)
-    const perDate = (body.tee_times && typeof body.tee_times === 'object' && !Array.isArray(body.tee_times)
-      ? body.tee_times
-      : {}) as Record<string, unknown>
-    teeTimeFor = (date) => (date in perDate ? clean(perDate[date]) : shared)
+    // What each date tees off at, sanitised — the row per date stores its own.
+    teeTimes = resolveTeeTimes(eventDates, body)
 
     // How members pay at this venue. Optional — an older client doesn't send
     // it, and then the venue's setting is left alone — but if sent it has to be
@@ -232,7 +223,7 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       host_id: ctx.host.id,
       course_id: courseId,
       event_date: date,
-      tee_time: teeTimeFor(date),
+      tee_time: teeTimes.get(date) ?? null,
       total_spots: spotsFor.get(date) ?? 1,
       member_guest_rate: rate,
       dinner,

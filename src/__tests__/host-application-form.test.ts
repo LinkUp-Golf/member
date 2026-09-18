@@ -19,10 +19,11 @@ const round = (overrides: Partial<RoundFields> = {}): RoundFields => ({
   ...overrides,
 })
 
+/** A round at the given dates, every one teeing off at 8:30. */
 const filled = (dates: string[]): RoundFields =>
   round({
     dates: dates.map(value => ({ value })),
-    tee_time: '8:30 AM',
+    tee_times: Object.fromEntries(dates.map(d => [d, '8:30 AM'])),
   })
 
 const COURSE_A = '3f2504e0-4f89-11d3-9a0c-0305e82c3301'
@@ -41,12 +42,14 @@ describe('roundStarted', () => {
 
   it('is true once any field the applicant owns is filled', () => {
     expect(roundStarted(round({ dates: [{ value: '2099-06-01' }] }))).toBe(true)
-    expect(roundStarted(round({ tee_time: 'morning' }))).toBe(true)
+    expect(roundStarted(round({ tee_times: { '2099-06-01': 'morning' } }))).toBe(true)
     expect(roundStarted(round({ dinner: true }))).toBe(true)
   })
 
   it('ignores whitespace-only entries', () => {
-    expect(roundStarted(round({ dates: [{ value: '   ' }], tee_time: '  ' }))).toBe(false)
+    expect(
+      roundStarted(round({ dates: [{ value: '   ' }], tee_times: { '2099-06-01': '  ' } })),
+    ).toBe(false)
   })
 
   it('is false for a missing round', () => {
@@ -59,7 +62,7 @@ describe('roundAt', () => {
     const values = form({
       existing: [{ courseId: COURSE_A, label: 'Aviara', pending: false, round: filled(['2099-06-01']) }],
     })
-    expect(roundAt(values, 'existing', 0)?.tee_time).toBe('8:30 AM')
+    expect(roundAt(values, 'existing', 0)?.tee_times['2099-06-01']).toBe('8:30 AM')
   })
 
   it('returns undefined for an index that is gone', () => {
@@ -92,9 +95,33 @@ describe('buildApplicationPayload', () => {
     expect(payload.events.map(e => e.event_date)).toEqual([
       '2099-06-01', '2099-06-08', '2099-06-15',
     ])
-    // Everything but the date is shared across them.
+    // The venue is shared across them; the tee time is per date.
     expect(new Set(payload.events.map(e => e.venue))).toEqual(new Set([COURSE_A]))
     expect(payload.events.every(e => e.tee_time === '8:30 AM')).toBe(true)
+  })
+
+  it('carries the tee time each date was given', () => {
+    // The point of asking per date: two days at a club rarely tee off at the
+    // same time, and each date becomes its own event row.
+    const payload = buildApplicationPayload(
+      form({
+        existing: [{
+          courseId: COURSE_A,
+          label: 'Aviara',
+          pending: false,
+          round: round({
+            dates: [{ value: '2099-06-01' }, { value: '2099-06-08' }, { value: '2099-06-15' }],
+            tee_times: { '2099-06-01': ' 8:30 AM ', '2099-06-08': 'afternoon' },
+          }),
+        }],
+      }),
+    )
+    expect(payload.events.map(e => [e.event_date, e.tee_time])).toEqual([
+      ['2099-06-01', '8:30 AM'],
+      ['2099-06-08', 'afternoon'],
+      // Left blank — no fixed time, rather than inheriting a sibling's.
+      ['2099-06-15', null],
+    ])
   })
 
   it('sends neither spots nor a guest rate', () => {

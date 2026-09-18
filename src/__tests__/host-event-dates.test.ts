@@ -4,6 +4,7 @@ import {
   validateHostedEventPayload,
   MAX_EVENT_DATES,
 } from '@/lib/validation'
+import { resolveTeeTimes } from '@/lib/hosts/events'
 
 // A hosted-event submission carries one date or several. `event_dates` is the
 // multi-date form (one event per date, everything else shared); `event_date` is
@@ -136,5 +137,49 @@ describe('validateHostedEventPayload with a tee time per date', () => {
       tee_times: { '2099-06-01': 'x'.repeat(51) },
     })
     expect(r.valid).toBe(false)
+  })
+})
+
+describe('resolveTeeTimes', () => {
+  const dates = ['2099-06-01', '2099-06-08', '2099-06-15']
+
+  it('gives each date the tee time it was given', () => {
+    // The whole point of asking per date: each becomes its own hosted_events
+    // row, and each row stores its own time.
+    const times = resolveTeeTimes(dates, {
+      tee_times: { '2099-06-01': ' 8:30 AM ', '2099-06-08': 'afternoon' },
+    })
+    expect(times.get('2099-06-01')).toBe('8:30 AM')
+    expect(times.get('2099-06-08')).toBe('afternoon')
+    // Not named, and nothing shared to fall back on: no fixed time.
+    expect(times.get('2099-06-15')).toBeNull()
+  })
+
+  it('reads a blank tee time as no fixed time', () => {
+    const times = resolveTeeTimes(dates, { tee_times: { '2099-06-01': '   ' } })
+    expect(times.get('2099-06-01')).toBeNull()
+  })
+
+  it('falls back to a one-for-all tee time for dates the map skips', () => {
+    // What an older client sends, and what the edit form still sends for its
+    // single date.
+    const times = resolveTeeTimes(dates, {
+      tee_time: 'morning',
+      tee_times: { '2099-06-08': '1:00 PM' },
+    })
+    expect([...times.values()]).toEqual(['morning', '1:00 PM', 'morning'])
+  })
+
+  it('sanitises what the host typed, like every other free-text field', () => {
+    const times = resolveTeeTimes(['2099-06-01'], {
+      tee_times: { '2099-06-01': '<script>8:30</script>' },
+    })
+    expect(times.get('2099-06-01')).not.toContain('<script>')
+  })
+
+  it('ignores a tee_times that is not a map', () => {
+    expect([...resolveTeeTimes(dates, { tee_times: ['8:30 AM'] }).values()]).toEqual([
+      null, null, null,
+    ])
   })
 })

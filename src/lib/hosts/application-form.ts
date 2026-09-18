@@ -12,7 +12,6 @@ import { newLinkupRounds, type NewLinkupValues } from '@/lib/hosts/new-linkup'
 
 export const NAME_MIN = 2
 export const NAME_MAX = 120
-export const TEE_TIME_MAX = 50
 export const MAX_DATES_PER_ROUND = 30
 
 /** A round as submitted: `venue` is the course id it sits at. */
@@ -39,13 +38,16 @@ export type SubmitValues = {
  * /api/host/application — which is why asking for them here produced two numbers
  * that were collected, validated, and then thrown away.
  *
- * Several dates on one round become one event each, sharing the tee time and
- * dinner setting. That's why a venue needs only one round: two rounds at the
- * same club were only ever two dates.
+ * Several dates on one round become one event each, sharing the dinner setting
+ * but not the tee time: two days at a club rarely tee off at the same time, so
+ * each date carries its own (`tee_times`, keyed by date) exactly as the host's
+ * own event form asks for them. That's why a venue needs only one round: two
+ * rounds at the same club were only ever two dates.
  */
 export interface RoundFields {
   dates: { value: string }[]
-  tee_time: string
+  /** date → tee time as typed; absent or '' means no fixed time. */
+  tee_times: Record<string, string>
   dinner: boolean
 }
 
@@ -80,7 +82,7 @@ export type VenueKind = 'existing'
 
 export const newRound = (): RoundFields => ({
   dates: [{ value: '' }],
-  tee_time: '',
+  tee_times: {},
   dinner: false,
 })
 
@@ -93,7 +95,7 @@ export const newRound = (): RoundFields => ({
 export const roundStarted = (r: RoundFields | undefined): boolean =>
   !!r &&
   (r.dates.some(d => d.value.trim() !== '') ||
-    r.tee_time.trim() !== '' ||
+    Object.values(r.tee_times ?? {}).some(t => t.trim() !== '') ||
     r.dinner)
 
 /**
@@ -121,7 +123,9 @@ export function buildApplicationPayload(data: ApplicationValues): SubmitValues {
       events.push({
         venue,
         event_date: date,
-        tee_time: round.tee_time.trim() || null,
+        // That date's own tee time — each date becomes its own event, and the
+        // row it becomes stores the time it was given.
+        tee_time: (round.tee_times?.[date] ?? '').trim() || null,
         dinner: round.dinner,
       })
     }
