@@ -10,7 +10,7 @@
 // tee time), and says how many guests it takes and at what rate. Everything but
 // the website is required — it's the whole of what we'll have to work from.
 
-import { DEFAULT_PAYMENT_OPTIONS, type PaymentOption } from '@/lib/bookings/payment-options'
+import { HOST_DEFAULT_PAYMENT_OPTIONS, type PaymentOption } from '@/lib/bookings/payment-options'
 import { TEE_TIME_REQUIRED, missingTeeTimes, normaliseTeeTime } from '@/lib/hosts/tee-time'
 
 export const NEW_LINKUP_NAME_MIN = 2
@@ -31,7 +31,12 @@ export interface NewLinkupValues {
   guests: string
   /** Member guest rate, as typed. */
   rate: string
-  /** How members pay at the club — written onto the pending course. */
+  /**
+   * How members pay at the club — written onto the pending course. Not asked
+   * for: a host's rounds are settled at the club, so this is always
+   * HOST_DEFAULT_PAYMENT_OPTIONS. It stays on the values because it's still
+   * what both callers send.
+   */
   paymentOptions: PaymentOption[]
 }
 
@@ -45,13 +50,13 @@ export const emptyNewLinkup = (): NewLinkupValues => ({
   teeTimes: {},
   guests: '',
   rate: '',
-  paymentOptions: [...DEFAULT_PAYMENT_OPTIONS],
+  paymentOptions: [...HOST_DEFAULT_PAYMENT_OPTIONS],
 })
 
 /**
  * Has anything been filled in? On the application a New LinkUp is optional, so
  * one left untouched is skipped rather than failing validation. Payment options
- * don't count — they start filled.
+ * don't count — nobody types them.
  */
 export const newLinkupStarted = (v: NewLinkupValues): boolean =>
   v.name.trim() !== '' ||

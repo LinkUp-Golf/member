@@ -15,7 +15,6 @@ import Select, { type SelectOption } from "@/components/ui/Select";
 import VenueDateSelector from "@/components/host/VenueDateSelector";
 import NewLinkupFields from "@/components/host/NewLinkupFields";
 import DateTeeTimeList from "@/components/host/DateTeeTimeList";
-import PaymentOptionsPicker from "@/components/payments/PaymentOptionsPicker";
 import ProofControl, {
   PROOF_NOTE_CLASS,
   currentProof,
@@ -33,11 +32,6 @@ import {
   type NewLinkupValues,
 } from "@/lib/hosts/new-linkup";
 import { missingTeeTimes, normaliseTeeTime } from "@/lib/hosts/tee-time";
-import {
-  DEFAULT_PAYMENT_OPTIONS,
-  coursePaymentOptions,
-  type PaymentOption,
-} from "@/lib/bookings/payment-options";
 import type {
   HostedEvent,
   HostedEventStatus,
@@ -487,12 +481,6 @@ type LinkupTab = "existing" | "new";
 interface EventFormValues {
   course_id: string;
   dinner: boolean;
-  /**
-   * How members pay for rounds at the venue — courses.payment_options. Set on
-   * the venue itself, so it opens on what the venue already offers. (New
-   * LinkUp carries its own, in NewLinkupValues.)
-   */
-  payment_options: PaymentOption[];
 }
 
 /**
@@ -509,7 +497,6 @@ type VenueDetail = Pick<Course, "id" | "name" | "city"> & {
   cost_per_player?: number | null;
   description?: string | null;
   approval_status?: string;
-  payment_options?: string[] | null;
 };
 
 function EventDrawer({
@@ -575,7 +562,6 @@ function EventDrawer({
     defaultValues: {
       course_id: event?.course_id ?? "",
       dinner: event?.dinner ?? false,
-      payment_options: [...DEFAULT_PAYMENT_OPTIONS],
     },
   });
 
@@ -606,7 +592,6 @@ function EventDrawer({
         // single venue — nothing to choose.
         if (!isEdit && vs.length === 1) {
           setValue("course_id", vs[0].id);
-          setValue("payment_options", coursePaymentOptions(vs[0]));
         }
       })
       .catch(() => {
@@ -727,6 +712,9 @@ function EventDrawer({
       body: JSON.stringify({
         name,
         website: values.website.trim() || null,
+        // Set here as well as on the rounds below, so the club is created on
+        // the right terms even if the second call never lands.
+        payment_options: values.paymentOptions,
       }),
     });
     const courseJson = await courseRes.json().catch(() => ({}));
@@ -789,8 +777,10 @@ function EventDrawer({
           }
         : { event_dates: allDates, tee_times: teeTimesFor(allDates) }),
       dinner: values.dinner,
-      // Only on create — the edit form acts on one round and doesn't show them.
-      ...(isEdit ? {} : { payment_options: values.payment_options }),
+      // Payment options aren't sent. They're the venue's own setting, and a
+      // venue already on LinkUp has one an admin chose — listing a round there
+      // is not a reason to overwrite it. A New LinkUp is a different path
+      // (propose), and sets itself up as pay-at-club.
     };
 
     const res =
@@ -939,14 +929,6 @@ function EventDrawer({
                     value={f.value}
                     onChange={(next) => {
                       f.onChange(next);
-                      // Payment options are the venue's own setting, so the
-                      // form starts from what the picked venue already offers.
-                      setValue(
-                        "payment_options",
-                        coursePaymentOptions(
-                          courseChoices.find((c) => c.id === next),
-                        ),
-                      );
                       // Open days belong to a venue, so a change invalidates
                       // anything picked at the previous one rather than
                       // carrying dates that club may not have.
@@ -1128,29 +1110,6 @@ function EventDrawer({
             </div>
           )}
 
-          {/* How members pay for rounds at this venue. It's the venue's
-              setting rather than this round's — every booking there follows
-              it — so it opens on what the venue already offers, and saving
-              updates it. New LinkUp asks the same inside its own fields. */}
-          {!isEdit && !proposing && (
-            <div>
-              <span className={labelCls}>Payment options *</span>
-              <Controller
-                name="payment_options"
-                control={control}
-                render={({ field: f }) => (
-                  <PaymentOptionsPicker
-                    value={f.value}
-                    onChange={f.onChange}
-                    idPrefix="ev-payment-option"
-                  />
-                )}
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Members see these ways to pay when they book this venue.
-              </p>
-            </div>
-          )}
         </form>
 
         {/* "Submit", not "Publish" — saving sends the event for approval, and

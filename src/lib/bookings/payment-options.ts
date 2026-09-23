@@ -21,6 +21,16 @@ export type PaymentOption = (typeof PAYMENT_OPTIONS)[number]
 /** What a course offers when it hasn't said — the behaviour before options existed. */
 export const DEFAULT_PAYMENT_OPTIONS: readonly PaymentOption[] = ['pay_now']
 
+/**
+ * What a venue a host brings to LinkUp is set up as.
+ *
+ * A host's round is settled with the club on the day: there is no checkout to
+ * send anyone to at a club we've only just heard of, and the host is the one
+ * standing there when the members arrive. So the hosting forms don't ask — they
+ * state it — and this is the answer they send.
+ */
+export const HOST_DEFAULT_PAYMENT_OPTIONS: readonly PaymentOption[] = ['pay_at_club']
+
 export const PAYMENT_OPTION_LABELS: Record<PaymentOption, string> = {
   pay_now: 'Pay on App',
   pay_at_club: 'Pay at club',
