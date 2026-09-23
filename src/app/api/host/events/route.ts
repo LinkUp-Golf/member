@@ -9,6 +9,7 @@ import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateHostedEventPayload, normaliseEventDates } from '@/lib/validation'
 import { enrichHostedEvents, hostCanUseCourse, resolveTeeTimes } from '@/lib/hosts/events'
+import { describeRoundConflict, findRoundConflicts, loadOccupyingRounds } from '@/lib/hosts/schedule'
 import { openSpotsByDate } from '@/lib/bookings/availability'
 import { sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
@@ -195,6 +196,38 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
         )
       }
       spotsFor.set(date, spots)
+    }
+  }
+
+  // Nobody else may already hold these blocks of the club's day.
+  //
+  // The venue's calendar is one tee sheet. Two hosts on overlapping times at the
+  // same club is the same seats promised twice, and it stays invisible until
+  // somebody creates the second calendar over the first — so it's refused at the
+  // door, naming the round and the host it runs into. The caller's own rounds
+  // count: listing the same block twice is the same double-booking with one
+  // fewer person involved.
+  {
+    const occupied = await loadOccupyingRounds(admin, {
+      courseId,
+      dates: orderedDates,
+    })
+    const conflicts = findRoundConflicts(
+      orderedDates.map(date => ({
+        date,
+        teeTime: teeTimes.get(date) ?? null,
+        hostId: ctx.host.id,
+        hostName: ctx.host.name,
+      })),
+      occupied,
+      Number(course.meeting_duration_mins),
+    )
+    const first = conflicts[0]
+    if (first) {
+      return NextResponse.json(
+        { error: describeRoundConflict(first, course.name as string) },
+        { status: 409 }
+      )
     }
   }
 

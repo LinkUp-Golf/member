@@ -11,6 +11,7 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { validateString, validateUUID } from '@/lib/validation'
 import { sendPushToMember, NotificationTemplates } from '@/lib/push'
 import { addTagToContact } from '@/lib/ghl/client'
+import { ensureHostGhlUser } from '@/lib/hosts/provisioning'
 import { HOST_ROLE_TAG } from '@/lib/ghl/tags'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
@@ -44,7 +45,7 @@ export const PATCH = withAuth(
 
     const { data: application, error: fetchError } = await admin
       .from('host_applications')
-      .select('id, member_id, status, name, requested_course_ids, events:host_application_events(*), member:members!host_applications_member_id_fkey(first_name, last_name)')
+      .select('id, member_id, status, name, requested_course_ids, events:host_application_events(*), member:members!host_applications_member_id_fkey(first_name, last_name, email, phone)')
       .eq('id', id)
       .single()
 
@@ -387,6 +388,26 @@ export const PATCH = withAuth(
       }
     }
 
+    // Set the host up in GHL: a user account of their own, which is what the
+    // calendars of their venues are then staffed by. Doing it here rather than
+    // leaving it on a checklist is the difference between a venue whose
+    // appointments are assigned to its host and one where they fall to a
+    // default user nobody at the club has heard of.
+    //
+    // Non-fatal, like the role tag above: the role is the hosts row. A
+    // location-scoped GHL token genuinely can't create users, and an approval
+    // must not turn into a failure on that account.
+    const ghlUserId = await ensureHostGhlUser(
+      admin,
+      { id: host.id, name: host.name, ghl_user_id: host.ghl_user_id },
+      {
+        first_name: member?.first_name ?? null,
+        last_name: member?.last_name ?? null,
+        email: member?.email ?? null,
+        phone: member?.phone ?? null,
+      },
+    )
+
     void sendPushToMember(
       application.member_id,
       NotificationTemplates.hostApplicationApproved()
@@ -402,6 +423,7 @@ export const PATCH = withAuth(
         adopted_existing_host: adopted,
         events_created: createdEvents,
         rounds_proposed: proposedRounds.length,
+        ghl_user_id: ghlUserId,
       },
     })
 

@@ -8,6 +8,13 @@ import { createGHLCalendar, deleteGHLCalendar, getCalendarBookingRules } from '@
 import { validateTimezone, sanitiseText } from '@/lib/validation'
 import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
 import { APPROVABLE_STATUSES, canApproveEvent } from '@/lib/hosts/events'
+import {
+  describeRoundConflict,
+  findRoundConflicts,
+  loadOccupyingRounds,
+  type ExistingRound,
+} from '@/lib/hosts/schedule'
+import { hostUserIdsForCourse } from '@/lib/hosts/provisioning'
 import { openSpotsByDate } from '@/lib/bookings/availability'
 import { sendPushToMember, NotificationTemplates } from '@/lib/push'
 import { MAX_PINNED_COURSES } from '@/lib/constants'
@@ -61,6 +68,63 @@ export const PATCH = withAuth(
           )
         }
 
+        // The rounds waiting on this calendar, loaded before it exists — this is
+        // the last moment anything can be changed without unpicking a calendar
+        // in another system. Reused below to publish them.
+        const { data: waiting } = await admin
+          .from('hosted_events')
+          .select('id, status, event_date, host:hosts(member_id)')
+          .eq('course_id', id)
+          .in('status', [...APPROVABLE_STATUSES])
+
+        const approvable = (waiting ?? []).filter(
+          e => canApproveEvent(e.status as string, e.event_date as string).ok,
+        )
+
+        // Two hosts holding the same block of the same club's day is the one
+        // thing a new calendar can't be talked out of afterwards: it would be
+        // built over a tee sheet somebody else already has. Both rounds are real
+        // requests, so the answer is to name the two and stop — not to pick a
+        // winner on the admin's behalf.
+        if (approvable.length) {
+          const atVenue = await loadOccupyingRounds(admin, {
+            courseId: id,
+            dates: approvable.map(e => String(e.event_date)),
+          })
+          const approvableIds = new Set(approvable.map(e => String(e.id)))
+          const proposed: ExistingRound[] = atVenue.filter(r => approvableIds.has(r.eventId))
+          const alreadyHeld: ExistingRound[] = atVenue.filter(r => !approvableIds.has(r.eventId))
+
+          const conflicts = findRoundConflicts(
+            proposed,
+            alreadyHeld,
+            course.meeting_duration_mins as number,
+          )
+          const first = conflicts[0]
+          if (first) {
+            const others = conflicts.length - 1
+            return NextResponse.json(
+              {
+                error:
+                  `Overlapping rounds — the calendar wasn't created. ` +
+                  describeRoundConflict(first, course.name as string) +
+                  (others > 0 ? ` ${others} other clash${others === 1 ? '' : 'es'} at this venue too.` : ''),
+                conflicts: conflicts.map(c => ({
+                  event_id: c.round.eventId,
+                  date: c.round.date,
+                  tee_time: c.round.teeTime,
+                  clashes_with: {
+                    event_id: c.existing.eventId,
+                    host: c.existing.hostName,
+                    tee_time: c.existing.teeTime,
+                  },
+                })),
+              },
+              { status: 409 }
+            )
+          }
+        }
+
         let ghlCalendarId = course.ghl_calendar_id as string | null
         if (!ghlCalendarId) {
           try {
@@ -76,6 +140,9 @@ export const PATCH = withAuth(
               preBufferMins: course.pre_buffer_mins,
               postBufferMins: course.post_buffer_mins,
               seatsPerClass: course.seats_per_class,
+              // Staffed by the hosts who will run it, rather than left to the
+              // fallback assignee — see src/lib/hosts/provisioning.ts.
+              teamMemberIds: await hostUserIdsForCourse(admin, id),
             })
           } catch (err) {
             return NextResponse.json({ error: `GHL calendar creation failed: ${String(err)}` }, { status: 502 })
@@ -98,7 +165,10 @@ export const PATCH = withAuth(
         // reading "we're setting up the calendar" about a calendar that now
         // exists.
         //
-        // Two gates, not one.
+        // Two gates here, on top of the overlap check above — which already
+        // stopped the whole approval rather than holding a round, because a
+        // calendar built over another host's tee sheet can't be undone from
+        // this screen.
         //
         // canApproveEvent, as when approving by hand: only rounds still awaiting
         // approval, and never one whose date has gone.
@@ -122,16 +192,8 @@ export const PATCH = withAuth(
         // The venue notice below is for whoever hasn't.
         const notified = new Set<string>()
         try {
-          const { data: waiting } = await admin
-            .from('hosted_events')
-            .select('id, status, event_date, host:hosts(member_id)')
-            .eq('course_id', id)
-            .in('status', [...APPROVABLE_STATUSES])
-
-          const approvable = (waiting ?? []).filter(
-            e => canApproveEvent(e.status as string, e.event_date as string).ok,
-          )
-
+          // `approvable` was read above, before the calendar was created — the
+          // same set the overlap check cleared.
           if (approvable.length) {
             // `data` carries the calendar id this approval just created, which
             // is what makes there be anything to ask.

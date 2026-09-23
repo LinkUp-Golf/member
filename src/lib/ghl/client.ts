@@ -6,6 +6,7 @@
 // Server-side only — never import in client components.
 // ============================================================
 
+import { randomBytes } from 'crypto'
 import { HighLevel } from '@gohighlevel/api-client'
 import { formatInTimeZone } from 'date-fns-tz'
 import type { GHLContact, GHLCalendarEvent, GHLBookingSlot } from '@/types'
@@ -16,6 +17,10 @@ import { getCache, withCache } from '@/lib/cache'
 import { GHL_CAL_RULES_NS, GHL_CAL_RULES_TTL_MS, ghlCalendarRulesKey } from '@/lib/cache/keys'
 
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID ?? ''
+// Agency-level. Only the user endpoints need it — creating a sub-account user
+// is an agency action, not a location one — so it's read separately and every
+// caller degrades when it's unset rather than failing.
+const GHL_COMPANY_ID = process.env.GHL_COMPANY_ID ?? ''
 
 // ---- SDK client (singleton) ---------------------------------
 // Initialized lazily so the process startup doesn't fail if the
@@ -772,6 +777,137 @@ export async function getContactBookings(contactId: string): Promise<GHLCalendar
   }
 }
 
+// ---- Users (raw fetch — the SDK's users API needs agency scope) ----
+//
+// A host is a person at a club, and the club's calendar has to be staffed by
+// somebody: GHL assigns every appointment to a user, and a calendar with nobody
+// on it hands its bookings to whoever the fallback assignee happens to be. So
+// approving a host provisions them a GHL user, and the calendar for their venue
+// is created with that user on it.
+//
+// Everything here is best-effort by design. Creating a user needs an
+// agency-scoped token (GHL_COMPANY_ID); a location-scoped install can read
+// users but not create them. When that's the case we log and carry on — the
+// host's role in LinkUp is the hosts row, not the GHL user, and an approval
+// must not fail because a second system wouldn't take a write.
+
+export interface GHLUser {
+  id: string
+  firstName?: string | null
+  lastName?: string | null
+  email?: string | null
+}
+
+/** Every user on this location. Empty when GHL can't be read. */
+export async function listGHLUsers(): Promise<GHLUser[]> {
+  try {
+    const data = await ghlFetch<{ users?: GHLUser[] }>(`/users/?locationId=${GHL_LOCATION_ID}`)
+    return data.users ?? []
+  } catch (err) {
+    logger.warn('listGHLUsers failed', { action: 'ghl_user_list', errorMessage: String(err) })
+    return []
+  }
+}
+
+/** The location user with this email, or null. Case-insensitive, as GHL is. */
+export async function findGHLUserByEmail(email: string): Promise<GHLUser | null> {
+  const wanted = email.trim().toLowerCase()
+  if (!wanted) return null
+  const users = await listGHLUsers()
+  return users.find(u => (u.email ?? '').trim().toLowerCase() === wanted) ?? null
+}
+
+/**
+ * A password GHL will accept for a user it is about to email a set-up link to.
+ *
+ * Never stored and never shown: the host signs in to GHL through its own
+ * password reset, exactly as a user an admin created by hand would. This exists
+ * only because the create endpoint requires the field.
+ */
+function generateUserPassword(): string {
+  const bytes = randomBytes(18).toString('base64url')
+  // GHL wants upper, lower, digit and symbol; base64url covers the first three
+  // between them, so the tail guarantees the rest.
+  return `Lu${bytes}9!`
+}
+
+/**
+ * Creates a GHL user on this location. Returns null — without throwing — when
+ * the token has no agency scope, which is the ordinary case for a
+ * location-scoped install.
+ */
+export async function createGHLUser(params: {
+  firstName: string
+  lastName: string
+  email: string
+  phone?: string | null
+}): Promise<GHLUser | null> {
+  if (!GHL_COMPANY_ID) {
+    logger.warn('GHL user not created: GHL_COMPANY_ID is not set', {
+      action: 'ghl_user_create',
+      metadata: { email: params.email },
+    })
+    return null
+  }
+
+  try {
+    const data = await ghlFetch<{ id?: string; user?: GHLUser }>('/users/', {
+      method: 'POST',
+      body: JSON.stringify({
+        companyId: GHL_COMPANY_ID,
+        firstName: params.firstName,
+        lastName: params.lastName,
+        email: params.email,
+        password: generateUserPassword(),
+        ...(params.phone ? { phone: params.phone } : {}),
+        // 'account' + 'user': a member of this one location with no agency
+        // rights. A host staffs their own calendar; they don't administer GHL.
+        type: 'account',
+        role: 'user',
+        locationIds: [GHL_LOCATION_ID],
+        permissions: {
+          appointmentsEnabled: true,
+          contactsEnabled: true,
+          dashboardStatsEnabled: true,
+        },
+      }),
+    })
+    const user = data.user ?? (data.id ? { id: data.id } : null)
+    if (!user?.id) {
+      logger.warn('createGHLUser returned no id', { action: 'ghl_user_create', metadata: { email: params.email } })
+      return null
+    }
+    return user
+  } catch (err) {
+    logger.warn('createGHLUser failed', {
+      action: 'ghl_user_create',
+      errorMessage: String(err),
+      metadata: { email: params.email },
+    })
+    return null
+  }
+}
+
+/**
+ * The GHL user for this person, reusing one that already exists.
+ *
+ * A host is very often already a GHL user — staff, a partner, someone set up by
+ * hand before this existed — and creating a second account on the same email is
+ * both refused by GHL and the wrong thing to want.
+ */
+export async function ensureGHLUser(params: {
+  firstName: string
+  lastName: string
+  email: string
+  phone?: string | null
+}): Promise<{ user: GHLUser; created: boolean } | null> {
+  const existing = await findGHLUserByEmail(params.email)
+  if (existing) return { user: existing, created: false }
+
+  const created = await createGHLUser(params)
+  return created ? { user: created, created: true } : null
+}
+
 // ---- Calendar management (raw fetch) ------------------------
 
 export async function createGHLCalendar(params: {
@@ -786,7 +922,18 @@ export async function createGHLCalendar(params: {
   preBufferMins: number
   postBufferMins: number
   seatsPerClass?: number | null
+  /**
+   * GHL users to staff the calendar with — the host of the venue it's being
+   * created for. Without one, every appointment falls back to
+   * GHL_DEFAULT_ASSIGNEE_ID (see resolveAppointmentAssignee), which is a user
+   * with no connection to the club. The first id is the primary.
+   */
+  teamMemberIds?: string[]
 }): Promise<string> {
+  const teamMembers = (params.teamMemberIds ?? [])
+    .filter(Boolean)
+    .map((userId, index) => ({ userId, priority: 0.5, isPrimary: index === 0 }))
+
   const data = await ghlFetch<{ calendar?: { id: string }; id?: string }>('/calendars/', {
     method: 'POST',
     body: JSON.stringify({
@@ -805,6 +952,7 @@ export async function createGHLCalendar(params: {
       ...(params.seatsPerClass != null ? { appoinmentPerSlot: params.seatsPerClass } : {}),
       allowBookingAfter: params.minSchedulingNoticeMins,
       allowBookingFor: params.dateRangeDays,
+      ...(teamMembers.length ? { teamMembers } : {}),
     }),
   })
   const id = (data.calendar?.id ?? (data as { id?: string }).id) ?? ''

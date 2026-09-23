@@ -448,6 +448,12 @@ export interface Host {
    */
   venues_unrestricted: boolean
   source: HostSource
+  /**
+   * The GHL user provisioned for this host — what staffs the calendars of their
+   * venues. Null for a host approved before provisioning existed, or one whose
+   * GHL user couldn't be created (see src/lib/hosts/provisioning.ts).
+   */
+  ghl_user_id: string | null
   created_by: string | null
   created_at: string
   updated_at: string
