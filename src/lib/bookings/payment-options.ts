@@ -37,7 +37,9 @@ export const PAYMENT_OPTION_LABELS: Record<PaymentOption, string> = {
 }
 
 export const PAYMENT_OPTION_HINTS: Record<PaymentOption, string> = {
-  pay_now: "Members pay online through the venue's checkout.",
+  // Who the money reaches, not which page it's typed into. The member's side of
+  // this is one payment to LinkUp; the venue is paid once, for everyone.
+  pay_now: 'Members pay LinkUp. LinkUp makes aggregate payment to host.',
   pay_at_club: 'Members settle with the club on the day.',
 }
 
