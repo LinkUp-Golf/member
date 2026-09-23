@@ -104,14 +104,15 @@ const EMPTY_PLAYER_DAYS: Record<string, CalendarPlayer[]> = {};
 const venueLocation = (v: CalendarVenue | undefined) =>
   [v?.city, v?.state].filter(Boolean).join(", ");
 
-// ---- One day cell (memoized) --------------------------------
+// ---- Who's playing ------------------------------------------
 
-/** How many circles the who's-playing stack holds before the last becomes "+n". */
+/** How many circles a who's-playing stack holds before the last becomes "+n". */
 const MAX_FACES = 3;
 
 // One size for a face and the "+n" that stands in for the rest, so the stack
-// reads as one row. Small enough to sit beside the day number at md.
-const FACE_SIZE = "w-3 h-3 md:w-4 md:h-4";
+// reads as one row. Sized for the agenda's venue cards, which is where the
+// faces live — a day cell is far too small to hold three of anything.
+const FACE_SIZE = "w-5 h-5";
 
 /**
  * A member's face at thumbnail size — the photo, or their initial on navy.
@@ -122,8 +123,8 @@ function MiniAvatar({ player }: { player: CalendarPlayer }) {
     <Image
       src={player.avatarUrl}
       alt=""
-      width={16}
-      height={16}
+      width={20}
+      height={20}
       className={cn(FACE_SIZE, "rounded-full object-cover ring-1 ring-white bg-green-100")}
     />
   ) : (
@@ -131,13 +132,66 @@ function MiniAvatar({ player }: { player: CalendarPlayer }) {
       className={cn(
         FACE_SIZE,
         "rounded-full ring-1 ring-white bg-green-900 text-white",
-        "flex items-center justify-center text-[6px] md:text-[8px] font-bold uppercase leading-none",
+        "flex items-center justify-center text-[9px] font-bold uppercase leading-none",
       )}
     >
       {player.firstName.charAt(0) || "?"}
     </span>
   );
 }
+
+/** One entry per member — someone with two tee times that day is one person. */
+function uniquePlayers(players: CalendarPlayer[]): CalendarPlayer[] {
+  const seen = new Set<string>();
+  return players.filter((p) =>
+    seen.has(p.memberId) ? false : (seen.add(p.memberId), true),
+  );
+}
+
+/**
+ * How a day cell says who's playing: "(1P)" for one player, "(2Ps)" for two.
+ *
+ * The cell used to carry the faces themselves, three 12px circles crammed into
+ * the corner of a square that also holds a date and a venue dot — recognisable
+ * to nobody at that size, and the first thing to collide when a week got busy.
+ * The faces moved to the agenda's venue cards, where there's room to see them
+ * and they sit against the club they're playing at. What's left here is the one
+ * thing a month grid can usefully say: how many.
+ */
+const playerTally = (count: number) => `(${count}P${count === 1 ? "" : "s"})`;
+
+/**
+ * The faces of everyone playing at one venue on one day, as a stack.
+ *
+ * Decorative: it lives inside the venue card's own button, which books the
+ * round. Opening the list of names is the day cell's tally, which is a button
+ * of its own.
+ */
+function PlayerFaces({ players }: { players: CalendarPlayer[] }) {
+  const shown = players.length > MAX_FACES ? players.slice(0, MAX_FACES - 1) : players;
+  const more = players.length - shown.length;
+
+  return (
+    <span aria-hidden className="flex -space-x-1.5 flex-shrink-0">
+      {shown.map((p) => (
+        <MiniAvatar key={p.memberId} player={p} />
+      ))}
+      {more > 0 && (
+        <span
+          className={cn(
+            FACE_SIZE,
+            "rounded-full ring-1 ring-white bg-green-100 text-green-900",
+            "flex items-center justify-center text-[9px] font-bold leading-none tabular-nums",
+          )}
+        >
+          +{more}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// ---- One day cell (memoized) --------------------------------
 
 interface DayCellProps {
   date: Date;
@@ -182,24 +236,14 @@ const DayCell = memo(function DayCell({
 
   // Three chips (or dots, below md) is what a cell holds without the row
   // growing; past that the third becomes a count that the agenda below spells
-  // out. The faces follow the same rule.
+  // out.
   const shown = openings.length > 3 ? openings.slice(0, 2) : openings;
   const extra = openings.length - shown.length;
 
-  // One face per person — a member with two tee times that day is still one
+  // One head per person — a member with two tee times that day is still one
   // member playing. Only on days still to come: a past day is dimmed and shut.
-  const faces = useMemo(() => {
-    const seen = new Set<string>();
-    return players.filter((p) =>
-      seen.has(p.memberId) ? false : (seen.add(p.memberId), true),
-    );
-  }, [players]);
-  const showPlayers = selectable && faces.length > 0;
-  // The same rule as the chips: three circles, and past three the last one is
-  // the count of everyone not shown.
-  const shownFaces =
-    faces.length > MAX_FACES ? faces.slice(0, MAX_FACES - 1) : faces;
-  const moreFaces = faces.length - shownFaces.length;
+  const playerCount = useMemo(() => uniquePlayers(players).length, [players]);
+  const showPlayers = selectable && playerCount > 0;
 
   return (
     // The styling lives on this wrapper rather than the day button, because the
@@ -231,12 +275,13 @@ const DayCell = memo(function DayCell({
         )}
       >
         {/* Below md the day number is centred, so there's no room beside it for
-            faces: they get a strip across the top instead. Reserved on every
-            day, not just ones with players, so the numbers in a week line up. */}
+            the player tally: it gets a strip across the top instead. Reserved on
+            every day, not just ones with players, so the numbers in a week line
+            up. */}
         <span aria-hidden className="md:hidden h-3 w-full flex-shrink-0" />
 
         {/* Date number — centred over the dots on mobile, top-left of the cell
-            at md, where the faces sit to its right and the chips below. */}
+            at md, where the tally sits to its right and the chips below. */}
         <span className="flex-1 flex items-center justify-center md:flex-none md:justify-start md:mb-1">
           <span
             className={cn(
@@ -307,38 +352,25 @@ const DayCell = memo(function DayCell({
         </span>
       </button>
 
-      {/* Who's playing — the faces of the members booked that day, anchored
+      {/* Who's playing — how many members are booked that day, anchored
           top-right: in the strip above the number on a phone, level with the
-          number from md. Only on a day that has any. */}
+          number from md. Tapping it still opens the names; the faces are on the
+          venue cards below. Only on a day that has any. */}
       {showPlayers && (
         <button
           type="button"
           onClick={() => onShowPlayers(dayIso)}
-          aria-label={`Who's playing on ${format(date, "EEEE, MMMM d")} — ${faces.length} member${faces.length === 1 ? "" : "s"}`}
+          aria-label={`Who's playing on ${format(date, "EEEE, MMMM d")} — ${playerCount} member${playerCount === 1 ? "" : "s"}`}
           className={cn(
             "absolute z-10 flex items-center justify-end rounded-full",
-            "top-0.5 right-0.5 p-0.5",
-            "md:top-1.5 md:right-1.5 md:h-6 md:px-0.5 md:py-0",
-            "hover:bg-green-900/[0.06]",
+            "top-0.5 right-0.5 px-1 py-0",
+            "md:top-1.5 md:right-1.5 md:h-5 md:px-1",
+            "text-[9px] md:text-[10px] font-bold leading-none tabular-nums",
+            "text-green-800 bg-green-900/[0.06] hover:bg-green-900/[0.12]",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700",
           )}
         >
-          <span className="flex -space-x-1 md:-space-x-0.5">
-            {shownFaces.map((p) => (
-              <MiniAvatar key={p.memberId} player={p} />
-            ))}
-            {moreFaces > 0 && (
-              <span
-                className={cn(
-                  FACE_SIZE,
-                  "rounded-full ring-1 ring-white bg-green-100 text-green-900",
-                  "flex items-center justify-center text-[6px] md:text-[8px] font-bold leading-none tabular-nums",
-                )}
-              >
-                +{moreFaces}
-              </span>
-            )}
-          </span>
+          <span aria-hidden>{playerTally(playerCount)}</span>
         </button>
       )}
     </div>
@@ -352,6 +384,7 @@ function AgendaDay({
   openings,
   venuesById,
   colourByVenue,
+  players,
   onPickOpening,
   showDate,
 }: {
@@ -359,10 +392,26 @@ function AgendaDay({
   openings: CalendarOpening[];
   venuesById: Map<string, CalendarVenue>;
   colourByVenue: Map<string, number>;
+  /** Members booked that day at the venues on show — grouped onto their cards. */
+  players: CalendarPlayer[];
   onPickOpening: (courseId: string, date: string) => void;
   showDate: boolean;
 }) {
   const date = new Date(`${dayIso}T12:00:00`);
+
+  // Who's at each club, on the club's own row. A day's faces used to be one
+  // undifferentiated stack in the corner of the grid, which answered "someone
+  // is out on the 14th" — this answers the question a member actually has,
+  // which is who is at the course they're looking at.
+  const playersByVenue = useMemo(() => {
+    const out = new Map<string, CalendarPlayer[]>();
+    for (const p of uniquePlayers(players)) {
+      const list = out.get(p.courseId) ?? [];
+      list.push(p);
+      out.set(p.courseId, list);
+    }
+    return out;
+  }, [players]);
 
   return (
     <div className="flex gap-3">
@@ -391,6 +440,7 @@ function AgendaDay({
           // so the fallback is defensive only — and it's the same house default
           // the price helper lands on when a venue has set no rate.
           const price = venue?.pricePerPlayer ?? BOOKING_PRICE_USD;
+          const venuePlayers = playersByVenue.get(o.courseId) ?? EMPTY_PLAYERS;
 
           return (
             <button
@@ -438,6 +488,18 @@ function AgendaDay({
                   </span>
                 )}
               </span>
+              {/* Who's already out here that day. Said in the label too, since
+                  the stack itself is hidden from assistive tech — a row of
+                  photos is not readable, and the count is the part that is. */}
+              {venuePlayers.length > 0 && (
+                <>
+                  <span className="sr-only">
+                    {venuePlayers.length} member
+                    {venuePlayers.length === 1 ? "" : "s"} playing
+                  </span>
+                  <PlayerFaces players={venuePlayers} />
+                </>
+              )}
               <BookIndicator />
             </button>
           );
@@ -760,7 +822,7 @@ interface VenueAvailabilityCalendarProps {
   onPickOpening: (courseId: string, date: string) => void;
   /**
    * 'YYYY-MM-DD' → the members booked that day, from GET /api/bookings/playing.
-   * Narrowed by the same venue filters as the grid, so a day's faces are the
+   * Narrowed by the same venue filters as the grid, so a day's players are the
    * people at the clubs on show.
    */
   players?: Record<string, CalendarPlayer[]>;
@@ -1021,6 +1083,7 @@ function VenueAvailabilityCalendar({
                 openings={selectedOpenings}
                 venuesById={venuesById}
                 colourByVenue={colourByVenue}
+                players={visiblePlayers[selectedDate] ?? EMPTY_PLAYERS}
                 onPickOpening={onPickOpening}
                 showDate={false}
               />
@@ -1060,6 +1123,7 @@ function VenueAvailabilityCalendar({
                   openings={visibleDays[d] ?? EMPTY}
                   venuesById={venuesById}
                   colourByVenue={colourByVenue}
+                  players={visiblePlayers[d] ?? EMPTY_PLAYERS}
                   onPickOpening={onPickOpening}
                   showDate
                 />
