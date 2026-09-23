@@ -2,10 +2,10 @@
 //
 // Two ways, set per course (courses.payment_options):
 //
-//   pay_now      the venue's online checkout (courses.payment_url). What every
-//                course did before this existed, so it's the default — and the
-//                only way credit can be spent, since a credit code is typed
-//                into that checkout.
+//   pay_now      "Pay on App" — the checkout LinkUp sends a member to
+//                (courses.payment_url). What every course did before this
+//                existed, so it's the default — and the only way credit can be
+//                spent, since a credit code is typed into that checkout.
 //   pay_at_club  the member settles with the club on the day. Choosing it marks
 //                the booking (bookings.payment_method = 'pay_at_club'), which
 //                takes the round off the member's "payment due" list. It reads
@@ -22,7 +22,7 @@ export type PaymentOption = (typeof PAYMENT_OPTIONS)[number]
 export const DEFAULT_PAYMENT_OPTIONS: readonly PaymentOption[] = ['pay_now']
 
 export const PAYMENT_OPTION_LABELS: Record<PaymentOption, string> = {
-  pay_now: 'Pay now',
+  pay_now: 'Pay on App',
   pay_at_club: 'Pay at club',
 }
 

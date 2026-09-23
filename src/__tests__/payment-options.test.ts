@@ -14,7 +14,7 @@ import {
 // arriving off the wire has to be non-empty and known.
 
 describe('coursePaymentOptions', () => {
-  it('defaults to Pay now when the course carries no options', () => {
+  it('defaults to Pay on App when the course carries no options', () => {
     expect(coursePaymentOptions(null)).toEqual(['pay_now'])
     expect(coursePaymentOptions({})).toEqual(['pay_now'])
     expect(coursePaymentOptions({ payment_options: null })).toEqual(['pay_now'])

@@ -48,7 +48,7 @@ export const POST = withAuth(
       return NextResponse.json({ error: 'Payment link must be a valid URL (e.g. https://example.com)' }, { status: 400 })
     }
 
-    // Omitted means the default (Pay now), exactly as the column does.
+    // Omitted means the default (Pay on App), exactly as the column does.
     const paymentOptions = body.payment_options === undefined
       ? [...DEFAULT_PAYMENT_OPTIONS]
       : parsePaymentOptions(body.payment_options)

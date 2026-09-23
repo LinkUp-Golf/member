@@ -36,7 +36,7 @@ export async function requestPendingCourse(params: {
   /**
    * How members will pay there, when the requester said. Only set on a course
    * this call creates — an already-pending one someone else proposed keeps its
-   * own. Omitted, the column default (Pay now) applies.
+   * own. Omitted, the column default (Pay on App) applies.
    */
   paymentOptions?: PaymentOption[] | null
 }): Promise<RequestCourseResult> {

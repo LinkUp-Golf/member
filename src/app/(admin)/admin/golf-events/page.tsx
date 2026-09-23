@@ -957,7 +957,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
       booking_rules: editingCourse?.booking_rules ?? '',
       booking_url: editingCourse?.booking_url ?? '',
       payment_url: editingCourse?.payment_url ?? '',
-      // A new course starts on the default (Pay now), like every existing one.
+      // A new course starts on the default (Pay on App), like every existing one.
       payment_options: coursePaymentOptions(editingCourse),
       required_tags: editingCourse?.required_tags ?? [],
       custom_slots_enabled: editingCourse?.custom_slots_enabled ?? false,
@@ -1311,7 +1311,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
                 />
                 <p className={infoText}>
                   The ways members can pay for a round here. Credit can only be
-                  spent through Pay now.
+                  spent through Pay on App.
                 </p>
               </div>
             </div>

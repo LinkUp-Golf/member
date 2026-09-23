@@ -1883,8 +1883,8 @@ function SuccessScreen({
   const [payingWithCredit, setPayingWithCredit] = useState(false);
   const showDinner = !!booking.bookingId && isAviaraEvent(booking.eventName);
 
-  // Which ways this venue takes payment. Pay now is the checkout link (and the
-  // only place credit can be spent); Pay at club marks the round and is done.
+  // Which ways this venue takes payment. Pay on App is the checkout link (and
+  // the only place credit can be spent); Pay at club marks the round and is done.
   const venue = { payment_options: booking.paymentOptions };
   const payNow = offersPayNow(venue);
   const payAtClub = offersPayAtClub(venue) && !!booking.bookingId;
@@ -2021,7 +2021,7 @@ function SuccessScreen({
               rel="noopener noreferrer"
               className="btn btn-gold btn-full !mt-4"
             >
-              Pay {formatUsd(booking.amountDue)} now →
+              Pay {formatUsd(booking.amountDue)} on App →
             </a>
           ) : (
             /* Every bookable course is required to have a payment link, so this
@@ -2033,7 +2033,7 @@ function SuccessScreen({
           )
         ) : null}
         {/* The other way this venue takes payment, when it takes it. Gold only
-            when it's the sole option — otherwise it sits under Pay now. */}
+            when it's the sole option — otherwise it sits under Pay on App. */}
         {!payingAtClub && payAtClub && (
           <button
             type="button"
