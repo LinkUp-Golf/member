@@ -979,15 +979,28 @@ export async function createGHLCalendar(params: {
     slotBufferUnit: 'mins',
     allowBookingAfter: params.minSchedulingNoticeMins,
     allowBookingAfterUnit: 'mins',
-    allowBookingFor: params.dateRangeDays,
-    allowBookingForUnit: 'days',
-    // Capacity comes from the number of guests on the booking, which is how a
-    // LinkUp round is sold. A course that pins a fixed class size still sends
-    // it — dropping the field would quietly re-open venues that had capped
-    // themselves.
+    // How far ahead the calendar is bookable. Falls back in months rather than
+    // days, because a zero here would be a calendar nobody can book at all.
+    ...(params.dateRangeDays > 0
+      ? { allowBookingFor: params.dateRangeDays, allowBookingForUnit: 'days' }
+      : {
+          allowBookingFor: GHL_CALENDAR_DEFAULTS.allowBookingForMonths,
+          allowBookingForUnit: 'months',
+        }),
+    // Seats on one tee time.
+    //
+    // GHL's dashboard sends appointmentPerSlot: 'number_of_guest' here — the UI
+    // control for "capacity is however many guests are on the booking" — but
+    // the API validates the field as a number and rejects the string outright
+    // (422: "appointmentPerSlot must be a number conforming to the specified
+    // constraints"). So the number is what goes, and guestType still collects
+    // the guest count on the booking form.
+    //
+    // seats_per_class is the one scheduling column with no database default, so
+    // a club a host proposed has none — hence the fallback rather than an
+    // omitted field, which is what produced the 422 in the first place.
     guestType: 'count_only',
-    appointmentPerSlot: 'number_of_guest',
-    ...(params.seatsPerClass != null ? { appoinmentPerSlot: params.seatsPerClass } : {}),
+    appointmentPerSlot: params.seatsPerClass ?? GHL_CALENDAR_DEFAULTS.appointmentsPerSlot,
     enableRecurring: false,
     formId: GHL_CALENDAR_FORM_ID,
     stickyContact: true,
@@ -1013,6 +1026,7 @@ export async function createGHLCalendar(params: {
       hasAddress: !!params.address?.trim(),
       slotDurationMins: body.slotDuration,
       slotIntervalMins: body.slotInterval,
+      appointmentPerSlot: body.appointmentPerSlot,
     },
   })
 

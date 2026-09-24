@@ -163,6 +163,13 @@ export const GHL_CALENDAR_DEFAULTS = {
   slotIntervalMins: 20,
   allowBookingAfterHours: 5,
   allowBookingForMonths: 6,
+  /**
+   * Seats on one tee time when the venue hasn't set courses.seats_per_class —
+   * which is every club a host proposes, since that column is the one
+   * scheduling field with no database default. A fourball is the unit a golf
+   * tee time is sold in, so it's the honest guess until an admin says otherwise.
+   */
+  appointmentsPerSlot: 4,
 } as const
 
 // Inbound webhook (GHL workflow trigger) fired alongside each booking
