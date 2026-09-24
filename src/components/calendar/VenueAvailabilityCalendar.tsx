@@ -125,6 +125,11 @@ function MiniAvatar({ player }: { player: CalendarPlayer }) {
       alt=""
       width={20}
       height={20}
+      // Unoptimized, like the venue logos below: a member's photo can be hosted
+      // anywhere their profile put it, and next/image throws outright on a
+      // hostname that isn't in next.config's remotePatterns — which would take
+      // the whole card down rather than one face.
+      unoptimized
       className={cn(FACE_SIZE, "rounded-full object-cover ring-1 ring-white bg-green-100")}
     />
   ) : (
@@ -404,13 +409,18 @@ function AgendaDay({
   // undifferentiated stack in the corner of the grid, which answered "someone
   // is out on the 14th" — this answers the question a member actually has,
   // which is who is at the course they're looking at.
+  //
+  // Deduped per venue rather than across the day: two tee times at one club is
+  // one person, but a member playing two clubs is at both, and dropping them
+  // from the second card would be reporting the wrong tee sheet.
   const playersByVenue = useMemo(() => {
     const out = new Map<string, CalendarPlayer[]>();
-    for (const p of uniquePlayers(players)) {
+    for (const p of players) {
       const list = out.get(p.courseId) ?? [];
       list.push(p);
       out.set(p.courseId, list);
     }
+    for (const [courseId, list] of out) out.set(courseId, uniquePlayers(list));
     return out;
   }, [players]);
 
