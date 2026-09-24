@@ -149,7 +149,7 @@ function uniquePlayers(players: CalendarPlayer[]): CalendarPlayer[] {
 }
 
 /**
- * How a day cell says who's playing: "(1P)" for one player, "(2Ps)" for two.
+ * How a day cell says who's playing: "1P" for one player, "2Ps" for two.
  *
  * The cell used to carry the faces themselves, three 12px circles crammed into
  * the corner of a square that also holds a date and a venue dot — recognisable
@@ -157,15 +157,17 @@ function uniquePlayers(players: CalendarPlayer[]): CalendarPlayer[] {
  * The faces moved to the agenda's venue cards, where there's room to see them
  * and they sit against the club they're playing at. What's left here is the one
  * thing a month grid can usefully say: how many.
+ *
+ * It's a label, not a control. A grid where some days have a second tappable
+ * thing in the corner is a grid where tapping a day is a gamble — the cell's
+ * one job is to open the day, and the count is there to be read on the way.
+ * Opening the names is the faces' job, down on the venue card.
  */
-const playerTally = (count: number) => `(${count}P${count === 1 ? "" : "s"})`;
+const playerTally = (count: number) => `${count}P${count === 1 ? "" : "s"}`;
 
 /**
- * The faces of everyone playing at one venue on one day, as a stack.
- *
- * Decorative: it lives inside the venue card's own button, which books the
- * round. Opening the list of names is the day cell's tally, which is a button
- * of its own.
+ * The faces of everyone playing at one venue on one day, as a stack, and the
+ * way into the full list of names.
  */
 function PlayerFaces({ players }: { players: CalendarPlayer[] }) {
   const shown = players.length > MAX_FACES ? players.slice(0, MAX_FACES - 1) : players;
@@ -206,7 +208,6 @@ interface DayCellProps {
   colourByVenue: Map<string, number>;
   nameByVenue: Map<string, string>;
   onSelect: (dayIso: string) => void;
-  onShowPlayers: (dayIso: string) => void;
 }
 
 const DayCell = memo(function DayCell({
@@ -221,18 +222,24 @@ const DayCell = memo(function DayCell({
   colourByVenue,
   nameByVenue,
   onSelect,
-  onShowPlayers,
 }: DayCellProps) {
   const has = openings.length > 0;
   // Any upcoming day in the month opens — landing on an empty one and being
   // told so beats a tap that does nothing.
   const selectable = inMonth && !past;
 
+  // One head per person — a member with two tee times that day is still one
+  // member playing. Only on days still to come: a past day is dimmed and shut.
+  const playerCount = useMemo(() => uniquePlayers(players).length, [players]);
+  const showPlayers = selectable && playerCount > 0;
+
+  // The count rides on the day's own label, because the tally it comes from is
+  // a label rather than a control and has nothing of its own to announce.
   const label = `${format(date, "EEEE, MMMM d")} — ${
     has
       ? `${openings.length} venue${openings.length === 1 ? "" : "s"} with tee times`
       : "nothing open"
-  }`;
+  }${showPlayers ? `, ${playerCount} member${playerCount === 1 ? "" : "s"} playing` : ""}`;
 
   // Three chips (or dots, below md) is what a cell holds without the row
   // growing; past that the third becomes a count that the agenda below spells
@@ -240,15 +247,9 @@ const DayCell = memo(function DayCell({
   const shown = openings.length > 3 ? openings.slice(0, 2) : openings;
   const extra = openings.length - shown.length;
 
-  // One head per person — a member with two tee times that day is still one
-  // member playing. Only on days still to come: a past day is dimmed and shut.
-  const playerCount = useMemo(() => uniquePlayers(players).length, [players]);
-  const showPlayers = selectable && playerCount > 0;
-
   return (
-    // The styling lives on this wrapper rather than the day button, because the
-    // avatars are a second button laid over the same cell — a button can't
-    // hold another one.
+    // The styling lives on this wrapper rather than the day button so the tally
+    // can sit in the cell's corner without being inside the button's text flow.
     <div
       className={cn(
         "relative flex flex-col rounded-lg transition-colors",
@@ -354,24 +355,21 @@ const DayCell = memo(function DayCell({
 
       {/* Who's playing — how many members are booked that day, anchored
           top-right: in the strip above the number on a phone, level with the
-          number from md. Tapping it still opens the names; the faces are on the
-          venue cards below. Only on a day that has any. */}
+          number from md. Read-only, and pointer-events-none so the whole cell
+          stays one target: the tap opens the day, and the names are behind the
+          faces on the venue cards below. Only on a day that has any. */}
       {showPlayers && (
-        <button
-          type="button"
-          onClick={() => onShowPlayers(dayIso)}
-          aria-label={`Who's playing on ${format(date, "EEEE, MMMM d")} — ${playerCount} member${playerCount === 1 ? "" : "s"}`}
+        <span
+          aria-hidden
           className={cn(
-            "absolute z-10 flex items-center justify-end rounded-full",
-            "top-0.5 right-0.5 px-1 py-0",
-            "md:top-1.5 md:right-1.5 md:h-5 md:px-1",
+            "absolute z-10 pointer-events-none",
+            "top-0.5 right-0.5 md:top-1.5 md:right-1.5",
             "text-[9px] md:text-[10px] font-bold leading-none tabular-nums",
-            "text-green-800 bg-green-900/[0.06] hover:bg-green-900/[0.12]",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700",
+            "text-green-900/50",
           )}
         >
-          <span aria-hidden>{playerTally(playerCount)}</span>
-        </button>
+          {playerTally(playerCount)}
+        </span>
       )}
     </div>
   );
@@ -386,6 +384,7 @@ function AgendaDay({
   colourByVenue,
   players,
   onPickOpening,
+  onShowPlayers,
   showDate,
 }: {
   dayIso: string;
@@ -395,6 +394,8 @@ function AgendaDay({
   /** Members booked that day at the venues on show — grouped onto their cards. */
   players: CalendarPlayer[];
   onPickOpening: (courseId: string, date: string) => void;
+  /** Opens the full list of names. The faces on each card are what call it. */
+  onShowPlayers: (dayIso: string) => void;
   showDate: boolean;
 }) {
   const date = new Date(`${dayIso}T12:00:00`);
@@ -443,19 +444,27 @@ function AgendaDay({
           const venuePlayers = playersByVenue.get(o.courseId) ?? EMPTY_PLAYERS;
 
           return (
-            <button
+            // A div, not a button: the faces beside the Book pill open the
+            // names, and a button can't hold another one. Booking is the
+            // stretched overlay below, so the whole card is still one tap —
+            // it just isn't the only one.
+            <div
               key={o.courseId}
-              type="button"
-              onClick={() => onPickOpening(o.courseId, dayIso)}
-              className="group w-full text-left flex items-center gap-3 rounded-xl border border-green-900/10 bg-white px-3 py-2.5 transition-colors hover:bg-green-50/50 active:opacity-70"
+              className="group relative w-full text-left flex items-center gap-3 rounded-xl border border-green-900/10 bg-white px-3 py-2.5 transition-colors hover:bg-green-50/50"
             >
+              <button
+                type="button"
+                onClick={() => onPickOpening(o.courseId, dayIso)}
+                aria-label={`Book ${venue?.name ?? "this venue"} on ${format(date, "EEEE, MMMM d")}`}
+                className="absolute inset-0 rounded-xl active:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-1"
+              />
               <span
                 className={cn(
-                  "w-1 self-stretch rounded-full flex-shrink-0",
+                  "relative z-10 pointer-events-none w-1 self-stretch rounded-full flex-shrink-0",
                   DOT[idx],
                 )}
               />
-              <span className="flex-1 min-w-0">
+              <span className="relative z-10 pointer-events-none flex-1 min-w-0">
                 <span className="block text-sm font-semibold text-green-950 truncate">
                   {venue?.name ?? "Venue"}
                 </span>
@@ -488,20 +497,26 @@ function AgendaDay({
                   </span>
                 )}
               </span>
-              {/* Who's already out here that day. Said in the label too, since
-                  the stack itself is hidden from assistive tech — a row of
-                  photos is not readable, and the count is the part that is. */}
+              {/* Who's already out here that day, right beside the action —
+                  the two things a member weighs on this row are what it costs
+                  to play and who they'd be playing with. Tapping opens the
+                  names; it sits above the booking overlay so it wins the tap. */}
               {venuePlayers.length > 0 && (
-                <>
-                  <span className="sr-only">
-                    {venuePlayers.length} member
-                    {venuePlayers.length === 1 ? "" : "s"} playing
-                  </span>
+                <button
+                  type="button"
+                  onClick={() => onShowPlayers(dayIso)}
+                  aria-label={`Who's playing at ${venue?.name ?? "this venue"} — ${venuePlayers.length} member${venuePlayers.length === 1 ? "" : "s"}`}
+                  className="relative z-10 flex-shrink-0 rounded-full p-0.5 -m-0.5 hover:bg-green-900/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700"
+                >
                   <PlayerFaces players={venuePlayers} />
-                </>
+                </button>
               )}
-              <BookIndicator />
-            </button>
+              {/* Above the overlay so it reads as the row's action, but not a
+                  target of its own — the overlay underneath is what books. */}
+              <span className="relative z-10 pointer-events-none">
+                <BookIndicator />
+              </span>
+            </div>
           );
         })}
       </div>
@@ -1045,7 +1060,6 @@ function VenueAvailabilityCalendar({
                   players={
                     inMonth ? (visiblePlayers[dayIso] ?? EMPTY_PLAYERS) : EMPTY_PLAYERS
                   }
-                  onShowPlayers={showPlayers}
                   colourByVenue={colourByVenue}
                   nameByVenue={nameByVenue}
                   onSelect={
@@ -1085,6 +1099,7 @@ function VenueAvailabilityCalendar({
                 colourByVenue={colourByVenue}
                 players={visiblePlayers[selectedDate] ?? EMPTY_PLAYERS}
                 onPickOpening={onPickOpening}
+                onShowPlayers={showPlayers}
                 showDate={false}
               />
             ) : (
@@ -1125,6 +1140,7 @@ function VenueAvailabilityCalendar({
                   colourByVenue={colourByVenue}
                   players={visiblePlayers[d] ?? EMPTY_PLAYERS}
                   onPickOpening={onPickOpening}
+                  onShowPlayers={showPlayers}
                   showDate
                 />
               ))}
