@@ -36,6 +36,11 @@ export interface PushPayload {
   tag?: string
   /** URL to open when the notification is tapped. Put inside data.url */
   url?: string
+  /**
+   * Words on the email's button. Ignored by push, which has no button — a
+   * pushed notification is tapped as a whole. Defaults to "Open in LinkUp".
+   */
+  cta?: string
   /** Custom key→value data passed through to the service worker */
   data?: Record<string, unknown>
   /** Up to 2 action buttons (Chrome/Android) */

@@ -16,7 +16,8 @@ import {
   hostUserIdsForCourse,
 } from '@/lib/hosts/provisioning'
 import { openSpotsByDate } from '@/lib/bookings/availability'
-import { sendPushToAdmins, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyAdmins } from '@/lib/notify'
 import { logger } from '@/lib/logger'
 import { HOST_EVENT_GUEST_RATE_USD } from '@/lib/constants'
 import { parsePaymentOptions, coursePaymentOptions } from '@/lib/bookings/payment-options'
@@ -285,7 +286,7 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
   // creation the host just completed). One push for the batch rather than one per
   // date, keyed on the earliest — a host listing ten dates shouldn't produce ten
   // identical notifications.
-  void sendPushToAdmins(
+  void notifyAdmins(
     NotificationTemplates.hostedEventNeedsReview(
       ctx.host.name,
       course.name,

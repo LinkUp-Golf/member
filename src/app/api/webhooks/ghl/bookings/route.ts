@@ -47,7 +47,8 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase-server'
 import { cancelBooking } from '@/lib/ghl/client'
 import { logger } from '@/lib/logger'
-import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember } from '@/lib/notify'
 import { format } from 'date-fns'
 
 type BookingEvent = 'availability_confirmed' | 'payment_confirmed' | 'cancelled' | 'deleted'
@@ -164,7 +165,7 @@ export async function POST(request: NextRequest) {
     if (bookingRow) {
       const displayDate = format(new Date(`${bookingRow.booking_date}T12:00:00`), 'EEEE, MMMM d')
       const displayTime = (bookingRow.tee_time as string).slice(0, 5)
-      sendPushToMember(
+      notifyMember(
         primary.member_id,
         NotificationTemplates.bookingPaymentReady(displayDate, displayTime)
       ).catch(() => {})

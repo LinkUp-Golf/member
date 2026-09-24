@@ -9,7 +9,8 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateString, validateUUID } from '@/lib/validation'
-import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember } from '@/lib/notify'
 import { addTagToContact } from '@/lib/ghl/client'
 import { ensureHostGhlUser } from '@/lib/hosts/provisioning'
 import { HOST_ROLE_TAG } from '@/lib/ghl/tags'
@@ -87,7 +88,7 @@ export const PATCH = withAuth(
         return NextResponse.json({ error: 'This application has already been reviewed.' }, { status: 409 })
       }
 
-      void sendPushToMember(
+      void notifyMember(
         application.member_id,
         NotificationTemplates.hostApplicationRejected(reason)
       ).catch(() => {})
@@ -408,7 +409,7 @@ export const PATCH = withAuth(
       },
     )
 
-    void sendPushToMember(
+    void notifyMember(
       application.member_id,
       NotificationTemplates.hostApplicationApproved()
     ).catch(() => {})

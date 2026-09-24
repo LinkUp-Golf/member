@@ -16,7 +16,8 @@ import {
 } from '@/lib/hosts/schedule'
 import { hostUserIdsForCourse } from '@/lib/hosts/provisioning'
 import { openSpotsByDate } from '@/lib/bookings/availability'
-import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember } from '@/lib/notify'
 import { MAX_PINNED_COURSES } from '@/lib/constants'
 import { parsePaymentOptions } from '@/lib/bookings/payment-options'
 import { logger } from '@/lib/logger'
@@ -249,7 +250,7 @@ export const PATCH = withAuth(
               if (!standing || date < standing) soonestByHost.set(memberId, date)
             }
             for (const [memberId, date] of soonestByHost) {
-              void sendPushToMember(
+              void notifyMember(
                 memberId,
                 NotificationTemplates.hostedEventApproved(data.name, date),
               ).catch(() => {})
@@ -266,7 +267,7 @@ export const PATCH = withAuth(
               heldByHost.set(memberId, (heldByHost.get(memberId) ?? 0) + 1)
             }
             for (const [memberId, count] of heldByHost) {
-              void sendPushToMember(
+              void notifyMember(
                 memberId,
                 NotificationTemplates.hostedEventDatesHeld(data.name, count),
               ).catch(() => {})
@@ -287,7 +288,7 @@ export const PATCH = withAuth(
         // pending, with nothing to say so.
         const requestedBy = data.requested_by as string | null
         if (requestedBy && !notified.has(requestedBy)) {
-          void sendPushToMember(
+          void notifyMember(
             requestedBy,
             NotificationTemplates.venueApproved(data.name),
           ).catch(() => {})

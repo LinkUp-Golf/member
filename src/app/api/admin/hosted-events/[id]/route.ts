@@ -22,7 +22,8 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { sanitiseText } from '@/lib/validation'
-import { sendPushToMember, sendPushToMembers, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember, notifyMembers } from '@/lib/notify'
 import { triggerHostedEventTakedownWebhook } from '@/lib/ghl/client'
 import {
   APPROVABLE_STATUSES,
@@ -122,7 +123,7 @@ export const POST = withAuth(
     const memberIds = (reserved ?? []).map(r => r.member_id)
 
     if (host?.member_id) {
-      void sendPushToMember(
+      void notifyMember(
         host.member_id,
         NotificationTemplates.hostedEventRejected(courseName, event.event_date, reason)
       ).catch(() => {})
@@ -148,7 +149,7 @@ export const POST = withAuth(
     }
 
     if (memberIds.length) {
-      void sendPushToMembers(
+      void notifyMembers(
         memberIds,
         NotificationTemplates.hostedEventCancelled(courseName, event.event_date)
       ).catch(() => {})
@@ -278,7 +279,7 @@ async function approveEvent(
   // The host has been waiting on this — it's the difference between "submitted"
   // and "members can book it".
   if (host?.member_id) {
-    void sendPushToMember(
+    void notifyMember(
       host.member_id,
       NotificationTemplates.hostedEventApproved(courseName, event.event_date)
     ).catch(() => {})

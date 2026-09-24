@@ -15,7 +15,8 @@ import { validateHostedEventPayload, sanitiseText } from '@/lib/validation'
 import { enrichHostedEvents, hostCanUseCourse } from '@/lib/hosts/events'
 import { normaliseTeeTime } from '@/lib/hosts/tee-time'
 import { describeRoundConflict, findRoundConflicts, loadOccupyingRounds } from '@/lib/hosts/schedule'
-import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMembers } from '@/lib/notify'
 import { logger } from '@/lib/logger'
 import type { HostedEvent } from '@/types'
 
@@ -179,7 +180,7 @@ export const PATCH = withHostAuth(
       // Tell the released members (best-effort).
       const memberIds = (reserved ?? []).map(r => r.member_id)
       if (memberIds.length) {
-        void sendPushToMembers(
+        void notifyMembers(
           memberIds,
           NotificationTemplates.hostedEventCancelled(event.course?.name ?? 'a course', event.event_date, reason || undefined)
         ).catch(() => {})
@@ -362,7 +363,7 @@ export const PATCH = withHostAuth(
         .eq('status', 'reserved')
       const memberIds = (reserved ?? []).map(r => r.member_id)
       if (memberIds.length) {
-        void sendPushToMembers(
+        void notifyMembers(
           memberIds,
           NotificationTemplates.hostedEventUpdated(
             enriched?.course?.name ?? event.course?.name ?? 'a course',

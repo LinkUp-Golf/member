@@ -26,7 +26,8 @@ import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { canUploadProof } from '@/lib/hosts/events'
 import { deleteProofs } from '@/lib/hosts/proofs'
-import { sendPushToAdmins, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyAdmins } from '@/lib/notify'
 import { logger } from '@/lib/logger'
 
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
@@ -133,7 +134,7 @@ export const POST = withHostAuth(
     await deleteProofs({ admin, proofs: stale, actorId: ctx.userId })
 
     const course = Array.isArray(event.course) ? event.course[0] : event.course
-    void sendPushToAdmins(
+    void notifyAdmins(
       NotificationTemplates.hostedEventProofSubmitted(ctx.host.name, course?.name ?? 'a course', event.event_date)
     ).catch(() => {})
 

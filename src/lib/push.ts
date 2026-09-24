@@ -112,6 +112,11 @@ export async function sendPushToFocusMembers(
 }
 
 // ---- Notification templates ---------------------------------
+//
+// One definition per notification, used by both channels. `title`, `body` and
+// `url` are all push needs; `cta` is the wording on the email's button and is
+// ignored by push, which has no button. Only the notifications that go out by
+// email carry one — see src/lib/notify.ts for which those are and why.
 
 export const NotificationTemplates = {
   newMember: (firstName: string, lastName: string, courseName: string, memberId?: string): PushPayload => ({
@@ -161,6 +166,7 @@ export const NotificationTemplates = {
     body:  `Your request to visit ${courseName} from ${from} to ${until} has been approved.`,
     url:   '/more/guest-access',
     tag:   'guest-access',
+    cta:   'View your guest access',
   }),
 
   referralPartnerApproved: (percentage: number): PushPayload => ({
@@ -168,6 +174,7 @@ export const NotificationTemplates = {
     body:  `Your application was approved — you'll earn ${percentage}% commission on every referral who joins.`,
     url:   '/partner',
     tag:   'referral-partner-approved',
+    cta:   'Open your partner dashboard',
   }),
 
   referralListImported: (imported: number, total: number): PushPayload => ({
@@ -177,6 +184,7 @@ export const NotificationTemplates = {
       : `${imported} of ${total} referrals were added — open the list to see why the rest weren't.`,
     url:   '/partner/submissions',
     tag:   'referral-list-imported',
+    cta:   'View your submissions',
   }),
 
   referralListRejected: (reason: string): PushPayload => ({
@@ -184,6 +192,7 @@ export const NotificationTemplates = {
     body:  reason,
     url:   '/partner/submissions',
     tag:   'referral-list-rejected',
+    cta:   'View your submissions',
   }),
 
   // A credit payout is spendable immediately, so point the partner at the
@@ -199,6 +208,7 @@ export const NotificationTemplates = {
       body:  `A referral commission payout of ${formatted} has been ${settled}.`,
       url:   method === 'credit' ? '/partner/credits' : '/partner/payments',
       tag:   'referral-commission-paid',
+      cta:   method === 'credit' ? 'View your credit' : 'View your payment',
     }
   },
 
@@ -207,6 +217,7 @@ export const NotificationTemplates = {
     body:  `Your application wasn't approved this time. ${reason}`,
     url:   '/more/referral-partner',
     tag:   'referral-partner-rejected',
+    cta:   'View details',
   }),
 
   referralJoined: (referredName: string): PushPayload => ({
@@ -214,6 +225,7 @@ export const NotificationTemplates = {
     body:  `Your referral ${referredName} is now a member. Book your introductory round together.`,
     url:   '/more/referrals',
     tag:   'referral-joined',
+    cta:   'View your referrals',
   }),
 
   announcementBroadcast: (title: string, body: string, type = 'admin_broadcast', announcementId?: string): PushPayload => ({
@@ -235,6 +247,7 @@ export const NotificationTemplates = {
     body:  'Your membership is now active. Explore the community, book a tee time, and connect with members.',
     url:   '/home',
     tag:   'member-activated',
+    cta:   'Open LinkUp',
   }),
 
   bookingInvite: (bookerFirstName: string, date: string, time: string): PushPayload => ({
@@ -242,6 +255,7 @@ export const NotificationTemplates = {
     body:  `You've been added to a tee time on ${date} at ${time}. Check My Bookings for details.`,
     url:   '/book',
     tag:   'booking-invite',
+    cta:   'View the tee time',
   }),
 
   bookingPaymentReady: (date: string, time: string): PushPayload => ({
@@ -249,6 +263,7 @@ export const NotificationTemplates = {
     body:  `Your booking on ${date} at ${time} is ready for payment. Tap to complete your booking.`,
     url:   '/book',
     tag:   'payment-ready',
+    cta:   'Pay for your round',
   }),
 
   // Sent once a round has finished, by the booking-surveys cron. Opening the
@@ -273,6 +288,7 @@ export const NotificationTemplates = {
     body:  `Your event "${eventTitle}" wasn't approved. Reason: ${reason}`,
     url:   '/more/events',
     tag:   'member-event-rejected',
+    cta:   'View your events',
   }),
 
   // ---- Hosts ------------------------------------------------
@@ -281,6 +297,7 @@ export const NotificationTemplates = {
     body:  'Your application was approved — create your first event and start earning credits.',
     url:   '/host',
     tag:   'host-application-approved',
+    cta:   'Open your host workspace',
   }),
 
   hostApplicationRejected: (reason: string): PushPayload => ({
@@ -288,6 +305,7 @@ export const NotificationTemplates = {
     body:  `Your application wasn't approved this time. ${reason}`,
     url:   '/more/host',
     tag:   'host-application-rejected',
+    cta:   'View details',
   }),
 
   hostedEventPublished: (courseName: string, date: string): PushPayload => ({
@@ -295,6 +313,7 @@ export const NotificationTemplates = {
     body:  `Your event at ${courseName} on ${date} is now open for members to reserve spots.`,
     url:   '/host/events',
     tag:   'hosted-event-created',
+    cta:   'View the round',
   }),
 
   // Sent to admins when a host's event goes live. Events publish without
@@ -319,6 +338,7 @@ export const NotificationTemplates = {
       : `${hostName} wants to host a round at ${courseName} on ${date}. Set up the calendar, then approve it to put it in front of members.`,
     url:   '/admin/hosts',
     tag:   'hosted-event-review',
+    cta:   'Review it now',
   }),
 
   // Sent to the host when an admin publishes their event. Until this lands the
@@ -328,6 +348,7 @@ export const NotificationTemplates = {
     body:  `Your ${courseName} event on ${date} has been approved — members can reserve a spot now.`,
     url:   '/host/events',
     tag:   'hosted-event-approved',
+    cta:   'View your round',
   }),
 
   // Sent to the host who proposed a venue when an admin approves it, and only
@@ -339,6 +360,7 @@ export const NotificationTemplates = {
     body:  `${courseName} is set up on LinkUp — you can list rounds there now.`,
     url:   '/host/events',
     tag:   'venue-approved',
+    cta:   'View the venue',
   }),
 
   // Sent when a venue goes live but some of the dates the host asked for can't
@@ -352,6 +374,7 @@ export const NotificationTemplates = {
       : `${courseName} is live, but ${count} of the dates you asked for have nothing open. Pick others and we'll put them in front of members.`,
     url:   '/host/events',
     tag:   'hosted-event-dates-held',
+    cta:   'Review your dates',
   }),
 
   // Sent to the host when an admin takes their event down. It's cancelled,
@@ -361,6 +384,7 @@ export const NotificationTemplates = {
     body:  `Your ${courseName} event on ${date} was taken down and anyone who reserved has been released. ${reason}`,
     url:   '/host/events',
     tag:   'hosted-event-rejected',
+    cta:   'View details',
   }),
 
   hostedEventJoined: (memberName: string, courseName: string, date: string): PushPayload => ({
@@ -375,6 +399,7 @@ export const NotificationTemplates = {
     body:  `${hostName} uploaded proof for their ${courseName} event on ${date}. Review it to approve credits.`,
     url:   '/admin/hosts',
     tag:   'hosted-event-proof',
+    cta:   'Review the proof',
   }),
 
   hostCreditApproved: (amount: number): PushPayload => ({
@@ -382,6 +407,7 @@ export const NotificationTemplates = {
     body:  `${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in host credits has been added to your balance.`,
     url:   '/host/credits',
     tag:   'host-credit-approved',
+    cta:   'View your credit',
   }),
 
   hostCreditRejected: (reason: string): PushPayload => ({
@@ -389,6 +415,7 @@ export const NotificationTemplates = {
     body:  `Your event's credits weren't approved. ${reason} You can upload new proof.`,
     url:   '/host/events',
     tag:   'host-credit-rejected',
+    cta:   'View details',
   }),
 
   // Credit is redeemed toward golf — the membership option went when redeeming
@@ -400,6 +427,7 @@ export const NotificationTemplates = {
     body:  `You redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in credits toward golf.`,
     url:   '/host/credits',
     tag:   'host-credit-redeemed',
+    cta:   'View your wallet',
   }),
 
   // A code is the whole point of issuing one, so it goes in the notification
@@ -409,6 +437,7 @@ export const NotificationTemplates = {
     body:  `${code} — ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} off at checkout.`,
     url:   '/host/credits',
     tag:   'host-credit-coupon',
+    cta:   'Get your code',
   }),
 
   // Sent to admins — a redemption isn't settled until someone puts it against a
@@ -418,6 +447,7 @@ export const NotificationTemplates = {
     body:  `${name} redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} toward golf.`,
     url:   '/admin/hosts',
     tag:   'host-credit-redemption',
+    cta:   'Review the request',
   }),
 
   // Sent to members who had reserved a spot when the host cancels the event.
@@ -426,6 +456,7 @@ export const NotificationTemplates = {
     body:  `The ${courseName} event on ${date} has been cancelled.${reason ? ` ${reason}` : ''} Your spot has been released.`,
     url:   '/book',
     tag:   'hosted-event-cancelled',
+    cta:   'Find another round',
   }),
 
   // Sent to members who had reserved a spot when the host changes event details.
@@ -434,6 +465,7 @@ export const NotificationTemplates = {
     body:  `Details changed for the ${courseName} event on ${date}. Open it to see the latest.`,
     url:   '/book',
     tag:   'hosted-event-updated',
+    cta:   'See what changed',
   }),
 
   // Sent to the host when a member releases their spot.

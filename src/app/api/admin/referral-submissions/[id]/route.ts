@@ -10,7 +10,8 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { linkTargetsToPartner } from '@/lib/referral-links'
-import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember } from '@/lib/notify'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -76,7 +77,7 @@ export const PATCH = withAuth(
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
       if (partner?.member_id) {
-        void sendPushToMember(
+        void notifyMember(
           partner.member_id,
           NotificationTemplates.referralListRejected(reason)
         ).catch(() => {})
@@ -144,7 +145,7 @@ export const PATCH = withAuth(
     if (statusError) return NextResponse.json({ error: statusError.message }, { status: 500 })
 
     if (partner?.member_id) {
-      void sendPushToMember(
+      void notifyMember(
         partner.member_id,
         NotificationTemplates.referralListImported(importedCount, entries.length)
       ).catch(() => {})

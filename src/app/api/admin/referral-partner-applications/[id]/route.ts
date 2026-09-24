@@ -10,7 +10,8 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateReferralPartnerPayload } from '@/lib/validation'
 import { DEFAULT_REFERRAL_PERCENTAGE } from '@/lib/constants'
-import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember } from '@/lib/notify'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -80,7 +81,7 @@ export const PATCH = withAuth(
 
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-      void sendPushToMember(
+      void notifyMember(
         application.member_id,
         NotificationTemplates.referralPartnerRejected(reason)
       ).catch(() => {})
@@ -162,7 +163,7 @@ export const PATCH = withAuth(
       return NextResponse.json({ error: statusError.message }, { status: 500 })
     }
 
-    void sendPushToMember(
+    void notifyMember(
       application.member_id,
       NotificationTemplates.referralPartnerApproved(percentage)
     ).catch(() => {})

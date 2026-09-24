@@ -31,7 +31,8 @@ import {
   resolveMeetingDurationMins,
 } from '@/lib/ghl/client'
 import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
-import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMembers } from '@/lib/notify'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findMembersWithPendingPayment } from '@/lib/bookings/pending-payment'
 import { provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
@@ -419,7 +420,7 @@ export const POST = withAuth(async (
       .select('first_name')
       .eq('id', ctx.userId)
       .single()
-    void sendPushToMembers(
+    void notifyMembers(
       invitedMemberIds,
       NotificationTemplates.bookingInvite(booker?.first_name ?? 'A member', displayDate, displayTime),
     ).catch(() => {})
