@@ -240,13 +240,18 @@ const VenueCard = memo(function VenueCard({
       <header className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-gray-100">
         <div className="min-w-0">
           {/* Title and, when the event is still with us, what's happening to
-              it — on one line, wrapping rather than truncating the sentence
-              away on a phone. */}
+              it — the same dotted chip the date rows use for every other state,
+              so one event reads like the rest of the list. On one line,
+              wrapping rather than truncating the sentence away on a phone. */}
           <h2 className="text-sm font-semibold text-gray-900">
             <span className="align-middle">{group.name}</span>
             {awaitingReview && (
-              <span className="align-middle font-normal text-amber-700">
-                {" \u2014 "}
+              <span
+                className={`ml-2 inline-flex items-center gap-1.5 align-middle text-xs font-normal ${STATUS_META.pending_approval.text}`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_META.pending_approval.dot}`}
+                />
                 {AWAITING_REVIEW_NOTE}
               </span>
             )}
