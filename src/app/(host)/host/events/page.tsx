@@ -68,21 +68,23 @@ const STATUS_META: Record<
   HostedEventStatus,
   { label: string; dot: string; text: string }
 > = {
-  // A sentence rather than a state, because this is the one row where the host
-  // has nothing to do and the only useful thing to say is that they needn't
-  // watch it. It replaces both the old "Waiting on us" chip and the separate
-  // note under the row, which said the same thing twice.
-  pending_approval: {
-    label: "We’ll notify you once it’s done.",
-    dot: "bg-amber-500",
-    text: "text-amber-700",
-  },
+  pending_approval: { label: "Waiting on us", dot: "bg-amber-500", text: "text-amber-700" },
   upcoming: { label: "Live", dot: "bg-green-600", text: "text-green-700" },
   completed: { label: "Finished", dot: "bg-blue-500", text: "text-blue-700" },
   pending_credit_approval: { label: "Credit pending", dot: "bg-amber-500", text: "text-amber-700" },
   credits_awarded: { label: "Credit paid", dot: "bg-green-600", text: "text-green-700" },
   cancelled: { label: "Cancelled", dot: "bg-red-500", text: "text-red-600" },
 };
+
+/**
+ * What an event awaiting review says, beside its title.
+ *
+ * It sits on the card header rather than on each date because it is one fact
+ * about the whole event, and the host has nothing to do about it. Said once
+ * there, the date rows underneath don't repeat it — a round waiting on us
+ * shows no state chip at all, because the title already said so.
+ */
+const AWAITING_REVIEW_NOTE = "We’ll notify you once it’s done.";
 
 /** One venue's rounds. A host listing several dates at a club sees one card. */
 interface VenueGroup {
@@ -227,12 +229,27 @@ const VenueCard = memo(function VenueCard({
   onToast: (msg: string, ok?: boolean) => void;
   onEdit: (event: HostedEvent) => void;
 }) {
+  // Any date still with us means the event is. A host who lists a week of
+  // dates submits them together, so this is nearly always all of them.
+  const awaitingReview = group.events.some(
+    (e) => e.status === "pending_approval",
+  );
+
   return (
     <section className="card overflow-hidden">
       <header className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-gray-100">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-gray-900 truncate">
-            {group.name}
+          {/* Title and, when the event is still with us, what's happening to
+              it — on one line, wrapping rather than truncating the sentence
+              away on a phone. */}
+          <h2 className="text-sm font-semibold text-gray-900">
+            <span className="align-middle">{group.name}</span>
+            {awaitingReview && (
+              <span className="align-middle font-normal text-amber-700">
+                {" \u2014 "}
+                {AWAITING_REVIEW_NOTE}
+              </span>
+            )}
           </h2>
           {group.city && (
             <p className="text-xs text-gray-400 mt-0.5 truncate">{group.city}</p>
@@ -332,10 +349,13 @@ const EventRow = memo(function EventRow({
             <p className="text-sm font-medium text-gray-900">
               {fmtDate(event.event_date)}
             </p>
-            <span className={`inline-flex items-center gap-1.5 text-xs ${meta.text}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
-              {meta.label}
-            </span>
+            {/* Every state but the one the title already carries. */}
+            {!awaitingApproval && (
+              <span className={`inline-flex items-center gap-1.5 text-xs ${meta.text}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
+                {meta.label}
+              </span>
+            )}
           </div>
           <p className="text-xs text-gray-500 mt-0.5">
             {event.tee_time ? `${fmtTime(event.tee_time)} · ` : ""}
