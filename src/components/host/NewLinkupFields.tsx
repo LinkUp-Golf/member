@@ -13,7 +13,7 @@
 import DateMultiPicker from '@/components/host/DateMultiPicker'
 import DateTeeTimeList from '@/components/host/DateTeeTimeList'
 import { cn } from '@/lib/utils'
-import { missingTeeTimes } from '@/lib/hosts/tee-time'
+import { DEFAULT_TEE_TIME, missingTeeTimes } from '@/lib/hosts/tee-time'
 import {
   NEW_LINKUP_GUESTS_MAX,
   NEW_LINKUP_NAME_MAX,
@@ -50,10 +50,13 @@ export default function NewLinkupFields({
   const set = (patch: Partial<NewLinkupValues>) => onChange({ ...value, ...patch })
 
   // Tee times follow their dates, so a date removed takes its tee time with it.
+  // A new one starts on the default rather than blank — see DEFAULT_TEE_TIME.
   const setDates = (dates: string[]) =>
     set({
       dates,
-      teeTimes: Object.fromEntries(dates.map(d => [d, value.teeTimes[d] ?? ''])),
+      teeTimes: Object.fromEntries(
+        dates.map(d => [d, value.teeTimes[d] ?? DEFAULT_TEE_TIME]),
+      ),
     })
 
   return (

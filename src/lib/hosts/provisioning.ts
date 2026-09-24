@@ -14,6 +14,10 @@
 //                         by hand) keeps that account.
 //   hostUserIdsForCourse — when the venue's calendar is created, so it is built
 //                         staffed by the hosts who are going to run it.
+//   ensureCourseCalendar — when a host lists their first round at a venue that
+//                         has no calendar. Creating it here rather than waiting
+//                         for an admin is the point: the round is submitted and
+//                         the thing it books against already exists.
 //
 // Best-effort throughout. Creating a GHL user needs an agency-scoped token, and
 // a location-scoped install simply can't; the host's role in LinkUp is the
@@ -21,8 +25,11 @@
 // failure is logged rather than swallowed — the gap is meant to be visible.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { ensureGHLUser } from '@/lib/ghl/client'
+import { createGHLCalendar, ensureGHLUser } from '@/lib/ghl/client'
 import { logger } from '@/lib/logger'
+
+/** One colour for every host-made calendar, so they read as a set in GHL. */
+const CALENDAR_COLOUR = '#16a34a'
 
 export interface HostPerson {
   first_name?: string | null
@@ -115,4 +122,93 @@ export async function hostUserIdsForCourse(
     if (id && !ids.includes(id)) ids.push(id)
   }
   return ids
+}
+
+/**
+ * The venue's GHL calendar, creating it if the venue hasn't got one.
+ *
+ * Called when a host lists rounds at a club: a venue the host proposed arrives
+ * with no calendar at all, and until one exists the round can't be published no
+ * matter how quickly it's reviewed. Making it at submission time means the
+ * admin's job is a decision rather than a setup.
+ *
+ * Returns the calendar id, or null when it couldn't be made. Never throws: the
+ * rounds are already the host's and must not be lost because GHL was down. Both
+ * outcomes are logged — createGHLCalendar logs the GHL side, this logs which
+ * venue and host it was for.
+ */
+export async function ensureCourseCalendar(
+  admin: SupabaseClient,
+  course: {
+    id: string
+    name: string
+    slug: string
+    ghl_calendar_id?: string | null
+    address?: string | null
+    city?: string | null
+    state?: string | null
+    meeting_interval_mins?: number | null
+    meeting_duration_mins?: number | null
+    min_scheduling_notice_mins?: number | null
+    date_range_days?: number | null
+    pre_buffer_mins?: number | null
+    post_buffer_mins?: number | null
+    seats_per_class?: number | null
+  },
+  teamMemberIds: string[],
+): Promise<string | null> {
+  if (course.ghl_calendar_id) return course.ghl_calendar_id
+
+  logger.info('Venue has no GHL calendar; creating one', {
+    action: 'host.calendar.start',
+    metadata: { course_id: course.id, course: course.name, teamMembers: teamMemberIds },
+  })
+
+  let calendarId: string
+  try {
+    calendarId = await createGHLCalendar({
+      // The event the host named — for a club they proposed, the course row is
+      // that event, so its name is what the calendar is called in GHL.
+      name: course.name,
+      slug: course.slug,
+      eventColor: CALENDAR_COLOUR,
+      address: [course.address, course.city, course.state].filter(Boolean).join(', '),
+      meetingIntervalMins: course.meeting_interval_mins ?? 0,
+      meetingDurationMins: course.meeting_duration_mins ?? 0,
+      minSchedulingNoticeMins: course.min_scheduling_notice_mins ?? 0,
+      dateRangeDays: course.date_range_days ?? 0,
+      preBufferMins: course.pre_buffer_mins ?? 0,
+      postBufferMins: course.post_buffer_mins ?? 0,
+      seatsPerClass: course.seats_per_class ?? null,
+      teamMemberIds,
+    })
+  } catch (err) {
+    logger.error('Venue calendar not created', {
+      action: 'host.calendar.failed',
+      errorMessage: String(err),
+      metadata: { course_id: course.id, course: course.name },
+    })
+    return null
+  }
+
+  const { error } = await admin
+    .from('courses')
+    .update({ ghl_calendar_id: calendarId })
+    .eq('id', course.id)
+
+  if (error) {
+    // The calendar exists in GHL but nothing here points at it, which is worse
+    // than not having made it: the next call would make a second one. Loud.
+    logger.error('Venue calendar created but not linked to the course', {
+      action: 'host.calendar.link_failed',
+      metadata: { course_id: course.id, calendar_id: calendarId, error: error.message },
+    })
+    return null
+  }
+
+  logger.info('Venue calendar ready', {
+    action: 'host.calendar.ok',
+    metadata: { course_id: course.id, course: course.name, calendar_id: calendarId },
+  })
+  return calendarId
 }

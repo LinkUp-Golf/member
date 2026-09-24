@@ -10,6 +10,11 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { validateHostedEventPayload, normaliseEventDates } from '@/lib/validation'
 import { enrichHostedEvents, hostCanUseCourse, resolveTeeTimes } from '@/lib/hosts/events'
 import { describeRoundConflict, findRoundConflicts, loadOccupyingRounds } from '@/lib/hosts/schedule'
+import {
+  ensureCourseCalendar,
+  ensureHostGhlUser,
+  hostUserIdsForCourse,
+} from '@/lib/hosts/provisioning'
 import { openSpotsByDate } from '@/lib/bookings/availability'
 import { sendPushToAdmins, NotificationTemplates } from '@/lib/push'
 import { logger } from '@/lib/logger'
@@ -289,6 +294,60 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     )
   ).catch(() => {})
 
+  // Set the venue up in GHL, so the rounds the host just submitted have
+  // something to book against by the time anyone looks at them.
+  //
+  // A club the host proposed arrives with no calendar at all, and an admin
+  // approving the venue used to be the first moment one existed. Doing it here
+  // makes the review a decision rather than a setup — and the host's own GHL
+  // user goes on the calendar, so appointments are assigned to the person
+  // actually running the round.
+  //
+  // After the insert and deliberately non-fatal: the rounds are the host's and
+  // must not be lost to a GHL outage. Course approval still calls the same
+  // helper, which no-ops once a calendar exists.
+  let calendarId: string | null = course.ghl_calendar_id as string | null
+  try {
+    // Read only when there's no GHL user yet — the common path is a host who
+    // already has one, and that returns without touching the database.
+    const person = ctx.host.ghl_user_id
+      ? null
+      : (
+          await admin
+            .from('members')
+            .select('first_name, last_name, email, phone')
+            .eq('id', ctx.memberId)
+            .maybeSingle()
+        ).data
+
+    const hostUserId = await ensureHostGhlUser(
+      admin,
+      { id: ctx.host.id, name: ctx.host.name, ghl_user_id: ctx.host.ghl_user_id },
+      {
+        first_name: person?.first_name ?? null,
+        last_name: person?.last_name ?? null,
+        email: person?.email ?? ctx.email,
+        phone: person?.phone ?? null,
+      },
+    )
+
+    // This host first, then anyone else already granted the venue — the first
+    // id becomes the calendar's primary.
+    const others = await hostUserIdsForCourse(admin, courseId)
+    const teamMemberIds = Array.from(
+      new Set([...(hostUserId ? [hostUserId] : []), ...others]),
+    )
+
+    calendarId = await ensureCourseCalendar(admin, course as Course, teamMemberIds)
+  } catch (err) {
+    logger.error('Venue setup after hosted event creation failed', {
+      action: 'host.event.venue_setup_failed',
+      userId: ctx.userId,
+      errorMessage: String(err),
+      metadata: { course_id: courseId, host_id: ctx.host.id },
+    })
+  }
+
   logger.info('Hosted event created', {
     action: 'host.event.created',
     userId: ctx.userId,
@@ -296,9 +355,11 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       event_id: event.id,
       event_count: events.length,
       host_id: ctx.host.id,
+      course_id: courseId,
+      ghl_calendar_id: calendarId,
     },
   })
 
   // `event` is the first for backwards compatibility; `events` is the full set.
-  return NextResponse.json({ event, events }, { status: 201 })
+  return NextResponse.json({ event, events, ghl_calendar_id: calendarId }, { status: 201 })
 })

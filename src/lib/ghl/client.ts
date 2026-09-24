@@ -12,7 +12,7 @@ import { formatInTimeZone } from 'date-fns-tz'
 import type { GHLContact, GHLCalendarEvent, GHLBookingSlot } from '@/types'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
 import { logger } from '@/lib/logger'
-import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GHL_BOOKING_REMINDER_WEBHOOK_PATH, GHL_PAYMENT_REMINDER_WEBHOOK_PATH, GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH } from '@/lib/constants'
+import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GHL_CALENDAR_DEFAULTS, GHL_CALENDAR_EVENT_TITLE, GHL_CALENDAR_FORM_ID, GHL_CALENDAR_REDIRECT_URL, GHL_CALENDAR_THANKS_MESSAGE, GHL_BOOKING_REMINDER_WEBHOOK_PATH, GHL_PAYMENT_REMINDER_WEBHOOK_PATH, GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH } from '@/lib/constants'
 import { getCache, withCache } from '@/lib/cache'
 import { GHL_CAL_RULES_NS, GHL_CAL_RULES_TTL_MS, ghlCalendarRulesKey } from '@/lib/cache/keys'
 
@@ -910,10 +910,24 @@ export async function ensureGHLUser(params: {
 
 // ---- Calendar management (raw fetch) ------------------------
 
+/**
+ * Creates the venue's booking calendar in GHL.
+ *
+ * The body is the shape every LinkUp calendar is set up in — booking form,
+ * redirect, auto-confirm, guests counted rather than seated individually — with
+ * the venue's own scheduling numbers dropped in. What used to be typed into the
+ * GHL dashboard by hand for each new club is now this object, so two clubs
+ * can't end up configured differently by accident.
+ *
+ * Logged on both sides. This runs inside an approval or a host's submission,
+ * where a silent failure looks like the calendar simply never existing — so the
+ * attempt, the id it produced, and the reason it didn't are all traceable
+ * without reproducing the request.
+ */
 export async function createGHLCalendar(params: {
   name: string
   slug: string
-  eventTitle: string
+  eventTitle?: string
   eventColor: string
   meetingIntervalMins: number
   meetingDurationMins: number
@@ -922,6 +936,8 @@ export async function createGHLCalendar(params: {
   preBufferMins: number
   postBufferMins: number
   seatsPerClass?: number | null
+  /** Street address shown on the booking widget, when the venue has one. */
+  address?: string | null
   /**
    * GHL users to staff the calendar with — the host of the venue it's being
    * created for. Without one, every appointment falls back to
@@ -934,29 +950,112 @@ export async function createGHLCalendar(params: {
     .filter(Boolean)
     .map((userId, index) => ({ userId, priority: 0.5, isPrimary: index === 0 }))
 
-  const data = await ghlFetch<{ calendar?: { id: string }; id?: string }>('/calendars/', {
-    method: 'POST',
-    body: JSON.stringify({
+  const body = {
+    isActive: true,
+    locationId: GHL_LOCATION_ID,
+    groupId: GHL_CALENDAR_PROVIDER_ID,
+    name: params.name,
+    slug: params.slug,
+    calendarType: 'class_booking',
+    widgetType: 'default',
+    eventTitle: params.eventTitle || GHL_CALENDAR_EVENT_TITLE,
+    eventColor: params.eventColor,
+    ...(teamMembers.length ? { teamMembers } : {}),
+    // Where the round is played, shown on the booking widget. Omitted rather
+    // than sent empty for a club whose address we haven't got yet.
+    ...(params.address?.trim()
+      ? { locationConfigurations: [{ kind: 'custom', location: params.address.trim() }] }
+      : {}),
+    // Units are explicit on every one of these. GHL stores each rule as a
+    // number plus its own unit, and a number sent without one is read against
+    // whatever that field happens to default to.
+    slotDuration: params.meetingDurationMins || GHL_CALENDAR_DEFAULTS.slotDurationMins,
+    slotDurationUnit: 'mins',
+    slotInterval: params.meetingIntervalMins || GHL_CALENDAR_DEFAULTS.slotIntervalMins,
+    slotIntervalUnit: 'mins',
+    preBuffer: params.preBufferMins,
+    preBufferUnit: 'mins',
+    slotBuffer: params.postBufferMins,
+    slotBufferUnit: 'mins',
+    allowBookingAfter: params.minSchedulingNoticeMins,
+    allowBookingAfterUnit: 'mins',
+    allowBookingFor: params.dateRangeDays,
+    allowBookingForUnit: 'days',
+    // Capacity comes from the number of guests on the booking, which is how a
+    // LinkUp round is sold. A course that pins a fixed class size still sends
+    // it — dropping the field would quietly re-open venues that had capped
+    // themselves.
+    guestType: 'count_only',
+    appointmentPerSlot: 'number_of_guest',
+    ...(params.seatsPerClass != null ? { appoinmentPerSlot: params.seatsPerClass } : {}),
+    enableRecurring: false,
+    formId: GHL_CALENDAR_FORM_ID,
+    stickyContact: true,
+    isLivePaymentMode: false,
+    autoConfirm: true,
+    shouldSendAlertEmailsToAssignedMember: false,
+    allowReschedule: true,
+    allowCancellation: true,
+    shouldAssignContactToTeamMember: true,
+    shouldSkipAssigningContactForExisting: false,
+    formSubmitType: 'RedirectURL',
+    formSubmitRedirectURL: GHL_CALENDAR_REDIRECT_URL,
+    formSubmitThanksMessage: GHL_CALENDAR_THANKS_MESSAGE,
+  }
+
+  logger.info('Creating GHL calendar', {
+    action: 'ghl_calendar_create.start',
+    metadata: {
       name: params.name,
-      calendarType: 'class_booking',
-      groupId: GHL_CALENDAR_PROVIDER_ID,
       slug: params.slug,
-      eventTitle: params.eventTitle,
-      eventColor: params.eventColor,
-      locationId: GHL_LOCATION_ID,
-      isActive: true,
-      slotInterval: params.meetingIntervalMins,
-      slotDuration: params.meetingDurationMins,
-      preBuffer: params.preBufferMins,
-      slotBuffer: params.postBufferMins,
-      ...(params.seatsPerClass != null ? { appoinmentPerSlot: params.seatsPerClass } : {}),
-      allowBookingAfter: params.minSchedulingNoticeMins,
-      allowBookingFor: params.dateRangeDays,
-      ...(teamMembers.length ? { teamMembers } : {}),
-    }),
+      groupId: GHL_CALENDAR_PROVIDER_ID,
+      teamMembers: teamMembers.map(m => m.userId),
+      hasAddress: !!params.address?.trim(),
+      slotDurationMins: body.slotDuration,
+      slotIntervalMins: body.slotInterval,
+    },
   })
+
+  let data: { calendar?: { id: string }; id?: string }
+  try {
+    data = await ghlFetch<{ calendar?: { id: string }; id?: string }>('/calendars/', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  } catch (err) {
+    // ghlFetch logs the status line; this says which calendar it was for, and
+    // carries GHL's own rejection body where there is one.
+    logger.error('GHL calendar creation failed', {
+      action: 'ghl_calendar_create.failed',
+      errorMessage: String(err),
+      metadata: {
+        name: params.name,
+        slug: params.slug,
+        statusCode: (err as GHLError)?.context?.['statusCode'] ?? null,
+        ghlResponse: (err as GHLError)?.context?.['body'] ?? null,
+      },
+    })
+    throw err
+  }
+
   const id = (data.calendar?.id ?? (data as { id?: string }).id) ?? ''
-  if (!id) throw new GHLError('createGHLCalendar returned no id', ErrorCode.GHL_UNAVAILABLE)
+  if (!id) {
+    logger.error('GHL calendar creation returned no id', {
+      action: 'ghl_calendar_create.no_id',
+      metadata: { name: params.name, slug: params.slug, response: data },
+    })
+    throw new GHLError('createGHLCalendar returned no id', ErrorCode.GHL_UNAVAILABLE)
+  }
+
+  logger.info('GHL calendar created', {
+    action: 'ghl_calendar_create.ok',
+    metadata: {
+      calendarId: id,
+      name: params.name,
+      slug: params.slug,
+      teamMembers: teamMembers.map(m => m.userId),
+    },
+  })
   return id
 }
 

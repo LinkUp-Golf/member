@@ -137,6 +137,34 @@ export const CREDIT_COUPON_CODE_LENGTH = 6
 export const GHL_CANCEL_BOOKING_URL = 'https://api.leadconnectorhq.com/widget/cancel-booking'
 export const GHL_CALENDAR_PROVIDER_ID = 'bdd10QRepJvC6EYoy32m'
 
+// ---- New-calendar defaults ----------------------------------
+// The shape every LinkUp booking calendar is created in. A venue's own
+// scheduling numbers (slot length, notice, how far ahead) still come from its
+// course row; everything here is the same on every calendar, so it lives in one
+// place rather than being retyped into GHL by hand for each new club.
+
+/** Booking form attached to a new calendar. GHL → Sites → Forms → copy the ID. */
+export const GHL_CALENDAR_FORM_ID = '05EBd86P7HbUnhBsfUBn'
+
+/** Where a completed booking form sends the member. */
+export const GHL_CALENDAR_REDIRECT_URL = 'https://linkup.golf/thank-you-membership'
+
+/** Shown if the form is set back to a thank-you message rather than a redirect. */
+export const GHL_CALENDAR_THANKS_MESSAGE =
+  'Thank you for your appointment request. We will contact you shortly to confirm ' +
+  'your request. Please call our office at {{contactMethod}} if you have any questions.'
+
+/** The appointment's title in GHL — the member who booked it. */
+export const GHL_CALENDAR_EVENT_TITLE = '{{contact.name}}'
+
+/** Scheduling defaults for a calendar created without a course's own numbers. */
+export const GHL_CALENDAR_DEFAULTS = {
+  slotDurationMins: 20,
+  slotIntervalMins: 20,
+  allowBookingAfterHours: 5,
+  allowBookingForMonths: 6,
+} as const
+
 // Inbound webhook (GHL workflow trigger) fired alongside each booking
 // reminder push notification — see /api/cron/booking-reminders. Path only;
 // combine with GHL_BASE_URL like every other GHL request (see ghlFetch).

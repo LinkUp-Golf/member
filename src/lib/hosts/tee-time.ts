@@ -20,6 +20,16 @@ const CLOCK_RE = /^([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/
 /** Said the same way wherever a date is missing its time. */
 export const TEE_TIME_REQUIRED = 'Set a tee time for every date'
 
+/**
+ * What a newly picked date tees off at until the host says otherwise.
+ *
+ * Hosted rounds go off in the early afternoon, and a host listing a week of
+ * dates was typing the same time seven times. Pre-filled rather than assumed:
+ * it lands in the time input as a real value, so changing it is one tap and
+ * leaving it is a choice rather than a blank that fails validation.
+ */
+export const DEFAULT_TEE_TIME = '13:30'
+
 /** Whether this is a time of day we can store and show. */
 export const isTeeTime = (value: unknown): value is string =>
   typeof value === 'string' && CLOCK_RE.test(value.trim())

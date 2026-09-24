@@ -31,7 +31,11 @@ import {
   type NewLinkupErrors,
   type NewLinkupValues,
 } from "@/lib/hosts/new-linkup";
-import { missingTeeTimes, normaliseTeeTime } from "@/lib/hosts/tee-time";
+import {
+  DEFAULT_TEE_TIME,
+  missingTeeTimes,
+  normaliseTeeTime,
+} from "@/lib/hosts/tee-time";
 import type {
   HostedEvent,
   HostedEventStatus,
@@ -64,7 +68,15 @@ const STATUS_META: Record<
   HostedEventStatus,
   { label: string; dot: string; text: string }
 > = {
-  pending_approval: { label: "Waiting on us", dot: "bg-amber-500", text: "text-amber-700" },
+  // A sentence rather than a state, because this is the one row where the host
+  // has nothing to do and the only useful thing to say is that they needn't
+  // watch it. It replaces both the old "Waiting on us" chip and the separate
+  // note under the row, which said the same thing twice.
+  pending_approval: {
+    label: "We’ll notify you once it’s done.",
+    dot: "bg-amber-500",
+    text: "text-amber-700",
+  },
   upcoming: { label: "Live", dot: "bg-green-600", text: "text-green-700" },
   completed: { label: "Finished", dot: "bg-blue-500", text: "text-blue-700" },
   pending_credit_approval: { label: "Credit pending", dot: "bg-amber-500", text: "text-amber-700" },
@@ -298,23 +310,17 @@ const EventRow = memo(function EventRow({
 
   // At most one line of explanation, and only where the state needs one — four
   // possible notes stacked under every row was most of the old card's height.
-  const note =
-    awaitingApproval
-      ? {
-          tone: "text-amber-600",
-          // Deliberately vague about what's outstanding. It used to say we were
-          // setting up the calendar, which stopped being true the moment the
-          // venue was approved — and a host looking at a venue that's clearly
-          // live reads that as the app being wrong.
-          text: "Not visible to members yet — waiting on our review.",
-        }
-      : proof.note
-        ? { tone: PROOF_NOTE_CLASS[proof.note.tone], text: proof.note.text }
-        : event.status === "cancelled" && event.rejection_reason
-          ? { tone: "text-red-600", text: `Taken down: ${event.rejection_reason}` }
-          : event.status === "cancelled" && event.cancellation_reason
-            ? { tone: "text-gray-400", text: `Cancelled: ${event.cancellation_reason}` }
-            : null;
+  //
+  // Nothing for a round awaiting approval: the chip beside the date now says
+  // it, and saying it twice on one row was the loudest thing on a screen where
+  // the host has nothing to do about it.
+  const note = proof.note
+    ? { tone: PROOF_NOTE_CLASS[proof.note.tone], text: proof.note.text }
+    : event.status === "cancelled" && event.rejection_reason
+      ? { tone: "text-red-600", text: `Taken down: ${event.rejection_reason}` }
+      : event.status === "cancelled" && event.cancellation_reason
+        ? { tone: "text-gray-400", text: `Cancelled: ${event.cancellation_reason}` }
+        : null;
 
   return (
     <li className="px-4 sm:px-5 py-3">
@@ -654,7 +660,11 @@ function EventDrawer({
           Object.values(prev)[0] ?? normaliseTeeTime(event?.tee_time);
         return next[0] ? { [next[0]]: kept } : prev;
       }
-      return Object.fromEntries(next.map((d) => [d, prev[d] ?? ""]));
+      // A date picked for the first time arrives on the default; one already
+      // picked keeps whatever the host set it to, including a cleared field.
+      return Object.fromEntries(
+        next.map((d) => [d, prev[d] ?? DEFAULT_TEE_TIME]),
+      );
     });
     setDates(next);
     setMissingTees((prev) => prev.filter((d) => next.includes(d)));
