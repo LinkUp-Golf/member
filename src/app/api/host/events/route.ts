@@ -14,6 +14,7 @@ import {
   ensureCourseCalendar,
   ensureHostGhlUser,
   hostUserIdsForCourse,
+  syncHostAvailability,
 } from '@/lib/hosts/provisioning'
 import { openSpotsByDate } from '@/lib/bookings/availability'
 import { NotificationTemplates } from '@/lib/push'
@@ -340,6 +341,21 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     )
 
     calendarId = await ensureCourseCalendar(admin, course as Course, teamMemberIds)
+
+    // And when the host is at the club. The calendar offers whatever its users
+    // are free for, and a GHL user's default is every weekday all day — so the
+    // dates just listed have to be stated as availability or the venue is
+    // bookable on days nobody will be there. Restates every upcoming date, not
+    // just this batch, so the schedule is the whole picture.
+    if (calendarId && hostUserId) {
+      await syncHostAvailability(admin, {
+        hostId: ctx.host.id,
+        courseId,
+        calendarId,
+        ghlUserId: hostUserId,
+        timezone: course.timezone as string | null,
+      })
+    }
   } catch (err) {
     logger.error('Venue setup after hosted event creation failed', {
       action: 'host.event.venue_setup_failed',

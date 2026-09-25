@@ -172,20 +172,51 @@ export const GHL_CALENDAR_EVENT_TITLE = '{{contact.name}}'
 export const GHL_CALENDAR_LOCATION =
   'Aviara Golf Club, 7447 Batiquitos Drive, Carlsbad, CA 92011'
 
-/** Scheduling defaults for a calendar created without a course's own numbers. */
-export const GHL_CALENDAR_DEFAULTS = {
-  slotDurationMins: 20,
-  slotIntervalMins: 20,
-  allowBookingAfterHours: 5,
-  allowBookingForMonths: 6,
-  /**
-   * Seats on one tee time when the venue hasn't set courses.seats_per_class —
-   * which is every club a host proposes, since that column is the one
-   * scheduling field with no database default. A fourball is the unit a golf
-   * tee time is sold in, so it's the honest guess until an admin says otherwise.
-   */
-  appointmentsPerSlot: 4,
+/**
+ * The booking rules every LinkUp calendar is created with.
+ *
+ * Fixed, not per-course. Every venue is a tee sheet run the same way, and the
+ * five course columns that used to feed these (meeting_interval_mins,
+ * min_scheduling_notice_mins, date_range_days, pre_buffer_mins,
+ * post_buffer_mins) were carrying their database defaults on every course
+ * anyway — a per-course knob nobody had ever turned, plumbed through three
+ * files. An admin who wants a calendar to differ changes it in GHL, which is
+ * where they'd look for it.
+ *
+ * Each rule is a number plus its own unit, which is how GHL stores and returns
+ * them. Nothing converts between units in either direction: these are sent as
+ * they read, and read back as they were sent.
+ */
+export const GHL_CALENDAR_RULES = {
+  /** One tee time. */
+  slotDuration: 20,
+  slotDurationUnit: 'mins',
+  /** The gap between consecutive tee times. */
+  slotInterval: 20,
+  slotIntervalUnit: 'mins',
+  /** How far ahead the calendar is bookable. */
+  allowBookingFor: 6,
+  allowBookingForUnit: 'months',
+  /** Minimum notice before a tee time can be booked. */
+  allowBookingAfter: 5,
+  allowBookingAfterUnit: 'hours',
+  /** No dead time either side of a round. */
+  preBuffer: 0,
+  preBufferUnit: 'mins',
+  slotBuffer: 0,
+  slotBufferUnit: 'mins',
 } as const
+
+/**
+ * Seats on one tee time when the venue hasn't set courses.seats_per_class —
+ * which is every club a host proposes, since that column is the one scheduling
+ * field with no database default. A fourball is the unit a golf tee time is
+ * sold in, so it's the honest guess until an admin says otherwise.
+ *
+ * Unlike GHL_CALENDAR_RULES this is a fallback, not a fixed value: a course
+ * that names its own seat count gets it.
+ */
+export const GHL_CALENDAR_APPOINTMENTS_PER_SLOT = 4
 
 // Inbound webhook (GHL workflow trigger) fired alongside each booking
 // reminder push notification — see /api/cron/booking-reminders. Path only;

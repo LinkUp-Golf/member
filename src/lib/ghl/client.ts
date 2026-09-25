@@ -12,7 +12,7 @@ import { formatInTimeZone } from 'date-fns-tz'
 import type { GHLContact, GHLCalendarEvent, GHLBookingSlot } from '@/types'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
 import { logger } from '@/lib/logger'
-import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GHL_CALENDAR_DEFAULTS, GHL_CALENDAR_EVENT_TITLE, GHL_CALENDAR_LOCATION, GHL_CALENDAR_FORM_ID, GHL_CALENDAR_REDIRECT_URL, GHL_CALENDAR_THANKS_MESSAGE, GHL_BOOKING_REMINDER_WEBHOOK_PATH, GHL_PAYMENT_REMINDER_WEBHOOK_PATH, GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH } from '@/lib/constants'
+import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GHL_CALENDAR_RULES, GHL_CALENDAR_APPOINTMENTS_PER_SLOT, GHL_CALENDAR_EVENT_TITLE, GHL_CALENDAR_LOCATION, GHL_CALENDAR_FORM_ID, GHL_CALENDAR_REDIRECT_URL, GHL_CALENDAR_THANKS_MESSAGE, GHL_BOOKING_REMINDER_WEBHOOK_PATH, GHL_PAYMENT_REMINDER_WEBHOOK_PATH, GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH } from '@/lib/constants'
 import { getCache, withCache } from '@/lib/cache'
 import { GHL_CAL_RULES_NS, GHL_CAL_RULES_TTL_MS, ghlCalendarRulesKey } from '@/lib/cache/keys'
 
@@ -982,12 +982,6 @@ export async function createGHLCalendar(params: {
   slug: string
   eventTitle?: string
   eventColor: string
-  meetingIntervalMins: number
-  meetingDurationMins: number
-  minSchedulingNoticeMins: number
-  dateRangeDays: number
-  preBufferMins: number
-  postBufferMins: number
   seatsPerClass?: number | null
   /**
    * GHL users to staff the calendar with — the host of the venue it's being
@@ -1059,27 +1053,22 @@ export async function createGHLCalendar(params: {
     eventColor: params.eventColor,
     ...(teamMembers.length ? { teamMembers } : {}),
     locationConfigurations: [locationConfiguration],
-    // Units are explicit on every one of these. GHL stores each rule as a
-    // number plus its own unit, and a number sent without one is read against
-    // whatever that field happens to default to.
-    slotDuration: params.meetingDurationMins || GHL_CALENDAR_DEFAULTS.slotDurationMins,
-    slotDurationUnit: 'mins',
-    slotInterval: params.meetingIntervalMins || GHL_CALENDAR_DEFAULTS.slotIntervalMins,
-    slotIntervalUnit: 'mins',
-    preBuffer: params.preBufferMins,
-    preBufferUnit: 'mins',
-    slotBuffer: params.postBufferMins,
-    slotBufferUnit: 'mins',
-    allowBookingAfter: params.minSchedulingNoticeMins,
-    allowBookingAfterUnit: 'mins',
-    // How far ahead the calendar is bookable. Falls back in months rather than
-    // days, because a zero here would be a calendar nobody can book at all.
-    ...(params.dateRangeDays > 0
-      ? { allowBookingFor: params.dateRangeDays, allowBookingForUnit: 'days' }
-      : {
-          allowBookingFor: GHL_CALENDAR_DEFAULTS.allowBookingForMonths,
-          allowBookingForUnit: 'months',
-        }),
+    // The booking rules, the same on every venue. Each is a number and its own
+    // unit, exactly as GHL stores it — nothing converts between units in either
+    // direction. Written out rather than spread in from GHL_CALENDAR_RULES so
+    // the payload GHL receives is readable here, at the POST.
+    slotDuration: GHL_CALENDAR_RULES.slotDuration,
+    slotDurationUnit: GHL_CALENDAR_RULES.slotDurationUnit,
+    slotInterval: GHL_CALENDAR_RULES.slotInterval,
+    slotIntervalUnit: GHL_CALENDAR_RULES.slotIntervalUnit,
+    allowBookingFor: GHL_CALENDAR_RULES.allowBookingFor,
+    allowBookingForUnit: GHL_CALENDAR_RULES.allowBookingForUnit,
+    allowBookingAfter: GHL_CALENDAR_RULES.allowBookingAfter,
+    allowBookingAfterUnit: GHL_CALENDAR_RULES.allowBookingAfterUnit,
+    preBuffer: GHL_CALENDAR_RULES.preBuffer,
+    preBufferUnit: GHL_CALENDAR_RULES.preBufferUnit,
+    slotBuffer: GHL_CALENDAR_RULES.slotBuffer,
+    slotBufferUnit: GHL_CALENDAR_RULES.slotBufferUnit,
     // Seats on one tee time.
     //
     // GHL's dashboard sends appointmentPerSlot: 'number_of_guest' here — the UI
@@ -1093,7 +1082,7 @@ export async function createGHLCalendar(params: {
     // a club a host proposed has none — hence the fallback rather than an
     // omitted field, which is what produced the 422 in the first place.
     guestType: 'count_only',
-    appointmentPerSlot: params.seatsPerClass ?? GHL_CALENDAR_DEFAULTS.appointmentsPerSlot,
+    appointmentPerSlot: params.seatsPerClass ?? GHL_CALENDAR_APPOINTMENTS_PER_SLOT,
     enableRecurring: false,
     formId: GHL_CALENDAR_FORM_ID,
     stickyContact: true,
@@ -1117,8 +1106,10 @@ export async function createGHLCalendar(params: {
       requestedSlug: params.slug,
       groupId: GHL_CALENDAR_PROVIDER_ID,
       teamMembers: teamMembers.map(m => m.userId),
-      slotDurationMins: body.slotDuration,
-      slotIntervalMins: body.slotInterval,
+      slotDuration: `${body.slotDuration} ${body.slotDurationUnit}`,
+      slotInterval: `${body.slotInterval} ${body.slotIntervalUnit}`,
+      allowBookingFor: `${body.allowBookingFor} ${body.allowBookingForUnit}`,
+      allowBookingAfter: `${body.allowBookingAfter} ${body.allowBookingAfterUnit}`,
       appointmentPerSlot: body.appointmentPerSlot,
     },
   })
@@ -1208,6 +1199,129 @@ export async function createCalendarGroup(params: {
   const id = data.group?.id ?? ''
   if (!id) throw new GHLError('createCalendarGroup returned no id', ErrorCode.GHL_UNAVAILABLE)
   return id
+}
+
+// ---- Calendar availability schedules ------------------------
+//
+// A calendar decides what to offer from the working hours of the users staffing
+// it, and a GHL user's default is every weekday, all day. A host is at the club
+// on the handful of dates they listed, at one tee time each, so without this the
+// venue's calendar offers members slots on days nobody will be there.
+//
+// A schedule is a named set of date rules attached to one user and one or more
+// calendars. See availabilityRules in src/lib/hosts/schedule.ts for how a host's
+// rounds become those rules.
+
+/** The name every host availability schedule is created under. */
+const SCHEDULE_NAME = 'Custom schedule'
+
+/**
+ * One date the user is available on, and the intervals within it.
+ *
+ * Declared here rather than imported from src/lib/hosts so this module keeps
+ * knowing nothing about hosts; AvailabilityRule there is the same shape.
+ */
+export interface GHLScheduleRule {
+  type: 'date'
+  /** 'YYYY-MM-DD'. */
+  date: string
+  /** 'HH:MM' each. */
+  intervals: Array<{ from: string; to: string }>
+}
+
+/**
+ * Writes a user's availability on a calendar, and returns the schedule's id.
+ *
+ * With `scheduleId` this replaces that schedule; without one it creates a new
+ * one. A failed replace falls through to a create rather than giving up — a
+ * schedule someone deleted in GHL by hand would otherwise leave the host's
+ * availability permanently stale, and a duplicate is the lesser problem.
+ *
+ * Best-effort like the rest of the calendar setup: returns null and logs rather
+ * than throwing, because a host's rounds are already listed and a schedule that
+ * didn't take must not undo them.
+ */
+export async function setGHLCalendarSchedule(params: {
+  calendarId: string
+  userId: string
+  timezone: string
+  rules: GHLScheduleRule[]
+  scheduleId?: string | null
+}): Promise<string | null> {
+  const schedule = {
+    rules: params.rules,
+    name: SCHEDULE_NAME,
+    timezone: params.timezone,
+    calendarIds: [params.calendarId],
+  }
+
+  // The two endpoints disagree about the other two fields, and both are strict.
+  //
+  // Create needs locationId and userId — it rejects a body without locationId as
+  // a 401 "Location ID is required", which reads like an auth failure and isn't.
+  // Update takes neither: it answers a body carrying them with a 422 naming both
+  // ("property locationId should not exist"). The schedule it is updating
+  // already knows its location and its user, so there is nothing to restate.
+  const send = async (path: string, method: 'POST' | 'PUT'): Promise<string | null> => {
+    const data = await ghlFetch<{ id?: string; schedule?: { id?: string }; _id?: string }>(path, {
+      method,
+      body: JSON.stringify(
+        method === 'POST'
+          ? { locationId: GHL_LOCATION_ID, userId: params.userId, ...schedule }
+          : schedule,
+      ),
+    })
+    // Create answers with { schedule: { id } }; take a bare id too rather than
+    // depend on the envelope.
+    return data?.schedule?.id ?? data?.id ?? data?._id ?? null
+  }
+
+  if (params.scheduleId) {
+    try {
+      const id = await send(`/calendars/schedules/${params.scheduleId}`, 'PUT')
+      logger.info('Calendar availability schedule updated', {
+        action: 'ghl_schedule.updated',
+        metadata: {
+          calendarId: params.calendarId,
+          userId: params.userId,
+          scheduleId: params.scheduleId,
+          dates: params.rules.length,
+        },
+      })
+      return id ?? params.scheduleId
+    } catch (err) {
+      logger.warn('Calendar availability schedule update failed; creating a new one', {
+        action: 'ghl_schedule.update_failed',
+        errorMessage: String(err),
+        metadata: { calendarId: params.calendarId, scheduleId: params.scheduleId },
+      })
+    }
+  }
+
+  try {
+    const id = await send('/calendars/schedules', 'POST')
+    logger.info('Calendar availability schedule created', {
+      action: 'ghl_schedule.created',
+      metadata: {
+        calendarId: params.calendarId,
+        userId: params.userId,
+        scheduleId: id,
+        dates: params.rules.length,
+      },
+    })
+    return id
+  } catch (err) {
+    logger.error('Calendar availability schedule not set', {
+      action: 'ghl_schedule.failed',
+      errorMessage: String(err),
+      metadata: {
+        calendarId: params.calendarId,
+        userId: params.userId,
+        dates: params.rules.length,
+      },
+    })
+    return null
+  }
 }
 
 export async function deleteGHLCalendar(calendarId: string): Promise<boolean> {
@@ -1333,10 +1447,11 @@ export async function listLocationTags(): Promise<{ id: string; name: string }[]
 
 // ---- Calendar list (for admin UI calendar selector) ---------
 
-// GHL stores every booking-rule value alongside its own unit (e.g. slotDuration: 4
-// with slotDurationUnit: 'hours'). Reading the number without its unit is wrong.
-export type GHLDurationUnit = 'mins' | 'hours' | 'days' | 'weeks' | 'months'
-
+// Every booking rule is a number and its own unit, which is how GHL takes them
+// on create and how it hands them back. Nothing converts between units in
+// either direction: the pair is sent as it reads and read as it was sent, and
+// the unit is carried alongside the number so whatever displays it can say
+// "6 months" rather than a bare 6.
 export interface GHLCalendarSummary {
   id: string
   name: string
@@ -1345,20 +1460,20 @@ export interface GHLCalendarSummary {
   /** The booking widget's own slug. Distinct from `slug`, and also unique. */
   widgetSlug?: string | null
   groupId: string | null
-  // Booking settings returned by GHL on the calendar object
+  // Booking settings returned by GHL on the calendar object, each with its unit
   slotInterval: number | null
-  slotIntervalUnit: GHLDurationUnit | null
+  slotIntervalUnit: string | null
   slotDuration: number | null
-  slotDurationUnit: GHLDurationUnit | null
+  slotDurationUnit: string | null
   preBuffer: number | null
-  preBufferUnit: GHLDurationUnit | null
+  preBufferUnit: string | null
   slotBuffer: number | null
-  slotBufferUnit: GHLDurationUnit | null
+  slotBufferUnit: string | null
   appoinmentPerSlot: number | null
   allowBookingAfter: number | null
-  allowBookingAfterUnit: GHLDurationUnit | null
+  allowBookingAfterUnit: string | null
   allowBookingFor: number | null
-  allowBookingForUnit: GHLDurationUnit | null
+  allowBookingForUnit: string | null
   // Who the calendar is staffed by. GHL's docs for GET /calendars/{id} don't
   // expand the calendar object's child attributes, so these are typed as
   // optional and read tolerantly — see pickCalendarAssignee.
@@ -1400,31 +1515,17 @@ export function pickCalendarAssignee(cal: GHLCalendarSummary | null | undefined)
 
 // ---- Calendar booking rules ---------------------------------
 // The GHL calendar is the source of truth for how long a round runs. Each rule
-// is stored as a value plus its own unit, so both must be read together.
-
-const UNIT_TO_MINUTES: Record<string, number> = {
-  mins: 1,
-  minutes: 1,
-  hours: 60,
-  days: 60 * 24,
-  weeks: 60 * 24 * 7,
-  months: 60 * 24 * 30,
-}
-
-export function ghlRuleToMinutes(
-  value: number | null | undefined,
-  unit: string | null | undefined,
-): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null
-  const factor = UNIT_TO_MINUTES[(unit ?? 'mins').toLowerCase()]
-  return factor ? value * factor : null
-}
+// is a number in its field's own unit — see GHLCalendarSummary — so it is read
+// as sent.
+//
+// Only the three rules something actually acts on are lifted out. The rest are
+// on GHLCalendarSummary, where the admin calendar panel reads them straight
+// from GHL to display; giving them a second home here meant three more fields
+// that nothing ever read.
 
 export interface CalendarBookingRules {
+  /** One tee time, in minutes — GHL_CALENDAR_RULES.slotDuration's unit. */
   slotDurationMins: number | null
-  slotIntervalMins: number | null
-  minSchedulingNoticeMins: number | null
-  dateRangeDays: number | null
   seatsPerSlot: number | null
   /**
    * The user this calendar's appointments should be assigned to, as GHL has it
@@ -1433,8 +1534,8 @@ export interface CalendarBookingRules {
   assigneeId: string | null
 }
 
-// Reads one calendar's booking rules, normalised to minutes. Cached — a
-// calendar's rules change only when an admin edits them in GHL. Returns null
+// Reads one calendar's booking rules. Cached — a calendar's rules change only
+// when an admin edits them in GHL. Returns null
 // if GHL is unreachable or the calendar is gone, so callers can fall back.
 export async function getCalendarBookingRules(calendarId: string): Promise<CalendarBookingRules | null> {
   if (!calendarId) return null
@@ -1448,15 +1549,14 @@ export async function getCalendarBookingRules(calendarId: string): Promise<Calen
         const cal = data.calendar
         if (!cal) return null
 
-        const dateRangeMins = ghlRuleToMinutes(cal.allowBookingFor, cal.allowBookingForUnit ?? 'days')
+        // A zero or a missing value is "GHL doesn't say", not "zero minutes".
+        const slotDuration =
+          typeof cal.slotDuration === 'number' && cal.slotDuration > 0 ? cal.slotDuration : null
 
         return {
-          slotDurationMins:        ghlRuleToMinutes(cal.slotDuration, cal.slotDurationUnit),
-          slotIntervalMins:        ghlRuleToMinutes(cal.slotInterval, cal.slotIntervalUnit),
-          minSchedulingNoticeMins: ghlRuleToMinutes(cal.allowBookingAfter, cal.allowBookingAfterUnit),
-          dateRangeDays:           dateRangeMins === null ? null : Math.round(dateRangeMins / (60 * 24)),
-          seatsPerSlot:            cal.appoinmentPerSlot ?? null,
-          assigneeId:              pickCalendarAssignee(cal),
+          slotDurationMins: slotDuration,
+          seatsPerSlot:     cal.appoinmentPerSlot ?? null,
+          assigneeId:       pickCalendarAssignee(cal),
         }
       } catch {
         return null

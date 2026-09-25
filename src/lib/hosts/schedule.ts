@@ -200,3 +200,80 @@ export async function loadOccupyingRounds(
       }
     })
 }
+
+// ---- The host's availability, as GHL wants it ----------------
+//
+// A calendar staffed by a host is bookable whenever GHL thinks that host is
+// working, which by default is every weekday all day. A host runs rounds on the
+// handful of dates they listed, at one tee time each — so the calendar has to be
+// told exactly that, or it offers members slots on days nobody is at the club.
+//
+// GHL takes this as a schedule of date rules, each carrying the intervals the
+// user is available in (POST /calendars/schedules). One rule per date, one
+// interval per tee time, each interval the length of a tee time.
+
+export interface AvailabilityInterval {
+  /** 'HH:MM'. */
+  from: string
+  to: string
+}
+
+export interface AvailabilityRule {
+  type: 'date'
+  /** 'YYYY-MM-DD'. */
+  date: string
+  intervals: AvailabilityInterval[]
+}
+
+const clockOf = (minsPastMidnight: number): string => {
+  // A tee time plus a slot can't run into the next day — a date rule has no way
+  // to say so — and a round teeing off at 23:50 is not a real case anyway.
+  const capped = Math.min(Math.max(minsPastMidnight, 0), 23 * 60 + 59)
+  const hours = Math.floor(capped / 60)
+  const mins = capped % 60
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`
+}
+
+/**
+ * The host's rounds as availability rules, sorted and deduplicated.
+ *
+ * `slotMins` is one tee time — GHL_CALENDAR_RULES.slotDuration, the same figure
+ * the calendar is created with, so an interval is exactly the slot it has to
+ * hold open.
+ *
+ * A round with no usable tee time is left out rather than given the whole day:
+ * these rules are what a member is offered, and opening a club's entire day
+ * because one old row has no time would sell tee times that don't exist.
+ * roundWindow takes the opposite view for the same field, and deliberately —
+ * there the question is "might this collide", where the cautious answer is yes.
+ */
+export function availabilityRules(
+  rounds: ScheduledRound[],
+  slotMins: number,
+): AvailabilityRule[] {
+  const length = Number.isFinite(slotMins) && slotMins > 0 ? slotMins : 0
+  const byDate = new Map<string, Map<string, AvailabilityInterval>>()
+
+  for (const round of rounds) {
+    if (!isTeeTime(round.teeTime)) continue
+    const date = round.date.slice(0, 10)
+    const start = minutesOf(round.teeTime)
+    const interval: AvailabilityInterval = {
+      from: clockOf(start),
+      to: clockOf(start + length),
+    }
+    // Keyed on the interval itself: two hosted rounds at one venue on one date
+    // and time is a duplicate listing, not two windows.
+    const intervals = byDate.get(date) ?? new Map<string, AvailabilityInterval>()
+    intervals.set(`${interval.from}-${interval.to}`, interval)
+    byDate.set(date, intervals)
+  }
+
+  return Array.from(byDate.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, intervals]) => ({
+      type: 'date' as const,
+      date,
+      intervals: Array.from(intervals.values()).sort((a, b) => a.from.localeCompare(b.from)),
+    }))
+}

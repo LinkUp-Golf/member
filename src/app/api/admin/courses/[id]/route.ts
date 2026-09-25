@@ -4,7 +4,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { createGHLCalendar, deleteGHLCalendar, getCalendarBookingRules } from '@/lib/ghl/client'
+import { createGHLCalendar, deleteGHLCalendar } from '@/lib/ghl/client'
 import { validateTimezone, sanitiseText } from '@/lib/validation'
 import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
 import { APPROVABLE_STATUSES, canApproveEvent } from '@/lib/hosts/events'
@@ -135,12 +135,6 @@ export const PATCH = withAuth(
               // eventTitle left to the house default ({{contact.name}}), so an
               // appointment in GHL is titled by who booked it.
               eventColor: randomColor(),
-              meetingIntervalMins: course.meeting_interval_mins,
-              meetingDurationMins: course.meeting_duration_mins,
-              minSchedulingNoticeMins: course.min_scheduling_notice_mins,
-              dateRangeDays: course.date_range_days,
-              preBufferMins: course.pre_buffer_mins,
-              postBufferMins: course.post_buffer_mins,
               seatsPerClass: course.seats_per_class,
               // Staffed by the hosts who will run it, rather than left to the
               // fallback assignee — see src/lib/hosts/provisioning.ts.
@@ -433,9 +427,11 @@ export const PATCH = withAuth(
       'name', 'slug', 'logo_url', 'city', 'state', 'country', 'address', 'phone', 'map_link',
       'access_tag', 'timezone', 'active',
       'description', 'ghl_calendar_id', 'ghl_calendar_user_id', 'cost_per_player',
-      'booking_rules', 'booking_url', 'payment_url', 'required_tags', 'meeting_interval_mins',
-      'meeting_duration_mins', 'min_scheduling_notice_mins', 'date_range_days',
-      'pre_buffer_mins', 'post_buffer_mins', 'seats_per_class', 'max_players_per_day',
+      'booking_rules', 'booking_url', 'payment_url', 'required_tags',
+      // meeting_duration_mins is here because the calendar mirror below writes
+      // it. The other five scheduling columns are not: a calendar is created on
+      // GHL_CALENDAR_RULES, so nothing reads them and no screen sends them.
+      'meeting_duration_mins', 'seats_per_class', 'max_players_per_day',
       'custom_slots_enabled', 'pinned', 'payment_options',
     ]
     const updates: Record<string, unknown> = {}
@@ -477,13 +473,12 @@ export const PATCH = withAuth(
     }
     if (!Object.keys(updates).length) return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
 
-    // The GHL calendar owns the round length, so pointing a course at a calendar
-    // adopts that calendar's slot duration. Mirroring it here keeps the member and
-    // admin screens showing the right end time without either of them calling GHL.
-    if (typeof updates.ghl_calendar_id === 'string' && updates.ghl_calendar_id) {
-      const rules = await getCalendarBookingRules(updates.ghl_calendar_id)
-      if (rules?.slotDurationMins) updates.meeting_duration_mins = rules.slotDurationMins
-    }
+    // Attaching a calendar used to overwrite meeting_duration_mins with that
+    // calendar's slotDuration. It doesn't any more, and mustn't: a slot is one
+    // tee time — a fixed 20 minutes, see GHL_CALENDAR_RULES — while
+    // meeting_duration_mins is how long a round runs, the figure the host clash
+    // check and the member's "round finished" time are built on. They were the
+    // same number only while the calendar was created from the course.
 
     const { data, error } = await admin.from('courses').update(updates).eq('id', id).select().single()
     if (error) {

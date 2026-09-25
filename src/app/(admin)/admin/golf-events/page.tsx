@@ -892,17 +892,17 @@ function DeleteCourseModal({
 }
 
 // ---- Booking rule display helpers ---------------------------
-// GHL sends each booking rule as a value plus its own unit field (slotDuration: 4,
-// slotDurationUnit: 'hours'). Render the pair as GHL stores it — reading the number
-// on its own silently reports hours and days as minutes.
+// GHL sends each booking rule as a number and its own unit (allowBookingFor: 6,
+// allowBookingForUnit: 'months'). Nothing converts between units — see
+// GHL_CALENDAR_RULES — so the pair is displayed as it comes, and reading the
+// number on its own would report six months as six minutes.
 const UNIT_LABELS: Record<string, string> = {
   mins: 'min', hours: 'hr', days: 'day', weeks: 'week', months: 'month',
 }
-function formatRule(value: number | null, unit: string | null, fallbackUnit = 'mins'): string {
+function formatRule(value: number | null, unit: string | null): string {
   if (!value) return '—'
-  const resolved = unit ?? fallbackUnit
-  const label = UNIT_LABELS[resolved] ?? resolved
-  return `${value} ${label}${value !== 1 ? 's' : ''}`.trim()
+  const label = UNIT_LABELS[unit ?? ''] ?? unit ?? ''
+  return `${value} ${label}${label && value !== 1 ? 's' : ''}`.trim()
 }
 
 type CourseFormValues = {
@@ -1392,7 +1392,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
                     { label: 'Meeting interval',      value: formatRule(selectedCalendar.slotInterval, selectedCalendar.slotIntervalUnit) },
                     { label: 'Meeting duration',      value: formatRule(selectedCalendar.slotDuration, selectedCalendar.slotDurationUnit) },
                     { label: 'Min scheduling notice', value: formatRule(selectedCalendar.allowBookingAfter, selectedCalendar.allowBookingAfterUnit) },
-                    { label: 'Date range',            value: formatRule(selectedCalendar.allowBookingFor, selectedCalendar.allowBookingForUnit, 'days') },
+                    { label: 'Date range',            value: formatRule(selectedCalendar.allowBookingFor, selectedCalendar.allowBookingForUnit) },
                     { label: 'Pre-buffer',            value: formatRule(selectedCalendar.preBuffer, selectedCalendar.preBufferUnit) },
                     { label: 'Post-buffer',           value: formatRule(selectedCalendar.slotBuffer, selectedCalendar.slotBufferUnit) },
                     { label: 'Seats per class',       value: selectedCalendar.appoinmentPerSlot ? `${selectedCalendar.appoinmentPerSlot}` : 'Unlimited' },

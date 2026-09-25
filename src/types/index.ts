@@ -114,8 +114,14 @@ export interface Course {
   cost_per_player: number | null
   booking_rules: string | null
   required_tags: string[]
-  meeting_interval_mins: number
+  // How long a round runs. Mirrored from the GHL calendar's slotDuration when
+  // one is attached, and read by the member and admin screens to work out when
+  // a round finished.
   meeting_duration_mins: number
+  // Columns the GHL calendar no longer takes its rules from — every calendar is
+  // created on GHL_CALENDAR_RULES. Kept because the table still has them, but
+  // nothing reads them and the admin API won't set them.
+  meeting_interval_mins: number
   min_scheduling_notice_mins: number
   date_range_days: number
   pre_buffer_mins: number
