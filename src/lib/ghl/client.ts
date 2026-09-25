@@ -12,7 +12,7 @@ import { formatInTimeZone } from 'date-fns-tz'
 import type { GHLContact, GHLCalendarEvent, GHLBookingSlot } from '@/types'
 import { GHLError, ErrorCode } from '@/lib/errors/app-error'
 import { logger } from '@/lib/logger'
-import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GHL_CALENDAR_DEFAULTS, GHL_CALENDAR_EVENT_TITLE, GHL_CALENDAR_FORM_ID, GHL_CALENDAR_REDIRECT_URL, GHL_CALENDAR_THANKS_MESSAGE, GHL_BOOKING_REMINDER_WEBHOOK_PATH, GHL_PAYMENT_REMINDER_WEBHOOK_PATH, GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH } from '@/lib/constants'
+import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GHL_CALENDAR_DEFAULTS, GHL_CALENDAR_EVENT_TITLE, GHL_CALENDAR_LOCATION, GHL_CALENDAR_FORM_ID, GHL_CALENDAR_REDIRECT_URL, GHL_CALENDAR_THANKS_MESSAGE, GHL_BOOKING_REMINDER_WEBHOOK_PATH, GHL_PAYMENT_REMINDER_WEBHOOK_PATH, GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH } from '@/lib/constants'
 import { getCache, withCache } from '@/lib/cache'
 import { GHL_CAL_RULES_NS, GHL_CAL_RULES_TTL_MS, ghlCalendarRulesKey } from '@/lib/cache/keys'
 
@@ -924,6 +924,59 @@ export async function ensureGHLUser(params: {
  * attempt, the id it produced, and the reason it didn't are all traceable
  * without reproducing the request.
  */
+/**
+ * A calendar slug GHL will accept, given the ones already in use.
+ *
+ * GHL requires a calendar's slug to be unique across the location, and rejects
+ * a duplicate outright ("Calendar slug is already taken", 400). Ours is the
+ * course slug, which is unique in our own database but says nothing about what
+ * else is in the GHL account — a calendar made by hand, one left behind by a
+ * course that was deleted here, or one from an earlier attempt whose id we
+ * failed to store.
+ *
+ * So the base is used when it's free and numbered when it isn't: aviara,
+ * aviara-2, aviara-3. Pure, so the numbering can be tested without GHL.
+ */
+export function uniqueCalendarSlug(
+  base: string,
+  taken: Iterable<string | null | undefined>,
+  limit = 50,
+): string {
+  const root = normaliseSlug(base) || 'calendar'
+  const used = new Set(
+    Array.from(taken)
+      .map(s => normaliseSlug(s ?? ''))
+      .filter(Boolean),
+  )
+
+  if (!used.has(root)) return root
+  for (let n = 2; n <= limit; n++) {
+    const candidate = `${root}-${n}`
+    if (!used.has(candidate)) return candidate
+  }
+  // Past the limit, stop counting and take the clock. A slug nobody reads is
+  // better than a course that can't be published.
+  return `${root}-${Date.now().toString(36)}`
+}
+
+/** Lower-case, hyphenated, and free of anything a URL would have to escape. */
+export function normaliseSlug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+/** True when GHL rejected a create because the slug was already in use. */
+export function isSlugTakenError(err: unknown): boolean {
+  const context = (err as GHLError)?.context
+  if (context?.['statusCode'] !== 400) return false
+  const body = context['body'] as { message?: unknown } | undefined
+  const message = Array.isArray(body?.message) ? body?.message.join(' ') : body?.message
+  return typeof message === 'string' && /slug is already taken/i.test(message)
+}
+
 export async function createGHLCalendar(params: {
   name: string
   slug: string
@@ -936,8 +989,6 @@ export async function createGHLCalendar(params: {
   preBufferMins: number
   postBufferMins: number
   seatsPerClass?: number | null
-  /** Street address shown on the booking widget, when the venue has one. */
-  address?: string | null
   /**
    * GHL users to staff the calendar with — the host of the venue it's being
    * created for. Without one, every appointment falls back to
@@ -946,26 +997,68 @@ export async function createGHLCalendar(params: {
    */
   teamMemberIds?: string[]
 }): Promise<string> {
+  // Where the round is played. One address for every calendar — see
+  // GHL_CALENDAR_LOCATION for why it isn't the course's own.
+  const locationConfiguration = {
+    kind: 'custom',
+    location: GHL_CALENDAR_LOCATION,
+    position: 0,
+    zoomOauthId: '',
+    meetingId: 'custom_0',
+  }
+
+  // GHL keeps the location on the team member as well as on the calendar, and
+  // it is the member's copy that ends up on the appointment — without it an
+  // assigned round shows no venue, however the calendar itself is configured.
+  // The shared meetingId is what pairs the two.
   const teamMembers = (params.teamMemberIds ?? [])
     .filter(Boolean)
-    .map((userId, index) => ({ userId, priority: 0.5, isPrimary: index === 0 }))
+    .map((userId, index) => ({
+      userId,
+      priority: 0.5,
+      isPrimary: index === 0,
+      locationConfigurations: [locationConfiguration],
+      meetingLocation: GHL_CALENDAR_LOCATION,
+    }))
+
+  // A slug GHL will take. The account is checked first so the common case gets
+  // the clean name; the POST below still retries, because that check is a
+  // snapshot and cannot see everything the location holds.
+  //
+  // Both fields are read: GHL exposes the booking widget under widgetSlug, but
+  // a calendar made through the dashboard can carry a plain slug too, and
+  // either will collide.
+  const existing = await listCalendars()
+  const existingSlugs = existing.flatMap(c => [c.slug, c.widgetSlug])
+  let slug = uniqueCalendarSlug(params.slug, existingSlugs)
+
+  if (slug !== normaliseSlug(params.slug)) {
+    // Worth a line rather than a silent rename. A venue only reaches here when
+    // no calendar id is stored against it, so a taken slug means GHL already
+    // holds a calendar we have lost track of — an earlier create whose id
+    // never got saved, or one made by hand. The numbered calendar works, but
+    // the orphan is still there and someone should look.
+    logger.warn('Calendar slug already in use; creating a numbered one', {
+      action: 'ghl_calendar_create.slug_renamed',
+      metadata: { name: params.name, requestedSlug: normaliseSlug(params.slug), using: slug },
+    })
+  }
 
   const body = {
     isActive: true,
     locationId: GHL_LOCATION_ID,
     groupId: GHL_CALENDAR_PROVIDER_ID,
     name: params.name,
-    slug: params.slug,
+    // The booking widget's address. GHL takes this rather than `slug` on
+    // create — the plain field is what the dashboard writes, and sending it
+    // here is what produced "Calendar slug is already taken".
+    widgetSlug: slug,
     calendarType: 'class_booking',
     widgetType: 'default',
     eventTitle: params.eventTitle || GHL_CALENDAR_EVENT_TITLE,
     eventColor: params.eventColor,
     ...(teamMembers.length ? { teamMembers } : {}),
-    // Where the round is played, shown on the booking widget. Omitted rather
-    // than sent empty for a club whose address we haven't got yet.
-    ...(params.address?.trim()
-      ? { locationConfigurations: [{ kind: 'custom', location: params.address.trim() }] }
-      : {}),
+    locationConfigurations: [locationConfiguration],
     // Units are explicit on every one of these. GHL stores each rule as a
     // number plus its own unit, and a number sent without one is read against
     // whatever that field happens to default to.
@@ -1020,43 +1113,67 @@ export async function createGHLCalendar(params: {
     action: 'ghl_calendar_create.start',
     metadata: {
       name: params.name,
-      slug: params.slug,
+      slug,
+      requestedSlug: params.slug,
       groupId: GHL_CALENDAR_PROVIDER_ID,
       teamMembers: teamMembers.map(m => m.userId),
-      hasAddress: !!params.address?.trim(),
       slotDurationMins: body.slotDuration,
       slotIntervalMins: body.slotInterval,
       appointmentPerSlot: body.appointmentPerSlot,
     },
   })
 
-  let data: { calendar?: { id: string }; id?: string }
-  try {
-    data = await ghlFetch<{ calendar?: { id: string }; id?: string }>('/calendars/', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    })
-  } catch (err) {
-    // ghlFetch logs the status line; this says which calendar it was for, and
-    // carries GHL's own rejection body where there is one.
-    logger.error('GHL calendar creation failed', {
-      action: 'ghl_calendar_create.failed',
-      errorMessage: String(err),
-      metadata: {
-        name: params.name,
-        slug: params.slug,
-        statusCode: (err as GHLError)?.context?.['statusCode'] ?? null,
-        ghlResponse: (err as GHLError)?.context?.['body'] ?? null,
-      },
-    })
-    throw err
+  // Listing calendars can come back empty — it swallows its own errors — and
+  // a slug can be taken by something the list doesn't return. Either way GHL
+  // says so on the POST, and the answer is the same: take the next number.
+  const SLUG_ATTEMPTS = 5
+  const tried: string[] = []
+
+  let data: { calendar?: { id: string }; id?: string } | null = null
+  for (let attempt = 1; attempt <= SLUG_ATTEMPTS; attempt++) {
+    tried.push(slug)
+    try {
+      data = await ghlFetch<{ calendar?: { id: string }; id?: string }>('/calendars/', {
+        method: 'POST',
+        body: JSON.stringify({ ...body, widgetSlug: slug }),
+      })
+      break
+    } catch (err) {
+      if (isSlugTakenError(err) && attempt < SLUG_ATTEMPTS) {
+        slug = uniqueCalendarSlug(params.slug, [...existingSlugs, ...tried])
+        logger.warn('GHL calendar slug taken, retrying with the next one', {
+          action: 'ghl_calendar_create.slug_taken',
+          metadata: { name: params.name, tried, next: slug },
+        })
+        continue
+      }
+      // ghlFetch logs the status line; this says which calendar it was for, and
+      // carries GHL's own rejection body where there is one.
+      logger.error('GHL calendar creation failed', {
+        action: 'ghl_calendar_create.failed',
+        errorMessage: String(err),
+        metadata: {
+          name: params.name,
+          slug,
+          requestedSlug: params.slug,
+          tried,
+          statusCode: (err as GHLError)?.context?.['statusCode'] ?? null,
+          ghlResponse: (err as GHLError)?.context?.['body'] ?? null,
+        },
+      })
+      throw err
+    }
+  }
+
+  if (!data) {
+    throw new GHLError('createGHLCalendar exhausted slug attempts', ErrorCode.GHL_UNAVAILABLE)
   }
 
   const id = (data.calendar?.id ?? (data as { id?: string }).id) ?? ''
   if (!id) {
     logger.error('GHL calendar creation returned no id', {
       action: 'ghl_calendar_create.no_id',
-      metadata: { name: params.name, slug: params.slug, response: data },
+      metadata: { name: params.name, slug, response: data },
     })
     throw new GHLError('createGHLCalendar returned no id', ErrorCode.GHL_UNAVAILABLE)
   }
@@ -1066,7 +1183,8 @@ export async function createGHLCalendar(params: {
     metadata: {
       calendarId: id,
       name: params.name,
-      slug: params.slug,
+      slug,
+      requestedSlug: params.slug,
       teamMembers: teamMembers.map(m => m.userId),
     },
   })
@@ -1224,6 +1342,8 @@ export interface GHLCalendarSummary {
   name: string
   calendarType: string
   slug: string | null
+  /** The booking widget's own slug. Distinct from `slug`, and also unique. */
+  widgetSlug?: string | null
   groupId: string | null
   // Booking settings returned by GHL on the calendar object
   slotInterval: number | null

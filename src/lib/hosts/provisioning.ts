@@ -172,7 +172,6 @@ export async function ensureCourseCalendar(
       name: course.name,
       slug: course.slug,
       eventColor: CALENDAR_COLOUR,
-      address: [course.address, course.city, course.state].filter(Boolean).join(', '),
       meetingIntervalMins: course.meeting_interval_mins ?? 0,
       meetingDurationMins: course.meeting_duration_mins ?? 0,
       minSchedulingNoticeMins: course.min_scheduling_notice_mins ?? 0,

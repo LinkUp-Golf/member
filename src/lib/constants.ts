@@ -157,6 +157,21 @@ export const GHL_CALENDAR_THANKS_MESSAGE =
 /** The appointment's title in GHL — the member who booked it. */
 export const GHL_CALENDAR_EVENT_TITLE = '{{contact.name}}'
 
+/**
+ * The address shown on every calendar's booking widget, and on the
+ * appointments its team members are assigned.
+ *
+ * Fixed rather than taken from the course row. Every round currently runs at
+ * Aviara whoever hosts it, so a venue a host proposes is a name for a round
+ * rather than a second place to play, and its own address — often blank, often
+ * the host's business — would be wrong on the booking.
+ *
+ * The day a round is genuinely played somewhere else, this has to become the
+ * course's own address again; createGHLCalendar is the only caller.
+ */
+export const GHL_CALENDAR_LOCATION =
+  'Aviara Golf Club, 7447 Batiquitos Drive, Carlsbad, CA 92011'
+
 /** Scheduling defaults for a calendar created without a course's own numbers. */
 export const GHL_CALENDAR_DEFAULTS = {
   slotDurationMins: 20,

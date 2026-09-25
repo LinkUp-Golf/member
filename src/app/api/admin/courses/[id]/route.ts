@@ -135,9 +135,6 @@ export const PATCH = withAuth(
               // eventTitle left to the house default ({{contact.name}}), so an
               // appointment in GHL is titled by who booked it.
               eventColor: randomColor(),
-              address: [course.address, course.city, course.state]
-                .filter(Boolean)
-                .join(', '),
               meetingIntervalMins: course.meeting_interval_mins,
               meetingDurationMins: course.meeting_duration_mins,
               minSchedulingNoticeMins: course.min_scheduling_notice_mins,
