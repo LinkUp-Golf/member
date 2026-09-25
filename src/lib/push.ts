@@ -131,44 +131,58 @@ export async function sendPushToFocusMembers(
 // event". Say who and what; the heading inside still carries the short form.
 
 export const NotificationTemplates = {
-  newMember: (firstName: string, lastName: string, courseName: string, memberId?: string): PushPayload => ({
-    title: `New member: ${firstName} ${lastName}`,
-    body:  `${firstName} has joined the ${courseName} community. Tap to view their profile.`,
-    url:   memberId ? `/members/${memberId}` : '/members',
-    tag:   'new-member',
-    subject: `${titleCaseName(`${firstName} ${lastName}`)} has joined ${courseName}`,
-    cta:   'View their profile',
-  }),
+  newMember: (firstName: string, lastName: string, courseName: string, memberId?: string): PushPayload => {
+    const first = titleCaseName(firstName)
+    const full = titleCaseName(`${firstName} ${lastName}`)
+    return {
+      title: `New member: ${full}`,
+      body:  `${first} has joined the ${courseName} community. Tap to view their profile.`,
+      url:   memberId ? `/members/${memberId}` : '/members',
+      tag:   'new-member',
+      subject: `${full} has joined ${courseName}`,
+      cta:   'View their profile',
+    }
+  },
 
-  bookingAnnouncement: (firstName: string, date: string, time: string, memberId?: string): PushPayload => ({
-    title: `${firstName} is playing ${date}`,
-    body:  `${firstName} booked a tee time at ${time}. Message them to join.`,
-    url:   memberId ? `/members/${memberId}` : '/members',
-    tag:   `booking-${date}`,
-    subject: `${titleCaseName(firstName)} is playing on ${date}`,
-    cta:   'See who else is playing',
-  }),
+  bookingAnnouncement: (firstName: string, date: string, time: string, memberId?: string): PushPayload => {
+    const first = titleCaseName(firstName)
+    return {
+      title: `${first} is playing ${date}`,
+      body:  `${first} booked a tee time at ${time}. Message them to join.`,
+      url:   memberId ? `/members/${memberId}` : '/members',
+      tag:   `booking-${date}`,
+      subject: `${first} is playing on ${date}`,
+      cta:   'See who else is playing',
+    }
+  },
 
-  visitingMember: (firstName: string, lastName: string, from: string, until: string, memberId?: string): PushPayload => ({
-    title: `${firstName} ${lastName} is visiting`,
-    body:  `Visiting from ${from} to ${until}. Tap to invite them to play.`,
-    url:   memberId ? `/members/${memberId}` : '/members',
-    tag:   `visit-${firstName.toLowerCase()}`,
-    subject: `${titleCaseName(`${firstName} ${lastName}`)} is visiting from ${from}`,
-    cta:   'Invite them to play',
-  }),
+  visitingMember: (firstName: string, lastName: string, from: string, until: string, memberId?: string): PushPayload => {
+    const full = titleCaseName(`${firstName} ${lastName}`)
+    return {
+      title: `${full} is visiting`,
+      body:  `Visiting from ${from} to ${until}. Tap to invite them to play.`,
+      url:   memberId ? `/members/${memberId}` : '/members',
+      // Lower-cased on purpose: the tag is a dedup key, not copy.
+      tag:   `visit-${firstName.toLowerCase()}`,
+      subject: `${full} is visiting from ${from}`,
+      cta:   'Invite them to play',
+    }
+  },
 
-  newMessage: (senderName: string, preview: string, conversationId: string): PushPayload => ({
+  newMessage: (senderName: string, preview: string, conversationId: string): PushPayload => {
     // As a push this reads like a chat notification — the sender's name over
     // the message. As an email the same two lines become the heading and the
     // body, which is why the title is the name rather than "New message".
-    title: senderName,
-    body:  preview.length > 80 ? preview.slice(0, 80) + '…' : preview,
-    url:   `/messages/${conversationId}`,
-    tag:   `msg-${conversationId}`,
-    subject: `${titleCaseName(senderName)} sent you a message`,
-    cta:   'Reply in LinkUp',
-  }),
+    const sender = titleCaseName(senderName)
+    return {
+      title: sender,
+      body:  preview.length > 80 ? preview.slice(0, 80) + '…' : preview,
+      url:   `/messages/${conversationId}`,
+      tag:   `msg-${conversationId}`,
+      subject: `${sender} sent you a message`,
+      cta:   'Reply in LinkUp',
+    }
+  },
 
   focusLinkup: (title: string, date: string, weeksOut: number): PushPayload => ({
     title: `${weeksOut === 2 ? '2 weeks' : '1 week'} away: ${title}`,
@@ -179,14 +193,18 @@ export const NotificationTemplates = {
     cta:   'Book your spot',
   }),
 
-  playSuggestion: (otherMemberName: string, suggestedMemberId?: string): PushPayload => ({
-    title: `Play with ${otherMemberName}?`,
-    body:  `You haven't played with ${otherMemberName} yet. Want to set up a round?`,
-    url:   suggestedMemberId ? `/members/${suggestedMemberId}` : '/members',
-    tag:   `suggestion-${otherMemberName.toLowerCase().replace(' ', '-')}`,
-    subject: `A round with ${titleCaseName(otherMemberName)}?`,
-    cta:   'See their profile',
-  }),
+  playSuggestion: (otherMemberName: string, suggestedMemberId?: string): PushPayload => {
+    const other = titleCaseName(otherMemberName)
+    return {
+      title: `Play with ${other}?`,
+      body:  `You haven't played with ${other} yet. Want to set up a round?`,
+      url:   suggestedMemberId ? `/members/${suggestedMemberId}` : '/members',
+      // Lower-cased on purpose: the tag is a dedup key, not copy.
+      tag:   `suggestion-${otherMemberName.toLowerCase().replace(' ', '-')}`,
+      subject: `A round with ${other}?`,
+      cta:   'See their profile',
+    }
+  },
 
   guestAccessApproved: (courseName: string, from: string, until: string): PushPayload => ({
     title: 'Guest access approved',
@@ -253,14 +271,17 @@ export const NotificationTemplates = {
     cta:   'View details',
   }),
 
-  referralJoined: (referredName: string): PushPayload => ({
-    title: `${referredName} has joined!`,
-    body:  `Your referral ${referredName} is now a member. Book your introductory round together.`,
-    url:   '/more/referrals',
-    tag:   'referral-joined',
-    subject: `${titleCaseName(referredName)} has joined LinkUp`,
-    cta:   'View your referrals',
-  }),
+  referralJoined: (referredName: string): PushPayload => {
+    const referred = titleCaseName(referredName)
+    return {
+      title: `${referred} has joined!`,
+      body:  `Your referral ${referred} is now a member. Book your introductory round together.`,
+      url:   '/more/referrals',
+      tag:   'referral-joined',
+      subject: `${referred} has joined LinkUp`,
+      cta:   'View your referrals',
+    }
+  },
 
   announcementBroadcast: (title: string, body: string, type = 'admin_broadcast', announcementId?: string): PushPayload => ({
     title: title.length > 60 ? title.slice(0, 60) + '…' : title,
@@ -281,7 +302,7 @@ export const NotificationTemplates = {
   }),
 
   memberActivated: (firstName: string): PushPayload => ({
-    title: `Welcome to LinkUp Golf, ${firstName}!`,
+    title: `Welcome to LinkUp Golf, ${titleCaseName(firstName)}!`,
     body:  'Your membership is now active. Explore the community, book a tee time, and connect with members.',
     url:   '/home',
     tag:   'member-activated',
@@ -290,7 +311,7 @@ export const NotificationTemplates = {
   }),
 
   bookingInvite: (bookerFirstName: string, date: string, time: string): PushPayload => ({
-    title: `${bookerFirstName} invited you to play`,
+    title: `${titleCaseName(bookerFirstName)} invited you to play`,
     body:  `You've been added to a tee time on ${date} at ${time}. Check My Bookings for details.`,
     url:   '/book',
     tag:   'booking-invite',
@@ -320,7 +341,7 @@ export const NotificationTemplates = {
   }),
 
   groupChatInvite: (inviterFirstName: string, groupName: string, conversationId: string): PushPayload => ({
-    title: `${inviterFirstName} invited you to a group`,
+    title: `${titleCaseName(inviterFirstName)} invited you to a group`,
     body:  `You've been invited to join "${groupName}". Tap to accept or decline.`,
     url:   `/messages/${conversationId}`,
     tag:   `group-invite-${conversationId}`,
@@ -383,8 +404,8 @@ export const NotificationTemplates = {
   ): PushPayload => ({
     title: 'A host wants to run a round',
     body: dateCount > 1
-      ? `${hostName} wants to host ${dateCount} rounds at ${courseName}, from ${date}. Set up the calendar, then approve them to put them in front of members.`
-      : `${hostName} wants to host a round at ${courseName} on ${date}. Set up the calendar, then approve it to put it in front of members.`,
+      ? `${titleCaseName(hostName)} wants to host ${dateCount} rounds at ${courseName}, from ${date}. Set up the calendar, then approve them to put them in front of members.`
+      : `${titleCaseName(hostName)} wants to host a round at ${courseName} on ${date}. Set up the calendar, then approve it to put it in front of members.`,
     url:   '/admin/hosts',
     tag:   'hosted-event-review',
     subject: `${titleCaseName(hostName)} wants to host a round at ${courseName}`,
@@ -443,7 +464,7 @@ export const NotificationTemplates = {
 
   hostedEventJoined: (memberName: string, courseName: string, date: string): PushPayload => ({
     title: 'New reservation',
-    body:  `${memberName} reserved a spot at your ${courseName} event on ${date}.`,
+    body:  `${titleCaseName(memberName)} reserved a spot at your ${courseName} event on ${date}.`,
     url:   '/host/events',
     tag:   'hosted-event-joined',
     subject: `${titleCaseName(memberName)} reserved a spot at your ${courseName} event`,
@@ -452,7 +473,7 @@ export const NotificationTemplates = {
 
   hostedEventProofSubmitted: (hostName: string, courseName: string, date: string): PushPayload => ({
     title: 'Event proof submitted',
-    body:  `${hostName} uploaded proof for their ${courseName} event on ${date}. Review it to approve credits.`,
+    body:  `${titleCaseName(hostName)} uploaded proof for their ${courseName} event on ${date}. Review it to approve credits.`,
     url:   '/admin/hosts',
     tag:   'hosted-event-proof',
     subject: `${titleCaseName(hostName)} submitted proof for ${courseName}`,
@@ -505,7 +526,7 @@ export const NotificationTemplates = {
   // round for them.
   creditRedemptionRequested: (name: string, amount: number): PushPayload => ({
     title: 'Credit redemption to settle',
-    body:  `${name} redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} toward golf.`,
+    body:  `${titleCaseName(name)} redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} toward golf.`,
     url:   '/admin/hosts',
     tag:   'host-credit-redemption',
     subject: `${titleCaseName(name)} redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in credits`,
@@ -535,7 +556,7 @@ export const NotificationTemplates = {
   // Sent to the host when a member releases their spot.
   hostedEventMemberCancelled: (memberName: string, courseName: string, date: string): PushPayload => ({
     title: 'A spot opened up',
-    body:  `${memberName} released their spot at your ${courseName} event on ${date}.`,
+    body:  `${titleCaseName(memberName)} released their spot at your ${courseName} event on ${date}.`,
     url:   '/host/events',
     tag:   'hosted-event-joined',
     subject: `A spot opened up at your ${courseName} event on ${date}`,

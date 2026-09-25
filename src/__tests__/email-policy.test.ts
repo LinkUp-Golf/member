@@ -140,7 +140,19 @@ describe('names in subject lines', () => {
     )
   })
 
-  it('does not touch the push title, which has its own context', () => {
-    expect(NotificationTemplates.newMessage('dana mcbride', 'hi', 'c1').title).toBe('dana mcbride')
+  it('capitalises the heading and body too, not only the subject', () => {
+    // The email's heading is the push title and its paragraph is the push
+    // body, so a name left lower-case there is just as visible.
+    const joined = NotificationTemplates.hostedEventJoined('dana mcbride', 'Aviara', 'Sat')
+    expect(joined.body).toContain('Dana Mcbride reserved')
+
+    const message = NotificationTemplates.newMessage('dana mcbride', 'hi', 'c1')
+    expect(message.title).toBe('Dana Mcbride')
+  })
+
+  it('leaves the dedup tag lower-cased, since it is a key and not copy', () => {
+    expect(NotificationTemplates.visitingMember('Dana', 'McBride', 'Mon', 'Fri').tag).toBe(
+      'visit-dana',
+    )
   })
 })
