@@ -134,7 +134,12 @@ ${email.preheader ? preheaderBlock(email.preheader) : ''}
           <tr>
             <td align="center" style="padding:0 0 24px 0;">
               <a href="${ctaUrl}" style="text-decoration:none;">
-                <img src="${logoUrl}" alt="LinkUp Golf" width="120" style="display:block;border:0;outline:none;text-decoration:none;width:120px;max-width:120px;height:auto;" />
+                <!-- public/logos/logo-full-color.png, which is square. Both
+                     dimensions are stated because Outlook renders through Word
+                     and ignores height:auto, collapsing the mark to a sliver;
+                     a fixed height is only safe because the asset's aspect
+                     ratio is fixed too. -->
+                <img src="${logoUrl}" alt="LinkUp Golf" width="120" height="120" style="display:block;border:0;outline:none;text-decoration:none;width:120px;max-width:120px;height:120px;" />
               </a>
             </td>
           </tr>

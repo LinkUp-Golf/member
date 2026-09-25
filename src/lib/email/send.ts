@@ -10,6 +10,7 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
 import { renderNotificationEmail } from './template'
 import { sendEmail, type EmailSendResult } from './client'
+import { filterByThrottle, recordEmailsSent } from './throttle'
 import type { PushPayload } from '@/lib/push/types'
 
 /** Resend takes at most 50 addresses per call. */
@@ -18,8 +19,31 @@ const BATCH_SIZE = 50
 /** What the button says when a notification doesn't name its own action. */
 const DEFAULT_CTA = 'Open in LinkUp'
 
+const PRODUCTION_APP_URL = 'https://app.linkup.golf'
+
 const appUrl = (): string =>
-  (process.env.NEXT_PUBLIC_APP_URL || 'https://app.linkup.golf').replace(/\/+$/, '')
+  (process.env.NEXT_PUBLIC_APP_URL || PRODUCTION_APP_URL).replace(/\/+$/, '')
+
+/**
+ * Where an image in an email is fetched from.
+ *
+ * Not the same as appUrl(), and the difference only shows up in development. A
+ * link can point at localhost — you click it on the machine that serves it. An
+ * image is fetched by the recipient's mail client, which is Gmail's proxy or a
+ * phone, and neither can reach your laptop: every test email sent from a dev
+ * machine arrives with a broken logo. So assets resolve against production even
+ * when the app doesn't. The asset is public and immutable, so serving the live
+ * copy to a local test is correct rather than a workaround.
+ */
+export function assetUrl(path: string): string {
+  const base = /localhost|127\.0\.0\.1|\[::1\]/i.test(appUrl())
+    ? PRODUCTION_APP_URL
+    : appUrl()
+  return `${base}${path.startsWith('/') ? path : `/${path}`}`
+}
+
+/** The mark at the top of every email — public/logos/logo-full-color.png. */
+const LOGO_PATH = '/logos/logo-full-color.png'
 
 /**
  * The absolute address of a notification's destination.
@@ -42,10 +66,15 @@ export function renderNotification(payload: PushPayload) {
     body: payload.body,
     ctaUrl: absoluteUrl(payload.url),
     ctaLabel: payload.cta || DEFAULT_CTA,
-    logoUrl: `${appUrl()}/logos/logo-full-color.png`,
+    logoUrl: assetUrl(LOGO_PATH),
     // The push notification's own image, when it has one — same asset, same
-    // notification. Relative paths are resolved like the destination is.
-    imageUrl: payload.image ? absoluteUrl(payload.image) : null,
+    // notification. A relative path is one of ours, so it resolves against the
+    // asset origin; an absolute one is already wherever it lives.
+    imageUrl: payload.image
+      ? /^https?:\/\//i.test(payload.image)
+        ? payload.image
+        : assetUrl(payload.image)
+      : null,
     preheader: payload.body,
     settingsUrl: `${appUrl()}/more/settings`,
   })
@@ -109,14 +138,25 @@ export async function sendNotificationEmail(
  */
 const NO_ACCESS_STATUSES: readonly string[] = ['cancelled', 'suspended']
 
-/** The addresses of the given members, skipping anyone who can't get in. */
-export async function memberEmails(memberIds: string[]): Promise<string[]> {
+export interface Recipient {
+  memberId: string
+  email: string
+}
+
+/**
+ * The addresses of the given members, skipping anyone who can't get in.
+ *
+ * Returns the member id alongside each address because the throttle is
+ * recorded per member, and only the members who were actually mailed should
+ * spend a slot.
+ */
+export async function resolveRecipients(memberIds: string[]): Promise<Recipient[]> {
   const ids = Array.from(new Set(memberIds.filter(Boolean)))
   if (ids.length === 0) return []
 
   const { data, error } = await createAdminClient()
     .from('members')
-    .select('email, membership_status')
+    .select('id, email, membership_status')
     .in('id', ids)
 
   if (error) {
@@ -136,16 +176,16 @@ export async function memberEmails(memberIds: string[]): Promise<string[]> {
   const blocked = rows.filter(m =>
     NO_ACCESS_STATUSES.includes((m.membership_status as string | null) ?? ''),
   )
-  const addresses = rows
+  const recipients: Recipient[] = rows
     .filter(m => !NO_ACCESS_STATUSES.includes((m.membership_status as string | null) ?? ''))
-    .map(m => (m.email as string | null) ?? '')
-    .filter(Boolean)
+    .map(m => ({ memberId: m.id as string, email: (m.email as string | null) ?? '' }))
+    .filter(r => !!r.email)
 
   // Every way a recipient can vanish between an id and an inbox, counted: the
   // row wasn't found, the member has lost access, or the row has no address.
   // Without this, an email that never arrives and an email that was never
   // addressed are the same silence.
-  if (addresses.length < ids.length) {
+  if (recipients.length < ids.length) {
     logger.warn('Some members will not be emailed', {
       action: 'email.recipients_dropped',
       metadata: {
@@ -156,13 +196,68 @@ export async function memberEmails(memberIds: string[]): Promise<string[]> {
         blockedStatuses: Array.from(
           new Set(blocked.map(m => (m.membership_status as string | null) ?? 'null')),
         ),
-        noAddress: rows.length - blocked.length - addresses.length,
-        resolved: addresses.length,
+        noAddress: rows.length - blocked.length - recipients.length,
+        resolved: recipients.length,
       },
     })
   }
 
-  return addresses
+  return recipients
+}
+
+/** The addresses alone, for callers that have no member ids to throttle on. */
+export async function memberEmails(memberIds: string[]): Promise<string[]> {
+  return (await resolveRecipients(memberIds)).map(r => r.email)
+}
+
+/**
+ * Emails a notification to members, after the policy has had its say.
+ *
+ * This is the one door every member-addressed email goes through, which is
+ * what makes the policy in ./policy enforceable rather than advisory. The
+ * order matters: decide who may be mailed, resolve only those to addresses,
+ * send, and record only what the provider accepted — a rejected send must not
+ * spend a member's budget for the day.
+ */
+async function sendToMemberIds(
+  memberIds: string[],
+  payload: PushPayload,
+): Promise<EmailSendResult> {
+  const ids = Array.from(new Set(memberIds.filter(Boolean)))
+  if (ids.length === 0) return empty()
+
+  const { allowed, suppressed, category, key } = await filterByThrottle(ids, payload.tag)
+
+  if (suppressed.length > 0) {
+    // Suppression is invisible to everyone involved, so it is stated plainly
+    // here. Counted by reason, because "we chose not to" and "we couldn't"
+    // look identical from an empty inbox.
+    logger.info('Some members were not emailed by policy', {
+      action: 'email.throttled',
+      metadata: {
+        key,
+        category,
+        title: payload.title,
+        suppressed: suppressed.length,
+        allowed: allowed.length,
+        cooldown: suppressed.filter(s => s.reason === 'cooldown').length,
+        dailyCap: suppressed.filter(s => s.reason === 'daily_cap').length,
+      },
+    })
+  }
+
+  if (allowed.length === 0) return empty()
+
+  const recipients = await resolveRecipients(allowed)
+  if (recipients.length === 0) return empty()
+
+  const result = await sendNotificationEmail(recipients.map(r => r.email), payload)
+
+  if (result.sent > 0) {
+    await recordEmailsSent(recipients.map(r => r.memberId), key, category)
+  }
+
+  return result
 }
 
 /** One member, by id. */
@@ -170,7 +265,7 @@ export async function sendEmailToMember(
   memberId: string,
   payload: PushPayload,
 ): Promise<EmailSendResult> {
-  return sendNotificationEmail(await memberEmails([memberId]), payload)
+  return sendToMemberIds([memberId], payload)
 }
 
 /** Several members, by id. */
@@ -178,14 +273,14 @@ export async function sendEmailToMembers(
   memberIds: string[],
   payload: PushPayload,
 ): Promise<EmailSendResult> {
-  return sendNotificationEmail(await memberEmails(memberIds), payload)
+  return sendToMemberIds(memberIds, payload)
 }
 
 /** Everyone with is_admin — the same audience sendPushToAdmins reaches. */
 export async function sendEmailToAdmins(payload: PushPayload): Promise<EmailSendResult> {
   const { data, error } = await createAdminClient()
     .from('members')
-    .select('email')
+    .select('id')
     .eq('is_admin', true)
 
   if (error) {
@@ -198,8 +293,5 @@ export async function sendEmailToAdmins(payload: PushPayload): Promise<EmailSend
     return empty()
   }
 
-  return sendNotificationEmail(
-    (data ?? []).map(m => (m.email as string | null) ?? '').filter(Boolean),
-    payload,
-  )
+  return sendToMemberIds((data ?? []).map(m => m.id as string), payload)
 }

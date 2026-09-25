@@ -5,7 +5,8 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { inviteRateLimit } from '@/lib/rateLimit'
-import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember } from '@/lib/notify'
 import type { AuthContext } from '@/lib/auth/types'
 
 // GET /api/conversations/[id]/participants
@@ -142,7 +143,7 @@ export const POST = withAuth(async (
     ])
     const groupName = conv?.name ?? 'a group'
     const inviterName = inviter?.first_name ?? 'Someone'
-    await sendPushToMember(
+    await notifyMember(
       member_id,
       NotificationTemplates.groupChatInvite(inviterName, groupName, convId)
     )

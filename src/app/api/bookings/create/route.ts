@@ -23,7 +23,8 @@ import { getAvailableSlots, createBooking, getContactByEmail, resolveMeetingDura
 import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { logActivity } from '@/lib/activity/log'
 import { provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
-import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMembers } from '@/lib/notify'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
 import { buildCustomSlots } from '@/lib/bookings/availability'
@@ -688,7 +689,7 @@ export async function POST(request: NextRequest) {
     .filter((id): id is string => Boolean(id))
   if (invitedMemberIds.length) {
     const displayTime = timeNormalized.slice(0, 5)
-    void sendPushToMembers(
+    void notifyMembers(
       invitedMemberIds,
       NotificationTemplates.bookingInvite(member.first_name, displayDate, displayTime)
     ).catch(() => {})

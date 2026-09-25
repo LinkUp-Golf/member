@@ -6,7 +6,8 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { getCache } from '@/lib/cache'
 import { COURSE_PROMO_NS, coursePromoPrefix } from '@/lib/cache/keys'
-import { sendPushToCourse, sendPushToMembers, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyCourse, notifyMembers } from '@/lib/notify'
 import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -72,7 +73,7 @@ export const POST = withAuth(
     const payload = NotificationTemplates.promotionAvailable(data.partner_name, data.title, data.id)
     if (data.course_id) {
       await getCache(COURSE_PROMO_NS).clear(coursePromoPrefix(data.course_id)).catch(() => {})
-      sendPushToCourse(data.course_id, payload).catch(() => {})
+      notifyCourse(data.course_id, payload).catch(() => {})
     } else {
       // Global promotion — affects every course's list. Clear the entire namespace.
       await getCache(COURSE_PROMO_NS).clear('course:promo:').catch(() => {})
@@ -84,7 +85,7 @@ export const POST = withAuth(
           .select('id')
           .eq('membership_status', 'active')
         if (members?.length) {
-          await sendPushToMembers(members.map(m => m.id), payload)
+          await notifyMembers(members.map(m => m.id), payload)
         }
       })().catch(() => {})
     }

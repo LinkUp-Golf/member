@@ -24,11 +24,13 @@ import type { PayoutMethod } from '@/types'
 // Kept here because it needs a Supabase query that doesn't
 // belong in the generic push service.
 
-export async function sendPushToCourse(
+// Exported because email needs to reach exactly the same people. Resolving the
+// audience once and handing the ids to both channels is what keeps a
+// course-wide notification from meaning two different things in two inboxes.
+export async function courseMemberIds(
   courseId: string,
-  payload: PushPayload,
   excludeUserId?: string
-): Promise<SendResult> {
+): Promise<string[]> {
   const supabase = createAdminClient()
 
   let query = supabase
@@ -42,9 +44,16 @@ export async function sendPushToCourse(
   }
 
   const { data: members } = await query
-  if (!members?.length) return { sent: 0, failed: 0, cleaned: 0 }
+  return (members ?? []).map((m: { member_id: string }) => m.member_id)
+}
 
-  const userIds = members.map((m: { member_id: string }) => m.member_id)
+export async function sendPushToCourse(
+  courseId: string,
+  payload: PushPayload,
+  excludeUserId?: string
+): Promise<SendResult> {
+  const userIds = await courseMemberIds(courseId, excludeUserId)
+  if (!userIds.length) return { sent: 0, failed: 0, cleaned: 0 }
   return sendToUsers(userIds, payload)
 }
 
@@ -66,38 +75,24 @@ export async function sendPushToAdmins(payload: PushPayload): Promise<SendResult
   return sendToUsers(userIds, payload)
 }
 
-// Sends to course members whose focus linkup subscriptions overlap with
-// focusCategories. Falls back to all course members when the list is empty.
-export async function sendPushToFocusMembers(
+// The members whose focus linkup subscriptions overlap with focusCategories.
+// Falls back to every course member when the list is empty.
+export async function focusMemberIds(
   courseId: string,
   focusCategories: string[],
-  payload: PushPayload,
   excludeUserId?: string
-): Promise<SendResult> {
-  if (!focusCategories.length) {
-    return sendPushToCourse(courseId, payload, excludeUserId)
-  }
+): Promise<string[]> {
+  if (!focusCategories.length) return courseMemberIds(courseId, excludeUserId)
 
-  const supabase = createAdminClient()
+  const memberIds = await courseMemberIds(courseId, excludeUserId)
+  if (!memberIds.length) return []
 
-  let memberQuery = supabase
-    .from('course_memberships')
-    .select('member_id')
-    .eq('course_id', courseId)
-    .eq('status', 'active')
-  if (excludeUserId) memberQuery = memberQuery.neq('member_id', excludeUserId)
-
-  const { data: courseMembers } = await memberQuery
-  if (!courseMembers?.length) return { sent: 0, failed: 0, cleaned: 0 }
-
-  const courseMemberIds = courseMembers.map((m: { member_id: string }) => m.member_id)
-
-  const { data: subs } = await supabase
+  const { data: subs } = await createAdminClient()
     .from('focus_linkup_subscriptions')
     .select('member_id, industry_focus, custom_label, status')
-    .in('member_id', courseMemberIds)
+    .in('member_id', memberIds)
 
-  const subscribedIds = [...new Set(
+  return [...new Set(
     (subs ?? [])
       .filter((s: { industry_focus: string; custom_label: string | null; status: string }) => {
         if (focusCategories.includes(s.industry_focus) && s.status !== 'declined') return true
@@ -106,7 +101,17 @@ export async function sendPushToFocusMembers(
       })
       .map((s: { member_id: string }) => s.member_id)
   )]
+}
 
+// Sends to course members whose focus linkup subscriptions overlap with
+// focusCategories. Falls back to all course members when the list is empty.
+export async function sendPushToFocusMembers(
+  courseId: string,
+  focusCategories: string[],
+  payload: PushPayload,
+  excludeUserId?: string
+): Promise<SendResult> {
+  const subscribedIds = await focusMemberIds(courseId, focusCategories, excludeUserId)
   if (!subscribedIds.length) return { sent: 0, failed: 0, cleaned: 0 }
   return sendToUsers(subscribedIds, payload)
 }
@@ -124,6 +129,7 @@ export const NotificationTemplates = {
     body:  `${firstName} has joined the ${courseName} community. Tap to view their profile.`,
     url:   memberId ? `/members/${memberId}` : '/members',
     tag:   'new-member',
+    cta:   'View their profile',
   }),
 
   bookingAnnouncement: (firstName: string, date: string, time: string, memberId?: string): PushPayload => ({
@@ -131,6 +137,7 @@ export const NotificationTemplates = {
     body:  `${firstName} booked a tee time at ${time}. Message them to join.`,
     url:   memberId ? `/members/${memberId}` : '/members',
     tag:   `booking-${date}`,
+    cta:   'See who else is playing',
   }),
 
   visitingMember: (firstName: string, lastName: string, from: string, until: string, memberId?: string): PushPayload => ({
@@ -138,13 +145,18 @@ export const NotificationTemplates = {
     body:  `Visiting from ${from} to ${until}. Tap to invite them to play.`,
     url:   memberId ? `/members/${memberId}` : '/members',
     tag:   `visit-${firstName.toLowerCase()}`,
+    cta:   'Invite them to play',
   }),
 
   newMessage: (senderName: string, preview: string, conversationId: string): PushPayload => ({
+    // As a push this reads like a chat notification — the sender's name over
+    // the message. As an email the same two lines become the heading and the
+    // body, which is why the title is the name rather than "New message".
     title: senderName,
     body:  preview.length > 80 ? preview.slice(0, 80) + '…' : preview,
     url:   `/messages/${conversationId}`,
     tag:   `msg-${conversationId}`,
+    cta:   'Reply in LinkUp',
   }),
 
   focusLinkup: (title: string, date: string, weeksOut: number): PushPayload => ({
@@ -152,6 +164,7 @@ export const NotificationTemplates = {
     body:  `The ${title} is coming up on ${date}. Book your spot now.`,
     url:   '/more/focus-linkups',
     tag:   `focus-linkup-${weeksOut}w`,
+    cta:   'Book your spot',
   }),
 
   playSuggestion: (otherMemberName: string, suggestedMemberId?: string): PushPayload => ({
@@ -159,6 +172,7 @@ export const NotificationTemplates = {
     body:  `You haven't played with ${otherMemberName} yet. Want to set up a round?`,
     url:   suggestedMemberId ? `/members/${suggestedMemberId}` : '/members',
     tag:   `suggestion-${otherMemberName.toLowerCase().replace(' ', '-')}`,
+    cta:   'See their profile',
   }),
 
   guestAccessApproved: (courseName: string, from: string, until: string): PushPayload => ({
@@ -233,6 +247,7 @@ export const NotificationTemplates = {
     body:  body.length > 150 ? body.slice(0, 150) + '…' : body,
     url:   announcementId ? `/more/announcements/${announcementId}` : '/more/announcements',
     tag:   `announcement-${type}`,
+    cta:   'Read the announcement',
   }),
 
   promotionAvailable: (partnerName: string, promoTitle: string, promotionId?: string): PushPayload => ({
@@ -240,6 +255,7 @@ export const NotificationTemplates = {
     body:  `${partnerName} has a new exclusive offer for LinkUp members.`,
     url:   promotionId ? `/more/promotions/${promotionId}` : '/more/promotions',
     tag:   `promotion-${partnerName.toLowerCase().replace(/\s+/g, '-').slice(0, 20)}`,
+    cta:   'See the offer',
   }),
 
   memberActivated: (firstName: string): PushPayload => ({
@@ -274,6 +290,7 @@ export const NotificationTemplates = {
     body:  `Rate your round at ${courseName} — it only takes a moment.`,
     url:   '/home',
     tag:   `booking-survey-${bookingId}`,
+    cta:   'Rate your round',
   }),
 
   groupChatInvite: (inviterFirstName: string, groupName: string, conversationId: string): PushPayload => ({
@@ -281,6 +298,7 @@ export const NotificationTemplates = {
     body:  `You've been invited to join "${groupName}". Tap to accept or decline.`,
     url:   `/messages/${conversationId}`,
     tag:   `group-invite-${conversationId}`,
+    cta:   'Accept or decline',
   }),
 
   memberEventRejected: (eventTitle: string, reason: string): PushPayload => ({
@@ -392,6 +410,7 @@ export const NotificationTemplates = {
     body:  `${memberName} reserved a spot at your ${courseName} event on ${date}.`,
     url:   '/host/events',
     tag:   'hosted-event-joined',
+    cta:   'View your event',
   }),
 
   hostedEventProofSubmitted: (hostName: string, courseName: string, date: string): PushPayload => ({
@@ -474,5 +493,6 @@ export const NotificationTemplates = {
     body:  `${memberName} released their spot at your ${courseName} event on ${date}.`,
     url:   '/host/events',
     tag:   'hosted-event-joined',
+    cta:   'View your event',
   }),
 }

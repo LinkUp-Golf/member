@@ -8,15 +8,19 @@
 //
 // ---- Which notifications belong here ----
 //
-// Not all of them. `sendPushToMember` and friends stay exactly as they were and
-// remain the right call for anything chatty — a new message, someone booking a
-// tee time, a play suggestion. Emailing those would turn a busy Saturday into
-// twenty emails and teach members to filter us.
+// All of them. Every template in NotificationTemplates has an email
+// counterpart, so this is the default way to send one and `sendPushTo*` is
+// only for the rare case that genuinely shouldn't leave the device.
 //
-// `notifyMember` is for the ones a member would be annoyed to have missed: a
-// booking that needs paying, an application approved or turned down, credit
-// issued, a round taken down, a venue going live. If you're unsure, ask whether
-// it would still matter tomorrow. If not, it's a push.
+// That used to be a choice made here, call site by call site, which meant the
+// restraint was real but undiscoverable — you could only learn it by reading
+// every route. It now lives in src/lib/email/policy.ts as a table of
+// notification kinds and how often each may be mailed, with a per-member daily
+// cap over the top. Sending more email is a question of policy, not of which
+// function a route happened to import.
+//
+// So: call notify*. If a new notification shouldn't be mailed as often as it's
+// pushed, say so in the policy where the next person will find it.
 //
 // ---- Failure ----
 //
@@ -28,6 +32,8 @@ import {
   sendPushToMember,
   sendPushToMembers,
   sendPushToAdmins,
+  courseMemberIds,
+  focusMemberIds,
 } from '@/lib/push'
 import {
   sendEmailToMember,
@@ -144,6 +150,48 @@ export async function notifyMembers(
     'notify.members',
     payload.title,
     { members: ids.length },
+    () => sendPushToMembers(ids, payload),
+    () => sendEmailToMembers(ids, payload),
+  )
+}
+
+/**
+ * Every active member of a course, both ways.
+ *
+ * The audience is resolved once and given to both channels, so a broadcast
+ * can't mean one thing on a phone and another in an inbox. The per-member cap
+ * in ./email/policy applies to each recipient individually, which is what
+ * stops a busy week of announcements from becoming a busy week of email.
+ */
+export async function notifyCourse(
+  courseId: string,
+  payload: PushPayload,
+  excludeUserId?: string,
+): Promise<NotifyResult> {
+  const ids = await courseMemberIds(courseId, excludeUserId)
+  if (ids.length === 0) return NONE
+  return both(
+    'notify.course',
+    payload.title,
+    { courseId, members: ids.length },
+    () => sendPushToMembers(ids, payload),
+    () => sendEmailToMembers(ids, payload),
+  )
+}
+
+/** Course members subscribed to any of these focus categories, both ways. */
+export async function notifyFocusMembers(
+  courseId: string,
+  focusCategories: string[],
+  payload: PushPayload,
+  excludeUserId?: string,
+): Promise<NotifyResult> {
+  const ids = await focusMemberIds(courseId, focusCategories, excludeUserId)
+  if (ids.length === 0) return NONE
+  return both(
+    'notify.focus',
+    payload.title,
+    { courseId, members: ids.length, categories: focusCategories.length },
     () => sendPushToMembers(ids, payload),
     () => sendEmailToMembers(ids, payload),
   )

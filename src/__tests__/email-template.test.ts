@@ -5,7 +5,7 @@ import {
   safeUrl,
   type NotificationEmail,
 } from '@/lib/email/template'
-import { absoluteUrl } from '@/lib/email/send'
+import { absoluteUrl, assetUrl } from '@/lib/email/send'
 import { maskEmail } from '@/lib/email/client'
 
 // An email can't be fixed after it's sent, and nobody sees it before a member
@@ -119,5 +119,28 @@ describe('maskEmail', () => {
   it('gives up rather than guess at something that is not an address', () => {
     expect(maskEmail('not-an-address')).toBe('***')
     expect(maskEmail('@x.com')).toBe('***')
+  })
+})
+
+describe('assetUrl', () => {
+  it('never points an email image at a machine the recipient cannot reach', () => {
+    // Gmail fetches images through its own proxy and a phone fetches them over
+    // the network; localhost is neither, so a dev-sent email would arrive with
+    // a broken logo.
+    const prev = process.env.NEXT_PUBLIC_APP_URL
+    process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000'
+    expect(assetUrl('/logos/logo-full-color.png')).toBe(
+      'https://app.linkup.golf/logos/logo-full-color.png',
+    )
+    process.env.NEXT_PUBLIC_APP_URL = prev
+  })
+
+  it('uses the configured app when it is a real one', () => {
+    const prev = process.env.NEXT_PUBLIC_APP_URL
+    process.env.NEXT_PUBLIC_APP_URL = 'https://staging.linkup.golf'
+    expect(assetUrl('/logos/logo-full-color.png')).toBe(
+      'https://staging.linkup.golf/logos/logo-full-color.png',
+    )
+    process.env.NEXT_PUBLIC_APP_URL = prev
   })
 })

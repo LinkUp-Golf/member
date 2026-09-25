@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { formatInTimeZone } from 'date-fns-tz'
-import { sendPushToAdmins } from '@/lib/push'
+import { notifyAdmins } from '@/lib/notify'
 import type { AuthContext } from '@/lib/auth/types'
 
 const VALID_RSVP = new Set(['yes', 'no', 'maybe'])
@@ -67,13 +67,14 @@ export const PATCH = withAuth(async (
       .single()
     const memberName = responder ? `${responder.first_name} ${responder.last_name}` : 'A member'
 
-    sendPushToAdmins({
+    notifyAdmins({
       title: isYes ? 'Dinner RSVP — yes' : 'Dinner RSVP — maybe',
       body: isYes
         ? `${memberName} confirmed they're staying for dinner on ${dateStr}.`
         : `${memberName} on the ${dateStr} booking is unsure about staying for dinner.`,
       url: '/admin/bookings',
       tag: `dinner-rsvp-${bookingId}`,
+      cta: 'Open the booking',
     }).catch(() => {})
   }
 
