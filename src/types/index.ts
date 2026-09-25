@@ -465,11 +465,11 @@ export interface Host {
   updated_at: string
 }
 
-export type HostApplicationStatus = 'pending' | 'approved' | 'rejected'
-
 /**
- * A round proposed on a host application — the dates/spots/pricing half of the
- * "how it works" flow. Becomes a real HostedEvent on approval.
+ * A round proposed when a member becomes a host — the dates/spots/pricing half
+ * of the form. Becomes a HostedEvent immediately: there is no review, so these
+ * no longer persist as rows of their own, and this is now the shape on the wire
+ * rather than a table.
  */
 export interface HostApplicationEvent {
   id: string
@@ -502,32 +502,6 @@ export type HostApplicationEventInput = Pick<
   'course_id' | 'event_date' | 'tee_time' | 'dinner'
 > &
   Partial<Pick<HostApplicationEvent, 'total_spots' | 'member_guest_rate'>>
-
-export interface HostApplication {
-  id: string
-  member_id: string
-  /** Host name the applicant proposes to operate under. */
-  name: string | null
-  /**
-   * The applicant's pitch. Null on anything submitted after the field was
-   * removed from the form — the venues and proposed rounds are what an admin
-   * reviews. Older applications keep theirs.
-   */
-  description: string | null
-  /** The course ids the applicant wants to host at. */
-  requested_course_ids: string[]
-  status: HostApplicationStatus
-  host_id: string | null
-  rejection_reason: string | null
-  reviewed_by: string | null
-  reviewed_at: string | null
-  created_at: string
-  updated_at: string
-  // Enriched (present when joined to the member row in API responses)
-  member?: { first_name: string; last_name: string; email: string } | null
-  /** Rounds the applicant proposed alongside the venues. */
-  events?: HostApplicationEvent[]
-}
 
 export type HostedEventStatus =
   /**

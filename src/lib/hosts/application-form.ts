@@ -11,8 +11,6 @@ import type { HostApplicationEventInput } from '@/types'
 import { newLinkupRounds, type NewLinkupValues } from '@/lib/hosts/new-linkup'
 import { normaliseTeeTime } from '@/lib/hosts/tee-time'
 
-export const NAME_MIN = 2
-export const NAME_MAX = 120
 export const MAX_DATES_PER_ROUND = 30
 
 /** A round as submitted: `venue` is the course id it sits at. */
@@ -21,7 +19,6 @@ export type ProposedRound = Omit<HostApplicationEventInput, 'course_id'> & {
 }
 
 export type SubmitValues = {
-  name: string
   course_ids: string[]
   events: ProposedRound[]
 }
@@ -64,7 +61,6 @@ export interface ExistingVenueField {
 }
 
 export interface ApplicationValues {
-  name: string
   existing: ExistingVenueField[]
 }
 
@@ -136,7 +132,6 @@ export function buildApplicationPayload(data: ApplicationValues): SubmitValues {
   data.existing.forEach(v => collect(v.round, v.courseId))
 
   return {
-    name: data.name.trim(),
     course_ids: data.existing.map(v => v.courseId),
     events,
   }

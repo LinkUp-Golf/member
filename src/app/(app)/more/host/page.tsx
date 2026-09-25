@@ -13,6 +13,7 @@ import {
   type UseFormTrigger,
 } from "react-hook-form";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Flag, Plus, X } from "lucide-react";
 import VenueDateSelector from "@/components/host/VenueDateSelector";
 import DateTeeTimeList from "@/components/host/DateTeeTimeList";
@@ -21,7 +22,6 @@ import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
 import { Spinner } from "@/components/ui/Loading";
 import AppShell from "@/components/layout/AppShell";
-import { formatRelativeTime } from "@/lib/utils";
 import { TutorialLink } from "@/components/tutorials/TutorialPlayer";
 import { HOST_EVENT_GUEST_RATE_USD } from "@/lib/constants";
 import {
@@ -38,14 +38,12 @@ import {
   newRound,
   roundAt,
   MAX_DATES_PER_ROUND,
-  NAME_MAX,
-  NAME_MIN,
   type ApplicationValues,
   type RoundFields,
   type SubmitValues,
 } from "@/lib/hosts/application-form";
 import { TEE_TIME_REQUIRED, missingTeeTimes } from "@/lib/hosts/tee-time";
-import type { Host, HostApplication, Course } from "@/types";
+import type { Host, Course } from "@/types";
 
 const fmtMoney = (n: number) =>
   n.toLocaleString("en-US", {
@@ -60,18 +58,14 @@ type VenueOption = Pick<Course, "id" | "name" | "city"> & {
   approval_status?: Course["approval_status"];
 };
 
-interface ApplicationState {
-  application: HostApplication | null;
+interface HostState {
   host: Pick<Host, "id" | "name" | "status"> | null;
   venues?: VenueOption[];
 }
 
 export default function HostApplicationPage() {
   const { user } = useProfile();
-  const [state, setState] = useState<ApplicationState>({
-    application: null,
-    host: null,
-  });
+  const [state, setState] = useState<HostState>({ host: null });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // A failed status read is not the same as "you have never applied". Rendering
@@ -80,7 +74,7 @@ export default function HostApplicationPage() {
   const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await apiClient.get<ApplicationState>("/api/host/application");
+    const res = await apiClient.get<HostState>("/api/host/application");
     if (res.data) {
       setState(res.data);
       setLoadFailed(false);
@@ -94,10 +88,9 @@ export default function HostApplicationPage() {
     if (user) load();
   }, [user, load]);
 
-  // Approval happens elsewhere (an admin, in their own session), so this page has
-  // to re-read rather than wait to be told. Re-checking when the tab regains
-  // focus is what turns "Under review" into the approved state without a manual
-  // reload — the member otherwise sat on a stale card indefinitely.
+  // Re-read when the tab regains focus. Nothing waits on an admin any more, but
+  // a host row can still appear from elsewhere — the GHL host tag grants one on
+  // login — and this page should show that rather than an apply form.
   useEffect(() => {
     if (!user) return;
     const onFocus = () => {
@@ -111,9 +104,13 @@ export default function HostApplicationPage() {
     };
   }, [user, load]);
 
-  const { application, host } = state;
-  const isPending = application?.status === "pending";
-  const wasRejected = application?.status === "rejected";
+  const router = useRouter();
+
+  const { host } = state;
+  // Nothing waits any more: a submission makes the member a host before the
+  // request returns. What used to be three states — pending, rejected, host —
+  // is one.
+
   // The host row is the role — an admin can grant it without an application.
   // Suspended hosts are excluded: the workspace gates refuse them, so offering
   // the dashboard link would be a closed loop.
@@ -137,7 +134,9 @@ export default function HostApplicationPage() {
         </div>
       }
     >
-      <div className="px-5 py-5 pb-8">
+      {/* Three-quarter width on a wide screen, centred; full width on a phone,
+          where anything narrower just wastes the screen. */}
+      <div className="px-5 py-5 pb-8 w-full md:w-3/4 md:mx-auto">
         {loading ? (
           <div className="py-16 flex justify-center">
             <Spinner className="w-5 h-5 text-green-900" />
@@ -211,60 +210,9 @@ export default function HostApplicationPage() {
               </div>
             )}
 
-            {/* Under review */}
-            {!isHost && isPending && (
-              <div className="card card-pad mb-5">
-                <StatusPill label="Under review" tone="yellow" />
-                <p className="text-sm text-green-900/70 leading-relaxed mt-3">
-                  Your application is with our team. We&apos;ll notify you as
-                  soon as it&apos;s been reviewed.
-                </p>
-                {/* What they actually submitted. Previously the card said only
-                    that something was under review, not what. */}
-                {application.events && application.events.length > 0 && (
-                  <div className="mt-3 space-y-1">
-                    {application.events.map((ev) => (
-                      <p
-                        key={ev.id}
-                        className="text-xs text-green-900/60 flex items-center gap-1.5"
-                      >
-                        <span className="w-1 h-1 rounded-full bg-green-900/40 flex-shrink-0" />
-                        {ev.course?.name ?? "Venue"} · {ev.event_date}
-                        {ev.tee_time ? ` · ${ev.tee_time}` : ""} ·{" "}
-                        {ev.total_spots} spots
-                      </p>
-                    ))}
-                  </div>
-                )}
-
-                <p className="text-xs text-green-900/40 mt-2">
-                  Submitted {formatRelativeTime(application.created_at)}
-                </p>
-              </div>
-            )}
-
-            {/* Rejected — may re-apply */}
-            {!isHost && wasRejected && (
-              <div className="card card-pad mb-5">
-                <StatusPill label="Not approved" tone="red" />
-                {application.rejection_reason && (
-                  <p className="text-sm text-green-900/70 leading-relaxed mt-3">
-                    {application.rejection_reason}
-                  </p>
-                )}
-                <p className="text-xs text-green-900/40 mt-2">
-                  Reviewed{" "}
-                  {application.reviewed_at
-                    ? formatRelativeTime(application.reviewed_at)
-                    : "recently"}{" "}
-                  · you&apos;re welcome to apply again below.
-                </p>
-              </div>
-            )}
-
             {/* Status couldn't be read — say so rather than implying the member
                 has never applied, which is what an unguarded apply form does. */}
-            {loadFailed && !isHost && !isPending && (
+            {loadFailed && !isHost && (
               <div className="card card-pad mb-5">
                 <StatusPill label="Unavailable" tone="yellow" />
                 <p className="text-sm text-green-900/70 leading-relaxed mt-3">
@@ -284,15 +232,15 @@ export default function HostApplicationPage() {
               </div>
             )}
 
-            {/* Apply — available when not a host and nothing is pending */}
-            {!loadFailed && !isHost && !isPending && (
+            {/* The form — the only thing on this page for a member who
+                isn't a host yet. Submitting it makes them one. */}
+            {!loadFailed && !isHost && (
               <ApplicationForm
-                heading={wasRejected ? "Apply again" : "Apply to become a host"}
+                heading="Become a host"
                 error={error}
-                onSubmit={async ({ name, course_ids, events }) => {
+                onSubmit={async ({ course_ids, events }) => {
                   setError(null);
                   const res = await apiClient.post("/api/host/application", {
-                    name,
                     course_ids,
                     events,
                   });
@@ -300,13 +248,16 @@ export default function HostApplicationPage() {
                     setError(res.error.message);
                     return false;
                   }
-                  await load();
+                  // They are a host as of this response — there is nothing to
+                  // come back to this page for, so send them to the workspace
+                  // rather than re-rendering it as an approved card.
+                  router.replace("/host");
                   return true;
                 }}
               />
             )}
 
-            {!isHost && !isPending && !wasRejected && (
+            {!isHost && (
               <p className="text-xs text-green-900/35 text-center mt-5 flex items-center justify-center gap-1.5">
                 <Flag className="w-3.5 h-3.5" strokeWidth={1.75} />
                 Credits are awarded after each event, once an admin approves
@@ -350,7 +301,7 @@ function ApplicationForm({
     trigger,
     formState: { errors, isSubmitting },
   } = useForm<ApplicationValues>({
-    defaultValues: { name: "", existing: [] },
+    defaultValues: { existing: [] },
     // Validate a field once it's been touched, so a bad date says so while
     // you're still looking at it rather than after a submit.
     mode: "onTouched",
@@ -457,7 +408,7 @@ function ApplicationForm({
 
     const ok = await onSubmit(payload);
     if (ok) {
-      reset({ name: "", existing: [] });
+      reset({ existing: [] });
       closeNewLinkup();
     }
   });
@@ -465,32 +416,6 @@ function ApplicationForm({
   return (
     <form onSubmit={submit} className="card card-pad space-y-4" noValidate>
       <p className="section-label">{heading}</p>
-
-      <div>
-        <label
-          htmlFor="host-name"
-          className="text-xs text-green-900/50 mb-1.5 block"
-        >
-          Host name
-        </label>
-        <input
-          id="host-name"
-          className="input"
-          placeholder="The name you'll host under — your own or a brand"
-          {...register("name", {
-            required: "Enter a host name",
-            maxLength: {
-              value: NAME_MAX,
-              message: `At most ${NAME_MAX} characters`,
-            },
-            validate: (v) =>
-              v.trim().length >= NAME_MIN || `At least ${NAME_MIN} characters`,
-          })}
-        />
-        {errors.name && (
-          <p className="text-xs text-red-500 mt-1.5">{errors.name.message}</p>
-        )}
-      </div>
 
       <div>
         <span className="text-xs text-green-900/50 mb-1.5 block">

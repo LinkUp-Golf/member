@@ -359,24 +359,6 @@ export const NotificationTemplates = {
   }),
 
   // ---- Hosts ------------------------------------------------
-  hostApplicationApproved: (): PushPayload => ({
-    title: 'You\'re now a host',
-    body:  'Your application was approved — create your first event and start earning credits.',
-    url:   '/host',
-    tag:   'host-application-approved',
-    subject: 'You\'re now a LinkUp host',
-    cta:   'Open your host workspace',
-  }),
-
-  hostApplicationRejected: (reason: string): PushPayload => ({
-    title: 'Host application',
-    body:  `Your application wasn't approved this time. ${reason}`,
-    url:   '/more/host',
-    tag:   'host-application-rejected',
-    subject: 'About your LinkUp host application',
-    cta:   'View details',
-  }),
-
   hostedEventPublished: (courseName: string, date: string): PushPayload => ({
     title: 'Your event is live',
     body:  `Your event at ${courseName} on ${date} is now open for members to reserve spots.`,

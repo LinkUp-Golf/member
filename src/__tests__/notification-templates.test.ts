@@ -31,8 +31,6 @@ describe('coverage of the template set', () => {
     NotificationTemplates.roundSurvey('Aviara', 'b1'),
     NotificationTemplates.groupChatInvite('Dana', 'Finance', 'c1'),
     NotificationTemplates.memberEventRejected('Event', 'no'),
-    NotificationTemplates.hostApplicationApproved(),
-    NotificationTemplates.hostApplicationRejected('no'),
     NotificationTemplates.hostedEventPublished('Aviara', 'Sat'),
     NotificationTemplates.hostedEventNeedsReview('Dana', 'Aviara', 'Sat'),
     NotificationTemplates.hostedEventApproved('Aviara', 'Sat'),

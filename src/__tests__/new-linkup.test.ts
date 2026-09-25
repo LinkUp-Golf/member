@@ -87,7 +87,7 @@ describe('newLinkupRounds', () => {
 })
 
 describe('withNewLinkup', () => {
-  const base = buildApplicationPayload({ name: 'Jane Smith', existing: [] })
+  const base = buildApplicationPayload({ existing: [] })
 
   it('adds the proposed club as a venue with a round per date', () => {
     const payload = withNewLinkup(base, COURSE, filled())
