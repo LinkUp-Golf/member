@@ -103,6 +103,23 @@ export class Logger {
 
     const line = this.isProd ? formatJSON(entry) : formatHuman(entry)
 
+    // On the server, write to the stream rather than through console.
+    //
+    // next.config.mjs strips console.log and console.info from production
+    // builds, which is right for page bundles and wrong for a logger: it meant
+    // every info-level line — including "email sent" and its Resend id —
+    // silently vanished in production, leaving only failures. Writing to
+    // stdout/stderr is what structured logging wants anyway, and Vercel
+    // captures both.
+    const stream =
+      level === 'error' || level === 'warn' ? process?.stderr : process?.stdout
+
+    if (stream?.write) {
+      stream.write(line + '\n')
+      return
+    }
+
+    // Browser, or an environment without the streams.
     if (level === 'error') {
       console.error(line)
     } else if (level === 'warn') {

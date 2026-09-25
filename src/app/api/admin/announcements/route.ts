@@ -7,7 +7,7 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
 import { NotificationTemplates } from '@/lib/push'
-import { notifyCourse, notifyFocusMembers } from '@/lib/notify'
+import { notifyCourse, notifyFocusMembers, kept } from '@/lib/notify'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(
@@ -51,10 +51,10 @@ export const POST = withAuth(
     // When focus_linkup_categories are set, only notify subscribed members.
     const notifPayload = NotificationTemplates.announcementBroadcast(data.title, data.body, data.type, data.id)
     const categories: string[] = body.focus_linkup_categories ?? []
-    ;(categories.length
+    void kept((categories.length
       ? notifyFocusMembers(body.course_id, categories, notifPayload, ctx.userId)
       : notifyCourse(body.course_id, notifPayload, ctx.userId)
-    ).catch(() => {})
+    ).catch(() => {}))
 
     return NextResponse.json(data, { status: 201 })
   },

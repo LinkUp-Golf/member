@@ -7,7 +7,7 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
 import { NotificationTemplates } from '@/lib/push'
-import { notifyCourse, notifyFocusMembers } from '@/lib/notify'
+import { notifyCourse, notifyFocusMembers, kept } from '@/lib/notify'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const PATCH = withAuth(
@@ -93,10 +93,10 @@ export const PATCH = withAuth(
     if (isApproving && !wasAlreadyPublished && data.course_id) {
       const notifPayload = NotificationTemplates.announcementBroadcast(data.title, data.body, data.type, data.id)
       const categories: string[] = data.focus_linkup_categories ?? []
-      ;(categories.length
+      void kept((categories.length
         ? notifyFocusMembers(data.course_id, categories, notifPayload, ctx.userId)
         : notifyCourse(data.course_id, notifPayload, ctx.userId)
-      ).catch(() => {})
+      ).catch(() => {}))
     }
 
     return NextResponse.json(data)

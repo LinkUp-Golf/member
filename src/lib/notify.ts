@@ -48,6 +48,44 @@ export interface NotifyResult {
   email: { sent: number; failed: number; skipped: boolean }
 }
 
+/**
+ * Keeps a notification alive past the response that triggered it.
+ *
+ * Every call site fires a notification without awaiting it, so a booking or an
+ * invite isn't held up by a mail server. On a long-lived server that's free.
+ * On Vercel it isn't: the function can be frozen the moment the response is
+ * sent, and anything still in flight — the push, the email, and the log lines
+ * that would have said so — dies with it. Silent, intermittent, and looks
+ * exactly like a broken email channel. No error, no logs, no mail.
+ *
+ * Vercel exposes a request context carrying waitUntil, which is the supported
+ * way to say "this request isn't finished yet". It's read through the global
+ * symbol rather than by adding @vercel/functions, so this stays dependency-free
+ * and is simply a no-op anywhere else.
+ *
+ * The same promise is registered and returned, so a caller that does await the
+ * result — the surveys cron counts them — still gets it.
+ */
+type VercelRequestContext = { waitUntil?: (p: Promise<unknown>) => void }
+
+export function kept<T>(work: Promise<T>): Promise<T> {
+  try {
+    const store = (
+      globalThis as {
+        [k: symbol]: { get?: () => VercelRequestContext | undefined } | undefined
+      }
+    )[Symbol.for('@vercel/request-context')]
+
+    const waitUntil = store?.get?.()?.waitUntil
+    // The promise never rejects — both() catches everything — but waitUntil
+    // treats a rejection as a failed invocation, so guard it anyway.
+    if (typeof waitUntil === 'function') waitUntil(work.catch(() => undefined))
+  } catch {
+    // A missing or changed internal is not worth failing a notification over.
+  }
+  return work
+}
+
 const NONE: NotifyResult = {
   push: { sent: 0, failed: 0 },
   email: { sent: 0, failed: 0, skipped: false },
@@ -124,13 +162,13 @@ export async function notifyMember(
     })
     return NONE
   }
-  return both(
+  return kept(both(
     'notify.member',
     payload.title,
     { memberId },
     () => sendPushToMember(memberId, payload),
     () => sendEmailToMember(memberId, payload),
-  )
+  ))
 }
 
 /** Several members, both ways. Emails are bcc'd, so nobody sees the list. */
@@ -146,13 +184,13 @@ export async function notifyMembers(
     })
     return NONE
   }
-  return both(
+  return kept(both(
     'notify.members',
     payload.title,
     { members: ids.length },
     () => sendPushToMembers(ids, payload),
     () => sendEmailToMembers(ids, payload),
-  )
+  ))
 }
 
 /**
@@ -170,13 +208,13 @@ export async function notifyCourse(
 ): Promise<NotifyResult> {
   const ids = await courseMemberIds(courseId, excludeUserId)
   if (ids.length === 0) return NONE
-  return both(
+  return kept(both(
     'notify.course',
     payload.title,
     { courseId, members: ids.length },
     () => sendPushToMembers(ids, payload),
     () => sendEmailToMembers(ids, payload),
-  )
+  ))
 }
 
 /** Course members subscribed to any of these focus categories, both ways. */
@@ -188,22 +226,22 @@ export async function notifyFocusMembers(
 ): Promise<NotifyResult> {
   const ids = await focusMemberIds(courseId, focusCategories, excludeUserId)
   if (ids.length === 0) return NONE
-  return both(
+  return kept(both(
     'notify.focus',
     payload.title,
     { courseId, members: ids.length, categories: focusCategories.length },
     () => sendPushToMembers(ids, payload),
     () => sendEmailToMembers(ids, payload),
-  )
+  ))
 }
 
 /** Every admin, both ways — the queue notifications nobody should sit on. */
 export async function notifyAdmins(payload: PushPayload): Promise<NotifyResult> {
-  return both(
+  return kept(both(
     'notify.admins',
     payload.title,
     { audience: 'admins' },
     () => sendPushToAdmins(payload),
     () => sendEmailToAdmins(payload),
-  )
+  ))
 }

@@ -7,7 +7,7 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { getCache } from '@/lib/cache'
 import { COURSE_PROMO_NS, coursePromoPrefix } from '@/lib/cache/keys'
 import { NotificationTemplates } from '@/lib/push'
-import { notifyCourse, notifyMembers } from '@/lib/notify'
+import { notifyCourse, notifyMembers, kept } from '@/lib/notify'
 import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -73,12 +73,12 @@ export const POST = withAuth(
     const payload = NotificationTemplates.promotionAvailable(data.partner_name, data.title, data.id)
     if (data.course_id) {
       await getCache(COURSE_PROMO_NS).clear(coursePromoPrefix(data.course_id)).catch(() => {})
-      notifyCourse(data.course_id, payload).catch(() => {})
+      void kept(notifyCourse(data.course_id, payload).catch(() => {}))
     } else {
       // Global promotion — affects every course's list. Clear the entire namespace.
       await getCache(COURSE_PROMO_NS).clear('course:promo:').catch(() => {})
       // Notify all active members across all courses.
-      ;(async () => {
+      void kept((async () => {
         const admin = createAdminClient()
         const { data: members } = await admin
           .from('members')
@@ -87,7 +87,7 @@ export const POST = withAuth(
         if (members?.length) {
           await notifyMembers(members.map(m => m.id), payload)
         }
-      })().catch(() => {})
+      })().catch(() => {}))
     }
 
     return NextResponse.json(data, { status: 201 })
