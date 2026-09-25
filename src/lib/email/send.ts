@@ -44,7 +44,17 @@ export function assetUrl(path: string): string {
 }
 
 /** The mark at the top of every email — public/logos/logo-full-color.png. */
-const LOGO_PATH = '/logos/logo-full-color.png'
+export const LOGO_PATH = '/logos/logo-full-color.png'
+
+/**
+ * Every asset an email points at, so a test can check each is in public/.
+ *
+ * An email image is fetched from the live site by the recipient's mail client,
+ * which means a path that is merely correct isn't enough — the file has to
+ * have shipped. A broken image is invisible until someone opens a real email,
+ * and by then it has been sent.
+ */
+export const EMAIL_ASSET_PATHS = [LOGO_PATH] as const
 
 /**
  * The absolute address of a notification's destination.

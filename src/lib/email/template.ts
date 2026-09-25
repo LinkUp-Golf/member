@@ -1,9 +1,15 @@
 // The one email LinkUp sends.
 //
-// Every notification uses this layout — logo, a white card on a tinted page, a
-// heading, a line of explanation, an optional image, and one button that opens
-// the app at the place the notification is about. A notification that needed
-// its own design would be a notification that should have been a page.
+// Every notification uses this layout: a small wordmark, a white card on the
+// app's cream, a heading, a line of explanation, an optional image, and one
+// button that opens the app where the notification points. A notification
+// that needed its own design would be one that should have been a page.
+//
+// Deliberately restrained. This is correspondence about something that has
+// already happened to the reader — a round booked, an application answered —
+// not an advert for it. So: left-aligned rather than centred, a hairline
+// rather than a shadow, the app's own navy and type, and exactly one piece of
+// decoration — a strip of grass green along the top of the card.
 //
 // Written as a string rather than with a component library on purpose. Email
 // clients are a decade behind browsers: Outlook renders through Word, Gmail
@@ -16,15 +22,28 @@
 // src/lib/push.ts, which supply the heading, body and destination unchanged:
 // one notification, described once, delivered two ways.
 
-/** LinkUp brand, as literal hex — email clients have no CSS variables. */
-const NAVY = '#002669'
-const NAVY_DEEP = '#001040'
-const GREEN = '#85bb65'
-const CHARCOAL = '#333132'
-const PAGE_BG = '#EEEEF5'
+/**
+ * LinkUp brand, as literal hex — email clients have no CSS variables.
+ * Values mirror tailwind.config.ts so the email and the app are the same
+ * product: green-900 is the brand navy despite the name, gold is the grass
+ * green accent.
+ */
+const NAVY = '#002669'        // green-900 — primary
+const NAVY_DEEP = '#001040'   // green-950 — headings
+const GRASS = '#85bb65'       // gold.DEFAULT — the one accent
+const BODY_TEXT = '#555355'   // charcoal.light
+const PAGE_BG = '#F8F8FC'     // cream
 const CARD_BG = '#FFFFFF'
-const MUTED = '#6B7280'
-const BORDER = '#DDE5F5'
+const HAIRLINE = '#DDE5F5'    // green-100
+const MUTED = '#8A8894'
+
+/**
+ * Lexend Deca is the app's typeface, requested for the few clients that honour
+ * a webfont (Apple Mail, iOS) and falling back to the system stack everywhere
+ * else. The fallback is the point: an email that depends on a font download is
+ * an email that renders wrong more often than not.
+ */
+const FONT = "'Lexend Deca',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
 
 export interface NotificationEmail {
   /** The card's headline — the push notification's title. */
@@ -125,6 +144,7 @@ export function renderNotificationEmail(email: NotificationEmail): RenderedEmail
   <meta name="color-scheme" content="light" />
   <meta name="supported-color-schemes" content="light" />
   <title>${heading}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@400;500;600&display=swap" rel="stylesheet" />
 </head>
 <body style="margin:0;padding:0;background-color:${PAGE_BG};-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
 ${email.preheader ? preheaderBlock(email.preheader) : ''}
@@ -132,87 +152,96 @@ ${email.preheader ? preheaderBlock(email.preheader) : ''}
        Outlook, so the outer table carries it too. -->
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${PAGE_BG};">
     <tr>
-      <td align="center" style="padding:32px 16px;">
+      <td align="center" style="padding:40px 16px;">
 
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;width:100%;">
 
-          <!-- Logo -->
+          <!-- The mark, centred above the card. Both dimensions are stated
+               because Outlook renders through Word and ignores height:auto,
+               collapsing it to a sliver; a fixed height is only safe because
+               the asset is square. -->
           <tr>
             <td align="center" style="padding:0 0 24px 0;">
               <a href="${ctaUrl}" style="text-decoration:none;">
-                <!-- public/logos/logo-full-color.png, which is square. Both
-                     dimensions are stated because Outlook renders through Word
-                     and ignores height:auto, collapsing the mark to a sliver;
-                     a fixed height is only safe because the asset's aspect
-                     ratio is fixed too. -->
-                <img src="${logoUrl}" alt="LinkUp Golf" width="120" height="120" style="display:block;border:0;outline:none;text-decoration:none;width:120px;max-width:120px;height:120px;" />
+                <img src="${logoUrl}" alt="LinkUp Golf" width="120" height="120" style="display:block;border:0;outline:none;text-decoration:none;width:120px;max-width:120px;height:120px;border-radius:26px;" />
               </a>
             </td>
           </tr>
 
-          <!-- The card -->
+          <!-- The card. A hairline rather than a shadow, because most clients
+               drop box-shadow and a borderless white block on a near-white
+               page has no edge at all. -->
           <tr>
-            <td style="background-color:${CARD_BG};border-radius:16px;padding:32px 28px;">
+            <td style="background-color:${CARD_BG};border:1px solid ${HAIRLINE};border-radius:14px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
 
+                <!-- The single piece of decoration in the whole email: a strip
+                     of the accent green along the top edge. One gesture toward
+                     the course, no clip-art. -->
                 <tr>
-                  <td align="center" style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:22px;line-height:30px;font-weight:700;color:${NAVY_DEEP};padding:0 0 12px 0;">
-                    ${heading}
-                  </td>
+                  <td style="background-color:${GRASS};font-size:0;line-height:0;border-radius:13px 13px 0 0;">&nbsp;</td>
                 </tr>
 
                 <tr>
-                  <td align="center" style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:22px;color:${MUTED};padding:0 0 24px 0;">
-                    ${body}
-                  </td>
-                </tr>
+                  <td style="padding:28px 26px 30px 26px;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+
+                      <!-- Left-aligned throughout. Centred text is for
+                           marketing; this is a notification about something
+                           that already happened. -->
+                      <tr>
+                        <td align="left" style="font-family:${FONT};font-size:19px;line-height:27px;font-weight:600;letter-spacing:-0.2px;color:${NAVY_DEEP};padding:0 0 10px 0;">
+                          ${heading}
+                        </td>
+                      </tr>
+
+                      <tr>
+                        <td align="left" style="font-family:${FONT};font-size:15px;line-height:24px;color:${BODY_TEXT};padding:0 0 24px 0;">
+                          ${body}
+                        </td>
+                      </tr>
 ${
   imageUrl
     ? `
-                <tr>
-                  <td align="center" style="padding:0 0 24px 0;">
-                    <img src="${imageUrl}" alt="" width="424" style="display:block;border:0;outline:none;text-decoration:none;width:100%;max-width:424px;height:auto;border-radius:10px;" />
-                  </td>
-                </tr>`
+                      <tr>
+                        <td align="left" style="padding:0 0 24px 0;">
+                          <img src="${imageUrl}" alt="" width="428" style="display:block;border:0;outline:none;text-decoration:none;width:100%;max-width:428px;height:auto;border-radius:10px;" />
+                        </td>
+                      </tr>`
     : ''
 }
-                <!-- The button. A bordered table cell rather than a styled
-                     <a>, because Outlook drops padding and background-color
-                     from an anchor and would render the label as bare text. -->
-                <tr>
-                  <td align="center">
-                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                      <!-- The button. A bordered table cell rather than a
+                           styled <a>, because Outlook drops padding and
+                           background-color from an anchor and would render the
+                           label as bare text. 12px radius matches the app's
+                           own primary buttons. -->
                       <tr>
-                        <td align="center" bgcolor="${NAVY}" style="background-color:${NAVY};border-radius:999px;">
-                          <a href="${ctaUrl}" target="_blank" rel="noopener noreferrer"
-                             style="display:inline-block;padding:13px 30px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:18px;font-weight:700;color:#FFFFFF;text-decoration:none;border-radius:999px;">
-                            ${ctaLabel}
-                          </a>
+                        <td align="center">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                            <tr>
+                              <td align="center" bgcolor="${NAVY}" style="background-color:${NAVY};border-radius:12px;">
+                                <a href="${ctaUrl}" target="_blank" rel="noopener noreferrer"
+                                   style="display:inline-block;padding:12px 24px;font-family:${FONT};font-size:14px;line-height:20px;font-weight:600;color:#FFFFFF;text-decoration:none;border-radius:12px;">
+                                  ${ctaLabel}
+                                </a>
+                              </td>
+                            </tr>
+                          </table>
                         </td>
                       </tr>
+
                     </table>
                   </td>
                 </tr>
-
               </table>
             </td>
           </tr>
 
           <!-- Footer -->
           <tr>
-            <td align="center" style="padding:24px 12px 0 12px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:11px;line-height:18px;color:${MUTED};">
-              You're receiving this because you're a LinkUp Golf member.<br />
+            <td align="left" style="padding:20px 2px 0 2px;font-family:${FONT};font-size:12px;line-height:20px;color:${MUTED};">
+              You're receiving this because you're a member.
               <a href="${settingsUrl}" style="color:${NAVY};text-decoration:underline;">Notification settings</a>
-              <span style="color:${BORDER};">&nbsp;|&nbsp;</span>
-              <span style="color:${CHARCOAL};">LinkUp Golf</span>
-            </td>
-          </tr>
-
-          <!-- A sliver of the accent, so the mark at the top and the tail of
-               the email belong to the same brand. -->
-          <tr>
-            <td align="center" style="padding:16px 0 0 0;">
-              <div style="width:28px;height:3px;border-radius:2px;background-color:${GREEN};font-size:0;line-height:0;">&nbsp;</div>
             </td>
           </tr>
 
