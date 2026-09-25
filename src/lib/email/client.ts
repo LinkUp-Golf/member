@@ -49,6 +49,37 @@ export interface EmailSendResult {
 }
 
 /**
+ * Enough of an address to trace a send without putting a member's email in a
+ * log line. 'd.na**@gmail.com' identifies the row to whoever already has the
+ * database open, and identifies nobody to whoever doesn't.
+ */
+export function maskEmail(address: string): string {
+  const at = address.lastIndexOf('@')
+  if (at < 1) return '***'
+  const name = address.slice(0, at)
+  const domain = address.slice(at)
+  if (name.length <= 2) return `${name[0]}*${domain}`
+  return `${name.slice(0, 2)}${'*'.repeat(Math.min(name.length - 2, 4))}${domain}`
+}
+
+/**
+ * What the channel is configured with, for a log line at the point of sending.
+ *
+ * Every field here is a setting rather than a secret — except the key, which is
+ * reported only as present or absent. Nearly every "email isn't working" turns
+ * out to be one of these four, and this makes the answer one line rather than a
+ * shell session.
+ */
+export function emailConfig(): Record<string, unknown> {
+  return {
+    hasApiKey: emailEnabled(),
+    from: from(),
+    usingSandboxFrom: !process.env.EMAIL_FROM,
+    replyTo: replyTo() ?? null,
+  }
+}
+
+/**
  * Sends one message.
  *
  * Recipients go in `bcc` when there's more than one, so a course-wide
@@ -57,11 +88,17 @@ export interface EmailSendResult {
  */
 export async function sendEmail(message: EmailMessage): Promise<EmailSendResult> {
   const recipients = Array.from(new Set(message.to.filter(Boolean)))
-  if (recipients.length === 0) return { sent: 0, failed: 0, skipped: false }
+  if (recipients.length === 0) {
+    logger.warn('Email not sent: no recipients on the message', {
+      action: 'email.no_recipients',
+      metadata: { subject: message.subject },
+    })
+    return { sent: 0, failed: 0, skipped: false }
+  }
 
   const client = getClient()
   if (!client) {
-    logger.info('Email not sent: RESEND_API_KEY is not set', {
+    logger.warn('Email not sent: RESEND_API_KEY is not set', {
       action: 'email.skipped',
       metadata: { recipients: recipients.length, subject: message.subject },
     })
@@ -69,6 +106,23 @@ export async function sendEmail(message: EmailMessage): Promise<EmailSendResult>
   }
 
   const single = recipients.length === 1
+
+  // Before the call, not after: if the process is torn down mid-request —
+  // which is how a serverless function treats work left running after the
+  // response — this is the only line that will exist, and its absence versus
+  // a missing 'email.sent' tells you which half failed.
+  logger.info('Email sending', {
+    action: 'email.sending',
+    metadata: {
+      ...emailConfig(),
+      subject: message.subject,
+      recipients: recipients.length,
+      to: recipients.slice(0, 5).map(maskEmail),
+      mode: single ? 'to' : 'bcc',
+    },
+  })
+
+  const startedAt = Date.now()
 
   try {
     const { data, error } = await client.emails.send({
@@ -85,13 +139,19 @@ export async function sendEmail(message: EmailMessage): Promise<EmailSendResult>
     })
 
     if (error) {
+      // The reason goes in errorMessage, which every formatter prints. Buried
+      // in metadata it was invisible in development, so a rejected send read
+      // as 'Email send rejected by Resend' and nothing else.
       logger.error('Email send rejected by Resend', {
         action: 'email.failed',
+        errorCode: error.name,
+        errorMessage: error.message,
+        durationMs: Date.now() - startedAt,
         metadata: {
+          ...emailConfig(),
           recipients: recipients.length,
+          to: recipients.slice(0, 5).map(maskEmail),
           subject: message.subject,
-          error: error.message,
-          name: error.name,
         },
       })
       return { sent: 0, failed: recipients.length, skipped: false }
@@ -99,14 +159,28 @@ export async function sendEmail(message: EmailMessage): Promise<EmailSendResult>
 
     logger.info('Email sent', {
       action: 'email.sent',
-      metadata: { recipients: recipients.length, subject: message.subject, id: data?.id ?? null },
+      durationMs: Date.now() - startedAt,
+      metadata: {
+        recipients: recipients.length,
+        to: recipients.slice(0, 5).map(maskEmail),
+        subject: message.subject,
+        // Resend's id — paste it into their dashboard to see delivery,
+        // bounce or spam disposition for this exact message.
+        id: data?.id ?? null,
+      },
     })
     return { sent: recipients.length, failed: 0, skipped: false }
   } catch (err) {
     logger.error('Email send threw', {
       action: 'email.failed',
-      errorMessage: String(err),
-      metadata: { recipients: recipients.length, subject: message.subject },
+      errorMessage: err instanceof Error ? err.message : String(err),
+      durationMs: Date.now() - startedAt,
+      metadata: {
+        ...emailConfig(),
+        recipients: recipients.length,
+        to: recipients.slice(0, 5).map(maskEmail),
+        subject: message.subject,
+      },
     })
     return { sent: 0, failed: recipients.length, skipped: false }
   }

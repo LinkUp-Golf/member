@@ -54,7 +54,7 @@ const COLORS: Record<LogLevel, string> = {
 const RESET = '\x1b[0m'
 
 function formatHuman(entry: LogEntry): string {
-  const { level, message, timestamp, requestId, userId, action, durationMs, errorCode, errorMessage } = entry
+  const { level, message, timestamp, requestId, userId, action, durationMs, errorCode, errorMessage, metadata } = entry
   const color = COLORS[level]
   const time = new Date(timestamp).toLocaleTimeString()
   const parts = [`${color}${level.toUpperCase()}${RESET}`, `[${time}]`, message]
@@ -64,6 +64,16 @@ function formatHuman(entry: LogEntry): string {
   if (durationMs !== undefined) parts.push(`${durationMs}ms`)
   if (errorCode) parts.push(`code=${errorCode}`)
   if (errorMessage) parts.push(`error="${errorMessage}"`)
+  // metadata is where callers put the detail that makes a line worth reading —
+  // which recipient, which provider error, how many were dropped. Omitting it
+  // in development meant a failing send logged nothing but its own name.
+  if (metadata && Object.keys(metadata).length > 0) {
+    parts.push(
+      Object.entries(metadata)
+        .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+        .join(' '),
+    )
+  }
   return parts.join(' ')
 }
 

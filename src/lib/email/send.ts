@@ -61,9 +61,31 @@ export async function sendNotificationEmail(
   const recipients = Array.from(
     new Set(addresses.map(a => a?.trim().toLowerCase()).filter((a): a is string => !!a)),
   )
-  if (recipients.length === 0) return empty()
+  if (recipients.length === 0) {
+    // The quietest way this channel fails: the notification is built, the key
+    // is valid, and there is simply nobody to send it to. It used to return
+    // here without a word, which looks identical to email being switched off.
+    logger.warn('Notification email has no recipients', {
+      action: 'email.no_recipients',
+      metadata: { title: payload.title },
+    })
+    return empty()
+  }
 
   const { subject, html, text } = renderNotification(payload)
+
+  logger.info('Notification email prepared', {
+    action: 'email.prepared',
+    metadata: {
+      subject,
+      recipients: recipients.length,
+      // The destination the button opens. A relative push path that didn't get
+      // an origin, or an app URL with a stray inline comment in .env, shows up
+      // here as something that obviously isn't a link.
+      ctaUrl: absoluteUrl(payload.url),
+      batches: Math.ceil(recipients.length / BATCH_SIZE),
+    },
+  })
 
   const totals = empty()
   for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
@@ -98,17 +120,49 @@ export async function memberEmails(memberIds: string[]): Promise<string[]> {
     .in('id', ids)
 
   if (error) {
-    logger.warn('Could not resolve member emails', {
+    // Almost always the service-role key: createAdminClient() bypasses RLS, so
+    // a key that doesn't authenticate fails here and nowhere the member can
+    // see. The message goes in errorMessage so it actually prints.
+    logger.error('Could not resolve member emails', {
       action: 'email.recipients_failed',
-      metadata: { members: ids.length, error: error.message },
+      errorCode: error.code,
+      errorMessage: error.message,
+      metadata: { asked: ids.length, hint: error.hint ?? null },
     })
     return []
   }
 
-  return (data ?? [])
+  const rows = data ?? []
+  const blocked = rows.filter(m =>
+    NO_ACCESS_STATUSES.includes((m.membership_status as string | null) ?? ''),
+  )
+  const addresses = rows
     .filter(m => !NO_ACCESS_STATUSES.includes((m.membership_status as string | null) ?? ''))
     .map(m => (m.email as string | null) ?? '')
     .filter(Boolean)
+
+  // Every way a recipient can vanish between an id and an inbox, counted: the
+  // row wasn't found, the member has lost access, or the row has no address.
+  // Without this, an email that never arrives and an email that was never
+  // addressed are the same silence.
+  if (addresses.length < ids.length) {
+    logger.warn('Some members will not be emailed', {
+      action: 'email.recipients_dropped',
+      metadata: {
+        asked: ids.length,
+        found: rows.length,
+        missingRows: ids.length - rows.length,
+        blockedByStatus: blocked.length,
+        blockedStatuses: Array.from(
+          new Set(blocked.map(m => (m.membership_status as string | null) ?? 'null')),
+        ),
+        noAddress: rows.length - blocked.length - addresses.length,
+        resolved: addresses.length,
+      },
+    })
+  }
+
+  return addresses
 }
 
 /** One member, by id. */
@@ -129,10 +183,20 @@ export async function sendEmailToMembers(
 
 /** Everyone with is_admin — the same audience sendPushToAdmins reaches. */
 export async function sendEmailToAdmins(payload: PushPayload): Promise<EmailSendResult> {
-  const { data } = await createAdminClient()
+  const { data, error } = await createAdminClient()
     .from('members')
     .select('email')
     .eq('is_admin', true)
+
+  if (error) {
+    logger.error('Could not resolve admin emails', {
+      action: 'email.recipients_failed',
+      errorCode: error.code,
+      errorMessage: error.message,
+      metadata: { audience: 'admins' },
+    })
+    return empty()
+  }
 
   return sendNotificationEmail(
     (data ?? []).map(m => (m.email as string | null) ?? '').filter(Boolean),

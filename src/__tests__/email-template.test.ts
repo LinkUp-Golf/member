@@ -6,6 +6,7 @@ import {
   type NotificationEmail,
 } from '@/lib/email/template'
 import { absoluteUrl } from '@/lib/email/send'
+import { maskEmail } from '@/lib/email/client'
 
 // An email can't be fixed after it's sent, and nobody sees it before a member
 // does. These lock the parts that would be silently wrong: the destination the
@@ -99,5 +100,24 @@ describe('absoluteUrl', () => {
 
   it('falls back to the app root when a notification names no destination', () => {
     expect(absoluteUrl(undefined)).toMatch(/^https?:\/\/[^/]+\/$/)
+  })
+})
+
+describe('maskEmail', () => {
+  it('keeps a log line traceable without putting an address in it', () => {
+    // Two characters and the domain is enough to match a row you already have
+    // open, and not enough to be a contact list in a log aggregator.
+    expect(maskEmail('dana.mcbride@gmail.com')).toBe('da****@gmail.com')
+    expect(maskEmail('sam@linkup.golf')).toBe('sa*@linkup.golf')
+  })
+
+  it('never echoes a short local part whole', () => {
+    expect(maskEmail('jo@x.com')).toBe('j*@x.com')
+    expect(maskEmail('a@x.com')).toBe('a*@x.com')
+  })
+
+  it('gives up rather than guess at something that is not an address', () => {
+    expect(maskEmail('not-an-address')).toBe('***')
+    expect(maskEmail('@x.com')).toBe('***')
   })
 })

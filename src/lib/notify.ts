@@ -55,9 +55,12 @@ const NONE: NotifyResult = {
  */
 async function both(
   action: string,
+  title: string,
+  audience: Record<string, unknown>,
   push: () => Promise<{ sent: number; failed: number }>,
   email: () => Promise<{ sent: number; failed: number; skipped: boolean }>,
 ): Promise<NotifyResult> {
+  const startedAt = Date.now()
   const [pushed, mailed] = await Promise.allSettled([push(), email()])
 
   const result: NotifyResult = {
@@ -69,11 +72,36 @@ async function both(
   }
 
   if (pushed.status === 'rejected') {
-    logger.warn('Push channel failed', { action: `${action}.push_failed`, errorMessage: String(pushed.reason) })
+    logger.error('Push channel failed', {
+      action: `${action}.push_failed`,
+      errorMessage: pushed.reason instanceof Error ? pushed.reason.message : String(pushed.reason),
+      metadata: { title },
+    })
   }
   if (mailed.status === 'rejected') {
-    logger.warn('Email channel failed', { action: `${action}.email_failed`, errorMessage: String(mailed.reason) })
+    logger.error('Email channel failed', {
+      action: `${action}.email_failed`,
+      errorMessage: mailed.reason instanceof Error ? mailed.reason.message : String(mailed.reason),
+      metadata: { title },
+    })
   }
+
+  // One line per notification, carrying both channels. Grep 'notify.' in the
+  // logs and you get the whole delivery history: what was sent, to how many,
+  // and which channel did or didn't do its half.
+  logger.info('Notification dispatched', {
+    action,
+    durationMs: Date.now() - startedAt,
+    metadata: {
+      title,
+      ...audience,
+      pushSent: result.push.sent,
+      pushFailed: result.push.failed,
+      emailSent: result.email.sent,
+      emailFailed: result.email.failed,
+      emailSkipped: result.email.skipped,
+    },
+  })
 
   return result
 }
@@ -83,9 +111,17 @@ export async function notifyMember(
   memberId: string,
   payload: PushPayload,
 ): Promise<NotifyResult> {
-  if (!memberId) return NONE
+  if (!memberId) {
+    logger.warn('Notification dropped: no member id', {
+      action: 'notify.member.no_recipient',
+      metadata: { title: payload.title },
+    })
+    return NONE
+  }
   return both(
     'notify.member',
+    payload.title,
+    { memberId },
     () => sendPushToMember(memberId, payload),
     () => sendEmailToMember(memberId, payload),
   )
@@ -97,9 +133,17 @@ export async function notifyMembers(
   payload: PushPayload,
 ): Promise<NotifyResult> {
   const ids = Array.from(new Set(memberIds.filter(Boolean)))
-  if (ids.length === 0) return NONE
+  if (ids.length === 0) {
+    logger.warn('Notification dropped: no member ids', {
+      action: 'notify.members.no_recipients',
+      metadata: { title: payload.title },
+    })
+    return NONE
+  }
   return both(
     'notify.members',
+    payload.title,
+    { members: ids.length },
     () => sendPushToMembers(ids, payload),
     () => sendEmailToMembers(ids, payload),
   )
@@ -109,6 +153,8 @@ export async function notifyMembers(
 export async function notifyAdmins(payload: PushPayload): Promise<NotifyResult> {
   return both(
     'notify.admins',
+    payload.title,
+    { audience: 'admins' },
     () => sendPushToAdmins(payload),
     () => sendEmailToAdmins(payload),
   )
