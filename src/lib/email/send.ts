@@ -10,8 +10,6 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
 import { renderNotificationEmail } from './template'
 import { sendEmail, type EmailSendResult } from './client'
-import { recordEmailsSent } from './log'
-import { categoryFor, notificationKey } from './policy'
 import type { PushPayload } from '@/lib/push/types'
 
 /** Resend takes at most 50 addresses per call. */
@@ -149,8 +147,8 @@ export interface Recipient {
 /**
  * The addresses of the given members, skipping anyone who can't get in.
  *
- * Returns the member id alongside each address because a send is logged per
- * member, and only the members who were actually mailed should appear in it.
+ * Returns the member id alongside each address so a caller can tell which of
+ * the ids it asked for resolved to someone reachable.
  */
 export async function resolveRecipients(memberIds: string[]): Promise<Recipient[]> {
   const ids = Array.from(new Set(memberIds.filter(Boolean)))
@@ -212,10 +210,9 @@ export async function memberEmails(memberIds: string[]): Promise<string[]> {
  * Emails a notification to members.
  *
  * The one door every member-addressed email goes through. Nothing is
- * suppressed on volume — if a notification was worth sending, every recipient
- * gets it — so the only reason someone here doesn't receive one is that they
- * have no usable address. What the provider accepted is recorded, so the
- * history exists whether or not anything ever reads it.
+ * suppressed — if a notification was worth sending, every recipient gets it —
+ * so the only reason someone here doesn't receive one is that they have no
+ * usable address.
  */
 async function sendToMemberIds(
   memberIds: string[],
@@ -227,17 +224,7 @@ async function sendToMemberIds(
   const recipients = await resolveRecipients(ids)
   if (recipients.length === 0) return empty()
 
-  const result = await sendNotificationEmail(recipients.map(r => r.email), payload)
-
-  if (result.sent > 0) {
-    await recordEmailsSent(
-      recipients.map(r => r.memberId),
-      notificationKey(payload.tag),
-      categoryFor(payload.tag),
-    )
-  }
-
-  return result
+  return sendNotificationEmail(recipients.map(r => r.email), payload)
 }
 
 /** One member, by id. */

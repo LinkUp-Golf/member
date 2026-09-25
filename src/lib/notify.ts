@@ -12,15 +12,10 @@
 // counterpart, so this is the default way to send one and `sendPushTo*` is
 // only for the rare case that genuinely shouldn't leave the device.
 //
-// That used to be a choice made here, call site by call site, which meant the
-// restraint was real but undiscoverable — you could only learn it by reading
-// every route. It now lives in src/lib/email/policy.ts as a table of
-// notification kinds and how often each may be mailed, with a per-member daily
-// cap over the top. Sending more email is a question of policy, not of which
-// function a route happened to import.
-//
-// So: call notify*. If a new notification shouldn't be mailed as often as it's
-// pushed, say so in the policy where the next person will find it.
+// Nothing is rationed: no cooldown, no daily cap, no send log. A member who is
+// sent twenty notifications receives twenty emails, which is the behaviour
+// that was asked for. If that ever needs limiting, the limit belongs here,
+// where both channels already meet, rather than at any one call site.
 //
 // ---- Failure ----
 //
@@ -197,9 +192,9 @@ export async function notifyMembers(
  * Every active member of a course, both ways.
  *
  * The audience is resolved once and given to both channels, so a broadcast
- * can't mean one thing on a phone and another in an inbox. The per-member cap
- * in ./email/policy applies to each recipient individually, which is what
- * stops a busy week of announcements from becoming a busy week of email.
+ * can't mean one thing on a phone and another in an inbox. Note the size of
+ * that audience: this emails every active member of the course, with nothing
+ * throttling it.
  */
 export async function notifyCourse(
   courseId: string,

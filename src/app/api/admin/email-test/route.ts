@@ -32,7 +32,6 @@ import {
   sendEmailToMember,
   sendNotificationEmail,
 } from '@/lib/email/send'
-import { categoryFor, notificationKey } from '@/lib/email/policy'
 import { logger } from '@/lib/logger'
 import type { PushPayload } from '@/lib/push/types'
 
@@ -66,12 +65,6 @@ export const POST = withAdminAuth(async (req: NextRequest, ctx: AuthContext) => 
 
     const stages = {
       config,
-      // Classification only — nothing here can stop a send. It's what the
-      // email is recorded as in email_send_log.
-      policy: {
-        key: notificationKey(SAMPLE.tag),
-        category: categoryFor(SAMPLE.tag),
-      },
       lookup: {
         memberId: targetMemberId,
         // The usual culprit when a notification silently doesn't arrive: no

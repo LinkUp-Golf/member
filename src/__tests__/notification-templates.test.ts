@@ -1,52 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { categoryFor, notificationKey, CATEGORY_BY_TAG } from '@/lib/email/policy'
 import { NotificationTemplates } from '@/lib/push'
 
-describe('notificationKey', () => {
-  it('collapses an instance to its kind, so the log groups', () => {
-    // Without this, email_send_log would hold one key per conversation and
-    // tell you nothing about how much a member is getting.
-    expect(notificationKey('msg-8f3c-conversation-id')).toBe('msg')
-    expect(notificationKey('booking-survey-abc123')).toBe('booking-survey')
-    expect(notificationKey('visit-dana')).toBe('visit')
-  })
-
-  it('prefers the longer of two tags that share a prefix', () => {
-    // 'booking-invite' is a commitment; 'booking-2026-09-27' is someone else's
-    // tee time. Shortest-prefix matching would make them the same thing.
-    expect(notificationKey('booking-invite')).toBe('booking-invite')
-    expect(notificationKey('booking-survey-1')).toBe('booking-survey')
-    expect(notificationKey('booking-2026-09-27')).toBe('booking')
-  })
-})
-
-describe('categoryFor', () => {
-  it('falls back to community for anything it has never heard of', () => {
-    // Classification only — an unknown tag is still sent, just recorded under
-    // the least specific heading.
-    expect(categoryFor('something-new')).toBe('community')
-    expect(categoryFor(undefined)).toBe('community')
-  })
-
-  it('files money, access and a cancelled round as transactional', () => {
-    expect(categoryFor('payment-ready')).toBe('transactional')
-    expect(categoryFor('host-credit-approved')).toBe('transactional')
-    expect(categoryFor('hosted-event-cancelled')).toBe('transactional')
-    expect(categoryFor('booking-invite')).toBe('transactional')
-  })
-
-  it('files the community feed as community', () => {
-    expect(categoryFor('new-member')).toBe('community')
-    expect(categoryFor('promotion-titleist')).toBe('community')
-    expect(categoryFor('booking-2026-09-27')).toBe('community')
-  })
-})
+// One definition per notification feeds both channels, so these guard the two
+// fields only the email reads. Nothing else in the app would notice if either
+// went missing, and by the time a member does it has been sent.
 
 describe('coverage of the template set', () => {
-  // The point of the whole exercise: a notification that can be pushed can be
-  // emailed. A template without a cta would render a button saying nothing in
-  // particular, and one whose tag isn't classified would be logged under a
-  // fallback heading — fine as a safety net, wrong as an oversight.
+  // A notification that can be pushed can be emailed. A template without a
+  // cta would render a button saying nothing in particular, and one without a
+  // subject would arrive under a push title written for a different context.
   const rendered = [
     NotificationTemplates.newMember('Dana', 'McBride', 'Aviara', 'm1'),
     NotificationTemplates.bookingAnnouncement('Dana', 'Sat 27 Sep', '1:30pm', 'm1'),
@@ -109,12 +71,6 @@ describe('coverage of the template set', () => {
     expect(lazy).toEqual([])
   })
 
-  it('classifies every template explicitly rather than by fallback', () => {
-    const unclassified = rendered
-      .map(p => notificationKey(p.tag))
-      .filter(key => !(key in CATEGORY_BY_TAG))
-    expect(Array.from(new Set(unclassified))).toEqual([])
-  })
 })
 
 describe('names in subject lines', () => {
