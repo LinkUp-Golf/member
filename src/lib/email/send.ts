@@ -10,7 +10,8 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
 import { renderNotificationEmail } from './template'
 import { sendEmail, type EmailSendResult } from './client'
-import { filterByThrottle, recordEmailsSent } from './throttle'
+import { recordEmailsSent } from './log'
+import { categoryFor, notificationKey } from './policy'
 import type { PushPayload } from '@/lib/push/types'
 
 /** Resend takes at most 50 addresses per call. */
@@ -63,6 +64,9 @@ export function absoluteUrl(path: string | undefined): string {
 export function renderNotification(payload: PushPayload) {
   return renderNotificationEmail({
     heading: payload.title,
+    // The notification's own subject when it has one. A push title is read
+    // beside the app's name; a subject line stands alone in an inbox.
+    subject: payload.subject,
     body: payload.body,
     ctaUrl: absoluteUrl(payload.url),
     ctaLabel: payload.cta || DEFAULT_CTA,
@@ -127,17 +131,6 @@ export async function sendNotificationEmail(
   return totals
 }
 
-/**
- * Membership states that have lost access to the app.
- *
- * The button opens a page behind the login gate, so mailing one of these is an
- * invitation to a locked door. 'cancelled' is where the nightly GHL reconcile
- * puts a member whose access tag was removed; 'suspended' is a moderation
- * outcome. Everything else — including 'waitlist' and 'non_member', who are
- * real people with real reasons to hear from us — still gets the email.
- */
-const NO_ACCESS_STATUSES: readonly string[] = ['cancelled', 'suspended']
-
 export interface Recipient {
   memberId: string
   email: string
@@ -146,9 +139,8 @@ export interface Recipient {
 /**
  * The addresses of the given members, skipping anyone who can't get in.
  *
- * Returns the member id alongside each address because the throttle is
- * recorded per member, and only the members who were actually mailed should
- * spend a slot.
+ * Returns the member id alongside each address because a send is logged per
+ * member, and only the members who were actually mailed should appear in it.
  */
 export async function resolveRecipients(memberIds: string[]): Promise<Recipient[]> {
   const ids = Array.from(new Set(memberIds.filter(Boolean)))
@@ -156,7 +148,7 @@ export async function resolveRecipients(memberIds: string[]): Promise<Recipient[
 
   const { data, error } = await createAdminClient()
     .from('members')
-    .select('id, email, membership_status')
+    .select('id, email')
     .in('id', ids)
 
   if (error) {
@@ -173,30 +165,26 @@ export async function resolveRecipients(memberIds: string[]): Promise<Recipient[
   }
 
   const rows = data ?? []
-  const blocked = rows.filter(m =>
-    NO_ACCESS_STATUSES.includes((m.membership_status as string | null) ?? ''),
-  )
   const recipients: Recipient[] = rows
-    .filter(m => !NO_ACCESS_STATUSES.includes((m.membership_status as string | null) ?? ''))
     .map(m => ({ memberId: m.id as string, email: (m.email as string | null) ?? '' }))
     .filter(r => !!r.email)
 
-  // Every way a recipient can vanish between an id and an inbox, counted: the
-  // row wasn't found, the member has lost access, or the row has no address.
-  // Without this, an email that never arrives and an email that was never
-  // addressed are the same silence.
+  // Membership status is deliberately not consulted. A member who has been
+  // suspended or whose membership lapsed is still a person we have things to
+  // tell — and the one notification that would bring them back is exactly the
+  // one a status filter would withhold.
+  //
+  // members.email is NOT NULL, so the only way someone disappears here is that
+  // their row wasn't found at all: a stale id, or a member deleted between the
+  // action and the notification. Rare, and worth a line when it happens.
   if (recipients.length < ids.length) {
-    logger.warn('Some members will not be emailed', {
+    logger.warn('Some members could not be emailed', {
       action: 'email.recipients_dropped',
       metadata: {
         asked: ids.length,
         found: rows.length,
         missingRows: ids.length - rows.length,
-        blockedByStatus: blocked.length,
-        blockedStatuses: Array.from(
-          new Set(blocked.map(m => (m.membership_status as string | null) ?? 'null')),
-        ),
-        noAddress: rows.length - blocked.length - recipients.length,
+        noAddress: rows.length - recipients.length,
         resolved: recipients.length,
       },
     })
@@ -211,13 +199,13 @@ export async function memberEmails(memberIds: string[]): Promise<string[]> {
 }
 
 /**
- * Emails a notification to members, after the policy has had its say.
+ * Emails a notification to members.
  *
- * This is the one door every member-addressed email goes through, which is
- * what makes the policy in ./policy enforceable rather than advisory. The
- * order matters: decide who may be mailed, resolve only those to addresses,
- * send, and record only what the provider accepted — a rejected send must not
- * spend a member's budget for the day.
+ * The one door every member-addressed email goes through. Nothing is
+ * suppressed on volume — if a notification was worth sending, every recipient
+ * gets it — so the only reason someone here doesn't receive one is that they
+ * have no usable address. What the provider accepted is recorded, so the
+ * history exists whether or not anything ever reads it.
  */
 async function sendToMemberIds(
   memberIds: string[],
@@ -226,35 +214,17 @@ async function sendToMemberIds(
   const ids = Array.from(new Set(memberIds.filter(Boolean)))
   if (ids.length === 0) return empty()
 
-  const { allowed, suppressed, category, key } = await filterByThrottle(ids, payload.tag)
-
-  if (suppressed.length > 0) {
-    // Suppression is invisible to everyone involved, so it is stated plainly
-    // here. Counted by reason, because "we chose not to" and "we couldn't"
-    // look identical from an empty inbox.
-    logger.info('Some members were not emailed by policy', {
-      action: 'email.throttled',
-      metadata: {
-        key,
-        category,
-        title: payload.title,
-        suppressed: suppressed.length,
-        allowed: allowed.length,
-        cooldown: suppressed.filter(s => s.reason === 'cooldown').length,
-        dailyCap: suppressed.filter(s => s.reason === 'daily_cap').length,
-      },
-    })
-  }
-
-  if (allowed.length === 0) return empty()
-
-  const recipients = await resolveRecipients(allowed)
+  const recipients = await resolveRecipients(ids)
   if (recipients.length === 0) return empty()
 
   const result = await sendNotificationEmail(recipients.map(r => r.email), payload)
 
   if (result.sent > 0) {
-    await recordEmailsSent(recipients.map(r => r.memberId), key, category)
+    await recordEmailsSent(
+      recipients.map(r => r.memberId),
+      notificationKey(payload.tag),
+      categoryFor(payload.tag),
+    )
   }
 
   return result

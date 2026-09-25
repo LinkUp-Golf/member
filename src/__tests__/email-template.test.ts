@@ -23,16 +23,33 @@ const base = (over: Partial<NotificationEmail> = {}): NotificationEmail => ({
 })
 
 describe('renderNotificationEmail', () => {
-  it('puts the destination on the button and again as readable text', () => {
+  it('puts the destination on the button, and on the logo above it', () => {
     const { html } = renderNotificationEmail(base())
-    // Twice: the button, and the paste-this-in fallback for a client that
-    // won't render it.
     expect(html.split('https://app.linkup.golf/book').length - 1).toBeGreaterThanOrEqual(2)
     expect(html).toContain('Pay for your round')
   })
 
-  it('subjects the email with its heading', () => {
+  it('does not repeat the URL as text under the button', () => {
+    // It was there as a fallback for clients that won't render the button, and
+    // it made every email end in a wall of raw URL.
+    const { html } = renderNotificationEmail(base())
+    expect(html).not.toContain('paste this into your browser')
+  })
+
+  it('uses the notification\'s own subject line', () => {
+    expect(
+      renderNotificationEmail(base({ subject: 'Dana added you to a tee time' })).subject,
+    ).toBe('Dana added you to a tee time')
+  })
+
+  it('falls back to the heading when a notification gives no subject', () => {
     expect(renderNotificationEmail(base()).subject).toBe('Your round is confirmed')
+  })
+
+  it('treats a blank subject as none at all', () => {
+    expect(renderNotificationEmail(base({ subject: '   ' })).subject).toBe(
+      'Your round is confirmed',
+    )
   })
 
   it('sends a plain-text part carrying the same link', () => {

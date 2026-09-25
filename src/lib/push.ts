@@ -17,6 +17,7 @@ export {
 import { createAdminClient } from '@/lib/supabase-server'
 import { sendToUsers } from './push/pushService'
 import type { PushPayload, SendResult } from './push/types'
+import { titleCaseName } from '@/lib/utils'
 import type { PayoutMethod } from '@/types'
 
 // ---- sendPushToCourse ---------------------------------------
@@ -119,9 +120,15 @@ export async function sendPushToFocusMembers(
 // ---- Notification templates ---------------------------------
 //
 // One definition per notification, used by both channels. `title`, `body` and
-// `url` are all push needs; `cta` is the wording on the email's button and is
-// ignored by push, which has no button. Only the notifications that go out by
-// email carry one — see src/lib/notify.ts for which those are and why.
+// `url` are all push needs. Two fields exist only for the email and are
+// ignored by push: `cta`, the wording on the button, and `subject`, the line
+// the notification arrives under.
+//
+// `subject` is separate from `title` because they're read in different places.
+// A push title sits beside the app's own name with the body directly under it,
+// so "New reservation" is clear. The same words alone in an inbox, among mail
+// from everyone else, are not — hence "Dana reserved a spot at your Aviara
+// event". Say who and what; the heading inside still carries the short form.
 
 export const NotificationTemplates = {
   newMember: (firstName: string, lastName: string, courseName: string, memberId?: string): PushPayload => ({
@@ -129,6 +136,7 @@ export const NotificationTemplates = {
     body:  `${firstName} has joined the ${courseName} community. Tap to view their profile.`,
     url:   memberId ? `/members/${memberId}` : '/members',
     tag:   'new-member',
+    subject: `${titleCaseName(`${firstName} ${lastName}`)} has joined ${courseName}`,
     cta:   'View their profile',
   }),
 
@@ -137,6 +145,7 @@ export const NotificationTemplates = {
     body:  `${firstName} booked a tee time at ${time}. Message them to join.`,
     url:   memberId ? `/members/${memberId}` : '/members',
     tag:   `booking-${date}`,
+    subject: `${titleCaseName(firstName)} is playing on ${date}`,
     cta:   'See who else is playing',
   }),
 
@@ -145,6 +154,7 @@ export const NotificationTemplates = {
     body:  `Visiting from ${from} to ${until}. Tap to invite them to play.`,
     url:   memberId ? `/members/${memberId}` : '/members',
     tag:   `visit-${firstName.toLowerCase()}`,
+    subject: `${titleCaseName(`${firstName} ${lastName}`)} is visiting from ${from}`,
     cta:   'Invite them to play',
   }),
 
@@ -156,6 +166,7 @@ export const NotificationTemplates = {
     body:  preview.length > 80 ? preview.slice(0, 80) + '…' : preview,
     url:   `/messages/${conversationId}`,
     tag:   `msg-${conversationId}`,
+    subject: `${titleCaseName(senderName)} sent you a message`,
     cta:   'Reply in LinkUp',
   }),
 
@@ -164,6 +175,7 @@ export const NotificationTemplates = {
     body:  `The ${title} is coming up on ${date}. Book your spot now.`,
     url:   '/more/focus-linkups',
     tag:   `focus-linkup-${weeksOut}w`,
+    subject: `${title} is ${weeksOut === 2 ? 'two weeks' : 'one week'} away`,
     cta:   'Book your spot',
   }),
 
@@ -172,6 +184,7 @@ export const NotificationTemplates = {
     body:  `You haven't played with ${otherMemberName} yet. Want to set up a round?`,
     url:   suggestedMemberId ? `/members/${suggestedMemberId}` : '/members',
     tag:   `suggestion-${otherMemberName.toLowerCase().replace(' ', '-')}`,
+    subject: `A round with ${titleCaseName(otherMemberName)}?`,
     cta:   'See their profile',
   }),
 
@@ -180,6 +193,7 @@ export const NotificationTemplates = {
     body:  `Your request to visit ${courseName} from ${from} to ${until} has been approved.`,
     url:   '/more/guest-access',
     tag:   'guest-access',
+    subject: `Your guest access to ${courseName} is approved`,
     cta:   'View your guest access',
   }),
 
@@ -188,6 +202,7 @@ export const NotificationTemplates = {
     body:  `Your application was approved — you'll earn ${percentage}% commission on every referral who joins.`,
     url:   '/partner',
     tag:   'referral-partner-approved',
+    subject: 'You\'re now a LinkUp referral partner',
     cta:   'Open your partner dashboard',
   }),
 
@@ -198,6 +213,7 @@ export const NotificationTemplates = {
       : `${imported} of ${total} referrals were added — open the list to see why the rest weren't.`,
     url:   '/partner/submissions',
     tag:   'referral-list-imported',
+    subject: 'Your referral list has been imported',
     cta:   'View your submissions',
   }),
 
@@ -206,6 +222,7 @@ export const NotificationTemplates = {
     body:  reason,
     url:   '/partner/submissions',
     tag:   'referral-list-rejected',
+    subject: 'Your referral list could not be imported',
     cta:   'View your submissions',
   }),
 
@@ -222,6 +239,7 @@ export const NotificationTemplates = {
       body:  `A referral commission payout of ${formatted} has been ${settled}.`,
       url:   method === 'credit' ? '/partner/credits' : '/partner/payments',
       tag:   'referral-commission-paid',
+      subject: `Your ${formatted} referral commission has been paid`,
       cta:   method === 'credit' ? 'View your credit' : 'View your payment',
     }
   },
@@ -231,6 +249,7 @@ export const NotificationTemplates = {
     body:  `Your application wasn't approved this time. ${reason}`,
     url:   '/more/referral-partner',
     tag:   'referral-partner-rejected',
+    subject: 'About your LinkUp referral partner application',
     cta:   'View details',
   }),
 
@@ -239,6 +258,7 @@ export const NotificationTemplates = {
     body:  `Your referral ${referredName} is now a member. Book your introductory round together.`,
     url:   '/more/referrals',
     tag:   'referral-joined',
+    subject: `${titleCaseName(referredName)} has joined LinkUp`,
     cta:   'View your referrals',
   }),
 
@@ -247,6 +267,7 @@ export const NotificationTemplates = {
     body:  body.length > 150 ? body.slice(0, 150) + '…' : body,
     url:   announcementId ? `/more/announcements/${announcementId}` : '/more/announcements',
     tag:   `announcement-${type}`,
+    subject: `LinkUp announcement: ${title.length > 60 ? title.slice(0, 60) + '…' : title}`,
     cta:   'Read the announcement',
   }),
 
@@ -255,6 +276,7 @@ export const NotificationTemplates = {
     body:  `${partnerName} has a new exclusive offer for LinkUp members.`,
     url:   promotionId ? `/more/promotions/${promotionId}` : '/more/promotions',
     tag:   `promotion-${partnerName.toLowerCase().replace(/\s+/g, '-').slice(0, 20)}`,
+    subject: `A new offer from ${partnerName}`,
     cta:   'See the offer',
   }),
 
@@ -263,6 +285,7 @@ export const NotificationTemplates = {
     body:  'Your membership is now active. Explore the community, book a tee time, and connect with members.',
     url:   '/home',
     tag:   'member-activated',
+    subject: `Welcome to LinkUp Golf, ${titleCaseName(firstName)}`,
     cta:   'Open LinkUp',
   }),
 
@@ -271,6 +294,7 @@ export const NotificationTemplates = {
     body:  `You've been added to a tee time on ${date} at ${time}. Check My Bookings for details.`,
     url:   '/book',
     tag:   'booking-invite',
+    subject: `${titleCaseName(bookerFirstName)} added you to a tee time on ${date}`,
     cta:   'View the tee time',
   }),
 
@@ -279,6 +303,7 @@ export const NotificationTemplates = {
     body:  `Your booking on ${date} at ${time} is ready for payment. Tap to complete your booking.`,
     url:   '/book',
     tag:   'payment-ready',
+    subject: `Your tee time on ${date} is ready for payment`,
     cta:   'Pay for your round',
   }),
 
@@ -290,6 +315,7 @@ export const NotificationTemplates = {
     body:  `Rate your round at ${courseName} — it only takes a moment.`,
     url:   '/home',
     tag:   `booking-survey-${bookingId}`,
+    subject: `How was your round at ${courseName}?`,
     cta:   'Rate your round',
   }),
 
@@ -298,6 +324,7 @@ export const NotificationTemplates = {
     body:  `You've been invited to join "${groupName}". Tap to accept or decline.`,
     url:   `/messages/${conversationId}`,
     tag:   `group-invite-${conversationId}`,
+    subject: `${titleCaseName(inviterFirstName)} invited you to "${groupName}" on LinkUp`,
     cta:   'Accept or decline',
   }),
 
@@ -306,6 +333,7 @@ export const NotificationTemplates = {
     body:  `Your event "${eventTitle}" wasn't approved. Reason: ${reason}`,
     url:   '/more/events',
     tag:   'member-event-rejected',
+    subject: `About your event "${eventTitle}"`,
     cta:   'View your events',
   }),
 
@@ -315,6 +343,7 @@ export const NotificationTemplates = {
     body:  'Your application was approved — create your first event and start earning credits.',
     url:   '/host',
     tag:   'host-application-approved',
+    subject: 'You\'re now a LinkUp host',
     cta:   'Open your host workspace',
   }),
 
@@ -323,6 +352,7 @@ export const NotificationTemplates = {
     body:  `Your application wasn't approved this time. ${reason}`,
     url:   '/more/host',
     tag:   'host-application-rejected',
+    subject: 'About your LinkUp host application',
     cta:   'View details',
   }),
 
@@ -331,6 +361,7 @@ export const NotificationTemplates = {
     body:  `Your event at ${courseName} on ${date} is now open for members to reserve spots.`,
     url:   '/host/events',
     tag:   'hosted-event-created',
+    subject: `Your ${courseName} event on ${date} is live`,
     cta:   'View the round',
   }),
 
@@ -356,6 +387,7 @@ export const NotificationTemplates = {
       : `${hostName} wants to host a round at ${courseName} on ${date}. Set up the calendar, then approve it to put it in front of members.`,
     url:   '/admin/hosts',
     tag:   'hosted-event-review',
+    subject: `${titleCaseName(hostName)} wants to host a round at ${courseName}`,
     cta:   'Review it now',
   }),
 
@@ -366,6 +398,7 @@ export const NotificationTemplates = {
     body:  `Your ${courseName} event on ${date} has been approved — members can reserve a spot now.`,
     url:   '/host/events',
     tag:   'hosted-event-approved',
+    subject: `Your ${courseName} event on ${date} is live`,
     cta:   'View your round',
   }),
 
@@ -378,6 +411,7 @@ export const NotificationTemplates = {
     body:  `${courseName} is set up on LinkUp — you can list rounds there now.`,
     url:   '/host/events',
     tag:   'venue-approved',
+    subject: `${courseName} is live on LinkUp`,
     cta:   'View the venue',
   }),
 
@@ -392,6 +426,7 @@ export const NotificationTemplates = {
       : `${courseName} is live, but ${count} of the dates you asked for have nothing open. Pick others and we'll put them in front of members.`,
     url:   '/host/events',
     tag:   'hosted-event-dates-held',
+    subject: `${count === 1 ? 'A date' : `${count} dates`} at ${courseName} need changing`,
     cta:   'Review your dates',
   }),
 
@@ -402,6 +437,7 @@ export const NotificationTemplates = {
     body:  `Your ${courseName} event on ${date} was taken down and anyone who reserved has been released. ${reason}`,
     url:   '/host/events',
     tag:   'hosted-event-rejected',
+    subject: `Your ${courseName} event on ${date} was taken down`,
     cta:   'View details',
   }),
 
@@ -410,6 +446,7 @@ export const NotificationTemplates = {
     body:  `${memberName} reserved a spot at your ${courseName} event on ${date}.`,
     url:   '/host/events',
     tag:   'hosted-event-joined',
+    subject: `${titleCaseName(memberName)} reserved a spot at your ${courseName} event`,
     cta:   'View your event',
   }),
 
@@ -418,6 +455,7 @@ export const NotificationTemplates = {
     body:  `${hostName} uploaded proof for their ${courseName} event on ${date}. Review it to approve credits.`,
     url:   '/admin/hosts',
     tag:   'hosted-event-proof',
+    subject: `${titleCaseName(hostName)} submitted proof for ${courseName}`,
     cta:   'Review the proof',
   }),
 
@@ -426,6 +464,7 @@ export const NotificationTemplates = {
     body:  `${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in host credits has been added to your balance.`,
     url:   '/host/credits',
     tag:   'host-credit-approved',
+    subject: `${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in host credits has been added`,
     cta:   'View your credit',
   }),
 
@@ -434,6 +473,7 @@ export const NotificationTemplates = {
     body:  `Your event's credits weren't approved. ${reason} You can upload new proof.`,
     url:   '/host/events',
     tag:   'host-credit-rejected',
+    subject: 'About the credits for your LinkUp event',
     cta:   'View details',
   }),
 
@@ -446,6 +486,7 @@ export const NotificationTemplates = {
     body:  `You redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in credits toward golf.`,
     url:   '/host/credits',
     tag:   'host-credit-redeemed',
+    subject: `You redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in LinkUp credits`,
     cta:   'View your wallet',
   }),
 
@@ -456,6 +497,7 @@ export const NotificationTemplates = {
     body:  `${code} — ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} off at checkout.`,
     url:   '/host/credits',
     tag:   'host-credit-coupon',
+    subject: `Your ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} LinkUp credit code`,
     cta:   'Get your code',
   }),
 
@@ -466,6 +508,7 @@ export const NotificationTemplates = {
     body:  `${name} redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} toward golf.`,
     url:   '/admin/hosts',
     tag:   'host-credit-redemption',
+    subject: `${titleCaseName(name)} redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in credits`,
     cta:   'Review the request',
   }),
 
@@ -475,6 +518,7 @@ export const NotificationTemplates = {
     body:  `The ${courseName} event on ${date} has been cancelled.${reason ? ` ${reason}` : ''} Your spot has been released.`,
     url:   '/book',
     tag:   'hosted-event-cancelled',
+    subject: `The ${courseName} event on ${date} was cancelled`,
     cta:   'Find another round',
   }),
 
@@ -484,6 +528,7 @@ export const NotificationTemplates = {
     body:  `Details changed for the ${courseName} event on ${date}. Open it to see the latest.`,
     url:   '/book',
     tag:   'hosted-event-updated',
+    subject: `The ${courseName} event on ${date} has changed`,
     cta:   'See what changed',
   }),
 
@@ -493,6 +538,7 @@ export const NotificationTemplates = {
     body:  `${memberName} released their spot at your ${courseName} event on ${date}.`,
     url:   '/host/events',
     tag:   'hosted-event-joined',
+    subject: `A spot opened up at your ${courseName} event on ${date}`,
     cta:   'View your event',
   }),
 }

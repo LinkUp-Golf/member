@@ -29,6 +29,12 @@ const BORDER = '#DDE5F5'
 export interface NotificationEmail {
   /** The card's headline — the push notification's title. */
   heading: string
+  /**
+   * The subject line. Read in an inbox with nothing around it, so it carries
+   * context the heading doesn't have to; defaults to the heading when a
+   * notification doesn't give one.
+   */
+  subject?: string
   /** The sentence under it — the push notification's body. */
   body: string
   /** Absolute https URL the button opens. */
@@ -188,16 +194,6 @@ ${
                   </td>
                 </tr>
 
-                <!-- The same destination as plain text. A button that doesn't
-                     render, or a client that blocks it, must not leave the
-                     reader with no way through. -->
-                <tr>
-                  <td align="center" style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:11px;line-height:18px;color:${MUTED};padding:18px 0 0 0;word-break:break-all;">
-                    Or paste this into your browser:<br />
-                    <a href="${ctaUrl}" style="color:${NAVY};text-decoration:underline;">${escapeHtml(ctaUrl)}</a>
-                  </td>
-                </tr>
-
               </table>
             </td>
           </tr>
@@ -240,5 +236,5 @@ ${
     `Notification settings: ${settingsUrl}`,
   ].join('\n')
 
-  return { subject: email.heading, html, text }
+  return { subject: email.subject?.trim() || email.heading, html, text }
 }

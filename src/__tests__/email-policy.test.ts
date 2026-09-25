@@ -1,26 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import {
-  categoryFor,
-  notificationKey,
-  throttleDecision,
-  CATEGORY_BY_TAG,
-  DAILY_EMAIL_CAP,
-  type ThrottleState,
-} from '@/lib/email/policy'
+import { categoryFor, notificationKey, CATEGORY_BY_TAG } from '@/lib/email/policy'
 import { NotificationTemplates } from '@/lib/push'
 
-const state = (over: Partial<ThrottleState> = {}): ThrottleState => ({
-  lastSentAt: null,
-  sentInWindow: 0,
-  ...over,
-})
-
-const NOW = Date.parse('2026-09-25T12:00:00.000Z')
-const hoursAgo = (n: number) => new Date(NOW - n * 60 * 60 * 1000).toISOString()
-
 describe('notificationKey', () => {
-  it('collapses an instance to its kind, so a cooldown means something', () => {
-    // Without this every conversation would carry its own email budget.
+  it('collapses an instance to its kind, so the log groups', () => {
+    // Without this, email_send_log would hold one key per conversation and
+    // tell you nothing about how much a member is getting.
     expect(notificationKey('msg-8f3c-conversation-id')).toBe('msg')
     expect(notificationKey('booking-survey-abc123')).toBe('booking-survey')
     expect(notificationKey('visit-dana')).toBe('visit')
@@ -36,71 +21,32 @@ describe('notificationKey', () => {
 })
 
 describe('categoryFor', () => {
-  it('rations anything it has never heard of', () => {
-    // A new notification should not be able to reach every member daily just
-    // because nobody remembered to classify it.
+  it('falls back to community for anything it has never heard of', () => {
+    // Classification only — an unknown tag is still sent, just recorded under
+    // the least specific heading.
     expect(categoryFor('something-new')).toBe('community')
     expect(categoryFor(undefined)).toBe('community')
   })
 
-  it('never suppresses money, access or a cancelled round', () => {
+  it('files money, access and a cancelled round as transactional', () => {
     expect(categoryFor('payment-ready')).toBe('transactional')
     expect(categoryFor('host-credit-approved')).toBe('transactional')
     expect(categoryFor('hosted-event-cancelled')).toBe('transactional')
     expect(categoryFor('booking-invite')).toBe('transactional')
   })
 
-  it('rations the community feed', () => {
+  it('files the community feed as community', () => {
     expect(categoryFor('new-member')).toBe('community')
     expect(categoryFor('promotion-titleist')).toBe('community')
     expect(categoryFor('booking-2026-09-27')).toBe('community')
   })
 })
 
-describe('throttleDecision', () => {
-  it('lets a transactional notification through a full inbox', () => {
-    const d = throttleDecision(
-      'transactional',
-      state({ sentInWindow: DAILY_EMAIL_CAP + 5, lastSentAt: hoursAgo(0) }),
-      NOW,
-    )
-    expect(d.send).toBe(true)
-  })
-
-  it('stops the same community notification twice in a day', () => {
-    const d = throttleDecision('community', state({ lastSentAt: hoursAgo(2) }), NOW)
-    expect(d).toEqual({ send: false, reason: 'cooldown' })
-  })
-
-  it('lets it through once the cooldown has passed', () => {
-    const d = throttleDecision('community', state({ lastSentAt: hoursAgo(21) }), NOW)
-    expect(d.send).toBe(true)
-  })
-
-  it('stops community mail once the day is full', () => {
-    const d = throttleDecision('community', state({ sentInWindow: DAILY_EMAIL_CAP }), NOW)
-    expect(d).toEqual({ send: false, reason: 'daily_cap' })
-  })
-
-  it('caps conversations but does not cool them down', () => {
-    // A reply an hour after the last one is a real message; the quiet comes
-    // from the caught-up rule in messages/email-policy, not from here.
-    expect(throttleDecision('conversation', state({ lastSentAt: hoursAgo(1) }), NOW).send).toBe(true)
-    expect(
-      throttleDecision('conversation', state({ sentInWindow: DAILY_EMAIL_CAP }), NOW).reason,
-    ).toBe('daily_cap')
-  })
-
-  it('sends rather than stays silent on an unreadable timestamp', () => {
-    expect(throttleDecision('community', state({ lastSentAt: 'nonsense' }), NOW).send).toBe(true)
-  })
-})
-
 describe('coverage of the template set', () => {
   // The point of the whole exercise: a notification that can be pushed can be
   // emailed. A template without a cta would render a button saying nothing in
-  // particular, and one whose tag isn't classified would quietly default to
-  // being rationed — fine as a fallback, wrong as an oversight.
+  // particular, and one whose tag isn't classified would be logged under a
+  // fallback heading — fine as a safety net, wrong as an oversight.
   const rendered = [
     NotificationTemplates.newMember('Dana', 'McBride', 'Aviara', 'm1'),
     NotificationTemplates.bookingAnnouncement('Dana', 'Sat 27 Sep', '1:30pm', 'm1'),
@@ -148,10 +94,53 @@ describe('coverage of the template set', () => {
     expect(missing).toEqual([])
   })
 
+  it('gives every template its own subject line', () => {
+    // Falling back to `title` is the safety net, not the plan: several titles
+    // are fragments that only make sense beside the app's name — a bare
+    // sender's name, "New reservation", "Your event is live".
+    const missing = rendered.filter(p => !p.subject).map(p => p.tag)
+    expect(missing).toEqual([])
+  })
+
+  it('writes subjects that stand on their own in an inbox', () => {
+    // A subject identical to a title that was written for a push is the shape
+    // of one that was added without being thought about.
+    const lazy = rendered.filter(p => p.subject === p.title).map(p => p.tag)
+    expect(lazy).toEqual([])
+  })
+
   it('classifies every template explicitly rather than by fallback', () => {
     const unclassified = rendered
       .map(p => notificationKey(p.tag))
       .filter(key => !(key in CATEGORY_BY_TAG))
     expect(Array.from(new Set(unclassified))).toEqual([])
+  })
+})
+
+describe('names in subject lines', () => {
+  // Names are stored however a member typed them into GHL, which is often
+  // lower-case. A push title is read beside an avatar and a body; a subject
+  // line is the first and sometimes only thing seen, and "dana mcbride sent
+  // you a message" reads like spam.
+  it('capitalises a lower-case name', () => {
+    expect(NotificationTemplates.newMessage('dana mcbride', 'hi', 'c1').subject).toBe(
+      'Dana Mcbride sent you a message',
+    )
+  })
+
+  it('leaves a name that is already capitalised alone', () => {
+    expect(
+      NotificationTemplates.hostedEventJoined('Dana McBride', 'Aviara', 'Sat').subject,
+    ).toBe('Dana McBride reserved a spot at your Aviara event')
+  })
+
+  it('handles hyphens and apostrophes', () => {
+    expect(NotificationTemplates.referralJoined("mary-jane o'neil").subject).toBe(
+      "Mary-Jane O'Neil has joined LinkUp",
+    )
+  })
+
+  it('does not touch the push title, which has its own context', () => {
+    expect(NotificationTemplates.newMessage('dana mcbride', 'hi', 'c1').title).toBe('dana mcbride')
   })
 })

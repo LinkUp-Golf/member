@@ -255,14 +255,19 @@ export function truncate(text: string, maxLength: number): string {
 }
 
 // Title-cases a person's name for display in copy where CSS `capitalize`
-// isn't available (server-built messages, notifications). Names are often
-// stored lower-case, so "mary jane o'neil" -> "Mary Jane O'neil".
+// isn't available (server-built messages, notifications, email subjects).
+// Names are often stored lower-case: "mary-jane o'neil" -> "Mary-Jane O'Neil".
+//
+// Only ever upper-cases. The rest of each word is left exactly as stored, so a
+// name that already carries internal capitals survives — "McBride" stays
+// "McBride" rather than being flattened to "Mcbride".
 export function titleCaseName(name: string): string {
   return name
     .split(/\s+/)
     .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ')
+    // Start of the string, or the letter after a space, hyphen or apostrophe.
+    .replace(/(^|[\s\-'’])(\p{L})/gu, (_, before: string, letter: string) => before + letter.toUpperCase())
 }
 
 // ---- Industry category short label -------------------------
