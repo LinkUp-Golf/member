@@ -870,6 +870,16 @@ export async function createGHLUser(params: {
           contactsEnabled: true,
           dashboardStatsEnabled: true,
         },
+        scopes: [
+          "calendars.readonly",
+          "calendars.write",
+          "calendars/events.write",
+          "calendars/groups.write",
+          "calendars/resources.write",
+          "calendars/settings.write"
+        ],
+        scopesAssignedToOnly: [],
+        source: "location_team",
       }),
     })
     const user = data.user ?? (data.id ? { id: data.id } : null)
