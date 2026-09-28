@@ -1,12 +1,17 @@
 "use client";
 
-// Host: create and manage hosted events. There is no draft — an event is live
-// from the moment it's created, then: (event runs) → upload proof → pending
-// approval → credits awarded. Cancelling frees any reserved spots, and an admin
-// can take a listing down (which cancels it) if it shouldn't have gone out.
+// Host: create hosted events and watch them run. There is no draft — an event
+// is live from the moment it's created, then: (event runs) → upload proof →
+// pending approval → credits awarded. An admin can take a listing down (which
+// cancels it) if it shouldn't have gone out.
+//
+// A host can't change or cancel a listed round from here for now: members
+// reserve against a date and a tee time, and a round that moves or disappears
+// under them is a promise broken by the app rather than by anyone. Changes go
+// through an admin instead. The API still accepts both — see the note on
+// EventDrawer — so the buttons can come back without a server change.
 
 import { useState, useEffect, useCallback, useMemo, memo } from "react";
-import Link from "next/link";
 import Image from "next/image";
 import { useForm, Controller } from "react-hook-form";
 import { AdminPageHeader, AdminCard } from "@/components/admin/AdminUI";
@@ -20,6 +25,9 @@ import ProofControl, {
   currentProof,
   eventProofState,
 } from "@/components/host/ProofControl";
+import RoundPlayersSheet, {
+  type RoundPlayers,
+} from "@/components/host/RoundPlayersSheet";
 import { HOST_EVENT_GUEST_RATE_USD } from "@/lib/constants";
 import { formatEventTeeTime as fmtTime, cn } from "@/lib/utils";
 import {
@@ -36,6 +44,7 @@ import {
   normaliseTeeTime,
 } from "@/lib/hosts/tee-time";
 import type {
+  EventPlayer,
   HostedEvent,
   HostedEventStatus,
   Course,
@@ -61,14 +70,25 @@ const fmtDate = (d: string) =>
 // rather than one field plus a list of extras.
 const MAX_DATES_PER_EVENT = 30;
 
+/** The chip an event still with us wears — on the card header, not the rows. */
+const AWAITING_REVIEW = {
+  label: "Waiting on us",
+  dot: "bg-amber-500",
+  text: "text-amber-700",
+} as const;
+
 // A dot and a word. A pill per row turned a list of dates into a wall of
 // badges; the state matters, but not that much of the row's weight.
-const STATUS_META: Record<
-  HostedEventStatus,
-  { label: string; dot: string; text: string }
+//
+// Partial, and 'upcoming' is deliberately absent: a published round says nothing
+// beside its date. "Live" was a label on the ordinary case — the date, the tee
+// time and the spot count already say the round is up — and a word on every row
+// made the states a host actually has to read harder to pick out. A status with
+// no entry here gets no chip.
+const STATUS_META: Partial<
+  Record<HostedEventStatus, { label: string; dot: string; text: string }>
 > = {
-  pending_approval: { label: "Waiting on us", dot: "bg-amber-500", text: "text-amber-700" },
-  upcoming: { label: "Live", dot: "bg-green-600", text: "text-green-700" },
+  pending_approval: AWAITING_REVIEW,
   completed: { label: "Finished", dot: "bg-blue-500", text: "text-blue-700" },
   pending_credit_approval: { label: "Credit pending", dot: "bg-amber-500", text: "text-amber-700" },
   credits_awarded: { label: "Credit paid", dot: "bg-green-600", text: "text-green-700" },
@@ -116,7 +136,9 @@ export default function HostEventsPage() {
   const [events, setEvents] = useState<HostedEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
-  const [editing, setEditing] = useState<HostedEvent | "new" | null>(null);
+  // Creating only. Editing a listed round is switched off for now, so there is
+  // no event to carry here — see the note on EventDrawer's `event` prop.
+  const [creating, setCreating] = useState(false);
 
   const showToast = useCallback((msg: string, ok = true) => {
     setToast({ msg, ok });
@@ -135,10 +157,9 @@ export default function HostEventsPage() {
     load();
   }, [load]);
 
-  // One stable callback for every row, so the memoized cards don't re-render
-  // whenever this page does.
-  const handleEdit = useCallback((e: HostedEvent) => setEditing(e), []);
-  const handleNew = useCallback(() => setEditing("new"), []);
+  // One stable callback, so the memoized cards don't re-render whenever this
+  // page does.
+  const handleNew = useCallback(() => setCreating(true), []);
 
   const groups = useMemo(() => groupByVenue(events), [events]);
 
@@ -175,18 +196,17 @@ export default function HostEventsPage() {
               group={g}
               onChanged={load}
               onToast={showToast}
-              onEdit={handleEdit}
             />
           ))}
         </div>
       )}
 
-      {editing && (
+      {creating && (
         <EventDrawer
-          event={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
+          event={null}
+          onClose={() => setCreating(false)}
           onSaved={(msg) => {
-            setEditing(null);
+            setCreating(false);
             showToast(msg);
             load();
           }}
@@ -211,12 +231,10 @@ const VenueCard = memo(function VenueCard({
   group,
   onChanged,
   onToast,
-  onEdit,
 }: {
   group: VenueGroup;
   onChanged: () => void;
   onToast: (msg: string, ok?: boolean) => void;
-  onEdit: (event: HostedEvent) => void;
 }) {
   // Any date still with us means the event is. A host who lists a week of
   // dates submits them together, so this is nearly always all of them.
@@ -236,10 +254,10 @@ const VenueCard = memo(function VenueCard({
             <span className="align-middle">{group.name}</span>
             {awaitingReview && (
               <span
-                className={`ml-2 inline-flex items-center gap-1.5 align-middle text-xs font-normal ${STATUS_META.pending_approval.text}`}
+                className={`ml-2 inline-flex items-center gap-1.5 align-middle text-xs font-normal ${AWAITING_REVIEW.text}`}
               >
                 <span
-                  className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_META.pending_approval.dot}`}
+                  className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${AWAITING_REVIEW.dot}`}
                 />
                 {AWAITING_REVIEW_NOTE}
               </span>
@@ -257,18 +275,73 @@ const VenueCard = memo(function VenueCard({
 
       <ul className="divide-y divide-gray-100">
         {group.events.map((e) => (
-          <EventRow
-            key={e.id}
-            event={e}
-            onChanged={onChanged}
-            onToast={onToast}
-            onEdit={onEdit}
-          />
+          <EventRow key={e.id} event={e} onChanged={onChanged} onToast={onToast} />
         ))}
       </ul>
     </section>
   );
 });
+
+// ---- Who's coming ------------------------------------------
+
+/** How many faces before the rest become a "+n". */
+const MAX_FACES = 4;
+
+/**
+ * The people on one round, as a row of overlapping faces.
+ *
+ * Ringed in white so an overlapping stack still reads as separate people, and
+ * titled with the full name so a host can hover one on a desktop. Hidden from
+ * screen readers, which can make nothing of four cropped photos — the button
+ * around it carries the count, and opens the names for everyone.
+ *
+ * Unoptimized images on purpose: a member's avatar can be hosted wherever their
+ * profile put it, and next/image throws outright on a hostname that isn't in
+ * next.config's remotePatterns — taking the row down over one face.
+ */
+function PlayerFaces({ players }: { players: EventPlayer[] }) {
+  // With one over the limit, showing MAX_FACES and "+1" costs the same room as
+  // showing them all, so the cut only happens when it actually saves space.
+  const shown =
+    players.length > MAX_FACES ? players.slice(0, MAX_FACES - 1) : players;
+  const more = players.length - shown.length;
+  const name = (p: EventPlayer) =>
+    `${p.first_name} ${p.last_name}`.trim() || "Member";
+
+  return (
+    // Labelled on the button that wraps it, so the faces themselves are
+    // decoration as far as a screen reader is concerned.
+    <span aria-hidden className="flex -space-x-1.5 flex-shrink-0">
+      {shown.map((p) =>
+        p.avatar_url ? (
+          <Image
+            key={p.member_id}
+            src={p.avatar_url}
+            alt=""
+            title={name(p)}
+            width={24}
+            height={24}
+            unoptimized
+            className="w-6 h-6 rounded-full object-cover ring-2 ring-white bg-green-100"
+          />
+        ) : (
+          <span
+            key={p.member_id}
+            title={name(p)}
+            className="w-6 h-6 rounded-full ring-2 ring-white bg-green-900 text-white flex items-center justify-center text-[10px] font-bold uppercase leading-none"
+          >
+            {p.first_name.charAt(0) || "?"}
+          </span>
+        ),
+      )}
+      {more > 0 && (
+        <span className="w-6 h-6 rounded-full ring-2 ring-white bg-green-100 text-green-900 flex items-center justify-center text-[10px] font-bold leading-none tabular-nums">
+          +{more}
+        </span>
+      )}
+    </span>
+  );
+}
 
 // ---- One date -----------------------------------------------
 
@@ -276,48 +349,28 @@ const EventRow = memo(function EventRow({
   event,
   onChanged,
   onToast,
-  onEdit,
 }: {
   event: HostedEvent;
   onChanged: () => void;
   onToast: (msg: string, ok?: boolean) => void;
-  /** Takes the event so the parent can pass one stable callback for every row. */
-  onEdit: (event: HostedEvent) => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
   const meta = STATUS_META[event.status];
-  const filled = event.filled_spots ?? 0;
-  // Members who booked the venue that day are at this round too, so the host's
-  // headcount is both. filled_spots alone is what the reservation RPC enforces
-  // capacity against, which is why the two numbers aren't the same thing.
-  const playing = filled + (event.booked_spots ?? 0);
-  // Mirrors the server's editable/cancellable set — a host can still fix an
-  // event that hasn't happened yet, including one still waiting on approval.
   const awaitingApproval = event.status === "pending_approval";
-  const editable = event.status === "upcoming" || awaitingApproval;
   // Whether a proof is in, what the button should say, and what to tell them —
   // all from one place, because the status alone can't answer the first of those.
   const proof = eventProofState(event);
   const proofImage = currentProof(event);
-
-  async function act(action: string, extra: Record<string, unknown> = {}) {
-    if (busy) return;
-    setBusy(true);
-    const res = await fetch(`/api/host/events/${event.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, ...extra }),
-    });
-    const json = await res.json().catch(() => ({}));
-    setBusy(false);
-    if (!res.ok) {
-      onToast(json.error ?? "Action failed.", false);
-      return;
-    }
-    onToast(action === "cancel" ? "Event cancelled." : "Saved.");
-    onChanged();
-  }
+  // Everyone at the round: reserved through the event, plus members who booked
+  // the venue that day. The roster is the headcount as well as the faces — it
+  // was filled_spots + booked_spots, which counts a member who did both twice,
+  // so the number could say four while three faces were shown. filled_spots is
+  // still what capacity is enforced against in SQL, which is why it isn't this.
+  const players = event.players ?? [];
+  const playing = players.length;
+  // The roster the sheet is showing, or null when it's shut. Held per row rather
+  // than on the page: only one is ever open, and the sheet portals to the body,
+  // so there is nothing for the page to coordinate.
+  const [openRoster, setOpenRoster] = useState<RoundPlayers | null>(null);
 
   // At most one line of explanation, and only where the state needs one — four
   // possible notes stacked under every row was most of the old card's height.
@@ -335,16 +388,20 @@ const EventRow = memo(function EventRow({
 
   return (
     <li className="px-4 sm:px-5 py-3">
-      {/* Stacked on a phone, one line from sm up: the date and its numbers read
-          left, the things you can do to it read right. */}
-      <div className="sm:flex sm:items-center sm:gap-4">
-        <div className="min-w-0 sm:flex-1">
+      {/* One line at every width: the date and its numbers read left, the faces
+          and anything to do read right, vertically centred against them. It used
+          to stack on a phone, from when the row carried Edit and Cancel too —
+          with those gone there's room, and the faces belong beside the round
+          rather than dropped underneath it. */}
+      <div className="flex items-center gap-3 sm:gap-4">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-medium text-gray-900">
               {fmtDate(event.event_date)}
             </p>
-            {/* Every state but the one the title already carries. */}
-            {!awaitingApproval && (
+            {/* Every state that has a chip, except the one the title already
+                carries. A live round has none — see STATUS_META. */}
+            {!awaitingApproval && meta && (
               <span className={`inline-flex items-center gap-1.5 text-xs ${meta.text}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
                 {meta.label}
@@ -358,42 +415,40 @@ const EventRow = memo(function EventRow({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap mt-2 sm:mt-0 sm:flex-shrink-0">
-          {editable && (
-            <button
-              onClick={() => onEdit(event)}
-              disabled={busy}
-              className="btn btn-outline btn-sm"
-            >
-              Edit
-            </button>
-          )}
+        <div className="flex items-center justify-end gap-2 flex-wrap">
           {proof.canUpload && (
             <ProofControl event={event} onDone={onChanged} onToast={onToast} />
           )}
-          {editable && !cancelling && (
+          {/* Who is coming, as faces, and the way into their names — the same
+              gesture the member app's booking calendar uses. This used to be a
+              count that opened a whole page to answer a question a row of
+              circles answers in place. Nothing when the round is empty: the spot
+              line above already says "0 of 4". */}
+          {players.length > 0 && (
             <button
-              onClick={() => setCancelling(true)}
-              disabled={busy}
-              className="btn btn-outline btn-sm text-red-600 border-red-200"
+              type="button"
+              onClick={() =>
+                setOpenRoster({
+                  date: event.event_date,
+                  venueName: event.course?.name ?? "This venue",
+                  teeTime: event.tee_time,
+                  players,
+                })
+              }
+              aria-label={`Who's coming on ${fmtDate(event.event_date)} — ${playing} ${playing === 1 ? "member" : "members"}`}
+              className="focus-ring rounded-full p-0.5 -m-0.5 hover:bg-gray-100"
             >
-              Cancel
+              <PlayerFaces players={players} />
             </button>
           )}
-          {/* The registered count is the link — it is the reason to open the
-              round, so it does not need a separate arrow next to it. */}
-          <Link
-            href={`/host/events/${event.id}`}
-            className="text-xs font-medium text-gray-500 hover:text-green-800 whitespace-nowrap ml-auto sm:ml-0"
-          >
-            {playing} {playing === 1 ? "member" : "members"} →
-          </Link>
         </div>
       </div>
 
+      <RoundPlayersSheet round={openRoster} onClose={() => setOpenRoster(null)} />
+
       {/* Either half can stand alone: a settled round has a photo worth seeing
           and nothing left to say, and a note can exist before any photo does. */}
-      {(note || proofImage) && !cancelling && (
+      {(note || proofImage) && (
         <div className="flex items-center gap-2 mt-2">
           {/* The photo itself, small. A line of text saying proof was sent is
               easy to miss and impossible to check; the thumbnail is the actual
@@ -417,74 +472,9 @@ const EventRow = memo(function EventRow({
           {note && <p className={`text-[11px] ${note.tone}`}>{note.text}</p>}
         </div>
       )}
-
-      {/* Under the row rather than in the button column, so the reason field
-          gets the full width on a phone. */}
-      {cancelling && (
-        <CancelPanel
-          event={event}
-          busy={busy}
-          onDismiss={() => setCancelling(false)}
-          onCancelReason={(reason) => {
-            setCancelling(false);
-            act("cancel", { cancellation_reason: reason });
-          }}
-        />
-      )}
     </li>
   );
 });
-
-// ---- Cancel with optional reason ----------------------------
-
-function CancelPanel({
-  event,
-  onCancelReason,
-  onDismiss,
-  busy,
-}: {
-  event: HostedEvent;
-  onCancelReason: (reason: string) => void;
-  onDismiss: () => void;
-  busy: boolean;
-}) {
-  const [reason, setReason] = useState("");
-  const hasRegs = (event.filled_spots ?? 0) > 0;
-
-  return (
-    <div className="mt-3 p-3 rounded-xl bg-red-50 border border-red-100 space-y-2">
-      <p className="text-xs text-red-700">
-        Cancel this event
-        {hasRegs
-          ? ` and release all ${event.filled_spots} reserved spot${event.filled_spots === 1 ? "" : "s"}`
-          : ""}
-        ?
-      </p>
-      <input
-        className="input text-sm"
-        placeholder="Reason (optional, shown to members)"
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-      />
-      <div className="flex gap-2">
-        <button
-          onClick={onDismiss}
-          disabled={busy}
-          className="btn btn-outline btn-sm flex-1"
-        >
-          Keep it
-        </button>
-        <button
-          onClick={() => onCancelReason(reason.trim())}
-          disabled={busy}
-          className="btn btn-sm flex-1 bg-red-600 text-white"
-        >
-          Cancel event
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // ---- Create / edit drawer -----------------------------------
 
@@ -525,6 +515,15 @@ function EventDrawer({
   onSaved,
   onError,
 }: {
+  /**
+   * The round being edited, or null to create.
+   *
+   * Always null today: the Edit button that supplied one is gone while host
+   * editing is switched off. Its `isEdit` path is kept rather than stripped
+   * because it's the whole of what turning editing back on needs — the drawer,
+   * the single-date picker and the PATCH it submits to are all still here and
+   * still correct. Passing an event is the only missing piece.
+   */
   event: HostedEvent | null;
   onClose: () => void;
   onSaved: (msg: string) => void;

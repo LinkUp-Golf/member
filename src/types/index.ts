@@ -515,6 +515,19 @@ export type HostedEventStatus =
   | 'pending_credit_approval'
   | 'credits_awarded'
 
+/**
+ * One person at a hosted round, however they got there: `reserved` through the
+ * event, or `booking` — they booked the venue that day, which puts them on the
+ * same afternoon at the same club.
+ */
+export interface EventPlayer {
+  member_id: string
+  first_name: string
+  last_name: string
+  avatar_url: string | null
+  source: 'reserved' | 'booking'
+}
+
 export interface HostedEvent {
   id: string
   host_id: string
@@ -555,6 +568,12 @@ export interface HostedEvent {
     tee_time: string | null
   }[]
   booked_spots?: number
+  /**
+   * Everyone at the round, reservations and venue bookings merged into one list
+   * with a face each. Only on responses the host asked for it on — it names
+   * members, so the member-facing endpoints leave it off.
+   */
+  players?: EventPlayer[]
   course?: { id: string; name: string; city?: string | null; payment_url?: string | null } | null
   host?: { id: string; name: string; member?: { first_name: string; last_name: string } | null } | null
   proofs?: HostedEventProof[]

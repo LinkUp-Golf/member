@@ -41,7 +41,11 @@ export const GET = withHostAuth(async (_req: NextRequest, ctx: HostAuthContext) 
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const events = await enrichHostedEvents(admin, (data ?? []) as HostedEvent[])
+  // The roster comes with it: the list shows the faces of everyone on each
+  // round, so the host can see who is coming without opening anything.
+  const events = await enrichHostedEvents(admin, (data ?? []) as HostedEvent[], {
+    withPlayers: true,
+  })
   return NextResponse.json({ events })
 })
 
