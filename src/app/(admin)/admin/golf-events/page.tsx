@@ -191,6 +191,7 @@ export default function AdminCoursesPage() {
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [editingCourse, setEditingCourse] = useState<CourseRow | null>(null)
+  const [approvingId, setApprovingId] = useState<string | null>(null)
   const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -242,6 +243,7 @@ export default function AdminCoursesPage() {
         held === 0,
       )
     } else showToast(json.error ?? 'Approval failed.', false)
+    setApprovingId(null)
     await loadCourses()
     setProcessing(null)
   }
@@ -612,7 +614,7 @@ export default function AdminCoursesPage() {
                         <>
                           {course.approval_status === 'pending' && !isRejecting && (
                             <>
-                              <CourseMenuItem label={isProcessing ? 'Approving…' : 'Approve'} disabled={isProcessing} onClick={() => { approveCourse(course); closeMenu() }} />
+                              <CourseMenuItem label={isProcessing ? 'Approving…' : 'Approve'} disabled={isProcessing} onClick={() => { setApprovingId(course.id); closeMenu() }} />
                               <CourseMenuItem label="Reject" danger disabled={isProcessing} onClick={() => { setRejectingId(course.id); setRejectReason(''); closeMenu() }} />
                             </>
                           )}
@@ -740,7 +742,7 @@ export default function AdminCoursesPage() {
                   <div className="hidden sm:flex items-center justify-end gap-1.5 flex-wrap pt-1">
                     {course.approval_status === 'pending' && !isRejecting && (
                       <>
-                        <AdminButton label={isProcessing ? 'Approving…' : 'Approve'} onClick={() => approveCourse(course)} variant="primary" size="sm" disabled={isProcessing} />
+                        <AdminButton label={isProcessing ? 'Approving…' : 'Approve'} onClick={() => setApprovingId(course.id)} variant="primary" size="sm" disabled={isProcessing} />
                         <AdminButton label="Reject" onClick={() => { setRejectingId(course.id); setRejectReason('') }} variant="danger" size="sm" disabled={isProcessing} />
                       </>
                     )}
@@ -782,6 +784,18 @@ export default function AdminCoursesPage() {
         />
       )}
 
+      {approvingId && (
+        <ApproveCourseModal
+          course={courses.find(c => c.id === approvingId) ?? null}
+          processing={!!processing}
+          onConfirm={() => {
+            const course = courses.find(c => c.id === approvingId)
+            if (course) approveCourse(course)
+          }}
+          onClose={() => setApprovingId(null)}
+        />
+      )}
+
       {deletingId && (
         <DeleteCourseModal
           course={courses.find(c => c.id === deletingId) ?? null}
@@ -801,6 +815,95 @@ export default function AdminCoursesPage() {
           onToast={showToast}
         />
       )}
+    </div>
+  )
+}
+
+// ---- Approve confirmation modal -----------------------------
+
+/**
+ * The stop before a course goes live.
+ *
+ * Approving is not a small button: it publishes the venue to every member, and
+ * publishes the host rounds waiting on it. What it does NOT do is finish the GHL
+ * side — a calendar is created, but the workflows and automations that carry a
+ * booking from reserved to paid are set up by hand over there. Approving first
+ * and setting those up afterwards means live bookings passing through a pipeline
+ * that isn't listening yet, which is why the list is read before the press
+ * rather than remembered after it.
+ */
+function ApproveCourseModal({
+  course,
+  processing,
+  onConfirm,
+  onClose,
+}: {
+  course: CourseRow | null
+  processing: boolean
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  if (!course) return null
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close"
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+      />
+
+      <div
+        className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Approve ${course.name}`}
+      >
+        <div className="w-12 h-12 rounded-full bg-green-50 flex items-center justify-center mb-4 mx-auto">
+          <svg className="w-6 h-6 text-green-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+        </div>
+
+        <h2 className="text-lg font-bold text-gray-900 text-center mb-2">Approve Course</h2>
+        <p className="text-sm text-gray-500 text-center mb-1">
+          You&apos;re about to publish
+        </p>
+        <p className="text-sm font-semibold text-gray-800 text-center mb-4">
+          &ldquo;{course.name}&rdquo;
+        </p>
+
+        <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 mb-6">
+          <p className="text-xs text-amber-700 font-medium mb-1">Before approving, confirm in GHL:</p>
+          <ul className="text-xs text-amber-600 space-y-1 list-disc list-inside">
+            <li>The calendar for this venue is set up and linked here</li>
+            <li>Its workflows are in place</li>
+            <li>Its automations are switched on</li>
+          </ul>
+          <p className="text-[11px] text-amber-500 mt-2">
+            Approving puts this venue in front of members and publishes the host
+            rounds waiting on it — bookings can start arriving straight away.
+          </p>
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            Not yet
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={processing}
+            className="flex-1 py-2.5 rounded-xl bg-green-800 text-white text-sm font-semibold hover:bg-green-900 disabled:opacity-50 transition-colors"
+          >
+            {processing ? 'Approving…' : 'Approve Course'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
