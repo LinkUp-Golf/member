@@ -4,7 +4,8 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember } from '@/lib/notify'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -65,7 +66,7 @@ export const PATCH = withAuth(
       }
 
       if (member?.first_name) {
-        sendPushToMember(
+        notifyMember(
           memberId,
           NotificationTemplates.memberActivated(member.first_name)
         ).catch(() => {})

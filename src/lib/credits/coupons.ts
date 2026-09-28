@@ -22,7 +22,8 @@ import {
   getGhlCoupon,
   isDuplicateCouponCodeError,
 } from '@/lib/ghl/coupons'
-import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember } from '@/lib/notify'
 import { sanitiseText } from '@/lib/validation'
 import { logger } from '@/lib/logger'
 import {
@@ -326,7 +327,7 @@ export async function issueCreditCoupon(params: {
     return { ok: false, status: 500, error: 'Could not create your credit code.' }
   }
 
-  void sendPushToMember(
+  void notifyMember(
     memberId,
     NotificationTemplates.creditCouponIssued(amount, coupon.code)
   ).catch(() => {})

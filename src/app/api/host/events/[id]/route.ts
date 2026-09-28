@@ -14,7 +14,9 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { validateHostedEventPayload, sanitiseText } from '@/lib/validation'
 import { enrichHostedEvents, hostCanUseCourse } from '@/lib/hosts/events'
 import { normaliseTeeTime } from '@/lib/hosts/tee-time'
-import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
+import { describeRoundConflict, findRoundConflicts, loadOccupyingRounds } from '@/lib/hosts/schedule'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMembers } from '@/lib/notify'
 import { logger } from '@/lib/logger'
 import type { HostedEvent } from '@/types'
 
@@ -178,7 +180,7 @@ export const PATCH = withHostAuth(
       // Tell the released members (best-effort).
       const memberIds = (reserved ?? []).map(r => r.member_id)
       if (memberIds.length) {
-        void sendPushToMembers(
+        void notifyMembers(
           memberIds,
           NotificationTemplates.hostedEventCancelled(event.course?.name ?? 'a course', event.event_date, reason || undefined)
         ).catch(() => {})
@@ -305,6 +307,40 @@ export const PATCH = withHostAuth(
       return NextResponse.json({ error: 'Nothing to update.' }, { status: 400 })
     }
 
+    // Moving a round is the same question as creating one: does anybody else
+    // already hold that block of the club's day? Only asked when the move could
+    // change the answer, and the event excludes itself — an edit that leaves the
+    // date and time alone must not report the round clashing with itself.
+    if ('event_date' in patch || 'tee_time' in patch || 'course_id' in patch) {
+      const courseId = String(patch.course_id ?? event.course_id)
+      const date = String(patch.event_date ?? event.event_date).slice(0, 10)
+      const teeTime = ('tee_time' in patch ? patch.tee_time : event.tee_time) as string | null
+
+      const { data: venue } = await admin
+        .from('courses')
+        .select('name, meeting_duration_mins')
+        .eq('id', courseId)
+        .maybeSingle()
+
+      const occupied = await loadOccupyingRounds(admin, {
+        courseId,
+        dates: [date],
+        exclude: [id],
+      })
+      const conflicts = findRoundConflicts(
+        [{ eventId: id, date, teeTime, hostId: ctx.host.id, hostName: ctx.host.name }],
+        occupied,
+        Number(venue?.meeting_duration_mins),
+      )
+      const first = conflicts[0]
+      if (first) {
+        return NextResponse.json(
+          { error: describeRoundConflict(first, venue?.name ?? 'this venue') },
+          { status: 409 }
+        )
+      }
+    }
+
     const { data: updated, error } = await admin
       .from('hosted_events')
       .update(patch)
@@ -327,7 +363,7 @@ export const PATCH = withHostAuth(
         .eq('status', 'reserved')
       const memberIds = (reserved ?? []).map(r => r.member_id)
       if (memberIds.length) {
-        void sendPushToMembers(
+        void notifyMembers(
           memberIds,
           NotificationTemplates.hostedEventUpdated(
             enriched?.course?.name ?? event.course?.name ?? 'a course',

@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 // GET /api/courses?search=...&city=...&state=...&date=YYYY-MM-DD
-// Returns every bookable course (has a GHL calendar + a payment link) —
+// Returns every bookable course (has a GHL calendar, and a way to be paid) —
 // any member can book any of these directly, with no access-request gate.
 // search/city/state filter server-side so the member "select an event"
 // screen doesn't need to fetch the full list to narrow it down.
@@ -15,6 +15,7 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { coursesWithAvailabilityOn } from '@/lib/bookings/availability'
+import { canTakePayment } from '@/lib/bookings/payment-options'
 import { validateDate } from '@/lib/validation'
 import type { Course } from '@/types'
 
@@ -42,7 +43,6 @@ export async function GET(req: NextRequest) {
     .eq('active', true)
     .eq('approval_status', 'active')
     .not('ghl_calendar_id', 'is', null)  // exclude courses without a GHL calendar
-    .not('payment_url', 'is', null)      // exclude courses without a payment link
 
   if (search) query = query.ilike('name', `%${search.replace(/[%_]/g, '\\$&')}%`)
   if (city) query = query.eq('city', city)
@@ -54,10 +54,16 @@ export async function GET(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+  // "Payable" isn't a column: a venue needs a checkout link only where it takes
+  // payment on the app, and one settled at the club needs none. Filtered here
+  // rather than in SQL because the rule lives in one place — canTakePayment —
+  // and the admin routes that enforce it read the same function.
+  const payable = ((courses ?? []) as Course[]).filter(canTakePayment)
+
   if (date) {
-    const available = await coursesWithAvailabilityOn(admin, (courses ?? []) as Course[], date)
+    const available = await coursesWithAvailabilityOn(admin, payable, date)
     return NextResponse.json({ courses: available })
   }
 
-  return NextResponse.json({ courses: courses ?? [] })
+  return NextResponse.json({ courses: payable })
 }

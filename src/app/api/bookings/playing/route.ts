@@ -23,6 +23,7 @@ import { addDays, format } from 'date-fns'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { loadPlayersForRange } from '@/lib/bookings/players'
+import { canTakePayment } from '@/lib/bookings/payment-options'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
@@ -45,16 +46,17 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   // day never shows players at a club it doesn't list.
   const { data: courses, error } = await admin
     .from('courses')
-    .select('id')
+    .select('id, payment_url, payment_options')
     .eq('active', true)
     .eq('approval_status', 'active')
     .not('ghl_calendar_id', 'is', null)
-    .not('payment_url', 'is', null)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const days = await loadPlayersForRange(admin, {
-    courseIds: (courses ?? []).map((c) => c.id as string),
+    // Payable in the same sense the calendar means it — a link only where the
+    // venue takes payment on the app. See GET /api/courses.
+    courseIds: (courses ?? []).filter(canTakePayment).map((c) => c.id as string),
     startDate,
     endDate,
     selfId: ctx.memberId,

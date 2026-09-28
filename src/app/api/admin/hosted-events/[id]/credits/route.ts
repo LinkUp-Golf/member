@@ -19,7 +19,8 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { sanitiseText } from '@/lib/validation'
-import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember } from '@/lib/notify'
 import { mirrorProofToGhl } from '@/lib/hosts/proofs'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
@@ -88,7 +89,7 @@ export const POST = withAuth(
       }
 
       if (host?.member_id) {
-        void sendPushToMember(host.member_id, NotificationTemplates.hostCreditRejected(reason)).catch(() => {})
+        void notifyMember(host.member_id, NotificationTemplates.hostCreditRejected(reason)).catch(() => {})
       }
       logger.info('Hosted event credit rejected', {
         action: 'host.event.credit.rejected', userId: ctx.userId, metadata: { event_id: id },
@@ -175,7 +176,7 @@ export const POST = withAuth(
       })
     }
     if (host?.member_id) {
-      void sendPushToMember(host.member_id, NotificationTemplates.hostCreditApproved(amount)).catch(() => {})
+      void notifyMember(host.member_id, NotificationTemplates.hostCreditApproved(amount)).catch(() => {})
     }
 
     logger.info('Hosted event credit approved', {

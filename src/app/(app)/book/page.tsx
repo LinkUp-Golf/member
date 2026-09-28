@@ -1883,14 +1883,22 @@ function SuccessScreen({
   const [payingWithCredit, setPayingWithCredit] = useState(false);
   const showDinner = !!booking.bookingId && isAviaraEvent(booking.eventName);
 
-  // Which ways this venue takes payment. Pay now is the checkout link (and the
-  // only place credit can be spent); Pay at club marks the round and is done.
+  // Which ways this venue takes payment. Pay on App is the checkout link (and
+  // the only place credit can be spent); Pay at club marks the round and is done.
   const venue = { payment_options: booking.paymentOptions };
   const payNow = offersPayNow(venue);
-  const payAtClub = offersPayAtClub(venue) && !!booking.bookingId;
-  const [payingAtClub, setPayingAtClub] = useState(false);
+  // A venue that takes nothing but club payment has already had the round
+  // created that way — see the payment_method the create route writes. There is
+  // no choice to offer and nothing to press: this screen only says so.
+  const clubOnly = !payNow && offersPayAtClub(venue);
+  // The button, for the venue that takes both. Here the club IS a choice, and
+  // it's the member's to make.
+  const canChooseClub = payNow && offersPayAtClub(venue) && !!booking.bookingId;
+  const [choseClub, setChoseClub] = useState(false);
   const [markingAtClub, setMarkingAtClub] = useState(false);
   const [atClubError, setAtClubError] = useState("");
+  /** However they got there: this round is being settled at the club. */
+  const settlingAtClub = clubOnly || choseClub;
 
   async function handlePayAtClub() {
     if (!booking.bookingId || markingAtClub) return;
@@ -1902,11 +1910,11 @@ function SuccessScreen({
       setAtClubError(error);
       return;
     }
-    setPayingAtClub(true);
+    setChoseClub(true);
     onChosePayAtClub(booking.bookingId);
   }
   // Something to pay still on screen — the Back button steps down to outline.
-  const hasPayCta = !payingAtClub && ((payNow && !!booking.paymentUrl) || payAtClub);
+  const hasPayCta = !settlingAtClub && ((payNow && !!booking.paymentUrl) || canChooseClub);
 
   // Credit the member could put toward this round. Same rules as the payment
   // banner: a code is issued against a booking row, and only when the balance
@@ -1987,11 +1995,13 @@ function SuccessScreen({
           className="text-sm leading-relaxed"
           style={{ color: "rgba(0,38,105,0.6)" }}
         >
-          {payingAtClub
-            ? "You're paying at the club — settle your round with them on the day."
-            : payNow
-              ? "The slot is yours to pay for — your round is confirmed once payment is complete."
-              : "The slot is yours — choose Pay at club below and settle your round with the club on the day."}
+          {/* Two answers, not three: this venue either takes payment on the app
+              or it doesn't, and if it doesn't there was never a third thing to
+              ask. A venue that takes both starts on the Pay on App line and
+              switches once the member picks the club. */}
+          {settlingAtClub
+            ? "This round is settled with the club — pay them on the day, there's nothing to do here."
+            : "The slot is yours to pay for — your round is confirmed once payment is complete."}
         </p>
         {booking.players > 1 && (
           <p
@@ -2006,12 +2016,25 @@ function SuccessScreen({
             its money separately, so this is that course's link and not a
             house-wide one. New tab, so this screen (and an unsaved dinner
             RSVP with it) survives the trip. */}
-        {payingAtClub ? (
+        {/* A statement, not a control. It carries the amount because the button
+            it replaces did, and what they owe at the counter is the one thing
+            they still need from this screen.
+
+            The wording is whatever My Bookings will say about the same round, so
+            the two screens can't disagree: a club-only round was created
+            'payment_confirmed' and reads as settled, while one the member just
+            chose the club for keeps its 'availability_confirmed' status and reads
+            as in progress. */}
+        {settlingAtClub ? (
           <p
             className="!mt-4 text-sm font-semibold rounded-xl px-3 py-2.5 text-center"
             style={{ background: "rgba(34,197,94,0.08)", color: "#166534" }}
           >
-            ✓ {PAY_AT_CLUB_STAGE_LABELS.paying}
+            ✓{" "}
+            {clubOnly
+              ? PAY_AT_CLUB_STAGE_LABELS.paid
+              : PAY_AT_CLUB_STAGE_LABELS.paying}{" "}
+            · {formatUsd(booking.amountDue)}
           </p>
         ) : payNow ? (
           booking.paymentUrl ? (
@@ -2021,7 +2044,7 @@ function SuccessScreen({
               rel="noopener noreferrer"
               className="btn btn-gold btn-full !mt-4"
             >
-              Pay {formatUsd(booking.amountDue)} now →
+              Pay {formatUsd(booking.amountDue)} on App →
             </a>
           ) : (
             /* Every bookable course is required to have a payment link, so this
@@ -2032,17 +2055,16 @@ function SuccessScreen({
             </p>
           )
         ) : null}
-        {/* The other way this venue takes payment, when it takes it. Gold only
-            when it's the sole option — otherwise it sits under Pay now. */}
-        {!payingAtClub && payAtClub && (
+        {/* The other way this venue takes payment, where that's a choice. It
+            sits under Pay on App, which is the only case it appears in — a venue
+            with no checkout has nothing for this button to be an alternative
+            to, and says so above instead. */}
+        {!settlingAtClub && canChooseClub && (
           <button
             type="button"
             onClick={handlePayAtClub}
             disabled={markingAtClub}
-            className={cn(
-              "btn btn-full disabled:opacity-50",
-              payNow ? "btn-outline" : "btn-gold !mt-4",
-            )}
+            className="btn btn-outline btn-full disabled:opacity-50"
           >
             {markingAtClub ? "Saving…" : `Pay ${formatUsd(booking.amountDue)} at club`}
           </button>
@@ -2055,7 +2077,7 @@ function SuccessScreen({
         {/* Credit is the second way to settle the same bill — the code is a
             discount typed into the venue's checkout, not a separate way to
             pay — so it sits under the Pay button rather than replacing it. */}
-        {!payNow || payingAtClub ? null : heldCoupon ? (
+        {!payNow || settlingAtClub ? null : heldCoupon ? (
           <>
             <button
               type="button"

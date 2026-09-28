@@ -7,7 +7,8 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { validateString } from '@/lib/validation'
 import { messageRateLimit, messageBurstLimit } from '@/lib/rateLimit'
-import { sendPushToMembers, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMembers, kept } from '@/lib/notify'
 import type { AuthContext } from '@/lib/auth/types'
 
 const DEFAULT_PAGE_SIZE = 30
@@ -152,20 +153,28 @@ export const POST = withAuth(async (
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // Notify other active participants (fire-and-forget)
+  // Notify other active participants (fire-and-forget).
+  //
+  // Every message is pushed and emailed, to everyone still in the conversation.
+  // kept() so a serverless function doesn't freeze on the response and take the
+  // participant lookup with it, before anything has been sent.
   const senderName = [data.sender?.first_name, data.sender?.last_name].filter(Boolean).join(' ') || 'Someone'
-  ;(async () => {
+  void kept((async () => {
     const { data: participants } = await admin
       .from('conversation_participants')
       .select('member_id')
       .eq('conversation_id', convId)
       .eq('status', 'active')
       .neq('member_id', ctx.userId)
+
     const recipientIds = (participants ?? []).map((p: { member_id: string }) => p.member_id)
-    if (recipientIds.length) {
-      await sendPushToMembers(recipientIds, NotificationTemplates.newMessage(senderName, body.body, convId))
-    }
-  })().catch(() => {})
+    if (!recipientIds.length) return
+
+    await notifyMembers(
+      recipientIds,
+      NotificationTemplates.newMessage(senderName, body.body, convId),
+    )
+  })().catch(() => {}))
 
   return NextResponse.json(data, { status: 201 })
 })

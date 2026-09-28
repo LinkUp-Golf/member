@@ -25,6 +25,10 @@ export const dynamic = 'force-dynamic'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase-server'
+// Deliberately push, not notify. A reminder already reaches the member by
+// email and SMS through triggerBookingReminderWebhook below — GHL owns that
+// side. Routing it through notify* as well would mean two emails about one
+// tee time, from two systems, neither aware of the other.
 import { sendPushToMember } from '@/lib/push'
 import { triggerBookingReminderWebhook } from '@/lib/ghl/client'
 import { bookingToLocalDate } from '@/lib/utils'

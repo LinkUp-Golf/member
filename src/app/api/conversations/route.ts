@@ -8,6 +8,8 @@ import { logActivity } from '@/lib/activity/log'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import type { AuthContext } from '@/lib/auth/types'
 import { inviteRateLimit } from '@/lib/rateLimit'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMembers, kept } from '@/lib/notify'
 import type { ConversationWithDetails, MessageWithSender, ParticipantRole, ParticipantStatus } from '@/types'
 
 // GET /api/conversations — list all conversations for the authenticated user,
@@ -184,7 +186,7 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
   const { data: member } = await supabase
     .from('members')
-    .select('home_course_id')
+    .select('home_course_id, first_name')
     .eq('id', ctx.userId)
     .single()
 
@@ -207,7 +209,7 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   }
 
   const allParticipants = [...new Set([ctx.userId, ...participant_ids])]
-  await admin
+  const { error: participantsError } = await admin
     .from('conversation_participants')
     .insert(
       allParticipants.map(id => ({
@@ -219,6 +221,36 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
         status: (type === 'group' && id !== ctx.userId) ? 'pending' : 'active',
       }))
     )
+
+  if (participantsError) {
+    // A conversation with no participants is unreachable by everyone including
+    // its creator, so this is a failure rather than a partial success.
+    return NextResponse.json({ error: participantsError.message }, { status: 500 })
+  }
+
+  // Tell the people who were added.
+  //
+  // Adding someone to an existing group notifies them (see
+  // ./[id]/participants); being added while the group was *created* did not,
+  // which is the more common way it happens. Their row sits at 'pending' until
+  // they accept, so with no notification the invitation was only discoverable
+  // by opening the app and noticing a badge.
+  //
+  // Direct threads are deliberately excluded: there is nothing to accept and
+  // nothing to read yet, and the first message notifies on its own.
+  const invited = allParticipants.filter(id => id !== ctx.userId)
+  if (type === 'group' && invited.length > 0) {
+    void kept(
+      notifyMembers(
+        invited,
+        NotificationTemplates.groupChatInvite(
+          member?.first_name ?? 'Someone',
+          name ?? 'a group',
+          conv.id,
+        ),
+      ).catch(() => {}),
+    )
+  }
 
   // A brand-new direct thread is a member reaching out for the first time —
   // the one real action the directory offers. Reopening an existing thread

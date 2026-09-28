@@ -10,7 +10,12 @@ import {
 import Select from '@/components/ui/Select'
 import MediaUpload from '@/components/ui/MediaUpload'
 import PaymentOptionsPicker from '@/components/payments/PaymentOptionsPicker'
-import { coursePaymentOptions, type PaymentOption } from '@/lib/bookings/payment-options'
+import {
+  coursePaymentOptions,
+  offersPayNow,
+  requiresPaymentUrl,
+  type PaymentOption,
+} from '@/lib/bookings/payment-options'
 import { MAX_PINNED_COURSES } from '@/lib/constants'
 import type { Course, CourseApprovalStatus } from '@/types'
 
@@ -186,6 +191,7 @@ export default function AdminCoursesPage() {
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [editingCourse, setEditingCourse] = useState<CourseRow | null>(null)
+  const [approvingId, setApprovingId] = useState<string | null>(null)
   const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -237,6 +243,7 @@ export default function AdminCoursesPage() {
         held === 0,
       )
     } else showToast(json.error ?? 'Approval failed.', false)
+    setApprovingId(null)
     await loadCourses()
     setProcessing(null)
   }
@@ -607,7 +614,7 @@ export default function AdminCoursesPage() {
                         <>
                           {course.approval_status === 'pending' && !isRejecting && (
                             <>
-                              <CourseMenuItem label={isProcessing ? 'Approving…' : 'Approve'} disabled={isProcessing} onClick={() => { approveCourse(course); closeMenu() }} />
+                              <CourseMenuItem label={isProcessing ? 'Approving…' : 'Approve'} disabled={isProcessing} onClick={() => { setApprovingId(course.id); closeMenu() }} />
                               <CourseMenuItem label="Reject" danger disabled={isProcessing} onClick={() => { setRejectingId(course.id); setRejectReason(''); closeMenu() }} />
                             </>
                           )}
@@ -680,7 +687,7 @@ export default function AdminCoursesPage() {
                     </p>
                   )}
 
-                  {course.approval_status === 'active' && !course.payment_url && (
+                  {course.approval_status === 'active' && !course.payment_url && offersPayNow(course) && (
                     <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-1.5">
                       ⚠️ No payment link — this course is hidden from members until one is set. Edit the course to add it.
                     </p>
@@ -689,8 +696,10 @@ export default function AdminCoursesPage() {
                   {/* Said before Approve is pressed, not after. A host-proposed
                       course arrives with no payment link and the placeholder
                       logo, and approving it without those produced a course
-                      that was live, calendared and invisible. */}
-                  {course.approval_status === 'pending' && !course.payment_url && (
+                      that was live, calendared and invisible. Not said at all
+                      for a pay-at-club venue, which needs no link — and which is
+                      what a host's proposed club is created as. */}
+                  {course.approval_status === 'pending' && !course.payment_url && offersPayNow(course) && (
                     <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-1.5">
                       ⚠️ Needs a payment link before it can be approved — members
                       can&apos;t pay for a booking without one. Edit the course to add it.
@@ -733,7 +742,7 @@ export default function AdminCoursesPage() {
                   <div className="hidden sm:flex items-center justify-end gap-1.5 flex-wrap pt-1">
                     {course.approval_status === 'pending' && !isRejecting && (
                       <>
-                        <AdminButton label={isProcessing ? 'Approving…' : 'Approve'} onClick={() => approveCourse(course)} variant="primary" size="sm" disabled={isProcessing} />
+                        <AdminButton label={isProcessing ? 'Approving…' : 'Approve'} onClick={() => setApprovingId(course.id)} variant="primary" size="sm" disabled={isProcessing} />
                         <AdminButton label="Reject" onClick={() => { setRejectingId(course.id); setRejectReason('') }} variant="danger" size="sm" disabled={isProcessing} />
                       </>
                     )}
@@ -775,6 +784,18 @@ export default function AdminCoursesPage() {
         />
       )}
 
+      {approvingId && (
+        <ApproveCourseModal
+          course={courses.find(c => c.id === approvingId) ?? null}
+          processing={!!processing}
+          onConfirm={() => {
+            const course = courses.find(c => c.id === approvingId)
+            if (course) approveCourse(course)
+          }}
+          onClose={() => setApprovingId(null)}
+        />
+      )}
+
       {deletingId && (
         <DeleteCourseModal
           course={courses.find(c => c.id === deletingId) ?? null}
@@ -794,6 +815,95 @@ export default function AdminCoursesPage() {
           onToast={showToast}
         />
       )}
+    </div>
+  )
+}
+
+// ---- Approve confirmation modal -----------------------------
+
+/**
+ * The stop before a course goes live.
+ *
+ * Approving is not a small button: it publishes the venue to every member, and
+ * publishes the host rounds waiting on it. What it does NOT do is finish the GHL
+ * side — a calendar is created, but the workflows and automations that carry a
+ * booking from reserved to paid are set up by hand over there. Approving first
+ * and setting those up afterwards means live bookings passing through a pipeline
+ * that isn't listening yet, which is why the list is read before the press
+ * rather than remembered after it.
+ */
+function ApproveCourseModal({
+  course,
+  processing,
+  onConfirm,
+  onClose,
+}: {
+  course: CourseRow | null
+  processing: boolean
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  if (!course) return null
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close"
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+      />
+
+      <div
+        className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Approve ${course.name}`}
+      >
+        <div className="w-12 h-12 rounded-full bg-green-50 flex items-center justify-center mb-4 mx-auto">
+          <svg className="w-6 h-6 text-green-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+        </div>
+
+        <h2 className="text-lg font-bold text-gray-900 text-center mb-2">Approve Course</h2>
+        <p className="text-sm text-gray-500 text-center mb-1">
+          You&apos;re about to publish
+        </p>
+        <p className="text-sm font-semibold text-gray-800 text-center mb-4">
+          &ldquo;{course.name}&rdquo;
+        </p>
+
+        <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 mb-6">
+          <p className="text-xs text-amber-700 font-medium mb-1">Before approving, confirm in GHL:</p>
+          <ul className="text-xs text-amber-600 space-y-1 list-disc list-inside">
+            <li>The calendar for this venue is set up and linked here</li>
+            <li>Its workflows are in place</li>
+            <li>Its automations are switched on</li>
+          </ul>
+          <p className="text-[11px] text-amber-500 mt-2">
+            Approving puts this venue in front of members and publishes the host
+            rounds waiting on it — bookings can start arriving straight away.
+          </p>
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            Not yet
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={processing}
+            className="flex-1 py-2.5 rounded-xl bg-green-800 text-white text-sm font-semibold hover:bg-green-900 disabled:opacity-50 transition-colors"
+          >
+            {processing ? 'Approving…' : 'Approve Course'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -892,17 +1002,17 @@ function DeleteCourseModal({
 }
 
 // ---- Booking rule display helpers ---------------------------
-// GHL sends each booking rule as a value plus its own unit field (slotDuration: 4,
-// slotDurationUnit: 'hours'). Render the pair as GHL stores it — reading the number
-// on its own silently reports hours and days as minutes.
+// GHL sends each booking rule as a number and its own unit (allowBookingFor: 6,
+// allowBookingForUnit: 'months'). Nothing converts between units — see
+// GHL_CALENDAR_RULES — so the pair is displayed as it comes, and reading the
+// number on its own would report six months as six minutes.
 const UNIT_LABELS: Record<string, string> = {
   mins: 'min', hours: 'hr', days: 'day', weeks: 'week', months: 'month',
 }
-function formatRule(value: number | null, unit: string | null, fallbackUnit = 'mins'): string {
+function formatRule(value: number | null, unit: string | null): string {
   if (!value) return '—'
-  const resolved = unit ?? fallbackUnit
-  const label = UNIT_LABELS[resolved] ?? resolved
-  return `${value} ${label}${value !== 1 ? 's' : ''}`.trim()
+  const label = UNIT_LABELS[unit ?? ''] ?? unit ?? ''
+  return `${value} ${label}${label && value !== 1 ? 's' : ''}`.trim()
 }
 
 type CourseFormValues = {
@@ -940,6 +1050,8 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
     handleSubmit,
     setValue,
     watch,
+    trigger,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<CourseFormValues>({
     defaultValues: {
@@ -957,7 +1069,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
       booking_rules: editingCourse?.booking_rules ?? '',
       booking_url: editingCourse?.booking_url ?? '',
       payment_url: editingCourse?.payment_url ?? '',
-      // A new course starts on the default (Pay now), like every existing one.
+      // A new course starts on the default (Pay on App), like every existing one.
       payment_options: coursePaymentOptions(editingCourse),
       required_tags: editingCourse?.required_tags ?? [],
       custom_slots_enabled: editingCourse?.custom_slots_enabled ?? false,
@@ -967,6 +1079,10 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
   const watchedName = watch('name')
   const watchedCalendarId = watch('ghl_calendar_id')
   const watchCustomSlots = watch('custom_slots_enabled')
+  // Whether the payment link is required — it is only the Pay on App checkout
+  // that needs one. Watched rather than read at submit so the label, the hint
+  // and the rule all change the moment the option is ticked.
+  const needsPaymentUrl = requiresPaymentUrl({ payment_options: watch('payment_options') })
 
   // Auto-generate slug from course name in create mode
   useEffect(() => {
@@ -1278,24 +1394,6 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
               </div>
 
               <div>
-                <label htmlFor="payment_url" className={labelCls}>Payment Link *</label>
-                <input
-                  id="payment_url"
-                  type="url"
-                  className={field(!!errors.payment_url)}
-                  placeholder="https://linkupgolf-services.com/event-checkout-page"
-                  {...register('payment_url', {
-                    required: 'Payment link is required',
-                    validate: v => /^https?:\/\/.+/.test(v) || 'Must be a valid URL (https://…)',
-                  })}
-                />
-                {errors.payment_url
-                  ? <p className={errMsg}>{errors.payment_url.message}</p>
-                  : <p className={infoText}>Members are sent here to pay for confirmed bookings.</p>
-                }
-              </div>
-
-              <div>
                 {/* A span: the control is a pair of checkboxes with their own labels. */}
                 <span className={labelCls}>Payment options *</span>
                 <Controller
@@ -1304,15 +1402,54 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
                   render={({ field: f }) => (
                     <PaymentOptionsPicker
                       value={f.value}
-                      onChange={f.onChange}
+                      onChange={next => {
+                        f.onChange(next)
+                        // Turning Pay on App off has to clear the "link
+                        // required" error a previous submit left behind, and
+                        // turning it back on has to re-apply it.
+                        void trigger('payment_url')
+                      }}
                       idPrefix="course-payment-option"
                     />
                   )}
                 />
                 <p className={infoText}>
                   The ways members can pay for a round here. Credit can only be
-                  spent through Pay now.
+                  spent through Pay on App, which is also the only one that needs
+                  a payment link.
                 </p>
+              </div>
+
+              <div>
+                <label htmlFor="payment_url" className={labelCls}>
+                  Payment Link {needsPaymentUrl ? '*' : '(optional)'}
+                </label>
+                <input
+                  id="payment_url"
+                  type="url"
+                  className={field(!!errors.payment_url)}
+                  placeholder="https://linkupgolf-services.com/event-checkout-page"
+                  {...register('payment_url', {
+                    validate: v => {
+                      // Read off the live value rather than the watched copy:
+                      // whichever field changed last, both are current here.
+                      if (!v?.trim()) {
+                        return requiresPaymentUrl({ payment_options: getValues('payment_options') })
+                          ? 'Payment link is required while this venue takes payment on the app'
+                          : true
+                      }
+                      return /^https?:\/\/.+/.test(v) || 'Must be a valid URL (https://…)'
+                    },
+                  })}
+                />
+                {errors.payment_url
+                  ? <p className={errMsg}>{errors.payment_url.message}</p>
+                  : <p className={infoText}>
+                      {needsPaymentUrl
+                        ? 'Members are sent here to pay for confirmed bookings.'
+                        : 'Not needed while members settle at the club. Add one if you turn Pay on App back on.'}
+                    </p>
+                }
               </div>
             </div>
           </section>
@@ -1392,7 +1529,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
                     { label: 'Meeting interval',      value: formatRule(selectedCalendar.slotInterval, selectedCalendar.slotIntervalUnit) },
                     { label: 'Meeting duration',      value: formatRule(selectedCalendar.slotDuration, selectedCalendar.slotDurationUnit) },
                     { label: 'Min scheduling notice', value: formatRule(selectedCalendar.allowBookingAfter, selectedCalendar.allowBookingAfterUnit) },
-                    { label: 'Date range',            value: formatRule(selectedCalendar.allowBookingFor, selectedCalendar.allowBookingForUnit, 'days') },
+                    { label: 'Date range',            value: formatRule(selectedCalendar.allowBookingFor, selectedCalendar.allowBookingForUnit) },
                     { label: 'Pre-buffer',            value: formatRule(selectedCalendar.preBuffer, selectedCalendar.preBufferUnit) },
                     { label: 'Post-buffer',           value: formatRule(selectedCalendar.slotBuffer, selectedCalendar.slotBufferUnit) },
                     { label: 'Seats per class',       value: selectedCalendar.appoinmentPerSlot ? `${selectedCalendar.appoinmentPerSlot}` : 'Unlimited' },

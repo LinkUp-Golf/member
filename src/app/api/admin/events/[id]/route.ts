@@ -5,7 +5,8 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { formatBookingDate } from '@/lib/utils'
-import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember } from '@/lib/notify'
 import { validateString, validateDate } from '@/lib/validation'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -97,7 +98,7 @@ export const PATCH = withAuth(
     if (statusError) return NextResponse.json({ error: statusError.message }, { status: 500 })
 
     if (rejectionReason) {
-      void sendPushToMember(
+      void notifyMember(
         event.organizer_id,
         NotificationTemplates.memberEventRejected(event.title, rejectionReason)
       ).catch(() => {})

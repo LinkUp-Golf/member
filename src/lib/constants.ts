@@ -137,6 +137,87 @@ export const CREDIT_COUPON_CODE_LENGTH = 6
 export const GHL_CANCEL_BOOKING_URL = 'https://api.leadconnectorhq.com/widget/cancel-booking'
 export const GHL_CALENDAR_PROVIDER_ID = 'bdd10QRepJvC6EYoy32m'
 
+// ---- New-calendar defaults ----------------------------------
+// The shape every LinkUp booking calendar is created in. A venue's own
+// scheduling numbers (slot length, notice, how far ahead) still come from its
+// course row; everything here is the same on every calendar, so it lives in one
+// place rather than being retyped into GHL by hand for each new club.
+
+/** Booking form attached to a new calendar. GHL → Sites → Forms → copy the ID. */
+export const GHL_CALENDAR_FORM_ID = '05EBd86P7HbUnhBsfUBn'
+
+/** Where a completed booking form sends the member. */
+export const GHL_CALENDAR_REDIRECT_URL = 'https://linkup.golf/thank-you-membership'
+
+/** Shown if the form is set back to a thank-you message rather than a redirect. */
+export const GHL_CALENDAR_THANKS_MESSAGE =
+  'Thank you for your appointment request. We will contact you shortly to confirm ' +
+  'your request. Please call our office at {{contactMethod}} if you have any questions.'
+
+/** The appointment's title in GHL — the member who booked it. */
+export const GHL_CALENDAR_EVENT_TITLE = '{{contact.name}}'
+
+/**
+ * The address shown on every calendar's booking widget, and on the
+ * appointments its team members are assigned.
+ *
+ * Fixed rather than taken from the course row. Every round currently runs at
+ * Aviara whoever hosts it, so a venue a host proposes is a name for a round
+ * rather than a second place to play, and its own address — often blank, often
+ * the host's business — would be wrong on the booking.
+ *
+ * The day a round is genuinely played somewhere else, this has to become the
+ * course's own address again; createGHLCalendar is the only caller.
+ */
+export const GHL_CALENDAR_LOCATION =
+  'Aviara Golf Club, 7447 Batiquitos Drive, Carlsbad, CA 92011'
+
+/**
+ * The booking rules every LinkUp calendar is created with.
+ *
+ * Fixed, not per-course. Every venue is a tee sheet run the same way, and the
+ * five course columns that used to feed these (meeting_interval_mins,
+ * min_scheduling_notice_mins, date_range_days, pre_buffer_mins,
+ * post_buffer_mins) were carrying their database defaults on every course
+ * anyway — a per-course knob nobody had ever turned, plumbed through three
+ * files. An admin who wants a calendar to differ changes it in GHL, which is
+ * where they'd look for it.
+ *
+ * Each rule is a number plus its own unit, which is how GHL stores and returns
+ * them. Nothing converts between units in either direction: these are sent as
+ * they read, and read back as they were sent.
+ */
+export const GHL_CALENDAR_RULES = {
+  /** One tee time. */
+  slotDuration: 20,
+  slotDurationUnit: 'mins',
+  /** The gap between consecutive tee times. */
+  slotInterval: 20,
+  slotIntervalUnit: 'mins',
+  /** How far ahead the calendar is bookable. */
+  allowBookingFor: 6,
+  allowBookingForUnit: 'months',
+  /** Minimum notice before a tee time can be booked. */
+  allowBookingAfter: 5,
+  allowBookingAfterUnit: 'hours',
+  /** No dead time either side of a round. */
+  preBuffer: 0,
+  preBufferUnit: 'mins',
+  slotBuffer: 0,
+  slotBufferUnit: 'mins',
+} as const
+
+/**
+ * Seats on one tee time when the venue hasn't set courses.seats_per_class —
+ * which is every club a host proposes, since that column is the one scheduling
+ * field with no database default. A fourball is the unit a golf tee time is
+ * sold in, so it's the honest guess until an admin says otherwise.
+ *
+ * Unlike GHL_CALENDAR_RULES this is a fallback, not a fixed value: a course
+ * that names its own seat count gets it.
+ */
+export const GHL_CALENDAR_APPOINTMENTS_PER_SLOT = 4
+
 // Inbound webhook (GHL workflow trigger) fired alongside each booking
 // reminder push notification — see /api/cron/booking-reminders. Path only;
 // combine with GHL_BASE_URL like every other GHL request (see ghlFetch).
@@ -193,6 +274,24 @@ export const BOOKING_PRICE_USD           = 160   // per player, USD
 // booking again the moment they book, rather than once an admin or a GHL
 // webhook moved them on. That is the FIFO rule working from booking time.
 export const NEW_BOOKING_STATUS = 'availability_confirmed' as const
+
+// What a round opens at when the venue takes nothing but payment at the club.
+//
+// 'availability_confirmed' means "payment due", and at a venue with no checkout
+// nothing is ever due through the app: the member settles at the counter on the
+// day, which LinkUp is not part of and gets no webhook about. Left at
+// 'availability_confirmed' the round would wait forever on a payment that can't
+// arrive — on the FIFO gate, out of the post-round survey (which only asks about
+// rounds that got as far as paid), and reading "payment due" to the member.
+//
+// So there is nothing for the app to confirm and the round opens confirmed. It
+// pairs with payment_method = 'pay_at_club' on the same row: the status says the
+// app is not waiting, the payment method says who is owed.
+//
+// Only where the club is the ONLY option. A venue that also takes payment on the
+// app has a real choice in it, and that round opens at NEW_BOOKING_STATUS like
+// any other until the member makes it.
+export const PAY_AT_CLUB_BOOKING_STATUS = 'payment_confirmed' as const
 
 // How long a round runs is a per-course setting owned by that course's GHL
 // calendar (its slotDuration). Read it with getCalendarBookingRules() — never

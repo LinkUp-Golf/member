@@ -23,7 +23,8 @@ export const dynamic = 'force-dynamic'
 
 import { type NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase-server'
-import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember } from '@/lib/notify'
 import { isSurveyDue, surveyRecipientId, SURVEYABLE_BOOKING_STATUSES } from '@/lib/surveys/due'
 import { logger } from '@/lib/logger'
 
@@ -113,7 +114,7 @@ export async function GET(request: NextRequest) {
     }
 
     try {
-      await sendPushToMember(
+      await notifyMember(
         surveyRecipientId(booking),
         NotificationTemplates.roundSurvey(booking.course?.name ?? 'your round', booking.id),
       )
@@ -121,8 +122,8 @@ export async function GET(request: NextRequest) {
       flagged.push(booking.id)
     } catch (err) {
       // Leave the flag unset so the next run retries this one. A member with no
-      // push subscription isn't a failure — sendPushToMember resolves with
-      // sent: 0 and still writes the in-app notification log entry.
+      // push subscription isn't a failure — notifyMember resolves with sent: 0
+      // and still writes the in-app notification log entry.
       failed++
       logger.error('booking-surveys: push failed', {
         action: 'cron.booking_surveys',

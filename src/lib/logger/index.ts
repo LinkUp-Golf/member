@@ -54,7 +54,7 @@ const COLORS: Record<LogLevel, string> = {
 const RESET = '\x1b[0m'
 
 function formatHuman(entry: LogEntry): string {
-  const { level, message, timestamp, requestId, userId, action, durationMs, errorCode, errorMessage } = entry
+  const { level, message, timestamp, requestId, userId, action, durationMs, errorCode, errorMessage, metadata } = entry
   const color = COLORS[level]
   const time = new Date(timestamp).toLocaleTimeString()
   const parts = [`${color}${level.toUpperCase()}${RESET}`, `[${time}]`, message]
@@ -64,6 +64,16 @@ function formatHuman(entry: LogEntry): string {
   if (durationMs !== undefined) parts.push(`${durationMs}ms`)
   if (errorCode) parts.push(`code=${errorCode}`)
   if (errorMessage) parts.push(`error="${errorMessage}"`)
+  // metadata is where callers put the detail that makes a line worth reading —
+  // which recipient, which provider error, how many were dropped. Omitting it
+  // in development meant a failing send logged nothing but its own name.
+  if (metadata && Object.keys(metadata).length > 0) {
+    parts.push(
+      Object.entries(metadata)
+        .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+        .join(' '),
+    )
+  }
   return parts.join(' ')
 }
 
@@ -93,6 +103,23 @@ export class Logger {
 
     const line = this.isProd ? formatJSON(entry) : formatHuman(entry)
 
+    // On the server, write to the stream rather than through console.
+    //
+    // next.config.mjs strips console.log and console.info from production
+    // builds, which is right for page bundles and wrong for a logger: it meant
+    // every info-level line — including "email sent" and its Resend id —
+    // silently vanished in production, leaving only failures. Writing to
+    // stdout/stderr is what structured logging wants anyway, and Vercel
+    // captures both.
+    const stream =
+      level === 'error' || level === 'warn' ? process?.stderr : process?.stdout
+
+    if (stream?.write) {
+      stream.write(line + '\n')
+      return
+    }
+
+    // Browser, or an environment without the streams.
     if (level === 'error') {
       console.error(line)
     } else if (level === 'warn') {

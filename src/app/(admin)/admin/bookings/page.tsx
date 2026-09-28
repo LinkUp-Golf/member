@@ -189,6 +189,20 @@ function playerInfo(b: BookingRow): { name: string; sub: string; badge?: string 
   return { name: `${b.member?.first_name ?? ''} ${b.member?.last_name ?? ''}`.trim(), sub: b.member?.email ?? '' }
 }
 
+/**
+ * Whether this row's money reached LinkUp.
+ *
+ * A round settled at the club is paid to the club — LinkUp never sees it, and a
+ * club-only round is created 'payment_confirmed' because there is nothing for the
+ * app to wait on (see PAY_AT_CLUB_BOOKING_STATUS). Counting either as revenue
+ * here would report takings that were never taken, so the status alone isn't the
+ * test: the payment method decides who was paid.
+ */
+function isLinkUpRevenue(b: BookingRow): boolean {
+  if (b.payment_method === 'pay_at_club') return false
+  return b.status === 'confirmed' || b.status === 'payment_confirmed'
+}
+
 // "Days left" badge for any unpaid player row — shown whenever the booking is
 // still tentative or availability_confirmed, regardless of how far out the tee
 // time is (past-due rows read "Overdue").
@@ -942,7 +956,7 @@ export default function AdminBookingsPage() {
   // Stats
   const confirmed  = bookings.filter(b => ['confirmed', 'payment_confirmed', 'availability_confirmed'].includes(b.status)).length
   const tentative  = bookings.filter(b => ['tentative', 'awaiting_approval'].includes(b.status)).length
-  const revenue    = bookings.filter(b => ['confirmed', 'payment_confirmed'].includes(b.status)).reduce((s, b) => s + Number(b.amount_charged), 0)
+  const revenue    = bookings.filter(isLinkUpRevenue).reduce((s, b) => s + Number(b.amount_charged), 0)
   const attention  = bookings.filter(b => b.status === 'awaiting_approval').length
   // Credit put toward these rounds. Void and expired codes are excluded — that
   // credit went back to the member and paid for nothing.
@@ -1443,7 +1457,7 @@ export default function AdminBookingsPage() {
           {byCourse.map(({ course, bookings: cb }) => {
             const courseSlots = groupBySlot(cb)
             const dateGroups = groupByDate(courseSlots)
-            const courseRevenue = cb.filter(b => ['confirmed', 'payment_confirmed'].includes(b.status)).reduce((s, b) => s + Number(b.amount_charged), 0)
+            const courseRevenue = cb.filter(isLinkUpRevenue).reduce((s, b) => s + Number(b.amount_charged), 0)
             const courseAttention = cb.filter(b => b.status === 'awaiting_approval').length
 
             return (

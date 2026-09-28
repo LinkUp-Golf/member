@@ -221,12 +221,15 @@ export function validateHostApplicationPayload(body: unknown): ValidationResult 
   const b = body as Record<string, unknown>
   const errors: string[] = []
 
-  const nameResult = validateString(b.name, 'Host name', { min: 2, max: 120 })
-  if (!nameResult.valid) errors.push(...nameResult.errors)
+  // A host is named after the member, so the form no longer asks. An older
+  // client may still send one; it is bounded if present and otherwise ignored.
+  if (typeof b.name === 'string' && b.name.trim()) {
+    const nameResult = validateString(b.name, 'Host name', { min: 2, max: 120 })
+    if (!nameResult.valid) errors.push(...nameResult.errors)
+  }
 
-  // The form stopped asking for a description — venues and rounds are what an
-  // admin actually reviews. Older clients may still send one, so it is bounded
-  // if present but never required.
+  // The form stopped asking for a description too — the venues and the rounds
+  // are the submission. Bounded if present, never required.
   if (typeof b.description === 'string' && b.description.trim()) {
     const descResult = validateString(b.description, 'Description', { max: 1000 })
     if (!descResult.valid) errors.push(...descResult.errors)

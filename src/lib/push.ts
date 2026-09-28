@@ -17,6 +17,7 @@ export {
 import { createAdminClient } from '@/lib/supabase-server'
 import { sendToUsers } from './push/pushService'
 import type { PushPayload, SendResult } from './push/types'
+import { titleCaseName } from '@/lib/utils'
 import type { PayoutMethod } from '@/types'
 
 // ---- sendPushToCourse ---------------------------------------
@@ -24,11 +25,13 @@ import type { PayoutMethod } from '@/types'
 // Kept here because it needs a Supabase query that doesn't
 // belong in the generic push service.
 
-export async function sendPushToCourse(
+// Exported because email needs to reach exactly the same people. Resolving the
+// audience once and handing the ids to both channels is what keeps a
+// course-wide notification from meaning two different things in two inboxes.
+export async function courseMemberIds(
   courseId: string,
-  payload: PushPayload,
   excludeUserId?: string
-): Promise<SendResult> {
+): Promise<string[]> {
   const supabase = createAdminClient()
 
   let query = supabase
@@ -42,9 +45,16 @@ export async function sendPushToCourse(
   }
 
   const { data: members } = await query
-  if (!members?.length) return { sent: 0, failed: 0, cleaned: 0 }
+  return (members ?? []).map((m: { member_id: string }) => m.member_id)
+}
 
-  const userIds = members.map((m: { member_id: string }) => m.member_id)
+export async function sendPushToCourse(
+  courseId: string,
+  payload: PushPayload,
+  excludeUserId?: string
+): Promise<SendResult> {
+  const userIds = await courseMemberIds(courseId, excludeUserId)
+  if (!userIds.length) return { sent: 0, failed: 0, cleaned: 0 }
   return sendToUsers(userIds, payload)
 }
 
@@ -66,38 +76,24 @@ export async function sendPushToAdmins(payload: PushPayload): Promise<SendResult
   return sendToUsers(userIds, payload)
 }
 
-// Sends to course members whose focus linkup subscriptions overlap with
-// focusCategories. Falls back to all course members when the list is empty.
-export async function sendPushToFocusMembers(
+// The members whose focus linkup subscriptions overlap with focusCategories.
+// Falls back to every course member when the list is empty.
+export async function focusMemberIds(
   courseId: string,
   focusCategories: string[],
-  payload: PushPayload,
   excludeUserId?: string
-): Promise<SendResult> {
-  if (!focusCategories.length) {
-    return sendPushToCourse(courseId, payload, excludeUserId)
-  }
+): Promise<string[]> {
+  if (!focusCategories.length) return courseMemberIds(courseId, excludeUserId)
 
-  const supabase = createAdminClient()
+  const memberIds = await courseMemberIds(courseId, excludeUserId)
+  if (!memberIds.length) return []
 
-  let memberQuery = supabase
-    .from('course_memberships')
-    .select('member_id')
-    .eq('course_id', courseId)
-    .eq('status', 'active')
-  if (excludeUserId) memberQuery = memberQuery.neq('member_id', excludeUserId)
-
-  const { data: courseMembers } = await memberQuery
-  if (!courseMembers?.length) return { sent: 0, failed: 0, cleaned: 0 }
-
-  const courseMemberIds = courseMembers.map((m: { member_id: string }) => m.member_id)
-
-  const { data: subs } = await supabase
+  const { data: subs } = await createAdminClient()
     .from('focus_linkup_subscriptions')
     .select('member_id, industry_focus, custom_label, status')
-    .in('member_id', courseMemberIds)
+    .in('member_id', memberIds)
 
-  const subscribedIds = [...new Set(
+  return [...new Set(
     (subs ?? [])
       .filter((s: { industry_focus: string; custom_label: string | null; status: string }) => {
         if (focusCategories.includes(s.industry_focus) && s.status !== 'declined') return true
@@ -106,61 +102,117 @@ export async function sendPushToFocusMembers(
       })
       .map((s: { member_id: string }) => s.member_id)
   )]
+}
 
+// Sends to course members whose focus linkup subscriptions overlap with
+// focusCategories. Falls back to all course members when the list is empty.
+export async function sendPushToFocusMembers(
+  courseId: string,
+  focusCategories: string[],
+  payload: PushPayload,
+  excludeUserId?: string
+): Promise<SendResult> {
+  const subscribedIds = await focusMemberIds(courseId, focusCategories, excludeUserId)
   if (!subscribedIds.length) return { sent: 0, failed: 0, cleaned: 0 }
   return sendToUsers(subscribedIds, payload)
 }
 
 // ---- Notification templates ---------------------------------
+//
+// One definition per notification, used by both channels. `title`, `body` and
+// `url` are all push needs. Two fields exist only for the email and are
+// ignored by push: `cta`, the wording on the button, and `subject`, the line
+// the notification arrives under.
+//
+// `subject` is separate from `title` because they're read in different places.
+// A push title sits beside the app's own name with the body directly under it,
+// so "New reservation" is clear. The same words alone in an inbox, among mail
+// from everyone else, are not — hence "Dana reserved a spot at your Aviara
+// event". Say who and what; the heading inside still carries the short form.
 
 export const NotificationTemplates = {
-  newMember: (firstName: string, lastName: string, courseName: string, memberId?: string): PushPayload => ({
-    title: `New member: ${firstName} ${lastName}`,
-    body:  `${firstName} has joined the ${courseName} community. Tap to view their profile.`,
-    url:   memberId ? `/members/${memberId}` : '/members',
-    tag:   'new-member',
-  }),
+  newMember: (firstName: string, lastName: string, courseName: string, memberId?: string): PushPayload => {
+    const first = titleCaseName(firstName)
+    const full = titleCaseName(`${firstName} ${lastName}`)
+    return {
+      title: `New member: ${full}`,
+      body:  `${first} has joined the ${courseName} community. Tap to view their profile.`,
+      url:   memberId ? `/members/${memberId}` : '/members',
+      tag:   'new-member',
+      subject: `${full} has joined ${courseName}`,
+      cta:   'View their profile',
+    }
+  },
 
-  bookingAnnouncement: (firstName: string, date: string, time: string, memberId?: string): PushPayload => ({
-    title: `${firstName} is playing ${date}`,
-    body:  `${firstName} booked a tee time at ${time}. Message them to join.`,
-    url:   memberId ? `/members/${memberId}` : '/members',
-    tag:   `booking-${date}`,
-  }),
+  bookingAnnouncement: (firstName: string, date: string, time: string, memberId?: string): PushPayload => {
+    const first = titleCaseName(firstName)
+    return {
+      title: `${first} is playing ${date}`,
+      body:  `${first} booked a tee time at ${time}. Message them to join.`,
+      url:   memberId ? `/members/${memberId}` : '/members',
+      tag:   `booking-${date}`,
+      subject: `${first} is playing on ${date}`,
+      cta:   'See who else is playing',
+    }
+  },
 
-  visitingMember: (firstName: string, lastName: string, from: string, until: string, memberId?: string): PushPayload => ({
-    title: `${firstName} ${lastName} is visiting`,
-    body:  `Visiting from ${from} to ${until}. Tap to invite them to play.`,
-    url:   memberId ? `/members/${memberId}` : '/members',
-    tag:   `visit-${firstName.toLowerCase()}`,
-  }),
+  visitingMember: (firstName: string, lastName: string, from: string, until: string, memberId?: string): PushPayload => {
+    const full = titleCaseName(`${firstName} ${lastName}`)
+    return {
+      title: `${full} is visiting`,
+      body:  `Visiting from ${from} to ${until}. Tap to invite them to play.`,
+      url:   memberId ? `/members/${memberId}` : '/members',
+      // Lower-cased on purpose: the tag is a dedup key, not copy.
+      tag:   `visit-${firstName.toLowerCase()}`,
+      subject: `${full} is visiting from ${from}`,
+      cta:   'Invite them to play',
+    }
+  },
 
-  newMessage: (senderName: string, preview: string, conversationId: string): PushPayload => ({
-    title: senderName,
-    body:  preview.length > 80 ? preview.slice(0, 80) + '…' : preview,
-    url:   `/messages/${conversationId}`,
-    tag:   `msg-${conversationId}`,
-  }),
+  newMessage: (senderName: string, preview: string, conversationId: string): PushPayload => {
+    // As a push this reads like a chat notification — the sender's name over
+    // the message. As an email the same two lines become the heading and the
+    // body, which is why the title is the name rather than "New message".
+    const sender = titleCaseName(senderName)
+    return {
+      title: sender,
+      body:  preview.length > 80 ? preview.slice(0, 80) + '…' : preview,
+      url:   `/messages/${conversationId}`,
+      tag:   `msg-${conversationId}`,
+      subject: `${sender} sent you a message`,
+      cta:   'Reply in LinkUp',
+    }
+  },
 
   focusLinkup: (title: string, date: string, weeksOut: number): PushPayload => ({
     title: `${weeksOut === 2 ? '2 weeks' : '1 week'} away: ${title}`,
     body:  `The ${title} is coming up on ${date}. Book your spot now.`,
     url:   '/more/focus-linkups',
     tag:   `focus-linkup-${weeksOut}w`,
+    subject: `${title} is ${weeksOut === 2 ? 'two weeks' : 'one week'} away`,
+    cta:   'Book your spot',
   }),
 
-  playSuggestion: (otherMemberName: string, suggestedMemberId?: string): PushPayload => ({
-    title: `Play with ${otherMemberName}?`,
-    body:  `You haven't played with ${otherMemberName} yet. Want to set up a round?`,
-    url:   suggestedMemberId ? `/members/${suggestedMemberId}` : '/members',
-    tag:   `suggestion-${otherMemberName.toLowerCase().replace(' ', '-')}`,
-  }),
+  playSuggestion: (otherMemberName: string, suggestedMemberId?: string): PushPayload => {
+    const other = titleCaseName(otherMemberName)
+    return {
+      title: `Play with ${other}?`,
+      body:  `You haven't played with ${other} yet. Want to set up a round?`,
+      url:   suggestedMemberId ? `/members/${suggestedMemberId}` : '/members',
+      // Lower-cased on purpose: the tag is a dedup key, not copy.
+      tag:   `suggestion-${otherMemberName.toLowerCase().replace(' ', '-')}`,
+      subject: `A round with ${other}?`,
+      cta:   'See their profile',
+    }
+  },
 
   guestAccessApproved: (courseName: string, from: string, until: string): PushPayload => ({
     title: 'Guest access approved',
     body:  `Your request to visit ${courseName} from ${from} to ${until} has been approved.`,
     url:   '/more/guest-access',
     tag:   'guest-access',
+    subject: `Your guest access to ${courseName} is approved`,
+    cta:   'View your guest access',
   }),
 
   referralPartnerApproved: (percentage: number): PushPayload => ({
@@ -168,6 +220,8 @@ export const NotificationTemplates = {
     body:  `Your application was approved — you'll earn ${percentage}% commission on every referral who joins.`,
     url:   '/partner',
     tag:   'referral-partner-approved',
+    subject: 'You\'re now a LinkUp referral partner',
+    cta:   'Open your partner dashboard',
   }),
 
   referralListImported: (imported: number, total: number): PushPayload => ({
@@ -177,6 +231,8 @@ export const NotificationTemplates = {
       : `${imported} of ${total} referrals were added — open the list to see why the rest weren't.`,
     url:   '/partner/submissions',
     tag:   'referral-list-imported',
+    subject: 'Your referral list has been imported',
+    cta:   'View your submissions',
   }),
 
   referralListRejected: (reason: string): PushPayload => ({
@@ -184,6 +240,8 @@ export const NotificationTemplates = {
     body:  reason,
     url:   '/partner/submissions',
     tag:   'referral-list-rejected',
+    subject: 'Your referral list could not be imported',
+    cta:   'View your submissions',
   }),
 
   // A credit payout is spendable immediately, so point the partner at the
@@ -199,6 +257,8 @@ export const NotificationTemplates = {
       body:  `A referral commission payout of ${formatted} has been ${settled}.`,
       url:   method === 'credit' ? '/partner/credits' : '/partner/payments',
       tag:   'referral-commission-paid',
+      subject: `Your ${formatted} referral commission has been paid`,
+      cta:   method === 'credit' ? 'View your credit' : 'View your payment',
     }
   },
 
@@ -207,20 +267,29 @@ export const NotificationTemplates = {
     body:  `Your application wasn't approved this time. ${reason}`,
     url:   '/more/referral-partner',
     tag:   'referral-partner-rejected',
+    subject: 'About your LinkUp referral partner application',
+    cta:   'View details',
   }),
 
-  referralJoined: (referredName: string): PushPayload => ({
-    title: `${referredName} has joined!`,
-    body:  `Your referral ${referredName} is now a member. Book your introductory round together.`,
-    url:   '/more/referrals',
-    tag:   'referral-joined',
-  }),
+  referralJoined: (referredName: string): PushPayload => {
+    const referred = titleCaseName(referredName)
+    return {
+      title: `${referred} has joined!`,
+      body:  `Your referral ${referred} is now a member. Book your introductory round together.`,
+      url:   '/more/referrals',
+      tag:   'referral-joined',
+      subject: `${referred} has joined LinkUp`,
+      cta:   'View your referrals',
+    }
+  },
 
   announcementBroadcast: (title: string, body: string, type = 'admin_broadcast', announcementId?: string): PushPayload => ({
     title: title.length > 60 ? title.slice(0, 60) + '…' : title,
     body:  body.length > 150 ? body.slice(0, 150) + '…' : body,
     url:   announcementId ? `/more/announcements/${announcementId}` : '/more/announcements',
     tag:   `announcement-${type}`,
+    subject: `LinkUp announcement: ${title.length > 60 ? title.slice(0, 60) + '…' : title}`,
+    cta:   'Read the announcement',
   }),
 
   promotionAvailable: (partnerName: string, promoTitle: string, promotionId?: string): PushPayload => ({
@@ -228,20 +297,26 @@ export const NotificationTemplates = {
     body:  `${partnerName} has a new exclusive offer for LinkUp members.`,
     url:   promotionId ? `/more/promotions/${promotionId}` : '/more/promotions',
     tag:   `promotion-${partnerName.toLowerCase().replace(/\s+/g, '-').slice(0, 20)}`,
+    subject: `A new offer from ${partnerName}`,
+    cta:   'See the offer',
   }),
 
   memberActivated: (firstName: string): PushPayload => ({
-    title: `Welcome to LinkUp Golf, ${firstName}!`,
+    title: `Welcome to LinkUp Golf, ${titleCaseName(firstName)}!`,
     body:  'Your membership is now active. Explore the community, book a tee time, and connect with members.',
     url:   '/home',
     tag:   'member-activated',
+    subject: `Welcome to LinkUp Golf, ${titleCaseName(firstName)}`,
+    cta:   'Open LinkUp',
   }),
 
   bookingInvite: (bookerFirstName: string, date: string, time: string): PushPayload => ({
-    title: `${bookerFirstName} invited you to play`,
+    title: `${titleCaseName(bookerFirstName)} invited you to play`,
     body:  `You've been added to a tee time on ${date} at ${time}. Check My Bookings for details.`,
     url:   '/book',
     tag:   'booking-invite',
+    subject: `${titleCaseName(bookerFirstName)} added you to a tee time on ${date}`,
+    cta:   'View the tee time',
   }),
 
   bookingPaymentReady: (date: string, time: string): PushPayload => ({
@@ -249,6 +324,8 @@ export const NotificationTemplates = {
     body:  `Your booking on ${date} at ${time} is ready for payment. Tap to complete your booking.`,
     url:   '/book',
     tag:   'payment-ready',
+    subject: `Your tee time on ${date} is ready for payment`,
+    cta:   'Pay for your round',
   }),
 
   // Sent once a round has finished, by the booking-surveys cron. Opening the
@@ -259,13 +336,17 @@ export const NotificationTemplates = {
     body:  `Rate your round at ${courseName} — it only takes a moment.`,
     url:   '/home',
     tag:   `booking-survey-${bookingId}`,
+    subject: `How was your round at ${courseName}?`,
+    cta:   'Rate your round',
   }),
 
   groupChatInvite: (inviterFirstName: string, groupName: string, conversationId: string): PushPayload => ({
-    title: `${inviterFirstName} invited you to a group`,
+    title: `${titleCaseName(inviterFirstName)} invited you to a group`,
     body:  `You've been invited to join "${groupName}". Tap to accept or decline.`,
     url:   `/messages/${conversationId}`,
     tag:   `group-invite-${conversationId}`,
+    subject: `${titleCaseName(inviterFirstName)} invited you to "${groupName}" on LinkUp`,
+    cta:   'Accept or decline',
   }),
 
   memberEventRejected: (eventTitle: string, reason: string): PushPayload => ({
@@ -273,28 +354,18 @@ export const NotificationTemplates = {
     body:  `Your event "${eventTitle}" wasn't approved. Reason: ${reason}`,
     url:   '/more/events',
     tag:   'member-event-rejected',
+    subject: `About your event "${eventTitle}"`,
+    cta:   'View your events',
   }),
 
   // ---- Hosts ------------------------------------------------
-  hostApplicationApproved: (): PushPayload => ({
-    title: 'You\'re now a host',
-    body:  'Your application was approved — create your first event and start earning credits.',
-    url:   '/host',
-    tag:   'host-application-approved',
-  }),
-
-  hostApplicationRejected: (reason: string): PushPayload => ({
-    title: 'Host application',
-    body:  `Your application wasn't approved this time. ${reason}`,
-    url:   '/more/host',
-    tag:   'host-application-rejected',
-  }),
-
   hostedEventPublished: (courseName: string, date: string): PushPayload => ({
     title: 'Your event is live',
     body:  `Your event at ${courseName} on ${date} is now open for members to reserve spots.`,
     url:   '/host/events',
     tag:   'hosted-event-created',
+    subject: `Your ${courseName} event on ${date} is live`,
+    cta:   'View the round',
   }),
 
   // Sent to admins when a host's event goes live. Events publish without
@@ -315,10 +386,12 @@ export const NotificationTemplates = {
   ): PushPayload => ({
     title: 'A host wants to run a round',
     body: dateCount > 1
-      ? `${hostName} wants to host ${dateCount} rounds at ${courseName}, from ${date}. Set up the calendar, then approve them to put them in front of members.`
-      : `${hostName} wants to host a round at ${courseName} on ${date}. Set up the calendar, then approve it to put it in front of members.`,
+      ? `${titleCaseName(hostName)} wants to host ${dateCount} rounds at ${courseName}, from ${date}. Set up the calendar, then approve them to put them in front of members.`
+      : `${titleCaseName(hostName)} wants to host a round at ${courseName} on ${date}. Set up the calendar, then approve it to put it in front of members.`,
     url:   '/admin/hosts',
     tag:   'hosted-event-review',
+    subject: `${titleCaseName(hostName)} wants to host a round at ${courseName}`,
+    cta:   'Review it now',
   }),
 
   // Sent to the host when an admin publishes their event. Until this lands the
@@ -328,6 +401,8 @@ export const NotificationTemplates = {
     body:  `Your ${courseName} event on ${date} has been approved — members can reserve a spot now.`,
     url:   '/host/events',
     tag:   'hosted-event-approved',
+    subject: `Your ${courseName} event on ${date} is live`,
+    cta:   'View your round',
   }),
 
   // Sent to the host who proposed a venue when an admin approves it, and only
@@ -339,6 +414,8 @@ export const NotificationTemplates = {
     body:  `${courseName} is set up on LinkUp — you can list rounds there now.`,
     url:   '/host/events',
     tag:   'venue-approved',
+    subject: `${courseName} is live on LinkUp`,
+    cta:   'View the venue',
   }),
 
   // Sent when a venue goes live but some of the dates the host asked for can't
@@ -352,6 +429,8 @@ export const NotificationTemplates = {
       : `${courseName} is live, but ${count} of the dates you asked for have nothing open. Pick others and we'll put them in front of members.`,
     url:   '/host/events',
     tag:   'hosted-event-dates-held',
+    subject: `${count === 1 ? 'A date' : `${count} dates`} at ${courseName} need changing`,
+    cta:   'Review your dates',
   }),
 
   // Sent to the host when an admin takes their event down. It's cancelled,
@@ -361,20 +440,26 @@ export const NotificationTemplates = {
     body:  `Your ${courseName} event on ${date} was taken down and anyone who reserved has been released. ${reason}`,
     url:   '/host/events',
     tag:   'hosted-event-rejected',
+    subject: `Your ${courseName} event on ${date} was taken down`,
+    cta:   'View details',
   }),
 
   hostedEventJoined: (memberName: string, courseName: string, date: string): PushPayload => ({
     title: 'New reservation',
-    body:  `${memberName} reserved a spot at your ${courseName} event on ${date}.`,
+    body:  `${titleCaseName(memberName)} reserved a spot at your ${courseName} event on ${date}.`,
     url:   '/host/events',
     tag:   'hosted-event-joined',
+    subject: `${titleCaseName(memberName)} reserved a spot at your ${courseName} event`,
+    cta:   'View your event',
   }),
 
   hostedEventProofSubmitted: (hostName: string, courseName: string, date: string): PushPayload => ({
     title: 'Event proof submitted',
-    body:  `${hostName} uploaded proof for their ${courseName} event on ${date}. Review it to approve credits.`,
+    body:  `${titleCaseName(hostName)} uploaded proof for their ${courseName} event on ${date}. Review it to approve credits.`,
     url:   '/admin/hosts',
     tag:   'hosted-event-proof',
+    subject: `${titleCaseName(hostName)} submitted proof for ${courseName}`,
+    cta:   'Review the proof',
   }),
 
   hostCreditApproved: (amount: number): PushPayload => ({
@@ -382,6 +467,8 @@ export const NotificationTemplates = {
     body:  `${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in host credits has been added to your balance.`,
     url:   '/host/credits',
     tag:   'host-credit-approved',
+    subject: `${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in host credits has been added`,
+    cta:   'View your credit',
   }),
 
   hostCreditRejected: (reason: string): PushPayload => ({
@@ -389,6 +476,8 @@ export const NotificationTemplates = {
     body:  `Your event's credits weren't approved. ${reason} You can upload new proof.`,
     url:   '/host/events',
     tag:   'host-credit-rejected',
+    subject: 'About the credits for your LinkUp event',
+    cta:   'View details',
   }),
 
   // Credit is redeemed toward golf — the membership option went when redeeming
@@ -400,6 +489,8 @@ export const NotificationTemplates = {
     body:  `You redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in credits toward golf.`,
     url:   '/host/credits',
     tag:   'host-credit-redeemed',
+    subject: `You redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in LinkUp credits`,
+    cta:   'View your wallet',
   }),
 
   // A code is the whole point of issuing one, so it goes in the notification
@@ -409,15 +500,19 @@ export const NotificationTemplates = {
     body:  `${code} — ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} off at checkout.`,
     url:   '/host/credits',
     tag:   'host-credit-coupon',
+    subject: `Your ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} LinkUp credit code`,
+    cta:   'Get your code',
   }),
 
   // Sent to admins — a redemption isn't settled until someone puts it against a
   // round for them.
   creditRedemptionRequested: (name: string, amount: number): PushPayload => ({
     title: 'Credit redemption to settle',
-    body:  `${name} redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} toward golf.`,
+    body:  `${titleCaseName(name)} redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} toward golf.`,
     url:   '/admin/hosts',
     tag:   'host-credit-redemption',
+    subject: `${titleCaseName(name)} redeemed ${amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} in credits`,
+    cta:   'Review the request',
   }),
 
   // Sent to members who had reserved a spot when the host cancels the event.
@@ -426,6 +521,8 @@ export const NotificationTemplates = {
     body:  `The ${courseName} event on ${date} has been cancelled.${reason ? ` ${reason}` : ''} Your spot has been released.`,
     url:   '/book',
     tag:   'hosted-event-cancelled',
+    subject: `The ${courseName} event on ${date} was cancelled`,
+    cta:   'Find another round',
   }),
 
   // Sent to members who had reserved a spot when the host changes event details.
@@ -434,13 +531,17 @@ export const NotificationTemplates = {
     body:  `Details changed for the ${courseName} event on ${date}. Open it to see the latest.`,
     url:   '/book',
     tag:   'hosted-event-updated',
+    subject: `The ${courseName} event on ${date} has changed`,
+    cta:   'See what changed',
   }),
 
   // Sent to the host when a member releases their spot.
   hostedEventMemberCancelled: (memberName: string, courseName: string, date: string): PushPayload => ({
     title: 'A spot opened up',
-    body:  `${memberName} released their spot at your ${courseName} event on ${date}.`,
+    body:  `${titleCaseName(memberName)} released their spot at your ${courseName} event on ${date}.`,
     url:   '/host/events',
     tag:   'hosted-event-joined',
+    subject: `A spot opened up at your ${courseName} event on ${date}`,
+    cta:   'View your event',
   }),
 }

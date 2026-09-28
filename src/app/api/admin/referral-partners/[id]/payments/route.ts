@@ -21,7 +21,8 @@ import { loadPartnerCommission } from '@/lib/referral-commission'
 import { monthOf } from '@/lib/referral-rate'
 import { PAYOUT_THRESHOLD_USD, PAYOUT_METHODS } from '@/lib/constants'
 import { syncPartnerReferredMembers } from '@/lib/referral-sync'
-import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember } from '@/lib/notify'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 import type { ReferralPartner } from '@/types'
@@ -127,7 +128,7 @@ export const POST = withAuth(
     }
 
     if (partner.member_id) {
-      void sendPushToMember(
+      void notifyMember(
         partner.member_id,
         NotificationTemplates.referralCommissionPaid(amount, method)
       ).catch(() => {})

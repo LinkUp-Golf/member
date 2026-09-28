@@ -268,13 +268,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       .eq('status', 'pending')
     setPartnerApplicationsCount(applicationsCount ?? 0)
 
-    // Host attention badge: pending role applications + events awaiting credit
-    // approval. (There's no event-review gate anymore — events publish live.)
-    const [hostAppsRes, hostProofRes] = await Promise.all([
-      supabase.from('host_applications').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
-      supabase.from('hosted_events').select('id', { count: 'exact', head: true }).eq('status', 'pending_credit_approval'),
-    ])
-    setHostsCount((hostAppsRes.count ?? 0) + (hostProofRes.count ?? 0))
+    // Host attention badge: events awaiting credit approval. Becoming a host
+    // no longer waits on anyone, and events publish live, so credit is the only
+    // thing left here that an admin has to action.
+    const { count: hostProofCount } = await supabase
+      .from('hosted_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending_credit_approval')
+    setHostsCount(hostProofCount ?? 0)
 
     const { data: courses } = await supabase
       .from('courses')

@@ -4,14 +4,22 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { createGHLCalendar, deleteGHLCalendar, getCalendarBookingRules } from '@/lib/ghl/client'
+import { createGHLCalendar, deleteGHLCalendar } from '@/lib/ghl/client'
 import { validateTimezone, sanitiseText } from '@/lib/validation'
 import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
 import { APPROVABLE_STATUSES, canApproveEvent } from '@/lib/hosts/events'
+import {
+  describeRoundConflict,
+  findRoundConflicts,
+  loadOccupyingRounds,
+  type ExistingRound,
+} from '@/lib/hosts/schedule'
+import { hostUserIdsForCourse } from '@/lib/hosts/provisioning'
 import { openSpotsByDate } from '@/lib/bookings/availability'
-import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember } from '@/lib/notify'
 import { MAX_PINNED_COURSES } from '@/lib/constants'
-import { parsePaymentOptions } from '@/lib/bookings/payment-options'
+import { canTakePayment, coursePaymentOptions, parsePaymentOptions } from '@/lib/bookings/payment-options'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 import type { Course } from '@/types'
@@ -42,23 +50,84 @@ export const PATCH = withAuth(
 
       if (body.action === 'approve') {
         // Approving is what publishes a course to members, so it has to clear
-        // the bar the member endpoints actually apply. GET /api/courses and
-        // GET /api/bookings/availability both require a payment link — a
-        // confirmed booking is sent to courses.payment_url to be paid, so a
-        // course without one has nowhere to send anybody.
+        // the bar the member endpoints actually apply: GET /api/courses and
+        // GET /api/bookings/availability both leave out a venue nobody can pay
+        // at. That means a payment link only where the venue takes payment on
+        // the app — a confirmed booking is sent to courses.payment_url to be
+        // paid, so a Pay on App course without one has nowhere to send anybody,
+        // while a pay-at-club course is settled with the club and never needed
+        // a link.
         //
-        // A course an admin created can't get here without one (POST requires
-        // it). A course a host proposed arrives with none at all, and approving
-        // it used to succeed and produce a course that was active, calendared,
-        // and invisible — with nothing saying why.
-        if (!(course.payment_url as string | null)?.trim()) {
+        // A course an admin created can't get here short of it (POST applies the
+        // same rule). A course a host proposed arrives with no link — which is
+        // fine, because it also arrives pay-at-club — and approving one that had
+        // been switched to Pay on App used to succeed and produce a course that
+        // was active, calendared, and invisible, with nothing saying why.
+        if (!canTakePayment(course)) {
           return NextResponse.json(
             {
               error:
-                'Add a payment link before approving. Without one this course stays hidden from members, because a confirmed booking has nowhere to be paid — edit the course, add the link, then approve.',
+                'This venue takes payment on the app but has no payment link, so it would stay hidden from members — a confirmed booking has nowhere to be paid. Edit the course and either add the link or set it to Pay at club, then approve.',
             },
             { status: 400 }
           )
+        }
+
+        // The rounds waiting on this calendar, loaded before it exists — this is
+        // the last moment anything can be changed without unpicking a calendar
+        // in another system. Reused below to publish them.
+        const { data: waiting } = await admin
+          .from('hosted_events')
+          .select('id, status, event_date, host:hosts(member_id)')
+          .eq('course_id', id)
+          .in('status', [...APPROVABLE_STATUSES])
+
+        const approvable = (waiting ?? []).filter(
+          e => canApproveEvent(e.status as string, e.event_date as string).ok,
+        )
+
+        // Two hosts holding the same block of the same club's day is the one
+        // thing a new calendar can't be talked out of afterwards: it would be
+        // built over a tee sheet somebody else already has. Both rounds are real
+        // requests, so the answer is to name the two and stop — not to pick a
+        // winner on the admin's behalf.
+        if (approvable.length) {
+          const atVenue = await loadOccupyingRounds(admin, {
+            courseId: id,
+            dates: approvable.map(e => String(e.event_date)),
+          })
+          const approvableIds = new Set(approvable.map(e => String(e.id)))
+          const proposed: ExistingRound[] = atVenue.filter(r => approvableIds.has(r.eventId))
+          const alreadyHeld: ExistingRound[] = atVenue.filter(r => !approvableIds.has(r.eventId))
+
+          const conflicts = findRoundConflicts(
+            proposed,
+            alreadyHeld,
+            course.meeting_duration_mins as number,
+          )
+          const first = conflicts[0]
+          if (first) {
+            const others = conflicts.length - 1
+            return NextResponse.json(
+              {
+                error:
+                  `Overlapping rounds — the calendar wasn't created. ` +
+                  describeRoundConflict(first, course.name as string) +
+                  (others > 0 ? ` ${others} other clash${others === 1 ? '' : 'es'} at this venue too.` : ''),
+                conflicts: conflicts.map(c => ({
+                  event_id: c.round.eventId,
+                  date: c.round.date,
+                  tee_time: c.round.teeTime,
+                  clashes_with: {
+                    event_id: c.existing.eventId,
+                    host: c.existing.hostName,
+                    tee_time: c.existing.teeTime,
+                  },
+                })),
+              },
+              { status: 409 }
+            )
+          }
         }
 
         let ghlCalendarId = course.ghl_calendar_id as string | null
@@ -67,15 +136,13 @@ export const PATCH = withAuth(
             ghlCalendarId = await createGHLCalendar({
               name: course.name,
               slug: course.slug,
-              eventTitle: `LinkUp @ ${course.name}`,
+              // eventTitle left to the house default ({{contact.name}}), so an
+              // appointment in GHL is titled by who booked it.
               eventColor: randomColor(),
-              meetingIntervalMins: course.meeting_interval_mins,
-              meetingDurationMins: course.meeting_duration_mins,
-              minSchedulingNoticeMins: course.min_scheduling_notice_mins,
-              dateRangeDays: course.date_range_days,
-              preBufferMins: course.pre_buffer_mins,
-              postBufferMins: course.post_buffer_mins,
               seatsPerClass: course.seats_per_class,
+              // Staffed by the hosts who will run it, rather than left to the
+              // fallback assignee — see src/lib/hosts/provisioning.ts.
+              teamMemberIds: await hostUserIdsForCourse(admin, id),
             })
           } catch (err) {
             return NextResponse.json({ error: `GHL calendar creation failed: ${String(err)}` }, { status: 502 })
@@ -98,7 +165,10 @@ export const PATCH = withAuth(
         // reading "we're setting up the calendar" about a calendar that now
         // exists.
         //
-        // Two gates, not one.
+        // Two gates here, on top of the overlap check above — which already
+        // stopped the whole approval rather than holding a round, because a
+        // calendar built over another host's tee sheet can't be undone from
+        // this screen.
         //
         // canApproveEvent, as when approving by hand: only rounds still awaiting
         // approval, and never one whose date has gone.
@@ -122,16 +192,8 @@ export const PATCH = withAuth(
         // The venue notice below is for whoever hasn't.
         const notified = new Set<string>()
         try {
-          const { data: waiting } = await admin
-            .from('hosted_events')
-            .select('id, status, event_date, host:hosts(member_id)')
-            .eq('course_id', id)
-            .in('status', [...APPROVABLE_STATUSES])
-
-          const approvable = (waiting ?? []).filter(
-            e => canApproveEvent(e.status as string, e.event_date as string).ok,
-          )
-
+          // `approvable` was read above, before the calendar was created — the
+          // same set the overlap check cleared.
           if (approvable.length) {
             // `data` carries the calendar id this approval just created, which
             // is what makes there be anything to ask.
@@ -183,7 +245,7 @@ export const PATCH = withAuth(
               if (!standing || date < standing) soonestByHost.set(memberId, date)
             }
             for (const [memberId, date] of soonestByHost) {
-              void sendPushToMember(
+              void notifyMember(
                 memberId,
                 NotificationTemplates.hostedEventApproved(data.name, date),
               ).catch(() => {})
@@ -200,7 +262,7 @@ export const PATCH = withAuth(
               heldByHost.set(memberId, (heldByHost.get(memberId) ?? 0) + 1)
             }
             for (const [memberId, count] of heldByHost) {
-              void sendPushToMember(
+              void notifyMember(
                 memberId,
                 NotificationTemplates.hostedEventDatesHeld(data.name, count),
               ).catch(() => {})
@@ -221,7 +283,7 @@ export const PATCH = withAuth(
         // pending, with nothing to say so.
         const requestedBy = data.requested_by as string | null
         if (requestedBy && !notified.has(requestedBy)) {
-          void sendPushToMember(
+          void notifyMember(
             requestedBy,
             NotificationTemplates.venueApproved(data.name),
           ).catch(() => {})
@@ -329,24 +391,44 @@ export const PATCH = withAuth(
       return NextResponse.json({ error: 'A venue logo is required' }, { status: 400 })
     }
 
-    // payment_url is required — reject attempts to clear it, but allow omitting
-    // the key entirely (no change) or replacing it with a new link.
-    if ('payment_url' in body) {
-      if (!body.payment_url?.trim()) {
-        return NextResponse.json({ error: 'A payment link is required' }, { status: 400 })
-      }
-      if (!isValidUrl(body.payment_url.trim())) {
-        return NextResponse.json({ error: 'Payment link must be a valid URL (e.g. https://example.com)' }, { status: 400 })
-      }
-    }
+    // The payment link and the payment options are checked together, against
+    // the row as it will be once this update lands — either one may be in this
+    // request and either one alone decides nothing. Clearing the link is allowed
+    // now, but only down to a venue that's settled at the club; a course with no
+    // way to pay at all can't be booked and would drop out of the member lists.
+    if ('payment_url' in body || 'payment_options' in body) {
+      const { data: current } = await admin
+        .from('courses')
+        .select('payment_url, payment_options')
+        .eq('id', id)
+        .maybeSingle()
+      if (!current) return NextResponse.json({ error: 'Course not found' }, { status: 404 })
 
-    // At least one known option — a course with no way to pay can't be booked.
-    if ('payment_options' in body) {
-      const options = parsePaymentOptions(body.payment_options)
-      if (!options) {
+      const changingOptions = 'payment_options' in body
+      const nextOptions = changingOptions
+        ? parsePaymentOptions(body.payment_options)
+        : coursePaymentOptions(current)
+      if (!nextOptions) {
         return NextResponse.json({ error: 'Choose at least one payment option' }, { status: 400 })
       }
-      body.payment_options = options
+      // Only written back when this request is the one changing them — reading
+      // them to check the link must not turn into rewriting them.
+      if (changingOptions) body.payment_options = nextOptions
+
+      const nextUrl =
+        'payment_url' in body
+          ? body.payment_url?.trim() || null
+          : ((current.payment_url as string | null) ?? null)
+      if (nextUrl && !isValidUrl(nextUrl)) {
+        return NextResponse.json({ error: 'Payment link must be a valid URL (e.g. https://example.com)' }, { status: 400 })
+      }
+
+      if (!canTakePayment({ payment_url: nextUrl, payment_options: nextOptions })) {
+        return NextResponse.json(
+          { error: 'A payment link is required while this venue takes payment on the app' },
+          { status: 400 },
+        )
+      }
     }
 
     // Calendar uniqueness on edit: reject if the new calendar is already used by a different course
@@ -369,9 +451,11 @@ export const PATCH = withAuth(
       'name', 'slug', 'logo_url', 'city', 'state', 'country', 'address', 'phone', 'map_link',
       'access_tag', 'timezone', 'active',
       'description', 'ghl_calendar_id', 'ghl_calendar_user_id', 'cost_per_player',
-      'booking_rules', 'booking_url', 'payment_url', 'required_tags', 'meeting_interval_mins',
-      'meeting_duration_mins', 'min_scheduling_notice_mins', 'date_range_days',
-      'pre_buffer_mins', 'post_buffer_mins', 'seats_per_class', 'max_players_per_day',
+      'booking_rules', 'booking_url', 'payment_url', 'required_tags',
+      // meeting_duration_mins is here because the calendar mirror below writes
+      // it. The other five scheduling columns are not: a calendar is created on
+      // GHL_CALENDAR_RULES, so nothing reads them and no screen sends them.
+      'meeting_duration_mins', 'seats_per_class', 'max_players_per_day',
       'custom_slots_enabled', 'pinned', 'payment_options',
     ]
     const updates: Record<string, unknown> = {}
@@ -408,18 +492,17 @@ export const PATCH = withAuth(
       updates.access_tag = tags[0] ?? ''
     }
     // Normalise optional text/URL fields: empty string → null
-    for (const key of ['booking_url', 'address', 'phone', 'map_link', 'ghl_calendar_id'] as const) {
+    for (const key of ['booking_url', 'address', 'phone', 'map_link', 'ghl_calendar_id', 'payment_url'] as const) {
       if (key in updates) updates[key] = (updates[key] as string)?.trim() || null
     }
     if (!Object.keys(updates).length) return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
 
-    // The GHL calendar owns the round length, so pointing a course at a calendar
-    // adopts that calendar's slot duration. Mirroring it here keeps the member and
-    // admin screens showing the right end time without either of them calling GHL.
-    if (typeof updates.ghl_calendar_id === 'string' && updates.ghl_calendar_id) {
-      const rules = await getCalendarBookingRules(updates.ghl_calendar_id)
-      if (rules?.slotDurationMins) updates.meeting_duration_mins = rules.slotDurationMins
-    }
+    // Attaching a calendar used to overwrite meeting_duration_mins with that
+    // calendar's slotDuration. It doesn't any more, and mustn't: a slot is one
+    // tee time — a fixed 20 minutes, see GHL_CALENDAR_RULES — while
+    // meeting_duration_mins is how long a round runs, the figure the host clash
+    // check and the member's "round finished" time are built on. They were the
+    // same number only while the calendar was created from the course.
 
     const { data, error } = await admin.from('courses').update(updates).eq('id', id).select().single()
     if (error) {

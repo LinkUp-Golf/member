@@ -6,8 +6,9 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { normaliseTeeTime } from '@/lib/hosts/tee-time'
+import { PLAYING_STATUSES, playingMemberId } from '@/lib/bookings/players'
 import { HOST_MEMBER_PRICE_MARKUP_PERCENT } from '@/lib/constants'
-import type { HostedEvent, HostStats } from '@/types'
+import type { EventPlayer, HostedEvent, HostStats } from '@/types'
 import { loadCreditSummary } from '@/lib/credits'
 
 type AdminClient = SupabaseClient
@@ -243,11 +244,15 @@ export function proofState(params: {
  * event was never the only way to end up in it, so the roster is built from
  * both.
  *
- * Only rows with no guest_name are members; the additional-player rows a group
- * booking creates for non-members are somebody's guest, not a separate
- * attendee. Statuses match GET /api/bookings/day, the app's existing answer to
- * "who is playing here that day", so the host's roster and the member-facing
- * one can't disagree.
+ * Who counts is decided by playingMemberId, the same rule the member-facing
+ * "who's playing" list uses, and the statuses are that list's PLAYING_STATUSES —
+ * so the host's roster and the one members see can't disagree. They used to:
+ * this read only rows with no guest_name, which is the booker's own row, and so
+ * missed every member invited onto someone else's booking. A group of four
+ * members at the venue showed up on the host's round as one person.
+ *
+ * A non-member guest is still not an attendee here — they have no profile to
+ * show — and a member with two tee times the same day is still one person.
  */
 export interface BookedAttendee {
   member_id: string
@@ -257,9 +262,44 @@ export interface BookedAttendee {
   tee_time: string | null
 }
 
-const BOOKED_STATUSES = ['availability_confirmed', 'payment_confirmed', 'confirmed']
-
 const venueDayKey = (courseId: string, date: string) => `${courseId}|${date.slice(0, 10)}`
+
+/** What it takes to show a person: their name and their face. */
+export interface MemberCard {
+  first_name: string
+  last_name: string
+  avatar_url: string | null
+}
+
+/**
+ * Names and avatars for a set of member ids.
+ *
+ * Its own read rather than a join, wherever it's called from: asking `members`
+ * for avatar_url — which lives on member_profiles — makes PostgREST reject the
+ * whole query, and a rejected roster query reads as "nobody is playing".
+ */
+async function loadMemberCards(
+  admin: AdminClient,
+  memberIds: string[],
+): Promise<Map<string, MemberCard>> {
+  const byId = new Map<string, MemberCard>()
+  if (memberIds.length === 0) return byId
+
+  const { data: members } = await admin
+    .from('members')
+    .select('id, first_name, last_name, profile:member_profiles(avatar_url)')
+    .in('id', memberIds)
+
+  for (const m of members ?? []) {
+    const profile = Array.isArray(m.profile) ? m.profile[0] : m.profile
+    byId.set(m.id as string, {
+      first_name: m.first_name as string,
+      last_name: m.last_name as string,
+      avatar_url: (profile as { avatar_url: string | null } | null)?.avatar_url ?? null,
+    })
+  }
+  return byId
+}
 
 /** Booked members for each (venue, day) the given events sit on. */
 export async function loadBookedAttendees(
@@ -277,46 +317,36 @@ export async function loadBookedAttendees(
   // rows are narrowed back down below rather than in the query.
   const { data: bookings } = await admin
     .from('bookings')
-    .select('member_id, course_id, booking_date, tee_time')
+    // guest_name and player_member_id come along because between them they say
+    // which member a row seats — see playingMemberId.
+    .select('member_id, player_member_id, guest_name, course_id, booking_date, tee_time')
     .in('course_id', courseIds)
     .in('booking_date', dates)
-    .is('guest_name', null)
-    .in('status', BOOKED_STATUSES)
+    .in('status', [...PLAYING_STATUSES])
 
   const rows = (bookings ?? []).filter(b =>
     wanted.has(venueDayKey(b.course_id as string, b.booking_date as string)),
   )
   if (rows.length === 0) return out
 
-  // Fetched separately rather than joined: asking members for avatar_url (which
-  // lives on member_profiles) makes PostgREST reject the whole query, which
-  // then reads as "nobody booked".
-  const memberIds = Array.from(new Set(rows.map(r => r.member_id as string)))
-  const { data: members } = await admin
-    .from('members')
-    .select('id, first_name, last_name, profile:member_profiles(avatar_url)')
-    .in('id', memberIds)
+  // The member each row seats, dropping the non-member guests as we go.
+  const seated = rows
+    .map(r => ({ row: r, memberId: playingMemberId(r as Parameters<typeof playingMemberId>[0]) }))
+    .filter((x): x is { row: (typeof rows)[number]; memberId: string } => !!x.memberId)
+  if (seated.length === 0) return out
 
-  const byId = new Map<string, { first_name: string; last_name: string; avatar_url: string | null }>()
-  for (const m of members ?? []) {
-    const profile = Array.isArray(m.profile) ? m.profile[0] : m.profile
-    byId.set(m.id as string, {
-      first_name: m.first_name as string,
-      last_name: m.last_name as string,
-      avatar_url: (profile as { avatar_url: string | null } | null)?.avatar_url ?? null,
-    })
-  }
+  const byId = await loadMemberCards(admin, Array.from(new Set(seated.map(x => x.memberId))))
 
-  for (const r of rows) {
-    const member = byId.get(r.member_id as string)
+  for (const { row: r, memberId } of seated) {
+    const member = byId.get(memberId)
     if (!member) continue
     const key = venueDayKey(r.course_id as string, r.booking_date as string)
     const list = out.get(key) ?? []
     // One entry per member per day — a member with two tee times the same day
     // is still one person at the round.
-    if (list.some(a => a.member_id === r.member_id)) continue
+    if (list.some(a => a.member_id === memberId)) continue
     list.push({
-      member_id: r.member_id as string,
+      member_id: memberId,
       first_name: member.first_name,
       last_name: member.last_name,
       avatar_url: member.avatar_url,
@@ -332,14 +362,61 @@ export async function loadBookedAttendees(
 export const bookedAttendeeKey = venueDayKey
 
 /**
+ * Everyone at one round, in the order the host should read them.
+ *
+ * Reservations first, then members who only booked the venue that day. Anyone
+ * who did both appears once, as a reservation — that is the more specific
+ * commitment, and two faces for one person would overstate the round.
+ *
+ * A reserved member whose card couldn't be loaded is dropped rather than shown
+ * nameless: the count beside the faces comes from filled_spots, which is counted
+ * from the registrations themselves, so the number stays right either way.
+ *
+ * Pure, and exported for its test — the dedupe is the part worth pinning down.
+ */
+export function rosterFor(
+  reservedIds: string[],
+  cards: Map<string, MemberCard>,
+  attendees: BookedAttendee[],
+): EventPlayer[] {
+  const players: EventPlayer[] = []
+  const seen = new Set<string>()
+
+  for (const id of reservedIds) {
+    const card = cards.get(id)
+    if (!card || seen.has(id)) continue
+    seen.add(id)
+    players.push({ member_id: id, ...card, source: 'reserved' })
+  }
+
+  for (const a of attendees) {
+    if (seen.has(a.member_id)) continue
+    seen.add(a.member_id)
+    players.push({
+      member_id: a.member_id,
+      first_name: a.first_name,
+      last_name: a.last_name,
+      avatar_url: a.avatar_url,
+      source: 'booking',
+    })
+  }
+
+  return players
+}
+
+/**
  * Annotate events with member_price, filled/remaining spots and (when a member
  * is given) whether they already hold an active reservation. Batches the
  * registration count into a single query across all events.
+ *
+ * `withPlayers` adds the roster itself — everyone at the round, with their name
+ * and face. Opt-in rather than always, because it names members: the host's own
+ * screens ask for it, the member-facing endpoints don't.
  */
 export async function enrichHostedEvents(
   admin: AdminClient,
   events: HostedEvent[],
-  opts: { memberId?: string } = {}
+  opts: { memberId?: string; withPlayers?: boolean } = {}
 ): Promise<HostedEvent[]> {
   if (events.length === 0) return []
 
@@ -352,9 +429,17 @@ export async function enrichHostedEvents(
 
   const filled = new Map<string, number>()
   const mine = new Set<string>()
+  /** Reserved member ids per event, kept only when the roster was asked for. */
+  const reservedBy = new Map<string, string[]>()
   for (const r of (regs ?? []) as { hosted_event_id: string; member_id: string }[]) {
     filled.set(r.hosted_event_id, (filled.get(r.hosted_event_id) ?? 0) + 1)
     if (opts.memberId && r.member_id === opts.memberId) mine.add(r.hosted_event_id)
+    if (opts.withPlayers) {
+      reservedBy.set(r.hosted_event_id, [
+        ...(reservedBy.get(r.hosted_event_id) ?? []),
+        r.member_id,
+      ])
+    }
   }
 
   // Members who reached the round by booking the venue that day rather than
@@ -367,6 +452,15 @@ export async function enrichHostedEvents(
   // real roster while capacity keeps one definition.
   const booked = await loadBookedAttendees(admin, events)
 
+  // The people who reserved through the event. loadBookedAttendees already has
+  // the other half's names, so this is the one extra read the roster costs.
+  const reservedCards = opts.withPlayers
+    ? await loadMemberCards(
+        admin,
+        Array.from(new Set(Array.from(reservedBy.values()).flat())),
+      )
+    : new Map<string, MemberCard>()
+
   return events.map(e => {
     const f = filled.get(e.id) ?? 0
     const attendees = booked.get(venueDayKey(e.course_id, e.event_date)) ?? []
@@ -377,6 +471,7 @@ export async function enrichHostedEvents(
       remaining_spots: Math.max(0, e.total_spots - f),
       booked_attendees: attendees,
       booked_spots: attendees.length,
+      ...(opts.withPlayers ? { players: rosterFor(reservedBy.get(e.id) ?? [], reservedCards, attendees) } : {}),
       ...(opts.memberId
         ? {
             // Booking the venue that day connects a member to the round just as

@@ -6,7 +6,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { AdminPageHeader, AdminTable, AdminTr, AdminTd, Badge } from '@/components/admin/AdminUI'
-import HostApplications from '@/components/admin/HostApplications'
 import HostedEventsAdmin from '@/components/admin/HostedEventsAdmin'
 import { errorMessage } from '@/lib/errors/error-message'
 import type { CreditSummary } from '@/types'
@@ -14,12 +13,11 @@ import type { CreditSummary } from '@/types'
 const fmtMoney = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 2 })
 
-type Tab = 'hosts' | 'applications' | 'events'
+type Tab = 'hosts' | 'events'
 
 // Module-level so the array isn't rebuilt on every render.
 const TABS: { key: Tab; label: string }[] = [
   { key: 'hosts', label: 'Hosts' },
-  { key: 'applications', label: 'Applications' },
   { key: 'events', label: 'Events & Credits' },
 ]
 
@@ -212,10 +210,6 @@ export default function AdminHostsPage() {
             </AdminTable>
           </>
         )
-      )}
-
-      {tab === 'applications' && (
-        <HostApplications onToast={showToast} onReviewed={loadHosts} />
       )}
 
       {tab === 'events' && (

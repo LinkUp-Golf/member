@@ -114,8 +114,14 @@ export interface Course {
   cost_per_player: number | null
   booking_rules: string | null
   required_tags: string[]
-  meeting_interval_mins: number
+  // How long a round runs. Mirrored from the GHL calendar's slotDuration when
+  // one is attached, and read by the member and admin screens to work out when
+  // a round finished.
   meeting_duration_mins: number
+  // Columns the GHL calendar no longer takes its rules from — every calendar is
+  // created on GHL_CALENDAR_RULES. Kept because the table still has them, but
+  // nothing reads them and the admin API won't set them.
+  meeting_interval_mins: number
   min_scheduling_notice_mins: number
   date_range_days: number
   pre_buffer_mins: number
@@ -448,16 +454,22 @@ export interface Host {
    */
   venues_unrestricted: boolean
   source: HostSource
+  /**
+   * The GHL user provisioned for this host — what staffs the calendars of their
+   * venues. Null for a host approved before provisioning existed, or one whose
+   * GHL user couldn't be created (see src/lib/hosts/provisioning.ts).
+   */
+  ghl_user_id: string | null
   created_by: string | null
   created_at: string
   updated_at: string
 }
 
-export type HostApplicationStatus = 'pending' | 'approved' | 'rejected'
-
 /**
- * A round proposed on a host application — the dates/spots/pricing half of the
- * "how it works" flow. Becomes a real HostedEvent on approval.
+ * A round proposed when a member becomes a host — the dates/spots/pricing half
+ * of the form. Becomes a HostedEvent immediately: there is no review, so these
+ * no longer persist as rows of their own, and this is now the shape on the wire
+ * rather than a table.
  */
 export interface HostApplicationEvent {
   id: string
@@ -491,32 +503,6 @@ export type HostApplicationEventInput = Pick<
 > &
   Partial<Pick<HostApplicationEvent, 'total_spots' | 'member_guest_rate'>>
 
-export interface HostApplication {
-  id: string
-  member_id: string
-  /** Host name the applicant proposes to operate under. */
-  name: string | null
-  /**
-   * The applicant's pitch. Null on anything submitted after the field was
-   * removed from the form — the venues and proposed rounds are what an admin
-   * reviews. Older applications keep theirs.
-   */
-  description: string | null
-  /** The course ids the applicant wants to host at. */
-  requested_course_ids: string[]
-  status: HostApplicationStatus
-  host_id: string | null
-  rejection_reason: string | null
-  reviewed_by: string | null
-  reviewed_at: string | null
-  created_at: string
-  updated_at: string
-  // Enriched (present when joined to the member row in API responses)
-  member?: { first_name: string; last_name: string; email: string } | null
-  /** Rounds the applicant proposed alongside the venues. */
-  events?: HostApplicationEvent[]
-}
-
 export type HostedEventStatus =
   /**
    * Created by the host, not yet visible to members. Waiting on an admin to
@@ -528,6 +514,19 @@ export type HostedEventStatus =
   | 'cancelled'
   | 'pending_credit_approval'
   | 'credits_awarded'
+
+/**
+ * One person at a hosted round, however they got there: `reserved` through the
+ * event, or `booking` — they booked the venue that day, which puts them on the
+ * same afternoon at the same club.
+ */
+export interface EventPlayer {
+  member_id: string
+  first_name: string
+  last_name: string
+  avatar_url: string | null
+  source: 'reserved' | 'booking'
+}
 
 export interface HostedEvent {
   id: string
@@ -569,6 +568,12 @@ export interface HostedEvent {
     tee_time: string | null
   }[]
   booked_spots?: number
+  /**
+   * Everyone at the round, reservations and venue bookings merged into one list
+   * with a face each. Only on responses the host asked for it on — it names
+   * members, so the member-facing endpoints leave it off.
+   */
+  players?: EventPlayer[]
   course?: { id: string; name: string; city?: string | null; payment_url?: string | null } | null
   host?: { id: string; name: string; member?: { first_name: string; last_name: string } | null } | null
   proofs?: HostedEventProof[]

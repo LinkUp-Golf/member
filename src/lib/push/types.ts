@@ -36,6 +36,21 @@ export interface PushPayload {
   tag?: string
   /** URL to open when the notification is tapped. Put inside data.url */
   url?: string
+  /**
+   * Words on the email's button. Ignored by push, which has no button — a
+   * pushed notification is tapped as a whole. Defaults to "Open in LinkUp".
+   */
+  cta?: string
+  /**
+   * The email's subject line. Ignored by push.
+   *
+   * Separate from `title` because the two are read in different places. A push
+   * title is glanced at beside the app's own name and next to the body, so it
+   * can be as short as a sender's name. A subject line sits in a list of
+   * unrelated mail with nothing around it, and has to say who it's from and
+   * what it concerns on its own. Falls back to `title`.
+   */
+  subject?: string
   /** Custom key→value data passed through to the service worker */
   data?: Record<string, unknown>
   /** Up to 2 action buttons (Chrome/Android) */

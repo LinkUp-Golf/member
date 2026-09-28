@@ -6,12 +6,14 @@
 // drawer and the become-a-host application. Controlled, with its rules in
 // src/lib/hosts/new-linkup.ts, so the two can't drift into asking different
 // things or accepting different answers.
+//
+// How members pay is not one of the questions — see the note where it used to
+// be asked.
 
 import DateMultiPicker from '@/components/host/DateMultiPicker'
 import DateTeeTimeList from '@/components/host/DateTeeTimeList'
-import PaymentOptionsPicker from '@/components/payments/PaymentOptionsPicker'
 import { cn } from '@/lib/utils'
-import { missingTeeTimes } from '@/lib/hosts/tee-time'
+import { DEFAULT_TEE_TIME, missingTeeTimes } from '@/lib/hosts/tee-time'
 import {
   NEW_LINKUP_GUESTS_MAX,
   NEW_LINKUP_NAME_MAX,
@@ -27,7 +29,6 @@ export default function NewLinkupFields({
   maxDates,
   tone = 'neutral',
   idPrefix = 'new-linkup',
-  showPaymentOptions = true,
 }: {
   value: NewLinkupValues
   onChange: (next: NewLinkupValues) => void
@@ -37,8 +38,6 @@ export default function NewLinkupFields({
   /** 'member' matches the member app's navy-on-cream forms. */
   tone?: 'neutral' | 'member'
   idPrefix?: string
-  /** Off where the surrounding form already asks for payment options. */
-  showPaymentOptions?: boolean
 }) {
   const member = tone === 'member'
   const labelCls = member
@@ -51,10 +50,13 @@ export default function NewLinkupFields({
   const set = (patch: Partial<NewLinkupValues>) => onChange({ ...value, ...patch })
 
   // Tee times follow their dates, so a date removed takes its tee time with it.
+  // A new one starts on the default rather than blank — see DEFAULT_TEE_TIME.
   const setDates = (dates: string[]) =>
     set({
       dates,
-      teeTimes: Object.fromEntries(dates.map(d => [d, value.teeTimes[d] ?? ''])),
+      teeTimes: Object.fromEntries(
+        dates.map(d => [d, value.teeTimes[d] ?? DEFAULT_TEE_TIME]),
+      ),
     })
 
   return (
@@ -160,18 +162,11 @@ export default function NewLinkupFields({
         {errors.rate && <p className={errCls}>{errors.rate}</p>}
       </div>
 
-      {showPaymentOptions && (
-        <div>
-          <span className={labelCls}>Payment options *</span>
-          <PaymentOptionsPicker
-            value={value.paymentOptions}
-            onChange={paymentOptions => set({ paymentOptions })}
-            tone={tone}
-            idPrefix={`${idPrefix}-payment-option`}
-          />
-          <p className={hintCls}>Members see these ways to pay when they book this venue.</p>
-        </div>
-      )}
+      {/* Payment isn't asked for. A club we're only hearing about now has no
+          checkout to send anyone to, and the host is the one at the venue on
+          the day — so a New LinkUp is set up to be settled at the club
+          (HOST_DEFAULT_PAYMENT_OPTIONS), and an admin can change it later like
+          any other course setting. */}
     </div>
   )
 }

@@ -9,8 +9,16 @@ import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateHostedEventPayload, normaliseEventDates } from '@/lib/validation'
 import { enrichHostedEvents, hostCanUseCourse, resolveTeeTimes } from '@/lib/hosts/events'
+import { describeRoundConflict, findRoundConflicts, loadOccupyingRounds } from '@/lib/hosts/schedule'
+import {
+  ensureCourseCalendar,
+  ensureHostGhlUser,
+  hostUserIdsForCourse,
+  syncHostAvailability,
+} from '@/lib/hosts/provisioning'
 import { openSpotsByDate } from '@/lib/bookings/availability'
-import { sendPushToAdmins, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyAdmins } from '@/lib/notify'
 import { logger } from '@/lib/logger'
 import { HOST_EVENT_GUEST_RATE_USD } from '@/lib/constants'
 import { parsePaymentOptions, coursePaymentOptions } from '@/lib/bookings/payment-options'
@@ -33,7 +41,11 @@ export const GET = withHostAuth(async (_req: NextRequest, ctx: HostAuthContext) 
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const events = await enrichHostedEvents(admin, (data ?? []) as HostedEvent[])
+  // The roster comes with it: the list shows the faces of everyone on each
+  // round, so the host can see who is coming without opening anything.
+  const events = await enrichHostedEvents(admin, (data ?? []) as HostedEvent[], {
+    withPlayers: true,
+  })
   return NextResponse.json({ events })
 })
 
@@ -198,6 +210,38 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     }
   }
 
+  // Nobody else may already hold these blocks of the club's day.
+  //
+  // The venue's calendar is one tee sheet. Two hosts on overlapping times at the
+  // same club is the same seats promised twice, and it stays invisible until
+  // somebody creates the second calendar over the first — so it's refused at the
+  // door, naming the round and the host it runs into. The caller's own rounds
+  // count: listing the same block twice is the same double-booking with one
+  // fewer person involved.
+  {
+    const occupied = await loadOccupyingRounds(admin, {
+      courseId,
+      dates: orderedDates,
+    })
+    const conflicts = findRoundConflicts(
+      orderedDates.map(date => ({
+        date,
+        teeTime: teeTimes.get(date) ?? null,
+        hostId: ctx.host.id,
+        hostName: ctx.host.name,
+      })),
+      occupied,
+      Number(course.meeting_duration_mins),
+    )
+    const first = conflicts[0]
+    if (first) {
+      return NextResponse.json(
+        { error: describeRoundConflict(first, course.name as string) },
+        { status: 409 }
+      )
+    }
+  }
+
   // Payment options belong to the venue, not to these rounds: every booking at
   // the course follows them. The host sets them from the event form — the
   // venue checks above are what entitle them to — so they're written before the
@@ -247,7 +291,7 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
   // creation the host just completed). One push for the batch rather than one per
   // date, keyed on the earliest — a host listing ten dates shouldn't produce ten
   // identical notifications.
-  void sendPushToAdmins(
+  void notifyAdmins(
     NotificationTemplates.hostedEventNeedsReview(
       ctx.host.name,
       course.name,
@@ -256,6 +300,75 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     )
   ).catch(() => {})
 
+  // Set the venue up in GHL, so the rounds the host just submitted have
+  // something to book against by the time anyone looks at them.
+  //
+  // A club the host proposed arrives with no calendar at all, and an admin
+  // approving the venue used to be the first moment one existed. Doing it here
+  // makes the review a decision rather than a setup — and the host's own GHL
+  // user goes on the calendar, so appointments are assigned to the person
+  // actually running the round.
+  //
+  // After the insert and deliberately non-fatal: the rounds are the host's and
+  // must not be lost to a GHL outage. Course approval still calls the same
+  // helper, which no-ops once a calendar exists.
+  let calendarId: string | null = course.ghl_calendar_id as string | null
+  try {
+    // Read only when there's no GHL user yet — the common path is a host who
+    // already has one, and that returns without touching the database.
+    const person = ctx.host.ghl_user_id
+      ? null
+      : (
+          await admin
+            .from('members')
+            .select('first_name, last_name, email, phone')
+            .eq('id', ctx.memberId)
+            .maybeSingle()
+        ).data
+
+    const hostUserId = await ensureHostGhlUser(
+      admin,
+      { id: ctx.host.id, name: ctx.host.name, ghl_user_id: ctx.host.ghl_user_id },
+      {
+        first_name: person?.first_name ?? null,
+        last_name: person?.last_name ?? null,
+        email: person?.email ?? ctx.email,
+        phone: person?.phone ?? null,
+      },
+    )
+
+    // This host first, then anyone else already granted the venue — the first
+    // id becomes the calendar's primary.
+    const others = await hostUserIdsForCourse(admin, courseId)
+    const teamMemberIds = Array.from(
+      new Set([...(hostUserId ? [hostUserId] : []), ...others]),
+    )
+
+    calendarId = await ensureCourseCalendar(admin, course as Course, teamMemberIds)
+
+    // And when the host is at the club. The calendar offers whatever its users
+    // are free for, and a GHL user's default is every weekday all day — so the
+    // dates just listed have to be stated as availability or the venue is
+    // bookable on days nobody will be there. Restates every upcoming date, not
+    // just this batch, so the schedule is the whole picture.
+    if (calendarId && hostUserId) {
+      await syncHostAvailability(admin, {
+        hostId: ctx.host.id,
+        courseId,
+        calendarId,
+        ghlUserId: hostUserId,
+        timezone: course.timezone as string | null,
+      })
+    }
+  } catch (err) {
+    logger.error('Venue setup after hosted event creation failed', {
+      action: 'host.event.venue_setup_failed',
+      userId: ctx.userId,
+      errorMessage: String(err),
+      metadata: { course_id: courseId, host_id: ctx.host.id },
+    })
+  }
+
   logger.info('Hosted event created', {
     action: 'host.event.created',
     userId: ctx.userId,
@@ -263,9 +376,11 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       event_id: event.id,
       event_count: events.length,
       host_id: ctx.host.id,
+      course_id: courseId,
+      ghl_calendar_id: calendarId,
     },
   })
 
   // `event` is the first for backwards compatibility; `events` is the full set.
-  return NextResponse.json({ event, events }, { status: 201 })
+  return NextResponse.json({ event, events, ghl_calendar_id: calendarId }, { status: 201 })
 })

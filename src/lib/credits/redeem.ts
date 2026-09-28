@@ -7,7 +7,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { sanitiseText } from '@/lib/validation'
-import { sendPushToMember, sendPushToAdmins, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember, notifyAdmins } from '@/lib/notify'
 import { logger } from '@/lib/logger'
 import { loadCreditSummary } from './index'
 import type { CreditSummary, CreditPurpose } from '@/types'
@@ -115,9 +116,9 @@ export async function redeemCredit(params: {
     return { ok: false, status: 500, error: 'Could not redeem your credits.' }
   }
 
-  void sendPushToMember(memberId, NotificationTemplates.creditRedeemed(amount)).catch(() => {})
+  void notifyMember(memberId, NotificationTemplates.creditRedeemed(amount)).catch(() => {})
   // Nothing else tells the admins a redemption is waiting to be settled.
-  void sendPushToAdmins(
+  void notifyAdmins(
     NotificationTemplates.creditRedemptionRequested(actorName, amount)
   ).catch(() => {})
 

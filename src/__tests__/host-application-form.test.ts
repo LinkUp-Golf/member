@@ -30,7 +30,6 @@ const COURSE_A = '3f2504e0-4f89-11d3-9a0c-0305e82c3301'
 const COURSE_B = '5f2504e0-4f89-11d3-9a0c-0305e82c3302'
 
 const form = (overrides: Partial<ApplicationValues> = {}): ApplicationValues => ({
-  name: 'Jane Smith',
   existing: [],
   ...overrides,
 })
@@ -174,10 +173,6 @@ describe('buildApplicationPayload', () => {
     )
     expect(payload.events[0]?.tee_time).toBe('')
     expect(validateHostApplicationPayload(payload).valid).toBe(false)
-  })
-
-  it('trims the host name', () => {
-    expect(buildApplicationPayload(form({ name: '  Jane Smith  ' })).name).toBe('Jane Smith')
   })
 
   // The payload has to satisfy the server rules, or the form can produce a body

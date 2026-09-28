@@ -8,7 +8,8 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
-import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember } from '@/lib/notify'
 import { logger } from '@/lib/logger'
 import { logActivity } from '@/lib/activity/log'
 import type { AuthContext } from '@/lib/auth/types'
@@ -69,7 +70,7 @@ export const POST = withAuth(
     const course = Array.isArray(event?.course) ? event?.course[0] : event?.course
     if (host?.member_id) {
       const memberName = `${member?.first_name ?? ''} ${member?.last_name ?? ''}`.trim() || 'A member'
-      void sendPushToMember(
+      void notifyMember(
         host.member_id,
         NotificationTemplates.hostedEventJoined(memberName, course?.name ?? 'your event', event?.event_date ?? '')
       ).catch(() => {})
@@ -140,7 +141,7 @@ export const DELETE = withAuth(
     const course = Array.isArray(full?.course) ? full?.course[0] : full?.course
     if (host?.member_id) {
       const memberName = `${member?.first_name ?? ''} ${member?.last_name ?? ''}`.trim() || 'A member'
-      void sendPushToMember(
+      void notifyMember(
         host.member_id,
         NotificationTemplates.hostedEventMemberCancelled(memberName, course?.name ?? 'your event', full?.event_date ?? '')
       ).catch(() => {})

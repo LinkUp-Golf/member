@@ -104,14 +104,15 @@ const EMPTY_PLAYER_DAYS: Record<string, CalendarPlayer[]> = {};
 const venueLocation = (v: CalendarVenue | undefined) =>
   [v?.city, v?.state].filter(Boolean).join(", ");
 
-// ---- One day cell (memoized) --------------------------------
+// ---- Who's playing ------------------------------------------
 
-/** How many circles the who's-playing stack holds before the last becomes "+n". */
+/** How many circles a who's-playing stack holds before the last becomes "+n". */
 const MAX_FACES = 3;
 
 // One size for a face and the "+n" that stands in for the rest, so the stack
-// reads as one row. Small enough to sit beside the day number at md.
-const FACE_SIZE = "w-3 h-3 md:w-4 md:h-4";
+// reads as one row. Sized for the agenda's venue cards, which is where the
+// faces live — a day cell is far too small to hold three of anything.
+const FACE_SIZE = "w-5 h-5";
 
 /**
  * A member's face at thumbnail size — the photo, or their initial on navy.
@@ -122,8 +123,13 @@ function MiniAvatar({ player }: { player: CalendarPlayer }) {
     <Image
       src={player.avatarUrl}
       alt=""
-      width={16}
-      height={16}
+      width={20}
+      height={20}
+      // Unoptimized, like the venue logos below: a member's photo can be hosted
+      // anywhere their profile put it, and next/image throws outright on a
+      // hostname that isn't in next.config's remotePatterns — which would take
+      // the whole card down rather than one face.
+      unoptimized
       className={cn(FACE_SIZE, "rounded-full object-cover ring-1 ring-white bg-green-100")}
     />
   ) : (
@@ -131,13 +137,68 @@ function MiniAvatar({ player }: { player: CalendarPlayer }) {
       className={cn(
         FACE_SIZE,
         "rounded-full ring-1 ring-white bg-green-900 text-white",
-        "flex items-center justify-center text-[6px] md:text-[8px] font-bold uppercase leading-none",
+        "flex items-center justify-center text-[9px] font-bold uppercase leading-none",
       )}
     >
       {player.firstName.charAt(0) || "?"}
     </span>
   );
 }
+
+/** One entry per member — someone with two tee times that day is one person. */
+function uniquePlayers(players: CalendarPlayer[]): CalendarPlayer[] {
+  const seen = new Set<string>();
+  return players.filter((p) =>
+    seen.has(p.memberId) ? false : (seen.add(p.memberId), true),
+  );
+}
+
+/**
+ * How a day cell says who's playing: "1P" for one player, "2Ps" for two.
+ *
+ * The cell used to carry the faces themselves, three 12px circles crammed into
+ * the corner of a square that also holds a date and a venue dot — recognisable
+ * to nobody at that size, and the first thing to collide when a week got busy.
+ * The faces moved to the agenda's venue cards, where there's room to see them
+ * and they sit against the club they're playing at. What's left here is the one
+ * thing a month grid can usefully say: how many.
+ *
+ * It's a label, not a control. A grid where some days have a second tappable
+ * thing in the corner is a grid where tapping a day is a gamble — the cell's
+ * one job is to open the day, and the count is there to be read on the way.
+ * Opening the names is the faces' job, down on the venue card.
+ */
+const playerTally = (count: number) => `${count}P${count === 1 ? "" : "s"}`;
+
+/**
+ * The faces of everyone playing at one venue on one day, as a stack, and the
+ * way into the full list of names.
+ */
+function PlayerFaces({ players }: { players: CalendarPlayer[] }) {
+  const shown = players.length > MAX_FACES ? players.slice(0, MAX_FACES - 1) : players;
+  const more = players.length - shown.length;
+
+  return (
+    <span aria-hidden className="flex -space-x-1.5 flex-shrink-0">
+      {shown.map((p) => (
+        <MiniAvatar key={p.memberId} player={p} />
+      ))}
+      {more > 0 && (
+        <span
+          className={cn(
+            FACE_SIZE,
+            "rounded-full ring-1 ring-white bg-green-100 text-green-900",
+            "flex items-center justify-center text-[9px] font-bold leading-none tabular-nums",
+          )}
+        >
+          +{more}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// ---- One day cell (memoized) --------------------------------
 
 interface DayCellProps {
   date: Date;
@@ -152,7 +213,6 @@ interface DayCellProps {
   colourByVenue: Map<string, number>;
   nameByVenue: Map<string, string>;
   onSelect: (dayIso: string) => void;
-  onShowPlayers: (dayIso: string) => void;
 }
 
 const DayCell = memo(function DayCell({
@@ -167,44 +227,34 @@ const DayCell = memo(function DayCell({
   colourByVenue,
   nameByVenue,
   onSelect,
-  onShowPlayers,
 }: DayCellProps) {
   const has = openings.length > 0;
   // Any upcoming day in the month opens — landing on an empty one and being
   // told so beats a tap that does nothing.
   const selectable = inMonth && !past;
 
+  // One head per person — a member with two tee times that day is still one
+  // member playing. Only on days still to come: a past day is dimmed and shut.
+  const playerCount = useMemo(() => uniquePlayers(players).length, [players]);
+  const showPlayers = selectable && playerCount > 0;
+
+  // The count rides on the day's own label, because the tally it comes from is
+  // a label rather than a control and has nothing of its own to announce.
   const label = `${format(date, "EEEE, MMMM d")} — ${
     has
       ? `${openings.length} venue${openings.length === 1 ? "" : "s"} with tee times`
       : "nothing open"
-  }`;
+  }${showPlayers ? `, ${playerCount} member${playerCount === 1 ? "" : "s"} playing` : ""}`;
 
   // Three chips (or dots, below md) is what a cell holds without the row
   // growing; past that the third becomes a count that the agenda below spells
-  // out. The faces follow the same rule.
+  // out.
   const shown = openings.length > 3 ? openings.slice(0, 2) : openings;
   const extra = openings.length - shown.length;
 
-  // One face per person — a member with two tee times that day is still one
-  // member playing. Only on days still to come: a past day is dimmed and shut.
-  const faces = useMemo(() => {
-    const seen = new Set<string>();
-    return players.filter((p) =>
-      seen.has(p.memberId) ? false : (seen.add(p.memberId), true),
-    );
-  }, [players]);
-  const showPlayers = selectable && faces.length > 0;
-  // The same rule as the chips: three circles, and past three the last one is
-  // the count of everyone not shown.
-  const shownFaces =
-    faces.length > MAX_FACES ? faces.slice(0, MAX_FACES - 1) : faces;
-  const moreFaces = faces.length - shownFaces.length;
-
   return (
-    // The styling lives on this wrapper rather than the day button, because the
-    // avatars are a second button laid over the same cell — a button can't
-    // hold another one.
+    // The styling lives on this wrapper rather than the day button so the tally
+    // can sit in the cell's corner without being inside the button's text flow.
     <div
       className={cn(
         "relative flex flex-col rounded-lg transition-colors",
@@ -231,12 +281,13 @@ const DayCell = memo(function DayCell({
         )}
       >
         {/* Below md the day number is centred, so there's no room beside it for
-            faces: they get a strip across the top instead. Reserved on every
-            day, not just ones with players, so the numbers in a week line up. */}
+            the player tally: it gets a strip across the top instead. Reserved on
+            every day, not just ones with players, so the numbers in a week line
+            up. */}
         <span aria-hidden className="md:hidden h-3 w-full flex-shrink-0" />
 
         {/* Date number — centred over the dots on mobile, top-left of the cell
-            at md, where the faces sit to its right and the chips below. */}
+            at md, where the tally sits to its right and the chips below. */}
         <span className="flex-1 flex items-center justify-center md:flex-none md:justify-start md:mb-1">
           <span
             className={cn(
@@ -307,39 +358,23 @@ const DayCell = memo(function DayCell({
         </span>
       </button>
 
-      {/* Who's playing — the faces of the members booked that day, anchored
+      {/* Who's playing — how many members are booked that day, anchored
           top-right: in the strip above the number on a phone, level with the
-          number from md. Only on a day that has any. */}
+          number from md. Read-only, and pointer-events-none so the whole cell
+          stays one target: the tap opens the day, and the names are behind the
+          faces on the venue cards below. Only on a day that has any. */}
       {showPlayers && (
-        <button
-          type="button"
-          onClick={() => onShowPlayers(dayIso)}
-          aria-label={`Who's playing on ${format(date, "EEEE, MMMM d")} — ${faces.length} member${faces.length === 1 ? "" : "s"}`}
+        <span
+          aria-hidden
           className={cn(
-            "absolute z-10 flex items-center justify-end rounded-full",
-            "top-0.5 right-0.5 p-0.5",
-            "md:top-1.5 md:right-1.5 md:h-6 md:px-0.5 md:py-0",
-            "hover:bg-green-900/[0.06]",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700",
+            "absolute z-10 pointer-events-none",
+            "top-0.5 right-0.5 md:top-1.5 md:right-1.5",
+            "text-[9px] md:text-[10px] font-bold leading-none tabular-nums",
+            "text-green-900/50",
           )}
         >
-          <span className="flex -space-x-1 md:-space-x-0.5">
-            {shownFaces.map((p) => (
-              <MiniAvatar key={p.memberId} player={p} />
-            ))}
-            {moreFaces > 0 && (
-              <span
-                className={cn(
-                  FACE_SIZE,
-                  "rounded-full ring-1 ring-white bg-green-100 text-green-900",
-                  "flex items-center justify-center text-[6px] md:text-[8px] font-bold leading-none tabular-nums",
-                )}
-              >
-                +{moreFaces}
-              </span>
-            )}
-          </span>
-        </button>
+          {playerTally(playerCount)}
+        </span>
       )}
     </div>
   );
@@ -352,17 +387,42 @@ function AgendaDay({
   openings,
   venuesById,
   colourByVenue,
+  players,
   onPickOpening,
+  onShowPlayers,
   showDate,
 }: {
   dayIso: string;
   openings: CalendarOpening[];
   venuesById: Map<string, CalendarVenue>;
   colourByVenue: Map<string, number>;
+  /** Members booked that day at the venues on show — grouped onto their cards. */
+  players: CalendarPlayer[];
   onPickOpening: (courseId: string, date: string) => void;
+  /** Opens the full list of names. The faces on each card are what call it. */
+  onShowPlayers: (dayIso: string) => void;
   showDate: boolean;
 }) {
   const date = new Date(`${dayIso}T12:00:00`);
+
+  // Who's at each club, on the club's own row. A day's faces used to be one
+  // undifferentiated stack in the corner of the grid, which answered "someone
+  // is out on the 14th" — this answers the question a member actually has,
+  // which is who is at the course they're looking at.
+  //
+  // Deduped per venue rather than across the day: two tee times at one club is
+  // one person, but a member playing two clubs is at both, and dropping them
+  // from the second card would be reporting the wrong tee sheet.
+  const playersByVenue = useMemo(() => {
+    const out = new Map<string, CalendarPlayer[]>();
+    for (const p of players) {
+      const list = out.get(p.courseId) ?? [];
+      list.push(p);
+      out.set(p.courseId, list);
+    }
+    for (const [courseId, list] of out) out.set(courseId, uniquePlayers(list));
+    return out;
+  }, [players]);
 
   return (
     <div className="flex gap-3">
@@ -391,21 +451,30 @@ function AgendaDay({
           // so the fallback is defensive only — and it's the same house default
           // the price helper lands on when a venue has set no rate.
           const price = venue?.pricePerPlayer ?? BOOKING_PRICE_USD;
+          const venuePlayers = playersByVenue.get(o.courseId) ?? EMPTY_PLAYERS;
 
           return (
-            <button
+            // A div, not a button: the faces beside the Book pill open the
+            // names, and a button can't hold another one. Booking is the
+            // stretched overlay below, so the whole card is still one tap —
+            // it just isn't the only one.
+            <div
               key={o.courseId}
-              type="button"
-              onClick={() => onPickOpening(o.courseId, dayIso)}
-              className="group w-full text-left flex items-center gap-3 rounded-xl border border-green-900/10 bg-white px-3 py-2.5 transition-colors hover:bg-green-50/50 active:opacity-70"
+              className="group relative w-full text-left flex items-center gap-3 rounded-xl border border-green-900/10 bg-white px-3 py-2.5 transition-colors hover:bg-green-50/50"
             >
+              <button
+                type="button"
+                onClick={() => onPickOpening(o.courseId, dayIso)}
+                aria-label={`Book ${venue?.name ?? "this venue"} on ${format(date, "EEEE, MMMM d")}`}
+                className="absolute inset-0 rounded-xl active:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-1"
+              />
               <span
                 className={cn(
-                  "w-1 self-stretch rounded-full flex-shrink-0",
+                  "relative z-10 pointer-events-none w-1 self-stretch rounded-full flex-shrink-0",
                   DOT[idx],
                 )}
               />
-              <span className="flex-1 min-w-0">
+              <span className="relative z-10 pointer-events-none flex-1 min-w-0">
                 <span className="block text-sm font-semibold text-green-950 truncate">
                   {venue?.name ?? "Venue"}
                 </span>
@@ -438,8 +507,26 @@ function AgendaDay({
                   </span>
                 )}
               </span>
-              <BookIndicator />
-            </button>
+              {/* Who's already out here that day, right beside the action —
+                  the two things a member weighs on this row are what it costs
+                  to play and who they'd be playing with. Tapping opens the
+                  names; it sits above the booking overlay so it wins the tap. */}
+              {venuePlayers.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onShowPlayers(dayIso)}
+                  aria-label={`Who's playing at ${venue?.name ?? "this venue"} — ${venuePlayers.length} member${venuePlayers.length === 1 ? "" : "s"}`}
+                  className="relative z-10 flex-shrink-0 rounded-full p-0.5 -m-0.5 hover:bg-green-900/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700"
+                >
+                  <PlayerFaces players={venuePlayers} />
+                </button>
+              )}
+              {/* Above the overlay so it reads as the row's action, but not a
+                  target of its own — the overlay underneath is what books. */}
+              <span className="relative z-10 pointer-events-none">
+                <BookIndicator />
+              </span>
+            </div>
           );
         })}
       </div>
@@ -760,7 +847,7 @@ interface VenueAvailabilityCalendarProps {
   onPickOpening: (courseId: string, date: string) => void;
   /**
    * 'YYYY-MM-DD' → the members booked that day, from GET /api/bookings/playing.
-   * Narrowed by the same venue filters as the grid, so a day's faces are the
+   * Narrowed by the same venue filters as the grid, so a day's players are the
    * people at the clubs on show.
    */
   players?: Record<string, CalendarPlayer[]>;
@@ -983,7 +1070,6 @@ function VenueAvailabilityCalendar({
                   players={
                     inMonth ? (visiblePlayers[dayIso] ?? EMPTY_PLAYERS) : EMPTY_PLAYERS
                   }
-                  onShowPlayers={showPlayers}
                   colourByVenue={colourByVenue}
                   nameByVenue={nameByVenue}
                   onSelect={
@@ -1021,7 +1107,9 @@ function VenueAvailabilityCalendar({
                 openings={selectedOpenings}
                 venuesById={venuesById}
                 colourByVenue={colourByVenue}
+                players={visiblePlayers[selectedDate] ?? EMPTY_PLAYERS}
                 onPickOpening={onPickOpening}
+                onShowPlayers={showPlayers}
                 showDate={false}
               />
             ) : (
@@ -1060,7 +1148,9 @@ function VenueAvailabilityCalendar({
                   openings={visibleDays[d] ?? EMPTY}
                   venuesById={venuesById}
                   colourByVenue={colourByVenue}
+                  players={visiblePlayers[d] ?? EMPTY_PLAYERS}
                   onPickOpening={onPickOpening}
+                  onShowPlayers={showPlayers}
                   showDate
                 />
               ))}

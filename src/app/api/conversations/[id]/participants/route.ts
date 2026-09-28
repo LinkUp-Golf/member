@@ -5,7 +5,8 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { inviteRateLimit } from '@/lib/rateLimit'
-import { sendPushToMember, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember, kept } from '@/lib/notify'
 import type { AuthContext } from '@/lib/auth/types'
 
 // GET /api/conversations/[id]/participants
@@ -134,19 +135,21 @@ export const POST = withAuth(async (
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  // Notify the invited member (fire-and-forget)
-  ;(async () => {
+  // Notify the invited member (fire-and-forget). kept() keeps the function
+  // alive past the 201 — the conversation and inviter lookups run here, so
+  // without it the notification can be killed before it is even built.
+  void kept((async () => {
     const [{ data: conv }, { data: inviter }] = await Promise.all([
       admin.from('conversations').select('name').eq('id', convId).single(),
       admin.from('members').select('first_name').eq('id', ctx.userId).single(),
     ])
     const groupName = conv?.name ?? 'a group'
     const inviterName = inviter?.first_name ?? 'Someone'
-    await sendPushToMember(
+    await notifyMember(
       member_id,
       NotificationTemplates.groupChatInvite(inviterName, groupName, convId)
     )
-  })().catch(() => {})
+  })().catch(() => {}))
 
   return NextResponse.json({ ok: true }, { status: 201 })
 })

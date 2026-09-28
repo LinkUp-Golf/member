@@ -10,14 +10,15 @@ export const dynamic = 'force-dynamic'
 //
 // It costs one GHL call per venue for the month, so the underlying slot fetch is
 // cached per calendar+month and the fan-out is capped. The venue list matches
-// GET /api/courses exactly — a course must have a calendar and a payment link to
-// be bookable, so anything absent there is absent here too.
+// GET /api/courses exactly — a course must have a calendar and a way to be paid
+// to be bookable, so anything absent there is absent here too.
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { venueAvailabilityForMonth } from '@/lib/bookings/availability'
+import { canTakePayment } from '@/lib/bookings/payment-options'
 import { format } from 'date-fns'
 import type { Course } from '@/types'
 
@@ -47,15 +48,16 @@ export async function GET(req: NextRequest) {
     .eq('active', true)
     .eq('approval_status', 'active')
     .not('ghl_calendar_id', 'is', null)
-    .not('payment_url', 'is', null)
     .order('sort_order', { ascending: true, nullsFirst: false })
     .order('name')
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+  // Same payable rule as GET /api/courses, and for the same reason it isn't a
+  // SQL filter there — see the note on that route.
   const availability = await venueAvailabilityForMonth(
     admin,
-    (courses ?? []) as Course[],
+    ((courses ?? []) as Course[]).filter(canTakePayment),
     month,
     startDate,
     endDate,

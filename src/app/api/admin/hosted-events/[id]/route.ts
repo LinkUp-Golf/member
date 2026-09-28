@@ -22,7 +22,8 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { sanitiseText } from '@/lib/validation'
-import { sendPushToMember, sendPushToMembers, NotificationTemplates } from '@/lib/push'
+import { NotificationTemplates } from '@/lib/push'
+import { notifyMember, notifyMembers } from '@/lib/notify'
 import { triggerHostedEventTakedownWebhook } from '@/lib/ghl/client'
 import {
   APPROVABLE_STATUSES,
@@ -30,6 +31,7 @@ import {
   canApproveEvent,
   canRejectEvent,
 } from '@/lib/hosts/events'
+import { describeRoundConflict, findRoundConflicts, loadOccupyingRounds } from '@/lib/hosts/schedule'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -121,7 +123,7 @@ export const POST = withAuth(
     const memberIds = (reserved ?? []).map(r => r.member_id)
 
     if (host?.member_id) {
-      void sendPushToMember(
+      void notifyMember(
         host.member_id,
         NotificationTemplates.hostedEventRejected(courseName, event.event_date, reason)
       ).catch(() => {})
@@ -147,7 +149,7 @@ export const POST = withAuth(
     }
 
     if (memberIds.length) {
-      void sendPushToMembers(
+      void notifyMembers(
         memberIds,
         NotificationTemplates.hostedEventCancelled(courseName, event.event_date)
       ).catch(() => {})
@@ -173,8 +175,10 @@ export const POST = withAuth(
  * Publishes a pending event: this is the moment members can first see it.
  *
  * Approving is a statement that the GHL calendar behind the event exists and
- * the host is on it. Nothing here checks that — it can't, the setup is manual
- * work in another system — so the guard is that only an admin can call it.
+ * the host is on it. Whether the calendar exists is still the admin's to know —
+ * that part lives in another system — so the guard on it is that only an admin
+ * can call this. What is checked is the thing an admin can't see from here:
+ * that no other host already holds this block of the venue's day.
  */
 async function approveEvent(
   admin: ReturnType<typeof createAdminClient>,
@@ -183,7 +187,9 @@ async function approveEvent(
 ) {
   const { data: event } = await admin
     .from('hosted_events')
-    .select('id, status, event_date, course:courses(name), host:hosts(member_id)')
+    .select(
+      'id, status, event_date, tee_time, course_id, course:courses(name, meeting_duration_mins), host:hosts(member_id)',
+    )
     .eq('id', id)
     .maybeSingle()
 
@@ -201,6 +207,46 @@ async function approveEvent(
       },
       { status: 409 },
     )
+  }
+
+  // Nobody else may hold this block of the club's day.
+  //
+  // Publishing is what puts the round on the venue's calendar, so this is the
+  // last point at which two hosts on the same tee sheet is still a question
+  // rather than a mess. The clash is named — which host, at what time — because
+  // the way out is a conversation with one of them, not a button here.
+  {
+    const venue = Array.isArray(event.course) ? event.course[0] : event.course
+    const occupied = await loadOccupyingRounds(admin, {
+      courseId: String(event.course_id),
+      dates: [String(event.event_date)],
+      exclude: [id],
+    })
+    const conflicts = findRoundConflicts(
+      [
+        {
+          eventId: id,
+          date: String(event.event_date),
+          teeTime: (event.tee_time as string | null) ?? null,
+        },
+      ],
+      occupied,
+      Number((venue as { meeting_duration_mins?: number } | null)?.meeting_duration_mins),
+    )
+    const first = conflicts[0]
+    if (first) {
+      return NextResponse.json(
+        {
+          error:
+            'Not published — it overlaps a round already on this venue. ' +
+            describeRoundConflict(
+              first,
+              (venue as { name?: string } | null)?.name ?? 'this venue',
+            ),
+        },
+        { status: 409 },
+      )
+    }
   }
 
   // The status filter is the race guard: two admins clicking approve, or a host
@@ -233,7 +279,7 @@ async function approveEvent(
   // The host has been waiting on this — it's the difference between "submitted"
   // and "members can book it".
   if (host?.member_id) {
-    void sendPushToMember(
+    void notifyMember(
       host.member_id,
       NotificationTemplates.hostedEventApproved(courseName, event.event_date)
     ).catch(() => {})
