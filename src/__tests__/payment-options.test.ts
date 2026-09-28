@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest'
+import { NEW_BOOKING_STATUS, PAY_AT_CLUB_BOOKING_STATUS } from '@/lib/constants'
+import { UNPAID_BOOKING_STATUSES } from '@/lib/bookings/pending-payment'
 import {
   canTakePayment,
   coursePaymentOptions,
@@ -134,5 +136,30 @@ describe('canTakePayment', () => {
     expect(
       canTakePayment({ payment_options: ['pay_now', 'pay_at_club'], payment_url: null }),
     ).toBe(false)
+  })
+})
+
+// What a round opens at, and the invariant that makes it safe. A venue with no
+// checkout has nothing for the app to collect, so POST /api/bookings/create (and
+// the add-players route) open the round already confirmed — which only works
+// while that status is one the payment banner ignores.
+describe('PAY_AT_CLUB_BOOKING_STATUS', () => {
+  it('is never on the payment banner — nothing is owed through the app', () => {
+    expect(UNPAID_BOOKING_STATUSES).not.toContain(PAY_AT_CLUB_BOOKING_STATUS)
+    // The ordinary status is, which is the whole point of the distinction.
+    expect(UNPAID_BOOKING_STATUSES).toContain(NEW_BOOKING_STATUS)
+  })
+
+  it('reads as settled at the club once the round carries both halves', () => {
+    const round = { status: PAY_AT_CLUB_BOOKING_STATUS, payment_method: 'pay_at_club' }
+    expect(isPayAtClub(round)).toBe(true)
+    expect(payAtClubStage(round)).toBe('paid')
+  })
+
+  it("leaves a round the member chose the club for reading as in progress", () => {
+    // A venue that takes both keeps NEW_BOOKING_STATUS; only the method changes,
+    // so the two cases stay distinguishable on screen.
+    const chosen = { status: NEW_BOOKING_STATUS, payment_method: 'pay_at_club' }
+    expect(payAtClubStage(chosen)).toBe('paying')
   })
 })

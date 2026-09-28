@@ -37,13 +37,18 @@ import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findMembersWithPendingPayment } from '@/lib/bookings/pending-payment'
 import { provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
 import { bookingAmountDue } from '@/lib/bookings/price'
-import { coursePaymentOptions } from '@/lib/bookings/payment-options'
+import {
+  PAY_AT_CLUB,
+  coursePaymentOptions,
+  offersPayNow,
+} from '@/lib/bookings/payment-options'
 import { format } from 'date-fns'
 import { titleCaseName } from '@/lib/utils'
 import type { AuthContext } from '@/lib/auth/types'
 import type { AdditionalPlayer } from '@/types'
 import {
   NEW_BOOKING_STATUS,
+  PAY_AT_CLUB_BOOKING_STATUS,
   AVIARA_TIMEZONE,
   AVIARA_ADDRESS,
   FALLBACK_ROUND_DURATION_MINUTES,
@@ -279,10 +284,18 @@ export const POST = withAuth(async (
     address: eventAddress,
   }
 
+  // How this venue is paid, and therefore what an added row opens at — the same
+  // rule POST /api/bookings/create applies to the booker's own row. A guest added
+  // to a club-only round must be created settled at the club too: created owing
+  // payment through the app, they'd be shown a payment banner for a checkout that
+  // doesn't exist, on a round whose booker was never asked for one.
+  const paymentMethod = offersPayNow(course) ? null : PAY_AT_CLUB
+  const addedStatus =
+    paymentMethod === PAY_AT_CLUB ? PAY_AT_CLUB_BOOKING_STATUS : NEW_BOOKING_STATUS
+
   // ---- Build the new rows (one per added player) --------------------------
-  // Every added player is booked in GHL below, at NEW_BOOKING_STATUS. A
-  // non-member's contact and member row are created there too — there is no
-  // approval step.
+  // Every added player is booked in GHL below. A non-member's contact and member
+  // row are created there too — there is no approval step.
   const rows = [
     ...memberPlayers.map((p) => ({
       member_id: ctx.userId,
@@ -293,10 +306,11 @@ export const POST = withAuth(async (
       guest_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email,
       player_member_id: p.memberId ?? null,
       additional_players: [p],
-      status: NEW_BOOKING_STATUS,
+      status: addedStatus,
       amount_charged: pricePerPlayer,
       focus_linkup_id: primary.focus_linkup_id ?? null,
       ghl_booking_id: null as string | null,
+      payment_method: paymentMethod,
     })),
     ...nonMemberPlayers.map((p) => ({
       member_id: ctx.userId,
@@ -307,10 +321,11 @@ export const POST = withAuth(async (
       guest_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email,
       player_member_id: null as string | null,
       additional_players: [p],
-      status: NEW_BOOKING_STATUS,
+      status: addedStatus,
       amount_charged: pricePerPlayer,
       focus_linkup_id: primary.focus_linkup_id ?? null,
       ghl_booking_id: null as string | null,
+      payment_method: paymentMethod,
     })),
   ]
 

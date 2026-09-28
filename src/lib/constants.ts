@@ -275,6 +275,24 @@ export const BOOKING_PRICE_USD           = 160   // per player, USD
 // webhook moved them on. That is the FIFO rule working from booking time.
 export const NEW_BOOKING_STATUS = 'availability_confirmed' as const
 
+// What a round opens at when the venue takes nothing but payment at the club.
+//
+// 'availability_confirmed' means "payment due", and at a venue with no checkout
+// nothing is ever due through the app: the member settles at the counter on the
+// day, which LinkUp is not part of and gets no webhook about. Left at
+// 'availability_confirmed' the round would wait forever on a payment that can't
+// arrive — on the FIFO gate, out of the post-round survey (which only asks about
+// rounds that got as far as paid), and reading "payment due" to the member.
+//
+// So there is nothing for the app to confirm and the round opens confirmed. It
+// pairs with payment_method = 'pay_at_club' on the same row: the status says the
+// app is not waiting, the payment method says who is owed.
+//
+// Only where the club is the ONLY option. A venue that also takes payment on the
+// app has a real choice in it, and that round opens at NEW_BOOKING_STATUS like
+// any other until the member makes it.
+export const PAY_AT_CLUB_BOOKING_STATUS = 'payment_confirmed' as const
+
 // How long a round runs is a per-course setting owned by that course's GHL
 // calendar (its slotDuration). Read it with getCalendarBookingRules() — never
 // assume a duration. This is only the last-resort fallback for when GHL can't

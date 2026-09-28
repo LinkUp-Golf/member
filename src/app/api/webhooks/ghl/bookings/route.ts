@@ -49,6 +49,7 @@ import { cancelBooking } from '@/lib/ghl/client'
 import { logger } from '@/lib/logger'
 import { NotificationTemplates } from '@/lib/push'
 import { notifyMember } from '@/lib/notify'
+import { isPayAtClub } from '@/lib/bookings/payment-options'
 import { format } from 'date-fns'
 
 type BookingEvent = 'availability_confirmed' | 'payment_confirmed' | 'cancelled' | 'deleted'
@@ -96,7 +97,7 @@ export async function POST(request: NextRequest) {
   // ── Find primary booking by GHL appointment ID ─────────────
   const { data: primary, error: findError } = await supabase
     .from('bookings')
-    .select('id, member_id, ghl_booking_id, status')
+    .select('id, member_id, ghl_booking_id, status, payment_method')
     .eq('ghl_booking_id', ghlBookingId)
     .maybeSingle()
 
@@ -136,6 +137,23 @@ export async function POST(request: NextRequest) {
 
   if (primary.status === event) {
     // Idempotent — already in this state
+    return NextResponse.json({ received: true, matched: true, updated: 0 })
+  }
+
+  // ── A round settled at the club is never "payment due" ──────
+  // 'availability_confirmed' is our "payment due" state, and it carries a push
+  // telling the member to go and pay. Neither applies to a round being settled
+  // with the club: there is no checkout to send them to, and at a club-only
+  // venue the row was created confirmed for exactly that reason (see
+  // PAY_AT_CLUB_BOOKING_STATUS). A GHL workflow announcing this stage anyway —
+  // they fire on their own pipeline, which doesn't know how the round is being
+  // paid — would move the round backwards and chase the member for money we
+  // aren't owed. Acknowledged and dropped.
+  if (event === 'availability_confirmed' && isPayAtClub(primary)) {
+    logger.info('GHL booking webhook: ignored payment-due stage on a pay-at-club round', {
+      action: 'ghl_booking_webhook',
+      metadata: { bookingId: primary.id, status: primary.status },
+    })
     return NextResponse.json({ received: true, matched: true, updated: 0 })
   }
 

@@ -9,7 +9,8 @@ export const dynamic = 'force-dynamic'
 // Flow:
 //   1. Validate member
 //   2. Create GHL calendar appointment
-//   3. Write one booking row per player to Supabase (NEW_BOOKING_STATUS)
+//   3. Write one booking row per player to Supabase (NEW_BOOKING_STATUS, or
+//      PAY_AT_CLUB_BOOKING_STATUS where the venue only takes club payment)
 //
 // GET /api/bookings/create?month=YYYY-MM&courseId=...
 //   Returns available tee-time slots from the GHL Aviara calendar.
@@ -29,7 +30,12 @@ import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
 import { buildCustomSlots } from '@/lib/bookings/availability'
 import { bookingAmountDue } from '@/lib/bookings/price'
-import { coursePaymentOptions, type PaymentOption } from '@/lib/bookings/payment-options'
+import {
+  PAY_AT_CLUB,
+  coursePaymentOptions,
+  offersPayNow,
+  type PaymentOption,
+} from '@/lib/bookings/payment-options'
 import { format } from 'date-fns'
 import { titleCaseName } from '@/lib/utils'
 import type { AdditionalPlayer } from '@/types'
@@ -39,6 +45,7 @@ import type { AdditionalPlayer } from '@/types'
 const MAX_ADDITIONAL_PLAYERS = 3
 import {
   NEW_BOOKING_STATUS,
+  PAY_AT_CLUB_BOOKING_STATUS,
   AVIARA_TIMEZONE,
   AVIARA_ADDRESS,
   FALLBACK_ROUND_DURATION_MINUTES,
@@ -447,6 +454,21 @@ export async function POST(request: NextRequest) {
     .single()
   const maxPlayersPerDay = capRow?.max_players_per_day ?? DEFAULT_MAX_PLAYERS_PER_DAY
 
+  // How this round will be paid, decided here rather than asked for later.
+  //
+  // A venue that takes payment on the app leaves this null — the member may
+  // still choose the club once availability is confirmed, and that choice is a
+  // real one. A venue that takes nothing else has no choice in it: there is no
+  // checkout to send anybody to, so the round is created settled at the club
+  // rather than sitting on the member's payment banner until they press a button
+  // to pick the only option there was.
+  const paymentMethod = offersPayNow(course) ? null : PAY_AT_CLUB
+  // And with it, what the round opens at. A club-only round has nothing for the
+  // app to confirm, so it opens confirmed rather than waiting on a payment that
+  // will never come through us — see PAY_AT_CLUB_BOOKING_STATUS.
+  const bookingStatus =
+    paymentMethod === PAY_AT_CLUB ? PAY_AT_CLUB_BOOKING_STATUS : NEW_BOOKING_STATUS
+
   // Step 1: Build one booking row per player. GHL appointments are created
   // AFTER the DB reserves the seats, so ghl_booking_id starts null and is
   // backfilled below. Every row consumes a seat: the booker, each member
@@ -461,10 +483,11 @@ export async function POST(request: NextRequest) {
       guest_name: null as string | null,
       player_member_id: null as string | null,
       additional_players: [] as typeof extraPlayers,
-      status: NEW_BOOKING_STATUS,
+      status: bookingStatus,
       amount_charged: pricePerPlayer,
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: null as string | null,
+      payment_method: paymentMethod,
     },
     ...memberPlayers.map((p) => ({
       member_id: user.id,
@@ -475,10 +498,11 @@ export async function POST(request: NextRequest) {
       guest_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email,
       player_member_id: p.memberId ?? null,
       additional_players: [p],
-      status: NEW_BOOKING_STATUS,
+      status: bookingStatus,
       amount_charged: pricePerPlayer,
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: null as string | null,
+      payment_method: paymentMethod,
     })),
     // Non-members take a seat on the same terms as anyone else. Their GHL
     // contact and member row are created below, right after the seats are
@@ -493,10 +517,11 @@ export async function POST(request: NextRequest) {
       guest_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email,
       player_member_id: null as string | null,
       additional_players: [p],
-      status: NEW_BOOKING_STATUS,
+      status: bookingStatus,
       amount_charged: pricePerPlayer,
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: null as string | null,
+      payment_method: paymentMethod,
     })),
   ]
 
