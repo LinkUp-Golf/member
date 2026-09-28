@@ -19,7 +19,7 @@ import { openSpotsByDate } from '@/lib/bookings/availability'
 import { NotificationTemplates } from '@/lib/push'
 import { notifyMember } from '@/lib/notify'
 import { MAX_PINNED_COURSES } from '@/lib/constants'
-import { parsePaymentOptions } from '@/lib/bookings/payment-options'
+import { canTakePayment, coursePaymentOptions, parsePaymentOptions } from '@/lib/bookings/payment-options'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 import type { Course } from '@/types'
@@ -50,20 +50,24 @@ export const PATCH = withAuth(
 
       if (body.action === 'approve') {
         // Approving is what publishes a course to members, so it has to clear
-        // the bar the member endpoints actually apply. GET /api/courses and
-        // GET /api/bookings/availability both require a payment link — a
-        // confirmed booking is sent to courses.payment_url to be paid, so a
-        // course without one has nowhere to send anybody.
+        // the bar the member endpoints actually apply: GET /api/courses and
+        // GET /api/bookings/availability both leave out a venue nobody can pay
+        // at. That means a payment link only where the venue takes payment on
+        // the app — a confirmed booking is sent to courses.payment_url to be
+        // paid, so a Pay on App course without one has nowhere to send anybody,
+        // while a pay-at-club course is settled with the club and never needed
+        // a link.
         //
-        // A course an admin created can't get here without one (POST requires
-        // it). A course a host proposed arrives with none at all, and approving
-        // it used to succeed and produce a course that was active, calendared,
-        // and invisible — with nothing saying why.
-        if (!(course.payment_url as string | null)?.trim()) {
+        // A course an admin created can't get here short of it (POST applies the
+        // same rule). A course a host proposed arrives with no link — which is
+        // fine, because it also arrives pay-at-club — and approving one that had
+        // been switched to Pay on App used to succeed and produce a course that
+        // was active, calendared, and invisible, with nothing saying why.
+        if (!canTakePayment(course)) {
           return NextResponse.json(
             {
               error:
-                'Add a payment link before approving. Without one this course stays hidden from members, because a confirmed booking has nowhere to be paid — edit the course, add the link, then approve.',
+                'This venue takes payment on the app but has no payment link, so it would stay hidden from members — a confirmed booking has nowhere to be paid. Edit the course and either add the link or set it to Pay at club, then approve.',
             },
             { status: 400 }
           )
@@ -387,24 +391,44 @@ export const PATCH = withAuth(
       return NextResponse.json({ error: 'A venue logo is required' }, { status: 400 })
     }
 
-    // payment_url is required — reject attempts to clear it, but allow omitting
-    // the key entirely (no change) or replacing it with a new link.
-    if ('payment_url' in body) {
-      if (!body.payment_url?.trim()) {
-        return NextResponse.json({ error: 'A payment link is required' }, { status: 400 })
-      }
-      if (!isValidUrl(body.payment_url.trim())) {
-        return NextResponse.json({ error: 'Payment link must be a valid URL (e.g. https://example.com)' }, { status: 400 })
-      }
-    }
+    // The payment link and the payment options are checked together, against
+    // the row as it will be once this update lands — either one may be in this
+    // request and either one alone decides nothing. Clearing the link is allowed
+    // now, but only down to a venue that's settled at the club; a course with no
+    // way to pay at all can't be booked and would drop out of the member lists.
+    if ('payment_url' in body || 'payment_options' in body) {
+      const { data: current } = await admin
+        .from('courses')
+        .select('payment_url, payment_options')
+        .eq('id', id)
+        .maybeSingle()
+      if (!current) return NextResponse.json({ error: 'Course not found' }, { status: 404 })
 
-    // At least one known option — a course with no way to pay can't be booked.
-    if ('payment_options' in body) {
-      const options = parsePaymentOptions(body.payment_options)
-      if (!options) {
+      const changingOptions = 'payment_options' in body
+      const nextOptions = changingOptions
+        ? parsePaymentOptions(body.payment_options)
+        : coursePaymentOptions(current)
+      if (!nextOptions) {
         return NextResponse.json({ error: 'Choose at least one payment option' }, { status: 400 })
       }
-      body.payment_options = options
+      // Only written back when this request is the one changing them — reading
+      // them to check the link must not turn into rewriting them.
+      if (changingOptions) body.payment_options = nextOptions
+
+      const nextUrl =
+        'payment_url' in body
+          ? body.payment_url?.trim() || null
+          : ((current.payment_url as string | null) ?? null)
+      if (nextUrl && !isValidUrl(nextUrl)) {
+        return NextResponse.json({ error: 'Payment link must be a valid URL (e.g. https://example.com)' }, { status: 400 })
+      }
+
+      if (!canTakePayment({ payment_url: nextUrl, payment_options: nextOptions })) {
+        return NextResponse.json(
+          { error: 'A payment link is required while this venue takes payment on the app' },
+          { status: 400 },
+        )
+      }
     }
 
     // Calendar uniqueness on edit: reject if the new calendar is already used by a different course
@@ -468,7 +492,7 @@ export const PATCH = withAuth(
       updates.access_tag = tags[0] ?? ''
     }
     // Normalise optional text/URL fields: empty string → null
-    for (const key of ['booking_url', 'address', 'phone', 'map_link', 'ghl_calendar_id'] as const) {
+    for (const key of ['booking_url', 'address', 'phone', 'map_link', 'ghl_calendar_id', 'payment_url'] as const) {
       if (key in updates) updates[key] = (updates[key] as string)?.trim() || null
     }
     if (!Object.keys(updates).length) return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })

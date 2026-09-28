@@ -6,7 +6,11 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateTimezone } from '@/lib/validation'
 import { AVIARA_TIMEZONE } from '@/lib/constants'
-import { DEFAULT_PAYMENT_OPTIONS, parsePaymentOptions } from '@/lib/bookings/payment-options'
+import {
+  DEFAULT_PAYMENT_OPTIONS,
+  canTakePayment,
+  parsePaymentOptions,
+} from '@/lib/bookings/payment-options'
 import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
 import type { AuthContext } from '@/lib/auth/types'
 import type { Course } from '@/types'
@@ -43,10 +47,6 @@ export const POST = withAuth(
 
     if (!body.name?.trim()) return NextResponse.json({ error: 'Course name required' }, { status: 400 })
     if (!body.logo_url?.trim()) return NextResponse.json({ error: 'A venue logo is required' }, { status: 400 })
-    if (!body.payment_url?.trim()) return NextResponse.json({ error: 'A payment link is required' }, { status: 400 })
-    if (!isValidUrl(body.payment_url.trim())) {
-      return NextResponse.json({ error: 'Payment link must be a valid URL (e.g. https://example.com)' }, { status: 400 })
-    }
 
     // Omitted means the default (Pay on App), exactly as the column does.
     const paymentOptions = body.payment_options === undefined
@@ -54,6 +54,20 @@ export const POST = withAuth(
       : parsePaymentOptions(body.payment_options)
     if (!paymentOptions) {
       return NextResponse.json({ error: 'Choose at least one payment option' }, { status: 400 })
+    }
+
+    // The options decide whether the link is needed, so they're read first. A
+    // pay-at-club venue has no checkout to send anyone to and is saved without
+    // one; a Pay on App venue without one would be listed and unpayable.
+    const paymentUrl = body.payment_url?.trim() || null
+    if (paymentUrl && !isValidUrl(paymentUrl)) {
+      return NextResponse.json({ error: 'Payment link must be a valid URL (e.g. https://example.com)' }, { status: 400 })
+    }
+    if (!canTakePayment({ payment_url: paymentUrl, payment_options: paymentOptions })) {
+      return NextResponse.json(
+        { error: 'A payment link is required while this venue takes payment on the app' },
+        { status: 400 },
+      )
     }
 
     const slug = body.slug?.trim() || toSlug(body.name)
@@ -120,7 +134,7 @@ export const POST = withAuth(
         cost_per_player: body.cost_per_player ?? null,
         booking_rules: body.booking_rules ?? null,
         booking_url: body.booking_url?.trim() || null,
-        payment_url: body.payment_url.trim(),
+        payment_url: paymentUrl,
         payment_options: paymentOptions,
         required_tags: requiredTags,
         max_players_per_day: body.max_players_per_day ?? undefined,

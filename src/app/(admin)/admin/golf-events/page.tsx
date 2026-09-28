@@ -10,7 +10,12 @@ import {
 import Select from '@/components/ui/Select'
 import MediaUpload from '@/components/ui/MediaUpload'
 import PaymentOptionsPicker from '@/components/payments/PaymentOptionsPicker'
-import { coursePaymentOptions, type PaymentOption } from '@/lib/bookings/payment-options'
+import {
+  coursePaymentOptions,
+  offersPayNow,
+  requiresPaymentUrl,
+  type PaymentOption,
+} from '@/lib/bookings/payment-options'
 import { MAX_PINNED_COURSES } from '@/lib/constants'
 import type { Course, CourseApprovalStatus } from '@/types'
 
@@ -680,7 +685,7 @@ export default function AdminCoursesPage() {
                     </p>
                   )}
 
-                  {course.approval_status === 'active' && !course.payment_url && (
+                  {course.approval_status === 'active' && !course.payment_url && offersPayNow(course) && (
                     <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-1.5">
                       ⚠️ No payment link — this course is hidden from members until one is set. Edit the course to add it.
                     </p>
@@ -689,8 +694,10 @@ export default function AdminCoursesPage() {
                   {/* Said before Approve is pressed, not after. A host-proposed
                       course arrives with no payment link and the placeholder
                       logo, and approving it without those produced a course
-                      that was live, calendared and invisible. */}
-                  {course.approval_status === 'pending' && !course.payment_url && (
+                      that was live, calendared and invisible. Not said at all
+                      for a pay-at-club venue, which needs no link — and which is
+                      what a host's proposed club is created as. */}
+                  {course.approval_status === 'pending' && !course.payment_url && offersPayNow(course) && (
                     <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-1.5">
                       ⚠️ Needs a payment link before it can be approved — members
                       can&apos;t pay for a booking without one. Edit the course to add it.
@@ -940,6 +947,8 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
     handleSubmit,
     setValue,
     watch,
+    trigger,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<CourseFormValues>({
     defaultValues: {
@@ -967,6 +976,10 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
   const watchedName = watch('name')
   const watchedCalendarId = watch('ghl_calendar_id')
   const watchCustomSlots = watch('custom_slots_enabled')
+  // Whether the payment link is required — it is only the Pay on App checkout
+  // that needs one. Watched rather than read at submit so the label, the hint
+  // and the rule all change the moment the option is ticked.
+  const needsPaymentUrl = requiresPaymentUrl({ payment_options: watch('payment_options') })
 
   // Auto-generate slug from course name in create mode
   useEffect(() => {
@@ -1278,24 +1291,6 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
               </div>
 
               <div>
-                <label htmlFor="payment_url" className={labelCls}>Payment Link *</label>
-                <input
-                  id="payment_url"
-                  type="url"
-                  className={field(!!errors.payment_url)}
-                  placeholder="https://linkupgolf-services.com/event-checkout-page"
-                  {...register('payment_url', {
-                    required: 'Payment link is required',
-                    validate: v => /^https?:\/\/.+/.test(v) || 'Must be a valid URL (https://…)',
-                  })}
-                />
-                {errors.payment_url
-                  ? <p className={errMsg}>{errors.payment_url.message}</p>
-                  : <p className={infoText}>Members are sent here to pay for confirmed bookings.</p>
-                }
-              </div>
-
-              <div>
                 {/* A span: the control is a pair of checkboxes with their own labels. */}
                 <span className={labelCls}>Payment options *</span>
                 <Controller
@@ -1304,15 +1299,54 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
                   render={({ field: f }) => (
                     <PaymentOptionsPicker
                       value={f.value}
-                      onChange={f.onChange}
+                      onChange={next => {
+                        f.onChange(next)
+                        // Turning Pay on App off has to clear the "link
+                        // required" error a previous submit left behind, and
+                        // turning it back on has to re-apply it.
+                        void trigger('payment_url')
+                      }}
                       idPrefix="course-payment-option"
                     />
                   )}
                 />
                 <p className={infoText}>
                   The ways members can pay for a round here. Credit can only be
-                  spent through Pay on App.
+                  spent through Pay on App, which is also the only one that needs
+                  a payment link.
                 </p>
+              </div>
+
+              <div>
+                <label htmlFor="payment_url" className={labelCls}>
+                  Payment Link {needsPaymentUrl ? '*' : '(optional)'}
+                </label>
+                <input
+                  id="payment_url"
+                  type="url"
+                  className={field(!!errors.payment_url)}
+                  placeholder="https://linkupgolf-services.com/event-checkout-page"
+                  {...register('payment_url', {
+                    validate: v => {
+                      // Read off the live value rather than the watched copy:
+                      // whichever field changed last, both are current here.
+                      if (!v?.trim()) {
+                        return requiresPaymentUrl({ payment_options: getValues('payment_options') })
+                          ? 'Payment link is required while this venue takes payment on the app'
+                          : true
+                      }
+                      return /^https?:\/\/.+/.test(v) || 'Must be a valid URL (https://…)'
+                    },
+                  })}
+                />
+                {errors.payment_url
+                  ? <p className={errMsg}>{errors.payment_url.message}</p>
+                  : <p className={infoText}>
+                      {needsPaymentUrl
+                        ? 'Members are sent here to pay for confirmed bookings.'
+                        : 'Not needed while members settle at the club. Add one if you turn Pay on App back on.'}
+                    </p>
+                }
               </div>
             </div>
           </section>

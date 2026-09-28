@@ -5,7 +5,9 @@
 //   pay_now      "Pay on App" — the checkout LinkUp sends a member to
 //                (courses.payment_url). What every course did before this
 //                existed, so it's the default — and the only way credit can be
-//                spent, since a credit code is typed into that checkout.
+//                spent, since a credit code is typed into that checkout. It is
+//                also the only option that needs courses.payment_url set, which
+//                is what requiresPaymentUrl and canTakePayment below decide.
 //   pay_at_club  the member settles with the club on the day. Choosing it marks
 //                the booking (bookings.payment_method = 'pay_at_club'), which
 //                takes the round off the member's "payment due" list. It reads
@@ -64,6 +66,34 @@ export const offersPayNow = (
 export const offersPayAtClub = (
   course: { payment_options?: readonly string[] | null } | null | undefined,
 ) => coursePaymentOptions(course).includes('pay_at_club')
+
+/**
+ * Whether this venue has to have a payment link (courses.payment_url).
+ *
+ * Only Pay on App sends anyone to a checkout, and payment_url is that checkout —
+ * so only Pay on App needs it. A venue settled at the club has nowhere to send a
+ * member and no link to give; requiring one there meant inventing a URL that
+ * would never be opened.
+ */
+export const requiresPaymentUrl = offersPayNow
+
+/**
+ * Whether a member could actually pay for a round here — the bar a venue clears
+ * to be listed at all.
+ *
+ * A venue that takes payment on the app and has no checkout link is bookable
+ * with nowhere to pay, so GET /api/courses and the availability calendar leave
+ * it out and approval refuses it. One that's settled at the club passes with no
+ * link, because there was never one to have.
+ */
+export function canTakePayment(
+  course:
+    | { payment_url?: string | null; payment_options?: readonly string[] | null }
+    | null
+    | undefined,
+): boolean {
+  return requiresPaymentUrl(course) ? !!course?.payment_url?.trim() : true
+}
 
 /**
  * Validates options arriving off the wire. Returns them de-duplicated and in
