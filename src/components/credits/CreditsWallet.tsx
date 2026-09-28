@@ -22,7 +22,6 @@ import { useCallback, useEffect, useState } from 'react'
 import { AdminPageHeader, StatCard, AdminCard, Badge } from '@/components/admin/AdminUI'
 import { Spinner, ContentLoader } from '@/components/ui/Loading'
 import CreditCouponModal from '@/components/credits/CreditCouponModal'
-import { TutorialLink } from '@/components/tutorials/TutorialPlayer'
 import { MEMBERSHIP_CHECKOUT_URL, MEMBERSHIP_JOIN_URL } from '@/lib/constants'
 import { isCouponUsable } from '@/lib/credits'
 import type {
@@ -60,15 +59,9 @@ interface Props {
   basePath: string
   /** How credit is earned here, appended to the shared spending copy. */
   earnedHint: string
-  /**
-   * Id of a video guide to offer above the balance. Passed in rather than
-   * hardcoded because the guides are host-framed: a referral partner earns
-   * credit a different way, and would be watching someone talk about hosting.
-   */
-  tutorialId?: string
 }
 
-export default function CreditsWallet({ basePath, earnedHint, tutorialId }: Props) {
+export default function CreditsWallet({ basePath, earnedHint }: Props) {
   const [summary, setSummary] = useState<CreditSummary | null>(null)
   const [entries, setEntries] = useState<CreditEntry[]>([])
   const [coupons, setCoupons] = useState<CreditCoupon[]>([])
@@ -153,12 +146,6 @@ export default function CreditsWallet({ basePath, earnedHint, tutorialId }: Prop
           </button>
         }
       />
-
-      {tutorialId && (
-        <div className="mb-5">
-          <TutorialLink tutorial={tutorialId} label="Watch: Credit usage guide" />
-        </div>
-      )}
 
       {/* Say it before the balance, not after they've tried to spend it. Only
           once the wallet has actually loaded — mid-load this would flash for
