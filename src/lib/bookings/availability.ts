@@ -212,6 +212,21 @@ export interface CalendarOpening {
    */
   openSpots: number
   /**
+   * Seats already taken that day — every booking row holding one, a member's
+   * own and a non-member guest's alike. A guest occupies a seat, so a count of
+   * members would be the wrong numerator for "how full is this".
+   */
+  bookedSpots: number
+  /**
+   * What the day can seat at all: bookedSpots + openSpots.
+   *
+   * Derived rather than read off the course, because two things bound it and
+   * either can be the smaller — the calendar's own seats, and max_players_per_day.
+   * A venue whose calendar is wide open reads as the cap; one with a short day
+   * reads as the calendar.
+   */
+  totalSpots: number
+  /**
    * The earliest few bookable tee times. Capped: the detail sheet previews
    * them, and the member picks an exact time in the booking flow itself, so
    * sending a whole day's grid per venue per day would bloat the month payload
@@ -321,15 +336,20 @@ export async function venueAvailabilityForMonth(
       const open = (daySlots ?? []).filter(s => s.available && (s.spotsOpen ?? 0) > 0)
       if (open.length === 0) continue
 
+      const openSpots = Math.min(
+        open.reduce((n, s) => n + (s.spotsOpen ?? 0), 0),
+        dayRemaining,
+      )
+      const bookedSpots = held.get(`${course.id}|${date}`) ?? 0
+
       openings.push({
         date,
         opening: {
           courseId: course.id,
           openSlots: open.length,
-          openSpots: Math.min(
-            open.reduce((n, s) => n + (s.spotsOpen ?? 0), 0),
-            dayRemaining,
-          ),
+          openSpots,
+          bookedSpots,
+          totalSpots: bookedSpots + openSpots,
           // startTime carries the venue's own offset, so the wall-clock time is
           // readable straight off the string — no re-zoning on the client.
           tees: open

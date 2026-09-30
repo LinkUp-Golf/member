@@ -50,6 +50,7 @@ import {
   buildVenueColours,
 } from "@/components/calendar/venue-colours";
 import WhosPlayingSheet from "@/components/calendar/WhosPlayingSheet";
+import { dayOccupancy, occupancyLabel, occupancyTally } from "@/lib/bookings/occupancy";
 import type { CalendarPlayer } from "@/lib/bookings/players";
 
 // Mirrors CalendarVenue / CalendarOpening from @/lib/bookings/availability —
@@ -76,6 +77,10 @@ export interface CalendarOpening {
   openSlots: number;
   /** Seats across them, already clamped to the venue's daily cap. */
   openSpots: number;
+  /** Seats already taken that day — members and non-member guests alike. */
+  bookedSpots: number;
+  /** What the day can seat at all: bookedSpots + openSpots. */
+  totalSpots: number;
   /** Earliest few tee times. */
   tees: CalendarTee[];
 }
@@ -154,21 +159,19 @@ function uniquePlayers(players: CalendarPlayer[]): CalendarPlayer[] {
 }
 
 /**
- * How a day cell says who's playing: "1P" for one player, "2Ps" for two.
- *
  * The cell used to carry the faces themselves, three 12px circles crammed into
  * the corner of a square that also holds a date and a venue dot — recognisable
  * to nobody at that size, and the first thing to collide when a week got busy.
  * The faces moved to the agenda's venue cards, where there's room to see them
- * and they sit against the club they're playing at. What's left here is the one
- * thing a month grid can usefully say: how many.
+ * and they sit against the club they're playing at. What's left in the corner is
+ * the one thing a month grid can usefully say, and it's now how full the day is
+ * rather than how many people are on it — see @/lib/bookings/occupancy.
  *
  * It's a label, not a control. A grid where some days have a second tappable
  * thing in the corner is a grid where tapping a day is a gamble — the cell's
- * one job is to open the day, and the count is there to be read on the way.
+ * one job is to open the day, and the tally is there to be read on the way.
  * Opening the names is the faces' job, down on the venue card.
  */
-const playerTally = (count: number) => `${count}P${count === 1 ? "" : "s"}`;
 
 /**
  * The faces of everyone playing at one venue on one day, as a stack, and the
@@ -208,8 +211,6 @@ interface DayCellProps {
   past: boolean;
   selected: boolean;
   openings: CalendarOpening[];
-  /** Members booked that day at the venues on show. */
-  players: CalendarPlayer[];
   colourByVenue: Map<string, number>;
   nameByVenue: Map<string, string>;
   onSelect: (dayIso: string) => void;
@@ -223,7 +224,6 @@ const DayCell = memo(function DayCell({
   past,
   selected,
   openings,
-  players,
   colourByVenue,
   nameByVenue,
   onSelect,
@@ -233,10 +233,12 @@ const DayCell = memo(function DayCell({
   // told so beats a tap that does nothing.
   const selectable = inMonth && !past;
 
-  // One head per person — a member with two tee times that day is still one
-  // member playing. Only on days still to come: a past day is dimmed and shut.
-  const playerCount = useMemo(() => uniquePlayers(players).length, [players]);
-  const showPlayers = selectable && playerCount > 0;
+  // How full the day is, across the venues it lists. Only on days still to
+  // come: a past day is dimmed and shut, and how full it got is no longer a
+  // question anyone is asking of it.
+  const occupancy = useMemo(() => dayOccupancy(openings), [openings]);
+  const tally = occupancyTally(occupancy);
+  const showTally = selectable && !!tally;
 
   // The count rides on the day's own label, because the tally it comes from is
   // a label rather than a control and has nothing of its own to announce.
@@ -244,7 +246,7 @@ const DayCell = memo(function DayCell({
     has
       ? `${openings.length} venue${openings.length === 1 ? "" : "s"} with tee times`
       : "nothing open"
-  }${showPlayers ? `, ${playerCount} member${playerCount === 1 ? "" : "s"} playing` : ""}`;
+  }${showTally ? `, ${occupancyLabel(occupancy)}` : ""}`;
 
   // Three chips (or dots, below md) is what a cell holds without the row
   // growing; past that the third becomes a count that the agenda below spells
@@ -358,12 +360,12 @@ const DayCell = memo(function DayCell({
         </span>
       </button>
 
-      {/* Who's playing — how many members are booked that day, anchored
+      {/* How full the day is — seats taken out of seats it can hold, anchored
           top-right: in the strip above the number on a phone, level with the
           number from md. Read-only, and pointer-events-none so the whole cell
           stays one target: the tap opens the day, and the names are behind the
-          faces on the venue cards below. Only on a day that has any. */}
-      {showPlayers && (
+          faces on the venue cards below. Only on a day that can seat anyone. */}
+      {showTally && (
         <span
           aria-hidden
           className={cn(
@@ -373,7 +375,7 @@ const DayCell = memo(function DayCell({
             "text-green-900/50",
           )}
         >
-          {playerTally(playerCount)}
+          {tally}
         </span>
       )}
     </div>
@@ -1067,9 +1069,6 @@ function VenueAvailabilityCalendar({
                   past={dayIso < todayIso}
                   selected={selectedDate === dayIso}
                   openings={inMonth ? (visibleDays[dayIso] ?? EMPTY) : EMPTY}
-                  players={
-                    inMonth ? (visiblePlayers[dayIso] ?? EMPTY_PLAYERS) : EMPTY_PLAYERS
-                  }
                   colourByVenue={colourByVenue}
                   nameByVenue={nameByVenue}
                   onSelect={
