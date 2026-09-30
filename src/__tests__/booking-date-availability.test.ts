@@ -17,6 +17,7 @@ import {
   coursesWithAvailabilityOn,
   hasOpenSlot,
   normaliseTime,
+  venueAvailabilityForMonth,
 } from '@/lib/bookings/availability'
 
 const mockedSlots = vi.mocked(getAvailableSlots)
@@ -245,5 +246,89 @@ describe('coursesWithAvailabilityOn', () => {
       expect(result.map(c => c.id)).toEqual(['course-1'])
       expect(mockedSlots).toHaveBeenCalledOnce()
     })
+  })
+})
+
+// ---- The last few days: join a round, don't start one --------
+
+// Inside the window a venue-day nobody has booked is closed, and one with
+// anyone on it stays open. The rule itself is unit-tested in
+// join-only-window.test.ts; these check that the two surfaces a member actually
+// meets apply it — and that the host path, which must not, doesn't.
+//
+// Dates are computed from today in the venue's own timezone rather than written
+// down, because the rule is relative to it. Arithmetic on UTC midnights so a
+// daylight-saving boundary can't shift a day.
+const VENUE_TZ = 'America/Los_Angeles'
+const todayAtVenue = new Intl.DateTimeFormat('en-CA', {
+  timeZone: VENUE_TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+}).format(new Date())
+const plusDays = (date: string, n: number) =>
+  new Date(Date.parse(`${date}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10)
+
+const SOON = plusDays(todayAtVenue, 1)
+const LATER = plusDays(todayAtVenue, 10)
+const MONTH = SOON.slice(0, 7)
+
+const held = (date: string) => ({
+  bookings: [{ course_id: 'course-1', booking_date: date, tee_time: '07:00:00' }],
+})
+
+describe('coursesWithAvailabilityOn — the join-only window', () => {
+  it('drops a near day nobody has booked, however open the calendar is', async () => {
+    mockedSlots.mockResolvedValue({ [SOON]: [slot(4)] })
+    const result = await coursesWithAvailabilityOn(fakeAdmin({}), [makeCourse()], SOON)
+    expect(result).toEqual([])
+  })
+
+  it('keeps it the moment one person is going', async () => {
+    mockedSlots.mockResolvedValue({ [SOON]: [slot(4)] })
+    const result = await coursesWithAvailabilityOn(fakeAdmin(held(SOON)), [makeCourse()], SOON)
+    expect(result.map(c => c.id)).toEqual(['course-1'])
+  })
+
+  it('leaves a day past the window open with nobody on it', async () => {
+    mockedSlots.mockResolvedValue({ [LATER]: [slot(4)] })
+    const result = await coursesWithAvailabilityOn(fakeAdmin({}), [makeCourse()], LATER)
+    expect(result.map(c => c.id)).toEqual(['course-1'])
+  })
+})
+
+describe('venueAvailabilityForMonth — the join-only window', () => {
+  const forMonth = (
+    admin: Parameters<typeof venueAvailabilityForMonth>[0],
+    options?: { joinOnlyWindowDays?: number },
+  ) =>
+    venueAvailabilityForMonth(
+      admin,
+      [makeCourse()],
+      MONTH,
+      `${MONTH}-01`,
+      `${MONTH}-28`,
+      options,
+    )
+
+  it('leaves a near day off the grid and keeps the far one', async () => {
+    mockedSlots.mockResolvedValue({ [SOON]: [slot(4)], [LATER]: [slot(4)] })
+    const { days } = await forMonth(fakeAdmin({}))
+    expect(Object.keys(days)).toEqual([LATER])
+  })
+
+  it('puts the near day back once someone has booked it', async () => {
+    mockedSlots.mockResolvedValue({ [SOON]: [slot(4)], [LATER]: [slot(4)] })
+    const { days } = await forMonth(fakeAdmin(held(SOON)))
+    expect(Object.keys(days).sort()).toEqual([SOON, LATER].sort())
+  })
+
+  it('is off for the host path, which creates the interest it would demand', async () => {
+    // openSpotsByDate passes this. A host listing a round IS the venue being
+    // asked in advance, and members reserve against hosted_event_registrations
+    // rather than bookings, so there would never be a booking to satisfy it.
+    mockedSlots.mockResolvedValue({ [SOON]: [slot(4)] })
+    const { days } = await forMonth(fakeAdmin({}), { joinOnlyWindowDays: 0 })
+    expect(Object.keys(days)).toEqual([SOON])
   })
 })

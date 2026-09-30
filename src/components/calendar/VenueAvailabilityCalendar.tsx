@@ -51,6 +51,7 @@ import {
 } from "@/components/calendar/venue-colours";
 import WhosPlayingSheet from "@/components/calendar/WhosPlayingSheet";
 import { dayOccupancy, occupancyLabel, occupancyTally } from "@/lib/bookings/occupancy";
+import { isInsideJoinOnlyWindow, JOIN_ONLY_WINDOW_DAYS } from "@/lib/bookings/lead-time";
 import type { CalendarPlayer } from "@/lib/bookings/players";
 
 // Mirrors CalendarVenue / CalendarOpening from @/lib/bookings/availability —
@@ -1121,9 +1122,17 @@ function VenueAvailabilityCalendar({
                       : "No tee times open on this day."}
                 </p>
                 <p className="text-xs text-green-900/40 mt-1">
-                  {monthOpeningCount > 0
-                    ? "Pick a highlighted day above."
-                    : "Try another month."}
+                  {/* A day this close is closed for a reason a member can act
+                      on, and one they'd never guess from "no tee times": inside
+                      the window a round has to already exist. Said here rather
+                      than on the grid, where it would be noise on every cell.
+                      Today is the browser's, which is close enough for a hint —
+                      the rule itself is applied in the venue's own timezone. */}
+                  {isInsideJoinOnlyWindow(selectedDate, todayIso)
+                    ? `Within ${JOIN_ONLY_WINDOW_DAYS} days you can join a round but not start one, and nobody has booked this day yet.`
+                    : monthOpeningCount > 0
+                      ? "Pick a highlighted day above."
+                      : "Try another month."}
                 </p>
               </div>
             )}

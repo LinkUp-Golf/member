@@ -12,14 +12,21 @@ import { getCache, withCache } from '@/lib/cache'
 import { GHL_SLOTS_NS, GHL_SLOTS_TTL_MS, ghlSlotsKey, ghlSlotsMonthKey } from '@/lib/cache/keys'
 import { AVIARA_TIMEZONE, FALLBACK_ROUND_DURATION_MINUTES, DEFAULT_MAX_PLAYERS_PER_DAY } from '@/lib/constants'
 import { bookingAmountDue } from '@/lib/bookings/price'
+import { dayIsBookable, JOIN_ONLY_WINDOW_DAYS } from '@/lib/bookings/lead-time'
 import type { createAdminClient } from '@/lib/supabase-server'
 import type { Course, GHLBookingSlot } from '@/types'
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
-// Statuses that don't hold a seat, so they don't count against a day's cap or
-// a curated tee time's seats.
-const NON_HOLDING_STATUSES = '(cancelled,waitlist)'
+/**
+ * Statuses that don't hold a seat, so they don't count against a day's cap or a
+ * curated tee time's seats.
+ *
+ * A PostgREST `in` list, exported because POST /api/bookings/create measures the
+ * same thing — whether anyone is on a day — and two spellings of "holds a seat"
+ * would let the calendar and the submit disagree.
+ */
+export const NON_HOLDING_STATUSES = '(cancelled,waitlist)'
 
 // How many courses we ask GHL about at once when filtering by date. One call
 // per course is unavoidable — GHL has no cross-calendar availability endpoint —
@@ -292,6 +299,12 @@ async function slotsForMonth(
  * "Today" is resolved in each venue's own timezone — a tee time is wall-clock
  * local to the club, so a course an hour ahead drops today's date before one
  * behind it does.
+ *
+ * The last few days before a round are the exception, and dayIsBookable is the
+ * rule: inside that window a venue-day nobody has booked is closed, because
+ * starting a round at that notice asks the club for a slot nobody wanted. A day
+ * with anyone on it stays open. Pass joinOnlyWindowDays: 0 to switch it off —
+ * only the host path does, and the note there says why.
  */
 export async function venueAvailabilityForMonth(
   admin: AdminClient,
@@ -299,6 +312,7 @@ export async function venueAvailabilityForMonth(
   month: string,
   startDate: string,
   endDate: string,
+  options: { joinOnlyWindowDays?: number } = {},
 ): Promise<MonthAvailability> {
   if (courses.length === 0) return { venues: [], days: {} }
 
@@ -329,8 +343,24 @@ export async function venueAvailabilityForMonth(
     for (const [date, daySlots] of Object.entries(slots)) {
       if (date < todayAtVenue) continue
 
+      const heldThatDay = held.get(`${course.id}|${date}`) ?? 0
+
+      // A day inside the last-minute window is only open if someone is already
+      // going. Checked before the calendar so a day nobody has booked costs
+      // nothing to rule out.
+      if (
+        !dayIsBookable({
+          date,
+          today: todayAtVenue,
+          bookedSpots: heldThatDay,
+          windowDays: options.joinOnlyWindowDays ?? JOIN_ONLY_WINDOW_DAYS,
+        })
+      ) {
+        continue
+      }
+
       // What the venue's daily cap still allows, whatever its calendar says.
-      const dayRemaining = cap - (held.get(`${course.id}|${date}`) ?? 0)
+      const dayRemaining = cap - heldThatDay
       if (dayRemaining <= 0) continue
 
       const open = (daySlots ?? []).filter(s => s.available && (s.spotsOpen ?? 0) > 0)
@@ -340,7 +370,7 @@ export async function venueAvailabilityForMonth(
         open.reduce((n, s) => n + (s.spotsOpen ?? 0), 0),
         dayRemaining,
       )
-      const bookedSpots = held.get(`${course.id}|${date}`) ?? 0
+      const bookedSpots = heldThatDay
 
       openings.push({
         date,
@@ -404,6 +434,13 @@ export async function venueAvailabilityForMonth(
  * month at a time; a schedule spanning a month boundary costs one call per
  * month, not one per date. A date with nothing open is absent from the result,
  * which the caller must treat as "can't be listed" rather than zero.
+ *
+ * The last-minute window does not apply here, and this is the one place it
+ * doesn't. It closes a day nobody has booked because starting a round at that
+ * notice asks the club for a slot nobody wanted — but a host listing a round IS
+ * the venue being asked, in advance and by the person who runs it, and members
+ * reserve against hosted_event_registrations rather than bookings. Applying it
+ * would refuse a host for want of the very interest they're creating.
  */
 export async function openSpotsByDate(
   admin: AdminClient,
@@ -427,7 +464,14 @@ export async function openSpotsByDate(
     const startDate = formatDateOnly(new Date(year, monthIdx, 1))
     const endDate = formatDateOnly(new Date(year, monthIdx + 1, 0))
 
-    const { days } = await venueAvailabilityForMonth(admin, [course], month, startDate, endDate)
+    const { days } = await venueAvailabilityForMonth(
+      admin,
+      [course],
+      month,
+      startDate,
+      endDate,
+      { joinOnlyWindowDays: 0 },
+    )
     for (const [date, openings] of Object.entries(days)) {
       const spots = openings[0]?.openSpots ?? 0
       if (spots > 0) out.set(date, spots)
@@ -525,10 +569,12 @@ function formatDateOnly(d: Date): string {
 /**
  * Narrows `courses` to those a member could actually book on `date`.
  *
- * Two things can rule a course out, and both matter: its calendar may have
- * nothing open, or our own per-course daily cap may already be spent. The cap
- * is enforced atomically at booking time, so a course that passes only the
- * first check would list as available and then fail with DAY_FULL on submit.
+ * Three things can rule a course out, and all three matter: its calendar may
+ * have nothing open, our own per-course daily cap may already be spent, or the
+ * date may be inside the last-minute window with nobody booked on it yet. The
+ * cap is enforced atomically at booking time and the window is enforced in
+ * POST /api/bookings/create, so a course that passes only the calendar check
+ * would list as available and then be refused on submit.
  */
 export async function coursesWithAvailabilityOn(
   admin: AdminClient,
@@ -552,12 +598,20 @@ export async function coursesWithAvailabilityOn(
     heldByCourse.set(id, (heldByCourse.get(id) ?? 0) + 1)
   }
 
-  const underDayCap = courses.filter(course => {
+  const bookable = courses.filter(course => {
     const cap = course.max_players_per_day ?? DEFAULT_MAX_PLAYERS_PER_DAY
-    return (heldByCourse.get(course.id) ?? 0) < cap
+    const held = heldByCourse.get(course.id) ?? 0
+    if (held >= cap) return false
+    // Today in the venue's own timezone, the same way the month grid resolves it
+    // — a club an hour ahead reaches the last-minute window first.
+    return dayIsBookable({
+      date,
+      today: formatInTimeZone(new Date(), course.timezone || AVIARA_TIMEZONE, 'yyyy-MM-dd'),
+      bookedSpots: held,
+    })
   })
 
-  const open = await mapWithConcurrency(underDayCap, GHL_CONCURRENCY, async (course) => {
+  const open = await mapWithConcurrency(bookable, GHL_CONCURRENCY, async (course) => {
     // A calendar we can't reach returns no slots rather than throwing, so an
     // unreachable GHL hides the course from a date search instead of emptying
     // the whole list.

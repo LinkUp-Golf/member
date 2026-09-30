@@ -28,7 +28,8 @@ import { NotificationTemplates } from '@/lib/push'
 import { notifyMembers } from '@/lib/notify'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
-import { buildCustomSlots } from '@/lib/bookings/availability'
+import { buildCustomSlots, NON_HOLDING_STATUSES } from '@/lib/bookings/availability'
+import { isInsideJoinOnlyWindow, joinOnlyWindowMessage } from '@/lib/bookings/lead-time'
 import { bookingAmountDue } from '@/lib/bookings/price'
 import {
   PAY_AT_CLUB,
@@ -328,6 +329,36 @@ export async function POST(request: NextRequest) {
   const timeNormalized = `${lp('hour')}:${lp('minute')}:${lp('second')}`
 
   console.log('[booking/create] Resolved in event/Aviara timezone:', { bookingDate, timeNormalized })
+
+  // ---- The last few days: join a round, don't start one --------------------
+  //
+  // Inside the window a venue-day with nobody on it is closed. The calendar
+  // already hides such a day, so reaching here means either a stale month in a
+  // client that has been open a while, or someone posting straight at the
+  // endpoint — and the day is the club's either way. See @/lib/bookings/lead-time.
+  //
+  // "Today" in the venue's own timezone, like the date above: a club an hour
+  // ahead enters the window before one behind it.
+  const todayAtVenue = new Intl.DateTimeFormat('en-CA', {
+    timeZone: eventTimezone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date())
+
+  if (isInsideJoinOnlyWindow(bookingDate, todayAtVenue)) {
+    const { count: heldThatDay } = await adminSupabase
+      .from('bookings')
+      .select('id', { count: 'exact', head: true })
+      .eq('course_id', resolvedCourseId)
+      .eq('booking_date', bookingDate)
+      .not('status', 'in', NON_HOLDING_STATUSES)
+
+    if (!heldThatDay) {
+      console.log('[booking/create] Refused: inside the join-only window with nobody booked', {
+        courseId: resolvedCourseId, bookingDate, todayAtVenue,
+      })
+      return NextResponse.json({ error: joinOnlyWindowMessage() }, { status: 409 })
+    }
+  }
 
   // ---- Validate everyone up front, before touching GHL --------------------
   // Fail fast with a clear message rather than getting partway through and
