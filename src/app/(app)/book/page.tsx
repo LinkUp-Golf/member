@@ -30,6 +30,7 @@ import VenueDayDetailSheet, {
   type VenueDayDetail,
 } from "@/components/calendar/VenueDayDetailSheet";
 import type { CalendarPlayer } from "@/lib/bookings/players";
+import type { VenueHost } from "@/lib/bookings/venue-hosts";
 import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
 import { bookingAmountDue } from "@/lib/bookings/price";
 import {
@@ -3848,6 +3849,10 @@ function EventSelectionScreen({
   const [calMonth, setCalMonth] = useState<Date>(() => startOfMonth(new Date()));
   const [calVenues, setCalVenues] = useState<CalendarVenue[]>([]);
   const [calDays, setCalDays] = useState<Record<string, CalendarOpening[]>>({});
+  // Who runs each venue, for the head of every tee time on the day's sheet.
+  // Arrives with the availability because a host is a property of the venue and
+  // the answer is on the same GHL calendar this request already reads.
+  const [calHosts, setCalHosts] = useState<Record<string, VenueHost>>({});
   const [calLoading, setCalLoading] = useState(false);
   const [calError, setCalError] = useState("");
   // null = every venue. A list narrows the month to just those clubs.
@@ -3889,11 +3894,17 @@ function EventSelectionScreen({
             ? (d.days as Record<string, CalendarOpening[]>)
             : {},
         );
+        setCalHosts(
+          d.hosts && typeof d.hosts === "object"
+            ? (d.hosts as Record<string, VenueHost>)
+            : {},
+        );
       })
       .catch(() => {
         if (!current) return;
         setCalVenues([]);
         setCalDays({});
+        setCalHosts({});
         setCalError("Couldn't load the calendar. Check your connection and try again.");
       })
       .finally(() => {
@@ -4251,6 +4262,7 @@ function EventSelectionScreen({
             pinnedNextAvailable={pinnedNext}
             onPickOpening={openDayDetail}
             players={calPlayers}
+            hosts={calHosts}
           />
         )}
 

@@ -53,6 +53,7 @@ import WhosPlayingSheet from "@/components/calendar/WhosPlayingSheet";
 import { dayOccupancy, occupancyLabel, occupancyTally } from "@/lib/bookings/occupancy";
 import { isInsideJoinOnlyWindow, JOIN_ONLY_WINDOW_DAYS } from "@/lib/bookings/lead-time";
 import type { CalendarPlayer } from "@/lib/bookings/players";
+import type { VenueHost } from "@/lib/bookings/venue-hosts";
 
 // Mirrors CalendarVenue / CalendarOpening from @/lib/bookings/availability —
 // declared here too so the component stays a pure presentational unit that a
@@ -106,6 +107,7 @@ const EMPTY_VENUES: PinnedVenue[] = [];
 const EMPTY_NEXT: Record<string, PinnedNextOpening | null> = {};
 const EMPTY_PLAYERS: CalendarPlayer[] = [];
 const EMPTY_PLAYER_DAYS: Record<string, CalendarPlayer[]> = {};
+const EMPTY_HOSTS: Record<string, VenueHost> = {};
 
 const venueLocation = (v: CalendarVenue | undefined) =>
   [v?.city, v?.state].filter(Boolean).join(", ");
@@ -854,6 +856,12 @@ interface VenueAvailabilityCalendarProps {
    * people at the clubs on show.
    */
   players?: Record<string, CalendarPlayer[]>;
+  /**
+   * Course id → whoever runs that venue, from GET /api/bookings/availability.
+   * Used only by the day's tee sheet, which puts them at the head of each tee
+   * time. A venue whose GHL calendar names nobody is simply absent.
+   */
+  hosts?: Record<string, VenueHost>;
 }
 
 function VenueAvailabilityCalendar({
@@ -871,12 +879,17 @@ function VenueAvailabilityCalendar({
   pinnedVenues = EMPTY_VENUES,
   pinnedNextAvailable = EMPTY_NEXT,
   players = EMPTY_PLAYER_DAYS,
+  hosts = EMPTY_HOSTS,
 }: VenueAvailabilityCalendarProps) {
   const todayIso = useMemo(() => iso(new Date()), []);
   // The day whose "Who's playing" sheet is open.
   const [playersDate, setPlayersDate] = useState<string | null>(null);
   const showPlayers = useCallback((d: string) => setPlayersDate(d), []);
   const closePlayers = useCallback(() => setPlayersDate(null), []);
+
+  // A Map because the sheet looks venues up one at a time; built here so the
+  // reference is stable across the sheet's mount/unmount transition.
+  const hostByVenue = useMemo(() => new Map(Object.entries(hosts)), [hosts]);
 
   const { colourByVenue, nameByVenue, venuesById } = useMemo(() => {
     // Colours follow the venue list — sorted by name server-side — so a venue
@@ -989,6 +1002,7 @@ function VenueAvailabilityCalendar({
         day={playersDay}
         venueNames={nameByVenue}
         colourByVenue={colourByVenue}
+        hostByVenue={hostByVenue}
         onClose={closePlayers}
       />
 
