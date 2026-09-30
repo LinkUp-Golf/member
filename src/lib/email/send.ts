@@ -9,11 +9,16 @@
 import { createAdminClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
 import { renderNotificationEmail } from './template'
-import { sendEmail, type EmailSendResult } from './client'
+import {
+  BATCH_LIMIT,
+  maskEmail,
+  sendEmailBatch,
+  type EmailMessage,
+  type EmailSendResult,
+} from './client'
+import { filterSuppressed } from './suppression'
+import { UNSUBSCRIBE_PATH, unsubscribeToken } from './unsubscribe'
 import type { PushPayload } from '@/lib/push/types'
-
-/** Resend takes at most 50 addresses per call. */
-const BATCH_SIZE = 50
 
 /** What the button says when a notification doesn't name its own action. */
 const DEFAULT_CTA = 'Open in LinkUp'
@@ -68,9 +73,46 @@ export function absoluteUrl(path: string | undefined): string {
   return `${appUrl()}${target.startsWith('/') ? target : `/${target}`}`
 }
 
-/** The email for one notification, rendered but not yet addressed. */
-export function renderNotification(payload: PushPayload) {
+/**
+ * This recipient's own way out, as an absolute link.
+ *
+ * Per address, because that's what an unsubscribe is about: the mailbox, not
+ * the member row behind it. Returns '' when the token can't be signed, and the
+ * footer and the headers both drop it rather than offering a link that
+ * wouldn't work.
+ */
+export function unsubscribeUrl(address: string): string {
+  const token = unsubscribeToken(address)
+  return token ? `${appUrl()}${UNSUBSCRIBE_PATH}?t=${encodeURIComponent(token)}` : ''
+}
+
+/**
+ * The headers that make a mail client's own unsubscribe button work.
+ *
+ * RFC 8058: the URL must accept a POST with no body and act on it without
+ * asking anything further, which is what List-Unsubscribe-Post promises and
+ * what /api/email/unsubscribe does. Gmail and Yahoo have required this of bulk
+ * senders since February 2024; without it their readers have no button, and
+ * the button they do have is "report spam".
+ */
+export function listUnsubscribeHeaders(url: string): Record<string, string> {
+  if (!url) return {}
+  return {
+    'List-Unsubscribe': `<${url}>`,
+    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+  }
+}
+
+/**
+ * The email for one notification, rendered for one recipient.
+ *
+ * Addressed rather than generic: the unsubscribe link is the recipient's own,
+ * so the same notification renders once per person. Called without an address
+ * — the admin smoke test — it renders with no unsubscribe link at all.
+ */
+export function renderNotification(payload: PushPayload, recipient?: string) {
   return renderNotificationEmail({
+    unsubscribeUrl: recipient ? unsubscribeUrl(recipient) : '',
     heading: payload.title,
     // The notification's own subject when it has one. A push title is read
     // beside the app's name; a subject line stands alone in an inbox.
@@ -94,44 +136,70 @@ export function renderNotification(payload: PushPayload) {
 
 const empty = (): EmailSendResult => ({ sent: 0, failed: 0, skipped: false })
 
-/** Sends one notification to a set of addresses, batched to Resend's limit. */
+/**
+ * Sends one notification to a set of addresses.
+ *
+ * Two things happen here that didn't used to. Anyone on the suppression list
+ * is dropped before a message is built — a hard bounce, a spam complaint or an
+ * unsubscribe, and continuing to mail any of the three is what ruins a sending
+ * domain for everybody else. And what's left is sent one message per person
+ * rather than one bcc'd message per fifty, because only an individually
+ * addressed message can carry that person's own unsubscribe header.
+ */
 export async function sendNotificationEmail(
   addresses: string[],
   payload: PushPayload,
 ): Promise<EmailSendResult> {
-  const recipients = Array.from(
-    new Set(addresses.map(a => a?.trim().toLowerCase()).filter((a): a is string => !!a)),
-  )
-  if (recipients.length === 0) {
+  const { allowed, suppressed } = await filterSuppressed(addresses)
+
+  if (suppressed.length > 0) {
+    logger.info('Notification email withheld from suppressed addresses', {
+      action: 'email.suppressed_recipients',
+      metadata: {
+        title: payload.title,
+        withheld: suppressed.length,
+        to: suppressed.slice(0, 5).map(maskEmail),
+      },
+    })
+  }
+
+  if (allowed.length === 0) {
     // The quietest way this channel fails: the notification is built, the key
     // is valid, and there is simply nobody to send it to. It used to return
     // here without a word, which looks identical to email being switched off.
     logger.warn('Notification email has no recipients', {
       action: 'email.no_recipients',
-      metadata: { title: payload.title },
+      metadata: { title: payload.title, withheld: suppressed.length },
     })
     return empty()
   }
 
-  const { subject, html, text } = renderNotification(payload)
+  // The body is the same for everyone; only the footer's unsubscribe link and
+  // the headers differ, so the render runs per recipient and the subject is
+  // read off the first.
+  const messages: EmailMessage[] = allowed.map(to => {
+    const opt = unsubscribeUrl(to)
+    const { subject, html, text } = renderNotification(payload, to)
+    return { to: [to], subject, html, text, headers: listUnsubscribeHeaders(opt) }
+  })
 
   logger.info('Notification email prepared', {
     action: 'email.prepared',
     metadata: {
-      subject,
-      recipients: recipients.length,
+      subject: messages[0]?.subject,
+      recipients: messages.length,
       // The destination the button opens. A relative push path that didn't get
       // an origin, or an app URL with a stray inline comment in .env, shows up
       // here as something that obviously isn't a link.
       ctaUrl: absoluteUrl(payload.url),
-      batches: Math.ceil(recipients.length / BATCH_SIZE),
+      batches: Math.ceil(messages.length / BATCH_LIMIT),
+      oneClickUnsubscribe: !!messages[0]?.headers?.['List-Unsubscribe'],
     },
   })
 
   const totals = empty()
-  for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
-    const batch = recipients.slice(i, i + BATCH_SIZE)
-    const result = await sendEmail({ to: batch, subject, html, text })
+  for (let i = 0; i < messages.length; i += BATCH_LIMIT) {
+    const result = await sendEmailBatch(messages.slice(i, i + BATCH_LIMIT))
     totals.sent += result.sent
     totals.failed += result.failed
     totals.skipped = totals.skipped || result.skipped

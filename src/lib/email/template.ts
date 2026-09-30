@@ -68,6 +68,15 @@ export interface NotificationEmail {
   preheader?: string
   /** Where "notification settings" in the footer points. */
   settingsUrl: string
+  /**
+   * The one-click unsubscribe link, unique to this recipient.
+   *
+   * Required rather than optional: an email without a way out is the email
+   * that gets reported as spam instead, and a complaint costs the sending
+   * domain what an unsubscribe doesn't. Pass '' only where there is genuinely
+   * nobody to unsubscribe — the admin smoke test — and the footer drops it.
+   */
+  unsubscribeUrl: string
 }
 
 export interface RenderedEmail {
@@ -133,6 +142,10 @@ export function renderNotificationEmail(email: NotificationEmail): RenderedEmail
   const ctaUrl = safeUrl(email.ctaUrl)
   const logoUrl = safeUrl(email.logoUrl)
   const settingsUrl = safeUrl(email.settingsUrl)
+  // safeUrl turns anything unusable into '#', which as an unsubscribe link
+  // would be worse than none — it looks like a way out and isn't.
+  const unsubscribeUrl = email.unsubscribeUrl ? safeUrl(email.unsubscribeUrl) : ''
+  const hasUnsubscribe = !!unsubscribeUrl && unsubscribeUrl !== '#'
   const imageUrl = email.imageUrl ? safeUrl(email.imageUrl) : null
 
   const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -241,7 +254,11 @@ ${
           <tr>
             <td align="left" style="padding:20px 2px 0 2px;font-family:${FONT};font-size:12px;line-height:20px;color:${MUTED};">
               You're receiving this because you're a member.
-              <a href="${settingsUrl}" style="color:${NAVY};text-decoration:underline;">Notification settings</a>
+              <a href="${settingsUrl}" style="color:${NAVY};text-decoration:underline;">Notification settings</a>${
+                hasUnsubscribe
+                  ? ` &middot; <a href="${unsubscribeUrl}" style="color:${NAVY};text-decoration:underline;">Unsubscribe</a>`
+                  : ''
+              }
             </td>
           </tr>
 
@@ -263,6 +280,7 @@ ${
     '',
     "You're receiving this because you're a LinkUp Golf member.",
     `Notification settings: ${settingsUrl}`,
+    ...(hasUnsubscribe ? [`Unsubscribe: ${unsubscribeUrl}`] : []),
   ].join('\n')
 
   return { subject: email.subject?.trim() || email.heading, html, text }

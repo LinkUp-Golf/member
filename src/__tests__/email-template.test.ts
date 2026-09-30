@@ -19,6 +19,7 @@ const base = (over: Partial<NotificationEmail> = {}): NotificationEmail => ({
   ctaLabel: 'Pay for your round',
   logoUrl: 'https://app.linkup.golf/logos/logo-full-color.png',
   settingsUrl: 'https://app.linkup.golf/more/settings',
+  unsubscribeUrl: 'https://app.linkup.golf/api/email/unsubscribe?t=abc.def',
   ...over,
 })
 
