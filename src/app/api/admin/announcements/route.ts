@@ -8,6 +8,7 @@ import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
 import { NotificationTemplates } from '@/lib/push'
 import { notifyCourse, notifyFocusMembers, kept } from '@/lib/notify'
+import { normaliseAudience, resolveEmailAudience } from '@/lib/announcements/recipients'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(
@@ -21,14 +22,25 @@ export const POST = withAuth(
       video_url?: string | null
       media_urls?: string[]
       focus_linkup_categories?: string[]
+      // Who gets it by email. Both empty — the default — means everyone in the
+      // community, exactly as before.
+      email_tags?: string[]
+      email_member_ids?: string[]
     }
 
     if (!body.title?.trim() || !body.body?.trim() || !body.course_id) {
       return NextResponse.json({ error: 'course_id, title and body are required' }, { status: 400 })
     }
 
+    const audience = normaliseAudience({
+      tags: body.email_tags,
+      memberIds: body.email_member_ids,
+    })
+
     const admin = createAdminClient()
     const { data, error } = await admin.from('announcements').insert({
+      email_tags: audience.tags,
+      email_member_ids: audience.memberIds,
       course_id: body.course_id,
       author_id: ctx.userId,
       type: body.type ?? 'admin_broadcast',
@@ -51,9 +63,12 @@ export const POST = withAuth(
     // When focus_linkup_categories are set, only notify subscribed members.
     const notifPayload = NotificationTemplates.announcementBroadcast(data.title, data.body, data.type, data.id)
     const categories: string[] = body.focus_linkup_categories ?? []
+    // The post and the in-app notification go to the community either way; only
+    // the email narrows. null here means "the same people the push reaches".
+    const emailMemberIds = await resolveEmailAudience(admin, body.course_id, audience, ctx.userId)
     void kept((categories.length
-      ? notifyFocusMembers(body.course_id, categories, notifPayload, ctx.userId)
-      : notifyCourse(body.course_id, notifPayload, ctx.userId)
+      ? notifyFocusMembers(body.course_id, categories, notifPayload, ctx.userId, { emailMemberIds })
+      : notifyCourse(body.course_id, notifPayload, ctx.userId, { emailMemberIds })
     ).catch(() => {}))
 
     return NextResponse.json(data, { status: 201 })

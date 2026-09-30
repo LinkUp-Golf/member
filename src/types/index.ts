@@ -753,6 +753,14 @@ export interface Announcement {
   video_url: string | null
   media_urls: string[]
   focus_linkup_categories: string[]
+  /**
+   * Who the announcement is emailed to. GHL tags, members by name, or — both
+   * empty, which is the default — everyone in the community. The post and the
+   * in-app notification always go to the community; only the email narrows.
+   * See src/lib/announcements/recipients.ts.
+   */
+  email_tags: string[]
+  email_member_ids: string[]
   is_pinned: boolean
   created_at: string
 }

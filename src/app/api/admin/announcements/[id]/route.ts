@@ -8,6 +8,7 @@ import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
 import { NotificationTemplates } from '@/lib/push'
 import { notifyCourse, notifyFocusMembers, kept } from '@/lib/notify'
+import { normaliseAudience, resolveEmailAudience } from '@/lib/announcements/recipients'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const PATCH = withAuth(
@@ -93,9 +94,19 @@ export const PATCH = withAuth(
     if (isApproving && !wasAlreadyPublished && data.course_id) {
       const notifPayload = NotificationTemplates.announcementBroadcast(data.title, data.body, data.type, data.id)
       const categories: string[] = data.focus_linkup_categories ?? []
+      // Read off the row, not off this request: the email audience was chosen
+      // when the announcement was written, and approving it can be days later.
+      // This is the reason those columns exist rather than being a property of
+      // the send.
+      const emailMemberIds = await resolveEmailAudience(
+        admin,
+        data.course_id,
+        normaliseAudience({ tags: data.email_tags, memberIds: data.email_member_ids }),
+        ctx.userId,
+      )
       void kept((categories.length
-        ? notifyFocusMembers(data.course_id, categories, notifPayload, ctx.userId)
-        : notifyCourse(data.course_id, notifPayload, ctx.userId)
+        ? notifyFocusMembers(data.course_id, categories, notifPayload, ctx.userId, { emailMemberIds })
+        : notifyCourse(data.course_id, notifPayload, ctx.userId, { emailMemberIds })
       ).catch(() => {}))
     }
 

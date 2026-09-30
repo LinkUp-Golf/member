@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import { useForm, Controller } from "react-hook-form";
 import Select from "@/components/ui/Select";
+import MultiSelect from "@/components/ui/MultiSelect";
 import { createClient } from "@/lib/supabase";
 import { COURSE_SLUGS } from "@/lib/ghl/tags";
 import {
@@ -18,6 +19,7 @@ import {
 import FormField from "@/components/admin/FormField";
 import { formatRelativeTime } from "@/lib/utils";
 import MultiMediaUpload, { type MediaFile } from "@/components/ui/MultiMediaUpload";
+import type { SelectOption } from "@/components/ui/Select";
 import type { AnnouncementType, ModerationStatus } from "@/types";
 
 interface AnnouncementRow {
@@ -32,6 +34,9 @@ interface AnnouncementRow {
   video_url: string | null;
   media_urls: string[];
   focus_linkup_categories: string[];
+  /** Who it was emailed to. Both empty means everyone — see the form. */
+  email_tags: string[];
+  email_member_ids: string[];
   is_pinned: boolean;
   author: { first_name: string; last_name: string } | null;
 }
@@ -44,6 +49,13 @@ interface AnnouncementPayload {
   video_url: string | null;
   media_urls: string[];
   focus_linkup_categories: string[];
+  /**
+   * The email audience. Sent on publish and ignored by the PATCH route — the
+   * audience belongs to the act of publishing, so the edit form doesn't offer
+   * it and an edit can't change who already received the mail.
+   */
+  email_tags: string[];
+  email_member_ids: string[];
 }
 
 const TYPE_OPTIONS = [
@@ -83,7 +95,7 @@ export default function AdminAnnouncementsPage() {
     const { data } = await supabase
       .from("announcements")
       .select(
-        "id, type, title, body, status, published_at, created_at, image_url, video_url, media_urls, focus_linkup_categories, is_pinned, author:members!announcements_author_id_fkey(first_name, last_name)",
+        "id, type, title, body, status, published_at, created_at, image_url, video_url, media_urls, focus_linkup_categories, email_tags, email_member_ids, is_pinned, author:members!announcements_author_id_fkey(first_name, last_name)",
       )
       .in("course_id", courseIds)
       .order("created_at", { ascending: false })
@@ -335,6 +347,93 @@ interface AnnouncementFormValues {
   body: string
 }
 
+// ---- Who gets the email -------------------------------------
+//
+// The post lands in the community feed and the in-app notification goes to the
+// whole community, as they always did. What this narrows is the email, which is
+// the half that lands in someone's inbox whether or not they asked.
+//
+// Two ways to name the group, because an admin already thinks in both: a GHL
+// tag — the segments the rest of the business is run on — or people by name.
+// Both are additive, and leaving both empty means everyone, which is why the
+// empty state says "Everyone in the community" rather than "None".
+
+interface AudienceOptions {
+  tags: SelectOption[]
+  members: SelectOption[]
+  loading: boolean
+}
+
+/**
+ * The tags and members an admin can pick from.
+ *
+ * Tags come from GHL rather than from the tags our members happen to carry —
+ * the same choice /admin/analytics makes, so a campaign tag nobody has yet is
+ * offered and simply matches nobody. A GHL outage costs the tag list its
+ * options, not the form.
+ */
+function useAudienceOptions(): AudienceOptions {
+  const [tags, setTags] = useState<SelectOption[]>([])
+  const [members, setMembers] = useState<SelectOption[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let alive = true
+
+    const ghlTags = fetch('/api/admin/ghl/tags')
+      .then(r => r.json())
+      .then((d: { tags?: Array<{ name?: string }> }) => {
+        const names = Array.from(
+          new Set((d.tags ?? []).map(t => (t.name ?? '').trim()).filter(Boolean)),
+        ).sort((a, b) => a.localeCompare(b))
+        if (alive) setTags(names.map(name => ({ value: name, label: name })))
+      })
+      .catch(() => {})
+
+    const roster = createClient()
+      .from('members')
+      .select('id, first_name, last_name, email')
+      .order('first_name')
+      .then(({ data }) => {
+        if (!alive) return
+        setMembers(
+          (data ?? []).map(m => ({
+            value: m.id as string,
+            // The address is in the label so the search box finds people by it —
+            // two members called Dana is the ordinary case, and the email is
+            // what tells them apart.
+            label: `${m.first_name ?? ''} ${m.last_name ?? ''}`.trim() || (m.email as string),
+          })),
+        )
+      })
+
+    void Promise.allSettled([ghlTags, roster]).then(() => {
+      if (alive) setLoading(false)
+    })
+
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  return { tags, members, loading }
+}
+
+/** What an announcement's stored audience reads as, for the edit form. */
+function audienceSummary(row: AnnouncementRow, members: SelectOption[]): string {
+  const tags = row.email_tags ?? []
+  const ids = row.email_member_ids ?? []
+  if (tags.length === 0 && ids.length === 0) return 'Emailed to everyone in the community.'
+
+  const parts: string[] = []
+  if (tags.length) parts.push(`anyone tagged ${tags.join(', ')}`)
+  if (ids.length) {
+    const named = ids.map(id => members.find(m => m.value === id)?.label ?? 'a member')
+    parts.push(named.length > 3 ? `${named.length} members by name` : named.join(', '))
+  }
+  return `Emailed to ${parts.join(' and ')}.`
+}
+
 function AnnouncementForm({
   initial,
   onSubmit,
@@ -361,6 +460,12 @@ function AnnouncementForm({
   const [mediaFiles, setMediaFiles] = useState<MediaFile[]>(() => initial ? initMediaFiles(initial) : [])
   const [uploadStatus, setUploadStatus] = useState<string | null>(null)
   const [serverError, setServerError] = useState<string | null>(null)
+
+  // Not registered with react-hook-form: these are two lists behind a portaled
+  // panel, and Controller would buy nothing a pair of useStates doesn't.
+  const [emailTags, setEmailTags] = useState<string[]>(() => initial?.email_tags ?? [])
+  const [emailMemberIds, setEmailMemberIds] = useState<string[]>(() => initial?.email_member_ids ?? [])
+  const audience = useAudienceOptions()
 
   const isEditing = !!initial
   const saving = isSubmitting
@@ -411,6 +516,8 @@ function AnnouncementForm({
         video_url: resolved.find(m => m.mediaType === 'video')?.url ?? null,
         media_urls: resolved.map(m => m.url),
         focus_linkup_categories: [],
+        email_tags: emailTags,
+        email_member_ids: emailMemberIds,
       })
       if (err) { await cleanup(); setServerError(err) }
     } catch (e) {
@@ -480,6 +587,60 @@ function AnnouncementForm({
             maxFiles={5}
             disabled={saving}
           />
+
+          {isEditing ? (
+            // The mail has already gone; showing pickers here would imply it
+            // could be recalled. What's useful is the record of who got it.
+            <p className="text-xs text-gray-400">
+              {audienceSummary(initial, audience.members)}
+            </p>
+          ) : (
+            <div className="space-y-3 rounded-xl border border-gray-200 bg-gray-50/60 p-3">
+              <div>
+                <p className="text-sm font-medium text-gray-700">Email recipients</p>
+                <p className="mt-0.5 text-xs text-gray-400">
+                  Who also gets this by email. Leave both empty to email everyone in the
+                  community — the post and the in-app notification go to everyone either way.
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <FormField label="By GHL tag" htmlFor="broadcast-email-tags">
+                  <MultiSelect
+                    id="broadcast-email-tags"
+                    options={audience.tags}
+                    values={emailTags}
+                    onChange={setEmailTags}
+                    emptyLabel={audience.loading ? 'Loading tags…' : 'Everyone in the community'}
+                    countNoun="tags"
+                    searchPlaceholder="Search tags…"
+                    disabled={saving}
+                    triggerClassName={inputCls(false) + ' flex items-center justify-between gap-2 text-left bg-white'}
+                  />
+                </FormField>
+
+                <FormField label="By member" htmlFor="broadcast-email-members">
+                  <MultiSelect
+                    id="broadcast-email-members"
+                    options={audience.members}
+                    values={emailMemberIds}
+                    onChange={setEmailMemberIds}
+                    emptyLabel={audience.loading ? 'Loading members…' : 'Everyone in the community'}
+                    countNoun="members"
+                    searchPlaceholder="Search members…"
+                    disabled={saving}
+                    triggerClassName={inputCls(false) + ' flex items-center justify-between gap-2 text-left bg-white'}
+                  />
+                </FormField>
+              </div>
+
+              <p className="text-xs text-gray-400">
+                {emailTags.length === 0 && emailMemberIds.length === 0
+                  ? 'Every active member of the community will be emailed.'
+                  : 'Only the people matched above will be emailed. Anyone picked by name is emailed whether or not they carry one of the tags.'}
+              </p>
+            </div>
+          )}
 
           {!isEditing && (
             <p className="text-xs text-gray-400">
