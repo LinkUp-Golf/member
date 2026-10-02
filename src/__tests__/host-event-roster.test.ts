@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { rosterFor } from '@/lib/hosts/events'
 
-// Who the host sees on a round, and in what order. Two ways onto the same
-// afternoon — reserving through the event, or booking the venue that day — merge
-// into one list of faces, so the rules that keep one person from appearing twice
-// are what these lock.
+// Who the host sees on a round, and in what order. Three ways onto the same
+// afternoon — hosting it, reserving through the event, or booking the venue that
+// day — merge into one list of faces, so the rules that keep one person from
+// appearing twice are what these lock.
 
 const card = (first: string, last = 'Fields', avatar: string | null = null) => ({
   first_name: first,
@@ -57,8 +57,8 @@ describe('rosterFor', () => {
   })
 
   it('drops a reserved member whose card is missing rather than showing a blank', () => {
-    // The count beside the faces comes from filled_spots, not from this list, so
-    // a member the lookup missed costs a face and not the number.
+    // Capacity comes from filled_spots, not from this list, so a member the
+    // lookup missed costs a face rather than a seat.
     const roster = rosterFor(['m1', 'ghost'], new Map([['m1', card('Ana')]]), [])
     expect(roster.map(p => p.member_id)).toEqual(['m1'])
   })
@@ -74,6 +74,65 @@ describe('rosterFor', () => {
 
   it('is empty when nobody is on the round', () => {
     expect(rosterFor([], new Map(), [])).toEqual([])
+  })
+})
+
+// The host is on their own round. It's the row's headcount as well as its faces,
+// and "3 of 12" for a four-ball of host plus three was the one number on the
+// screen the host could check against the people in front of them.
+describe('rosterFor — the host', () => {
+  const cards = () =>
+    new Map([
+      ['host-1', card('Wren', 'Delgado')],
+      ['m1', card('Ana')],
+    ])
+
+  it('puts the host at the head of the list', () => {
+    const roster = rosterFor(['m1'], cards(), [attendee('m2', 'Ben')], undefined, 'host-1')
+    expect(roster.map(p => [p.first_name, p.source])).toEqual([
+      ['Wren', 'host'],
+      ['Ana', 'reserved'],
+      ['Ben', 'booking'],
+    ])
+  })
+
+  it('counts the host, so the round reads one more than its guests', () => {
+    const roster = rosterFor(['m1'], cards(), [], undefined, 'host-1')
+    expect(roster).toHaveLength(2)
+  })
+
+  it('lists a host who also booked the venue once, as the host', () => {
+    // They turn up through loadBookedAttendees like anyone else with a booking
+    // at that club that day; hosting is the more specific thing about them.
+    const roster = rosterFor([], cards(), [attendee('host-1', 'Wren')], undefined, 'host-1')
+    expect(roster).toHaveLength(1)
+    expect(roster[0]).toMatchObject({ member_id: 'host-1', source: 'host' })
+  })
+
+  it('lists a host who also reserved a spot once, as the host', () => {
+    const roster = rosterFor(['host-1'], cards(), [], undefined, 'host-1')
+    expect(roster.map(p => [p.member_id, p.source])).toEqual([['host-1', 'host']])
+  })
+
+  it('can be ticked as present like anyone else', () => {
+    // They played. Nothing about the round distinguishes their attendance from a
+    // guest's, and the route computes the roster this same way before saving.
+    const roster = rosterFor([], cards(), [], new Set(['host-1']), 'host-1')
+    expect(roster[0]).toMatchObject({ source: 'host', attended: true })
+  })
+
+  it('leaves the host out when there is no card for them', () => {
+    // Same rule as a reserved member we can't name: a face with no name is worse
+    // than a face fewer, and capacity never came from this list.
+    const roster = rosterFor(['m1'], new Map([['m1', card('Ana')]]), [], undefined, 'host-1')
+    expect(roster.map(p => p.member_id)).toEqual(['m1'])
+  })
+
+  it('leaves the list alone when no host was given', () => {
+    // The member-facing endpoints don't ask for the roster at all, and the admin
+    // one doesn't name a host.
+    const roster = rosterFor(['m1'], cards(), [], undefined, null)
+    expect(roster.map(p => [p.member_id, p.source])).toEqual([['m1', 'reserved']])
   })
 })
 

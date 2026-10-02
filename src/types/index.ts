@@ -534,7 +534,11 @@ export interface EventPlayer {
    */
   email?: string | null
   avatar_url: string | null
-  source: 'reserved' | 'booking'
+  /**
+   * How they got onto the round. 'host' is the host themselves, who is on it by
+   * definition and takes a seat like anyone else — see rosterFor.
+   */
+  source: 'host' | 'reserved' | 'booking'
   /**
    * Whether the host marked them present after the round.
    *

@@ -361,11 +361,15 @@ const EventRow = memo(function EventRow({
   // all from one place, because the status alone can't answer the first of those.
   const proof = eventProofState(event);
   const proofImage = currentProof(event);
-  // Everyone at the round: reserved through the event, plus members who booked
-  // the venue that day. The roster is the headcount as well as the faces — it
-  // was filled_spots + booked_spots, which counts a member who did both twice,
-  // so the number could say four while three faces were shown. filled_spots is
-  // still what capacity is enforced against in SQL, which is why it isn't this.
+  // Everyone at the round: the host, whoever reserved through the event, and
+  // members who booked the venue that day. The roster is the headcount as well
+  // as the faces — it was filled_spots + booked_spots, which counts a member who
+  // did both twice, so the number could say four while three faces were shown.
+  //
+  // The host is in it because they are playing: "3 of 12" for a four-ball of
+  // host plus three was the one number here the host could check against the
+  // people in front of them. filled_spots is still what capacity is enforced
+  // against in SQL, which is why it isn't this.
   const players = event.players ?? [];
   const playing = players.length;
   // The roster the sheet is showing, or null when it's shut. Held per row rather

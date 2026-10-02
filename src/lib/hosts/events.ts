@@ -410,13 +410,21 @@ export const bookedAttendeeKey = venueDayKey
 /**
  * Everyone at one round, in the order the host should read them.
  *
- * Reservations first, then members who only booked the venue that day. Anyone
- * who did both appears once, as a reservation — that is the more specific
- * commitment, and two faces for one person would overstate the round.
+ * The host first, then reservations, then members who only booked the venue that
+ * day. Anyone who appears twice appears once, at the first of those — the host is
+ * the host whether or not they also booked a seat, and a reservation is a more
+ * specific commitment than a booking at the same club on the same day. Two faces
+ * for one person would overstate the round.
+ *
+ * The host counts because they are playing. The round is a group going out with
+ * them in it, and a row reading "3 of 12" for a four-ball of host plus three was
+ * the one number on the screen the host could check against the people standing
+ * in front of them. It is not a capacity change: filled_spots and
+ * remaining_spots are still counted from the registrations alone, because that
+ * is what reserve_hosted_event_spot enforces in SQL.
  *
  * A reserved member whose card couldn't be loaded is dropped rather than shown
- * nameless: the count beside the faces comes from filled_spots, which is counted
- * from the registrations themselves, so the number stays right either way.
+ * nameless, as is a host we can't name.
  *
  * `attended` is who the host has ticked as present (hosted_event_attendance).
  * It's carried on the roster rather than fetched beside it because the two are
@@ -430,9 +438,21 @@ export function rosterFor(
   cards: Map<string, MemberCard>,
   attendees: BookedAttendee[],
   attended?: ReadonlySet<string>,
+  hostMemberId?: string | null,
 ): EventPlayer[] {
   const players: EventPlayer[] = []
   const seen = new Set<string>()
+
+  const hostCard = hostMemberId ? cards.get(hostMemberId) : undefined
+  if (hostMemberId && hostCard) {
+    seen.add(hostMemberId)
+    players.push({
+      member_id: hostMemberId,
+      ...hostCard,
+      source: 'host',
+      attended: !!attended?.has(hostMemberId),
+    })
+  }
 
   for (const id of reservedIds) {
     const card = cards.get(id)
@@ -463,10 +483,10 @@ export function rosterFor(
  * is given) whether they already hold an active reservation. Batches the
  * registration count into a single query across all events.
  *
- * `withPlayers` adds the roster itself — everyone at the round, with their name,
- * face and whether the host marked them present. Opt-in rather than always,
- * because it names members: the host's own screens ask for it, the member-facing
- * endpoints don't.
+ * `withPlayers` adds the roster itself — everyone at the round, the host
+ * included, with their name, face and whether the host marked them present.
+ * Opt-in rather than always, because it names members: the host's own screens
+ * ask for it, the member-facing endpoints don't.
  */
 export async function enrichHostedEvents(
   admin: AdminClient,
@@ -507,12 +527,37 @@ export async function enrichHostedEvents(
   // real roster while capacity keeps one definition.
   const booked = await loadBookedAttendees(admin, events)
 
-  // The people who reserved through the event. loadBookedAttendees already has
-  // the other half's names, so this is the one extra read the roster costs.
+  // Which member each event's host is. One row per host behind the whole list,
+  // and only for the roster: the host is on their own round by definition, and
+  // nothing but the roster has to say so.
+  const hostMemberByEvent = new Map<string, string>()
+  if (opts.withPlayers) {
+    const hostIds = Array.from(new Set(events.map(e => e.host_id)))
+    const { data: hostRows } = await admin
+      .from('hosts')
+      .select('id, member_id')
+      .in('id', hostIds)
+    const memberByHost = new Map(
+      ((hostRows ?? []) as { id: string; member_id: string }[]).map(h => [h.id, h.member_id]),
+    )
+    for (const e of events) {
+      const memberId = memberByHost.get(e.host_id)
+      if (memberId) hostMemberByEvent.set(e.id, memberId)
+    }
+  }
+
+  // The people who reserved through the event, and the hosts. loadBookedAttendees
+  // already has the other half's names, so this is the one extra read the roster
+  // costs.
   const reservedCards = opts.withPlayers
     ? await loadMemberCards(
         admin,
-        Array.from(new Set(Array.from(reservedBy.values()).flat())),
+        Array.from(
+          new Set([
+            ...Array.from(reservedBy.values()).flat(),
+            ...hostMemberByEvent.values(),
+          ]),
+        ),
       )
     : new Map<string, MemberCard>()
 
@@ -549,6 +594,7 @@ export async function enrichHostedEvents(
               reservedCards,
               attendees,
               attendedByEvent.get(e.id),
+              hostMemberByEvent.get(e.id),
             ),
           }
         : {}),
