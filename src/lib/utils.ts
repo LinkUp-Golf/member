@@ -270,6 +270,31 @@ export function titleCaseName(name: string): string {
     .replace(/(^|[\s\-'’])(\p{L})/gu, (_, before: string, letter: string) => before + letter.toUpperCase())
 }
 
+/**
+ * What to call someone, from whatever we hold for them.
+ *
+ * A member row can reach us with no name at all: a non-member guest is
+ * provisioned from an email address and a phone number, and GHL will happily
+ * hold a contact whose first and last name are both blank. Every list that
+ * named those people called them "Member", which is the one thing a list of
+ * people must not do — four rows reading "Member" are four people the reader
+ * cannot tell apart, and one of them might be the person they are looking for.
+ *
+ * So the name comes first, title-cased (see titleCaseName), and the address is
+ * the fallback. An email is not a name, and it is never title-cased: an address
+ * is a string that has to stay exactly as it is to be recognised.
+ *
+ * Returns '' when we hold neither, so the caller supplies its own last resort.
+ */
+export function nameOrEmail(
+  name: string | null | undefined,
+  email?: string | null,
+): string {
+  const named = titleCaseName((name ?? '').trim())
+  if (named) return named
+  return (email ?? '').trim()
+}
+
 // ---- Industry category short label -------------------------
 export function shortCategory(category: string): string {
   const map: Record<string, string> = {

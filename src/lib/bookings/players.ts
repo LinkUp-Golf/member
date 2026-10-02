@@ -24,6 +24,16 @@ export interface CalendarPlayer {
   memberId: string
   firstName: string
   lastName: string
+  /**
+   * The member's address, and only as a label: present when they have no name
+   * for the list to show, absent when they do.
+   *
+   * A member can genuinely have neither first nor last name — a non-member guest
+   * is provisioned from an address and a phone number — and this list used to
+   * call every one of them "Member". Sent conditionally because that is all it
+   * is for: nothing here needs a way to contact anybody.
+   */
+  email?: string | null
   avatarUrl: string | null
   courseId: string
   /** Wall-clock 'HH:mm:ss' at the venue. */
@@ -56,7 +66,10 @@ export function playingMemberId(row: Pick<PlayingRow, 'member_id' | 'player_memb
  */
 export function groupPlayersByDay(
   rows: PlayingRow[],
-  members: Map<string, { firstName: string; lastName: string; avatarUrl: string | null }>,
+  members: Map<
+    string,
+    { firstName: string; lastName: string; avatarUrl: string | null; email?: string | null }
+  >,
   selfId: string,
 ): Record<string, CalendarPlayer[]> {
   const days: Record<string, CalendarPlayer[]> = {}
@@ -78,6 +91,7 @@ export function groupPlayersByDay(
       memberId,
       firstName: member.firstName,
       lastName: member.lastName,
+      ...(member.email ? { email: member.email } : {}),
       avatarUrl: member.avatarUrl,
       courseId: row.course_id,
       teeTime: row.tee_time,
@@ -122,16 +136,25 @@ export async function loadPlayersForRange(
   // as "nobody's playing" (same reason as loadBookedAttendees).
   const { data: memberRows } = await admin
     .from('members')
-    .select('id, first_name, last_name, profile:member_profiles(avatar_url)')
+    // email comes along for the few members who have no name — see
+    // CalendarPlayer.email — and is dropped for everybody else below.
+    .select('id, first_name, last_name, email, profile:member_profiles(avatar_url)')
     .in('id', memberIds)
 
-  const members = new Map<string, { firstName: string; lastName: string; avatarUrl: string | null }>()
+  const members = new Map<
+    string,
+    { firstName: string; lastName: string; avatarUrl: string | null; email?: string | null }
+  >()
   for (const m of memberRows ?? []) {
     const profile = Array.isArray(m.profile) ? m.profile[0] : m.profile
+    const firstName = (m.first_name as string) ?? ''
+    const lastName = (m.last_name as string) ?? ''
     members.set(m.id as string, {
-      firstName: (m.first_name as string) ?? '',
-      lastName: (m.last_name as string) ?? '',
+      firstName,
+      lastName,
       avatarUrl: (profile as { avatar_url: string | null } | null)?.avatar_url ?? null,
+      // Only where there is no name to show it beside.
+      ...(`${firstName} ${lastName}`.trim() ? {} : { email: (m.email as string) ?? null }),
     })
   }
 

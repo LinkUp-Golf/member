@@ -6,6 +6,7 @@ import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient, createRouteHandlerClient } from '@/lib/supabase-server'
 import { coursePaymentOptions } from '@/lib/bookings/payment-options'
+import { nameOrEmail } from '@/lib/utils'
 import type { AuthContext } from '@/lib/auth/types'
 
 // GET /api/bookings
@@ -43,17 +44,27 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   if (invitedRows.length > 0) {
     const admin = createAdminClient()
 
-    // Attach booker first name
+    // What to call whoever booked the round this member was added to.
+    //
+    // Their full name where we have one, and their address where we don't — a
+    // booker with no name on their member row made the card read "Booker" and
+    // the round read "invited by" nobody, which is the one thing an invited
+    // member wants from it. nameOrEmail decides, so the client never has to.
     const bookerIds = [...new Set(invitedRows.map(b => b.member_id))]
     const { data: bookers } = await supabase
       .from('members')
-      .select('id, first_name')
+      .select('id, first_name, last_name, email')
       .in('id', bookerIds)
-    const nameById = Object.fromEntries((bookers ?? []).map(m => [m.id as string, m.first_name as string]))
+    const nameById = Object.fromEntries(
+      (bookers ?? []).map(m => [
+        m.id as string,
+        nameOrEmail(`${m.first_name ?? ''} ${m.last_name ?? ''}`, m.email as string | null),
+      ]),
+    )
 
     rows = rows.map(b =>
       b.player_member_id === ctx.userId
-        ? { ...b, booker_name: nameById[b.member_id] ?? null }
+        ? { ...b, booker_name: nameById[b.member_id] || null }
         : b
     )
 
@@ -74,7 +85,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
       for (const s of siblings ?? []) {
         if (!existingIds.has(s.id as string)) {
           existingIds.add(s.id as string)
-          siblingRows.push({ ...s, is_sibling: true, booker_name: nameById[inv.member_id] ?? null })
+          siblingRows.push({ ...s, is_sibling: true, booker_name: nameById[inv.member_id] || null })
         }
       }
     }))

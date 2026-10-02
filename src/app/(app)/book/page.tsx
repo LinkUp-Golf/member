@@ -643,6 +643,9 @@ function PendingPaymentBanner({
   // instead of the booker-facing wording. An invited player only ever has
   // their own single row, so this reads off the group's `self` row.
   const invited = current.self?.invited ?? false;
+  // Already the label to print: GET /api/bookings resolves it to the booker's
+  // name, or their address when their member row carries no name (nameOrEmail),
+  // which is why nothing here cases it.
   const bookerName = current.self?.booker_name ?? null;
 
   async function messageMember(memberId: string) {
@@ -709,7 +712,7 @@ function PendingPaymentBanner({
                 You&apos;ve been invited
                 {bookerName && (
                   <>
-                    {" "}by <span className="capitalize font-medium">{bookerName}</span>
+                    {" "}by <span className="font-medium">{bookerName}</span>
                   </>
                 )}
                 {" "}to play at {current.course_name} on{" "}
@@ -717,7 +720,7 @@ function PendingPaymentBanner({
                 {formatTeeTime(current.tee_time)}. Pay your share below — or
                 {bookerName ? (
                   <>
-                    {" "}have <span className="capitalize font-medium">{bookerName}</span> pay it
+                    {" "}have <span className="font-medium">{bookerName}</span> pay it
                   </>
                 ) : (
                   " have the booker pay it"

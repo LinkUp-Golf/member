@@ -295,6 +295,8 @@ export interface BookedAttendee {
   first_name: string
   last_name: string
   avatar_url: string | null
+  /** Set only for a member with no name — see MemberCard.email. */
+  email?: string | null
   tee_time: string | null
 }
 
@@ -305,6 +307,8 @@ export interface MemberCard {
   first_name: string
   last_name: string
   avatar_url: string | null
+  /** Set only for a member with no name, as the label to show instead. */
+  email?: string | null
 }
 
 /**
@@ -323,15 +327,20 @@ async function loadMemberCards(
 
   const { data: members } = await admin
     .from('members')
-    .select('id, first_name, last_name, profile:member_profiles(avatar_url)')
+    // email for the few with no name to show — see MemberCard.email — and
+    // dropped for everybody else below.
+    .select('id, first_name, last_name, email, profile:member_profiles(avatar_url)')
     .in('id', memberIds)
 
   for (const m of members ?? []) {
     const profile = Array.isArray(m.profile) ? m.profile[0] : m.profile
+    const first = (m.first_name as string) ?? ''
+    const last = (m.last_name as string) ?? ''
     byId.set(m.id as string, {
-      first_name: m.first_name as string,
-      last_name: m.last_name as string,
+      first_name: first,
+      last_name: last,
       avatar_url: (profile as { avatar_url: string | null } | null)?.avatar_url ?? null,
+      ...(`${first} ${last}`.trim() ? {} : { email: (m.email as string) ?? null }),
     })
   }
   return byId
@@ -386,6 +395,7 @@ export async function loadBookedAttendees(
       first_name: member.first_name,
       last_name: member.last_name,
       avatar_url: member.avatar_url,
+      ...(member.email ? { email: member.email } : {}),
       tee_time: (r.tee_time as string) ?? null,
     })
     out.set(key, list)
@@ -439,6 +449,7 @@ export function rosterFor(
       first_name: a.first_name,
       last_name: a.last_name,
       avatar_url: a.avatar_url,
+      ...(a.email ? { email: a.email } : {}),
       source: 'booking',
       attended: !!attended?.has(a.member_id),
     })

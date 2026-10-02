@@ -28,6 +28,41 @@ describe('playingMemberId', () => {
   })
 })
 
+// A member can have no name at all — a non-member guest is provisioned from an
+// address and a phone number — and this list called every one of them "Member".
+describe('groupPlayersByDay — a member with no name', () => {
+  const nameless = 'nameless-id'
+  const row = {
+    member_id: nameless,
+    player_member_id: null,
+    guest_name: null,
+    course_id: COURSE,
+    booking_date: '2026-09-20',
+    tee_time: '09:00:00',
+  }
+
+  it('carries the address through as the label to show instead', () => {
+    const days = groupPlayersByDay(
+      [row],
+      new Map([
+        [nameless, { firstName: '', lastName: '', avatarUrl: null, email: 'ada@example.com' }],
+      ]),
+      'me',
+    )
+    expect(days['2026-09-20']?.[0]?.email).toBe('ada@example.com')
+  })
+
+  it('carries nothing for a member we can name', () => {
+    // It is a fallback label, not contact details — see CalendarPlayer.email.
+    const days = groupPlayersByDay(
+      [{ ...row, member_id: BOOKER }],
+      new Map([[BOOKER, { firstName: 'Bea', lastName: 'Booker', avatarUrl: null }]]),
+      'me',
+    )
+    expect(days['2026-09-20']?.[0]?.email).toBeUndefined()
+  })
+})
+
 describe('groupPlayersByDay', () => {
   const members = new Map([
     [BOOKER, { firstName: 'Bea', lastName: 'Booker', avatarUrl: null }],

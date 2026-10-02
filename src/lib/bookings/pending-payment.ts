@@ -1,5 +1,5 @@
 import { format } from 'date-fns'
-import { titleCaseName } from '@/lib/utils'
+import { nameOrEmail, titleCaseName } from '@/lib/utils'
 import { validateUUID } from '@/lib/validation'
 import { bookingAmountDue } from './price'
 import { coursePaymentOptions, type PaymentOption } from './payment-options'
@@ -45,8 +45,10 @@ export interface PendingPaymentBooking {
   // Lets the UI explain that they were invited and owe their share, instead of
   // the booker-facing "before booking another" wording.
   invited: boolean
-  // Name of the member who booked this round, shown when `invited` so the
-  // added player can see who invited them. Null otherwise.
+  // What to call the member who booked this round, shown when `invited` so the
+  // added player can see who invited them. Null otherwise. Their name where we
+  // hold one and their address where we don't, already cased for printing —
+  // see nameOrEmail.
   booker_name: string | null
   // What this row costs, so the payment banner can say what paying with credit
   // would cover. See bookingAmountDue.
@@ -79,7 +81,7 @@ export function pendingPaymentBlockMessage(
     // The member was added to someone else's round and owes their own share.
     if (first.invited) {
       return first.booker_name
-        ? `You have a payment due for the round ${titleCaseName(first.booker_name)} added you to at ${first.course_name} on ${date}. Please pay before booking again.`
+        ? `You have a payment due for the round ${first.booker_name} added you to at ${first.course_name} on ${date}. Please pay before booking again.`
         : `You have a payment due for a round you were added to at ${first.course_name} on ${date}. Please pay before booking again.`
     }
     // The member's own booking.
@@ -119,7 +121,7 @@ export async function findPendingPaymentBookings(
 ): Promise<PendingPaymentBooking[]> {
   const { data } = await admin
     .from('bookings')
-    .select('id, member_id, course_id, booking_date, tee_time, status, guest_name, player_member_id, amount_charged, booker:members!bookings_member_id_fkey(first_name, last_name), course:courses!bookings_course_id_fkey(name, payment_url, payment_options, cost_per_player)')
+    .select('id, member_id, course_id, booking_date, tee_time, status, guest_name, player_member_id, amount_charged, booker:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name, payment_url, payment_options, cost_per_player)')
     .or(`member_id.eq.${memberId},player_member_id.eq.${memberId}`)
     .in('status', UNPAID_BOOKING_STATUSES)
     .is('payment_method', null)
@@ -136,9 +138,15 @@ export async function findPendingPaymentBookings(
     // booking — they didn't book it (member_id is the booker), they were
     // invited into it (player_member_id points at them).
     const invited = row.member_id !== memberId && row.player_member_id === memberId
-    const booker = row.booker as unknown as { first_name: string | null; last_name: string | null } | null
+    const booker = row.booker as unknown as {
+      first_name: string | null
+      last_name: string | null
+      email: string | null
+    } | null
+    // Name where we have one, address where we don't — and cased here, which is
+    // why the message below prints it as it comes. See nameOrEmail.
     const bookerName = booker
-      ? `${booker.first_name ?? ''} ${booker.last_name ?? ''}`.trim() || null
+      ? nameOrEmail(`${booker.first_name ?? ''} ${booker.last_name ?? ''}`, booker.email) || null
       : null
     return {
       id: row.id,

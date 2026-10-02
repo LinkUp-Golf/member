@@ -524,6 +524,15 @@ export interface EventPlayer {
   member_id: string
   first_name: string
   last_name: string
+  /**
+   * The member's address, and only as a label: present when they have no name
+   * for the list to show, absent when they do.
+   *
+   * A member can genuinely have neither — a non-member guest is provisioned from
+   * an address and a phone number — and the roster used to call every one of
+   * them "Member". See nameOrEmail.
+   */
+  email?: string | null
   avatar_url: string | null
   source: 'reserved' | 'booking'
   /**

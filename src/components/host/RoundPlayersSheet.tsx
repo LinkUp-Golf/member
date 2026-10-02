@@ -30,7 +30,7 @@ import { createPortal } from 'react-dom'
 import { Check, Clock, X } from 'lucide-react'
 import { format } from 'date-fns'
 import Avatar from '@/components/ui/Avatar'
-import { formatEventTeeTime, titleCaseName } from '@/lib/utils'
+import { formatEventTeeTime, nameOrEmail } from '@/lib/utils'
 import type { EventPlayer } from '@/types'
 
 export interface RoundPlayers {
@@ -240,8 +240,10 @@ export default function RoundPlayersSheet({
                 )}
                 <ul className="mt-1.5 space-y-1.5">
                   {group.players.map(p => {
+                    // Their address rather than the word "Member" when we hold
+                    // no name for them — see nameOrEmail.
                     const name =
-                      titleCaseName(`${p.first_name} ${p.last_name}`.trim()) || 'Member'
+                      nameOrEmail(`${p.first_name} ${p.last_name}`, p.email) || 'Member'
                     const ticked = marked.has(p.member_id)
                     const row = (
                       <>
