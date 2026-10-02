@@ -54,17 +54,9 @@ export interface RoundPlayers {
 
 /** How each person got onto the round, in the host's terms. */
 const SOURCE_LABEL: Record<EventPlayer['source'], string> = {
-  host: 'Hosting this round',
   reserved: 'Reserved a spot',
   booking: 'Booked this venue',
 }
-
-/**
- * The order the groups read in: the host, then who reserved, then who only
- * booked the venue. Same order rosterFor builds them in — this is the sheet
- * saying it again for the headings rather than deciding it.
- */
-const SOURCE_ORDER = ['host', 'reserved', 'booking'] as const
 
 export default function RoundPlayersSheet({
   round,
@@ -119,7 +111,7 @@ export default function RoundPlayersSheet({
   // in; this only splits them so each group can be counted under its own head.
   const groups = useMemo(() => {
     const players = shown?.players ?? []
-    return SOURCE_ORDER
+    return (['reserved', 'booking'] as const)
       .map(source => ({ source, players: players.filter(p => p.source === source) }))
       .filter(g => g.players.length > 0)
   }, [shown])
