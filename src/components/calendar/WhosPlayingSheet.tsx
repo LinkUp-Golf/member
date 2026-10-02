@@ -22,7 +22,7 @@ import Link from 'next/link'
 import { Clock, X } from 'lucide-react'
 import { format } from 'date-fns'
 import Avatar from '@/components/ui/Avatar'
-import { cn, formatTeeTime, titleCaseName } from '@/lib/utils'
+import { cn, formatTeeTime, nameOrEmail, titleCaseName } from '@/lib/utils'
 import { VENUE_DOT as DOT } from '@/components/calendar/venue-colours'
 import { buildTeeSheet, distinctPlayers, type VenueTeeSheet } from '@/lib/bookings/tee-sheet'
 import type { DaySeats } from '@/lib/bookings/occupancy'
@@ -276,7 +276,11 @@ export default function WhosPlayingSheet({
                           </li>
                         )}
                         {tee.players.map(p => {
-                          const name = titleCaseName(`${p.firstName} ${p.lastName}`.trim()) || 'Member'
+                          // Their address rather than the word "Member" when we
+                          // hold no name: four rows reading "Member" are four
+                          // people the reader can't tell apart. See nameOrEmail.
+                          const name =
+                            nameOrEmail(`${p.firstName} ${p.lastName}`, p.email) || 'Member'
                           const row = (
                             <>
                               <Avatar

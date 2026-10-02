@@ -31,7 +31,7 @@ import RoundPlayersSheet, {
   type RoundPlayers,
 } from "@/components/host/RoundPlayersSheet";
 import { HOST_EVENT_GUEST_RATE_USD } from "@/lib/constants";
-import { formatEventTeeTime as fmtTime, cn } from "@/lib/utils";
+import { formatEventTeeTime as fmtTime, cn, nameOrEmail } from "@/lib/utils";
 import {
   emptyNewLinkup,
   hasNewLinkupErrors,
@@ -304,8 +304,10 @@ function PlayerFaces({ players }: { players: EventPlayer[] }) {
   const shown =
     players.length > MAX_FACES ? players.slice(0, MAX_FACES - 1) : players;
   const more = players.length - shown.length;
+  // Their address rather than the word "Member" when we hold no name — a face
+  // with no name is the one case this title has to earn. See nameOrEmail.
   const name = (p: EventPlayer) =>
-    `${p.first_name} ${p.last_name}`.trim() || "Member";
+    nameOrEmail(`${p.first_name} ${p.last_name}`, p.email) || "Member";
 
   return (
     // Labelled on the button that wraps it, so the faces themselves are

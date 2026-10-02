@@ -77,6 +77,32 @@ describe('rosterFor', () => {
   })
 })
 
+// A member can genuinely have no name: a non-member guest is provisioned from an
+// address and a phone number. The roster called every one of them "Member".
+describe('rosterFor — a member with no name', () => {
+  it('carries the address through as the label to show instead', () => {
+    const roster = rosterFor(
+      ['m1'],
+      new Map([['m1', { first_name: '', last_name: '', avatar_url: null, email: 'ada@example.com' }]]),
+      [],
+    )
+    expect(roster[0]?.email).toBe('ada@example.com')
+  })
+
+  it('carries nothing for a member we can name', () => {
+    // It is a fallback label, not contact details — see MemberCard.email.
+    const roster = rosterFor(['m1'], new Map([['m1', card('Ana')]]), [])
+    expect(roster[0]?.email).toBeUndefined()
+  })
+
+  it('carries it for a member who only booked the venue', () => {
+    const roster = rosterFor([], new Map(), [
+      { ...attendee('m2', ''), last_name: '', email: 'ben@example.com' },
+    ])
+    expect(roster[0]?.email).toBe('ben@example.com')
+  })
+})
+
 // Who actually came. The host ticks it after the round, against the same roster,
 // and the tick has to survive both ways onto the list — a member who reserved and
 // a member who only booked the venue were at the same round.
