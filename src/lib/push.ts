@@ -283,13 +283,26 @@ export const NotificationTemplates = {
     }
   },
 
-  announcementBroadcast: (title: string, body: string, type = 'admin_broadcast', announcementId?: string): PushPayload => ({
+  /**
+   * `images` are the post's own photos (announcementImages), which the email
+   * shows under the body — a post about a tournament arrives looking like the
+   * post rather than like a line of text about one. Push takes the first, which
+   * is the only one it has room for.
+   */
+  announcementBroadcast: (
+    title: string,
+    body: string,
+    type = 'admin_broadcast',
+    announcementId?: string,
+    images: string[] = [],
+  ): PushPayload => ({
     title: title.length > 60 ? title.slice(0, 60) + '…' : title,
     body:  body.length > 150 ? body.slice(0, 150) + '…' : body,
     url:   announcementId ? `/more/announcements/${announcementId}` : '/more/announcements',
     tag:   `announcement-${type}`,
     subject: `LinkUp announcement: ${title.length > 60 ? title.slice(0, 60) + '…' : title}`,
     cta:   'Read the announcement',
+    ...(images[0] ? { image: images[0], images } : {}),
   }),
 
   promotionAvailable: (partnerName: string, promoTitle: string, promotionId?: string): PushPayload => ({

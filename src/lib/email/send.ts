@@ -121,14 +121,17 @@ export function renderNotification(payload: PushPayload, recipient?: string) {
     ctaUrl: absoluteUrl(payload.url),
     ctaLabel: payload.cta || DEFAULT_CTA,
     logoUrl: assetUrl(LOGO_PATH),
-    // The push notification's own image, when it has one — same asset, same
-    // notification. A relative path is one of ours, so it resolves against the
-    // asset origin; an absolute one is already wherever it lives.
-    imageUrl: payload.image
-      ? /^https?:\/\//i.test(payload.image)
-        ? payload.image
-        : assetUrl(payload.image)
-      : null,
+    // The notification's own images, when it has any — same assets, same
+    // notification. `images` is the whole set (an announcement's photos) and
+    // `image` the single one push can show, so either answers this. A relative
+    // path is one of ours and resolves against the asset origin; an absolute one
+    // is already wherever it lives.
+    imageUrls: (payload.images?.length
+      ? payload.images
+      : payload.image
+        ? [payload.image]
+        : []
+    ).map(src => (/^https?:\/\//i.test(src) ? src : assetUrl(src))),
     preheader: payload.body,
     settingsUrl: `${appUrl()}/more/settings`,
   })

@@ -9,6 +9,7 @@ import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
 import { NotificationTemplates } from '@/lib/push'
 import { notifyCourse, notifyFocusMembers, kept } from '@/lib/notify'
 import { normaliseAudience, resolveEmailAudience } from '@/lib/announcements/recipients'
+import { announcementImages } from '@/lib/announcements/media'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(
@@ -62,10 +63,21 @@ export const POST = withAuth(
 
     // Notify course members (fire-and-forget; excludes the author).
     // When focus_linkup_categories are set, only notify subscribed members.
-    const notifPayload = NotificationTemplates.announcementBroadcast(data.title, data.body, data.type, data.id)
+    // The post's own photos ride along: the email shows them under the body, so
+    // a post about a tournament arrives looking like the post. Read off the
+    // inserted row rather than the request, so the email can only show media the
+    // announcement actually kept.
+    const notifPayload = NotificationTemplates.announcementBroadcast(
+      data.title,
+      data.body,
+      data.type,
+      data.id,
+      announcementImages(data),
+    )
     const categories: string[] = body.focus_linkup_categories ?? []
     // The post and the in-app notification go to the community either way; only
-    // the email narrows. null here means "the same people the push reaches".
+    // the email narrows. An empty list is a real answer — nobody was named, so
+    // nobody is emailed — and must be passed through as one.
     const emailMemberIds = await resolveEmailAudience(admin, body.course_id, audience, ctx.userId)
     void kept((categories.length
       ? notifyFocusMembers(body.course_id, categories, notifPayload, ctx.userId, { emailMemberIds })
