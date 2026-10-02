@@ -381,16 +381,17 @@ export const NotificationTemplates = {
     cta:   'View the round',
   }),
 
-  // Sent to admins when a host's event goes live. Events publish without
-  // waiting for approval, so this is the after-the-fact heads-up that gives an
-  // admin the chance to reject one that shouldn't have gone out.
-  // Sent to admins when a host submits an event. It is not live — it sits in
-  // 'pending_approval' until someone sets up the GHL calendar and approves it,
-  // so this is a queue item to action, not an FYI about something already out.
-  // A host asking to run a round. Nothing is visible to members until an admin
-  // approves it, so this push is the only thing that says there's a queue.
-  // `dateCount` covers the batch case: a host picks their dates in one go, and
-  // naming only the first would understate what's waiting.
+  /**
+   * A host asking for a club we don't have yet — the only hosted round that
+   * still waits on an admin.
+   *
+   * Nothing is visible to members until the venue is set up and approved, so this
+   * push is the only thing that says there's a queue. A round at a venue already
+   * on LinkUp publishes on creation and sends hostedEventListed instead.
+   *
+   * `dateCount` covers the batch case: a host picks their dates in one go, and
+   * naming only the first would understate what's waiting.
+   */
   hostedEventNeedsReview: (
     hostName: string,
     courseName: string,
@@ -405,6 +406,31 @@ export const NotificationTemplates = {
     tag:   'hosted-event-review',
     subject: `${titleCaseName(hostName)} wants to host a round at ${courseName}`,
     cta:   'Review it now',
+  }),
+
+  /**
+   * A round that is already live, for admins to know about rather than action.
+   *
+   * At a venue already on LinkUp a host's round publishes as it's created —
+   * nothing was waiting on a decision — so this is the after-the-fact heads-up,
+   * and the only thing left to decide is whether to take one down. Deliberately
+   * worded as news, not as a task: a queue that is really an inbox stops being
+   * read.
+   */
+  hostedEventListed: (
+    hostName: string,
+    courseName: string,
+    date: string,
+    dateCount = 1,
+  ): PushPayload => ({
+    title: 'A host listed a round',
+    body: dateCount > 1
+      ? `${titleCaseName(hostName)} listed ${dateCount} rounds at ${courseName}, from ${date}. Members can reserve them now.`
+      : `${titleCaseName(hostName)} listed a round at ${courseName} on ${date}. Members can reserve it now.`,
+    url:   '/admin/hosts',
+    tag:   'hosted-event-listed',
+    subject: `${titleCaseName(hostName)} listed a round at ${courseName}`,
+    cta:   'See the round',
   }),
 
   // Sent to the host when an admin publishes their event. Until this lands the

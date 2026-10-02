@@ -102,6 +102,25 @@ export const JOINABLE_STATUSES = ['upcoming'] as const
 export const APPROVABLE_STATUSES = ['pending_approval'] as const
 
 /**
+ * What status a hosted round opens at — and so whether anyone has to approve it.
+ *
+ * The gate protects one thing: a round must not be bookable before the club
+ * behind it is set up. At a venue that is already active that is already true, so
+ * the round is published as it's created and nobody is asked to confirm a fact
+ * the database already has. A club proposed through the host form has no calendar
+ * and no agreed rate, so its rounds wait, and approving the venue is what
+ * releases them.
+ *
+ * Anything other than an active course is treated as waiting. A venue in some
+ * state we haven't thought of is not a venue to publish against.
+ */
+export function newEventStatus(
+  course: { approval_status?: string | null } | null | undefined,
+): 'upcoming' | 'pending_approval' {
+  return course?.approval_status === 'active' ? 'upcoming' : 'pending_approval'
+}
+
+/**
  * A listing can be taken down while it waits for approval or while it's live. An
  * event that has run (completed / pending_credit_approval / credits_awarded)
  * happened — taking it down would rewrite history rather than prevent it.

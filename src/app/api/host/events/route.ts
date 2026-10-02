@@ -1,14 +1,21 @@
 export const dynamic = 'force-dynamic'
 
 // GET  /api/host/events — the caller's own hosted events, with spot counts.
-// POST /api/host/events — create a hosted event. It goes live immediately.
+// POST /api/host/events — create a hosted event.
+//
+// A round at a venue already on LinkUp is published as it's created: the club is
+// set up, its calendar exists, the host is entitled to the venue and the dates
+// came from that venue's own open days, so there was nothing for a review to
+// decide. Only a club we don't have yet — proposed from the form's "New LinkUp"
+// tab — lands in 'pending_approval', because there the review is a real piece of
+// work: someone has to set the club up before anyone can play there.
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { withHostAuth, type HostAuthContext } from '@/lib/auth/with-host-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { validateHostedEventPayload, normaliseEventDates } from '@/lib/validation'
-import { enrichHostedEvents, hostCanUseCourse, resolveTeeTimes } from '@/lib/hosts/events'
+import { enrichHostedEvents, hostCanUseCourse, newEventStatus, resolveTeeTimes } from '@/lib/hosts/events'
 import { describeRoundConflict, findRoundConflicts, loadOccupyingRounds } from '@/lib/hosts/schedule'
 import {
   ensureCourseCalendar,
@@ -173,10 +180,22 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
   }
 
 
-  // Creating an event does not publish it. It lands in 'pending_approval',
-  // invisible to members, and an admin approves it once the GHL calendar behind
-  // it exists (POST /api/admin/hosted-events/[id], action 'approve'). The push
-  // below is what puts it in front of them.
+  /**
+   * Whether these rounds go straight to members.
+   *
+   * The approval gate exists for one thing: a round must not be bookable before
+   * the club behind it is set up. At a venue that is already active that is
+   * already true — it has a calendar, it takes bookings on /book today, and this
+   * host is entitled to it — so holding the round back was asking an admin to
+   * confirm a fact the database already had.
+   *
+   * A proposed venue is the opposite: there is no club yet, no calendar, no rate
+   * agreed with anyone. Those rounds stay in 'pending_approval' and approving the
+   * venue is what releases them.
+   */
+  const status = newEventStatus(course)
+  const publishNow = status === 'upcoming'
+
   const dinner = body.dinner === true
 
   // One row per date, inserted together so a partial failure can't leave half a
@@ -271,9 +290,7 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
       total_spots: spotsFor.get(date) ?? 1,
       member_guest_rate: rate,
       dinner,
-      // Not live yet. An admin approves it — which is when the GHL calendar
-      // behind it gets created — and approval is what makes it 'upcoming'.
-      status: 'pending_approval',
+      status,
     })))
     .select()
 
@@ -285,19 +302,27 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
     return NextResponse.json({ error: 'Could not create the event.' }, { status: 500 })
   }
 
-  // Nothing is live yet — this push is the only thing that tells an admin there's
-  // something waiting to be set up and approved, so the host isn't left sitting in
-  // a queue nobody knows about (best-effort; a push failure must not fail the
-  // creation the host just completed). One push for the batch rather than one per
-  // date, keyed on the earliest — a host listing ten dates shouldn't produce ten
-  // identical notifications.
+  // Admins hear either way, and which notification they get is the difference
+  // between a queue item and a heads-up: a proposed venue needs someone to set
+  // the club up before anyone can play there, while a published round is already
+  // in front of members and the only thing left to decide is whether to take it
+  // down. Best-effort — a push failure must not fail the creation the host just
+  // completed. One push for the batch rather than one per date, keyed on the
+  // earliest: a host listing ten dates shouldn't produce ten identical ones.
   void notifyAdmins(
-    NotificationTemplates.hostedEventNeedsReview(
-      ctx.host.name,
-      course.name,
-      orderedDates[0] ?? '',
-      orderedDates.length,
-    )
+    publishNow
+      ? NotificationTemplates.hostedEventListed(
+          ctx.host.name,
+          course.name,
+          orderedDates[0] ?? '',
+          orderedDates.length,
+        )
+      : NotificationTemplates.hostedEventNeedsReview(
+          ctx.host.name,
+          course.name,
+          orderedDates[0] ?? '',
+          orderedDates.length,
+        )
   ).catch(() => {})
 
   // Set the venue up in GHL, so the rounds the host just submitted have
@@ -307,7 +332,9 @@ export const POST = withHostAuth(async (req: NextRequest, ctx: HostAuthContext) 
   // approving the venue used to be the first moment one existed. Doing it here
   // makes the review a decision rather than a setup — and the host's own GHL
   // user goes on the calendar, so appointments are assigned to the person
-  // actually running the round.
+  // actually running the round. At an active venue the calendar is already there
+  // and ensureCourseCalendar no-ops, which is what makes publishing on creation
+  // safe: nothing is listed ahead of the club it books against.
   //
   // After the insert and deliberately non-fatal: the rounds are the host's and
   // must not be lost to a GHL outage. Course approval still calls the same
