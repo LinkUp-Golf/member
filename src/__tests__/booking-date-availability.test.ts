@@ -332,3 +332,87 @@ describe('venueAvailabilityForMonth — the join-only window', () => {
     expect(Object.keys(days)).toEqual([SOON])
   })
 })
+
+// A full day is listed rather than dropped, so the calendar can say that a round
+// is happening and nobody can join it. The thing that must not slip: it has to
+// come back with no seats and no tee times, because openSpots is the only thing
+// between it and a booking the database refuses.
+describe('venueAvailabilityForMonth — a day with nothing left', () => {
+  const forMonth = (
+    admin: Parameters<typeof venueAvailabilityForMonth>[0],
+    course = makeCourse(),
+  ) =>
+    venueAvailabilityForMonth(admin, [course], MONTH, `${MONTH}-01`, `${MONTH}-28`)
+
+  /** n booking rows on one date — the venue's own cap is what they fill. */
+  const heldTimes = (date: string, n: number) => ({
+    bookings: Array.from({ length: n }, () => ({
+      course_id: 'course-1',
+      booking_date: date,
+      tee_time: '07:00:00',
+    })),
+  })
+
+  it('lists a day whose daily cap is spent, closed to booking', async () => {
+    mockedSlots.mockResolvedValue({ [LATER]: [slot(4)] })
+    const { days } = await forMonth(
+      fakeAdmin(heldTimes(LATER, 2)),
+      makeCourse({ max_players_per_day: 2 }),
+    )
+    const opening = days[LATER]?.[0]
+    expect(opening).toMatchObject({ openSpots: 0, openSlots: 0, bookedSpots: 2, totalSpots: 2 })
+    expect(opening?.tees).toEqual([])
+  })
+
+  it('lists a day whose calendar has sold out, closed to booking', async () => {
+    // The cap has room; the club doesn't. Same answer either way.
+    mockedSlots.mockResolvedValue({ [LATER]: [slot(0)] })
+    const { days } = await forMonth(fakeAdmin(heldTimes(LATER, 3)))
+    expect(days[LATER]?.[0]).toMatchObject({ openSpots: 0, bookedSpots: 3, totalSpots: 3 })
+  })
+
+  it('still drops a day with nothing open and nobody on it', async () => {
+    // An empty day has nothing to say, and this is the case that used to be the
+    // only one — it must not come back as "0/0".
+    mockedSlots.mockResolvedValue({ [LATER]: [slot(0)] })
+    const { days } = await forMonth(fakeAdmin({}))
+    expect(days[LATER]).toBeUndefined()
+  })
+
+  it('keeps the venue in the month so the day can be drawn', async () => {
+    // Colours and names come from `venues`; a full day whose venue was missing
+    // would render as "Venue" in the house colour.
+    mockedSlots.mockResolvedValue({ [LATER]: [slot(0)] })
+    const { venues } = await forMonth(fakeAdmin(heldTimes(LATER, 1)))
+    expect(venues.map(v => v.id)).toEqual(['course-1'])
+  })
+
+  it('reads as full inside the join-only window too', async () => {
+    // The window's rule and this one agree: a booking is what opens a near day,
+    // and a near day whose seats are gone is on and closed.
+    mockedSlots.mockResolvedValue({ [SOON]: [slot(0)] })
+    const { days } = await forMonth(fakeAdmin(heldTimes(SOON, 1)))
+    expect(days[SOON]?.[0]).toMatchObject({ openSpots: 0, bookedSpots: 1 })
+  })
+
+  it('puts what can be booked before what is merely happening', async () => {
+    // Two venues on one day, one full. Sorted by tee time alone the full card —
+    // which has no tee time — would lead the day.
+    mockedSlots.mockImplementation(async ({ calendarId }) =>
+      calendarId === 'cal-full' ? { [LATER]: [slot(0)] } : { [LATER]: [slot(4)] },
+    )
+    const { days } = await venueAvailabilityForMonth(
+      fakeAdmin({
+        bookings: [{ course_id: 'course-full', booking_date: LATER, tee_time: '07:00:00' }],
+      }),
+      [
+        makeCourse({ id: 'course-full', name: 'Full', ghl_calendar_id: 'cal-full' }),
+        makeCourse(),
+      ],
+      MONTH,
+      `${MONTH}-01`,
+      `${MONTH}-28`,
+    )
+    expect(days[LATER]?.map(o => o.courseId)).toEqual(['course-1', 'course-full'])
+  })
+})

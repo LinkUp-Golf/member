@@ -4066,6 +4066,11 @@ function EventSelectionScreen({
         (calDays[date] ?? []).find((o) => o.courseId === courseId) ??
         (ahead?.date === date ? ahead : null);
       if (!opening) return;
+      // The month also lists venue-days that are full, so the calendar can show
+      // that a round is happening. There is nothing to book on one: the sheet
+      // would open on an empty tee-time list and the submit would be refused.
+      // The cards don't offer it; this is the guard behind them.
+      if ("openSpots" in opening && !(opening.openSpots > 0)) return;
 
       setDayDetail({
         course,

@@ -206,16 +206,26 @@ export interface CalendarTee {
   spotsOpen: number
 }
 
-/** One venue's opening on one day. */
+/**
+ * One venue's opening on one day.
+ *
+ * "Opening" is now the weaker word it looks like: a venue-day with openSpots 0
+ * is a round that is happening and can't be joined. It's listed so a member can
+ * see the day isn't empty — and every surface that offers a booking has to check
+ * openSpots first, because the calendar no longer does it for them.
+ */
 export interface CalendarOpening {
   courseId: string
-  /** Bookable tee times left that day — the true total, not tees.length. */
+  /** Bookable tee times left that day — the true total, not tees.length. 0 when full. */
   openSlots: number
   /**
    * Seats bookable across those tee times, clamped to what the venue's daily
    * player cap still allows. Without the clamp a day could advertise more
    * seats than it can actually sell — the cap is enforced atomically at
    * booking time, so the surplus would fail with DAY_FULL on submit.
+   *
+   * Zero means full: either the cap is spent or the calendar has nothing left.
+   * Such a day is still listed when somebody is on it, and must not be bookable.
    */
   openSpots: number
   /**
@@ -291,10 +301,19 @@ async function slotsForMonth(
  * Every venue's openings across one month, keyed by day — what the aggregated
  * month calendar plots.
  *
- * A day is only listed for a venue if a member could actually book it: the
- * calendar has an open tee time AND the venue's daily player cap still has room.
- * Both checks mirror coursesWithAvailabilityOn, so the month grid and the
- * single-date filter can never disagree about whether a day is bookable.
+ * Two kinds of venue-day come back, and the difference is openSpots:
+ *
+ *   bookable  the calendar has an open tee time and the venue's daily player cap
+ *             still has room. Both checks mirror coursesWithAvailabilityOn, so
+ *             the month grid and the single-date filter can never disagree about
+ *             whether a day can be booked.
+ *   full      nothing left to sell, but somebody is already playing. Listed on
+ *             purpose: a day with a round on it is not an empty day, and a member
+ *             deciding where to play is better served by "happening, full" than
+ *             by a blank cell. Nothing may offer a booking on it — openSpots 0 is
+ *             the one check that stands between it and DAY_FULL on submit.
+ *
+ * A day with neither — nothing open and nobody on it — is absent, as before.
  *
  * "Today" is resolved in each venue's own timezone — a tee time is wall-clock
  * local to the club, so a course an hour ahead drops today's date before one
@@ -360,17 +379,21 @@ export async function venueAvailabilityForMonth(
       }
 
       // What the venue's daily cap still allows, whatever its calendar says.
-      const dayRemaining = cap - heldThatDay
-      if (dayRemaining <= 0) continue
+      const dayRemaining = Math.max(0, cap - heldThatDay)
+      const open = dayRemaining > 0
+        ? (daySlots ?? []).filter(s => s.available && (s.spotsOpen ?? 0) > 0)
+        : []
 
-      const open = (daySlots ?? []).filter(s => s.available && (s.spotsOpen ?? 0) > 0)
-      if (open.length === 0) continue
-
+      const bookedSpots = heldThatDay
       const openSpots = Math.min(
         open.reduce((n, s) => n + (s.spotsOpen ?? 0), 0),
         dayRemaining,
       )
-      const bookedSpots = heldThatDay
+
+      // Nothing to sell and nobody on it is an empty day, and an empty day has
+      // nothing to say. Nothing to sell with somebody on it is a full round,
+      // which is worth showing and must not be bookable.
+      if (openSpots <= 0 && bookedSpots <= 0) continue
 
       openings.push({
         date,
@@ -379,6 +402,8 @@ export async function venueAvailabilityForMonth(
           openSlots: open.length,
           openSpots,
           bookedSpots,
+          // A full day can seat exactly who is on it: there is no room beyond
+          // them, so "3/3" is the honest reading of a round nobody can join.
           totalSpots: bookedSpots + openSpots,
           // startTime carries the venue's own offset, so the wall-clock time is
           // readable straight off the string — no re-zoning on the client.
@@ -414,10 +439,17 @@ export async function venueAvailabilityForMonth(
   }
 
   venues.sort((a, b) => a.name.localeCompare(b.name))
-  // Within a day, the venue teeing off earliest reads first — the same order the
-  // grid chips and the agenda render in.
+  // Within a day, what can be booked reads first and then the venue teeing off
+  // earliest — the same order the grid chips and the agenda render in. A full
+  // venue has no tee times left to sort by and belongs at the bottom anyway:
+  // sorted purely by time it would lead the day with the one card nobody can act
+  // on.
   for (const list of Object.values(days)) {
-    list.sort((a, b) => (a.tees[0]?.time ?? '').localeCompare(b.tees[0]?.time ?? ''))
+    list.sort(
+      (a, b) =>
+        Number(b.openSpots > 0) - Number(a.openSpots > 0) ||
+        (a.tees[0]?.time ?? '').localeCompare(b.tees[0]?.time ?? ''),
+    )
   }
 
   return { venues, days }
@@ -473,6 +505,8 @@ export async function openSpotsByDate(
       { joinOnlyWindowDays: 0 },
     )
     for (const [date, openings] of Object.entries(days)) {
+      // Bookable seats only: a date the month lists as full has none, and a
+      // host can't be offered a day with no room in it.
       const spots = openings[0]?.openSpots ?? 0
       if (spots > 0) out.set(date, spots)
     }
@@ -544,8 +578,12 @@ export async function nextOpeningForCourse(
     // current month needs no clamping here.
     const { days } = await venueAvailabilityForMonth(admin, [course], month, startDate, endDate)
 
-    const earliest = Object.keys(days).sort()[0]
-    const opening = earliest ? days[earliest]?.[0] : undefined
+    // Bookable only. The month now also lists days that are full, and "the next
+    // day you can play here" is not satisfied by a round with no seats in it.
+    const earliest = Object.keys(days)
+      .sort()
+      .find(d => (days[d] ?? []).some(o => o.openSpots > 0))
+    const opening = earliest ? days[earliest]?.find(o => o.openSpots > 0) : undefined
     if (earliest && opening) {
       return {
         date: earliest,

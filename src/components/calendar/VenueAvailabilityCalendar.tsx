@@ -50,7 +50,16 @@ import {
   buildVenueColours,
 } from "@/components/calendar/venue-colours";
 import WhosPlayingSheet from "@/components/calendar/WhosPlayingSheet";
-import { dayOccupancy, occupancyLabel, occupancyTally } from "@/lib/bookings/occupancy";
+import {
+  dayOccupancy,
+  daySplit,
+  occupancyLabel,
+  occupancyLevel,
+  occupancyPercent,
+  occupancyTally,
+  openingIsFull,
+  type OccupancyLevel,
+} from "@/lib/bookings/occupancy";
 import { isInsideJoinOnlyWindow, JOIN_ONLY_WINDOW_DAYS } from "@/lib/bookings/lead-time";
 import type { CalendarPlayer } from "@/lib/bookings/players";
 import type { VenueHost } from "@/lib/bookings/venue-hosts";
@@ -75,9 +84,13 @@ export interface CalendarTee {
 
 export interface CalendarOpening {
   courseId: string;
-  /** Bookable tee times that day. */
+  /** Bookable tee times that day. 0 when the day is full. */
   openSlots: number;
-  /** Seats across them, already clamped to the venue's daily cap. */
+  /**
+   * Seats across them, already clamped to the venue's daily cap. Zero means the
+   * venue-day is full: it's listed so the day doesn't read as empty, and nothing
+   * here may offer a booking on it — see openingIsFull.
+   */
   openSpots: number;
   /** Seats already taken that day — members and non-member guests alike. */
   bookedSpots: number;
@@ -111,6 +124,23 @@ const EMPTY_HOSTS: Record<string, VenueHost> = {};
 
 const venueLocation = (v: CalendarVenue | undefined) =>
   [v?.city, v?.state].filter(Boolean).join(", ");
+
+// ---- How full a day is --------------------------------------
+
+/**
+ * The occupancy bar's colours, by state.
+ *
+ * Three states, three fills, on one track. `gold` is the brand's accent green
+ * (the `green-*` scale in this project is the brand blue), so a day with room
+ * reads green, a day nearly gone reads amber — the same amber the host workspace
+ * uses for "needs you" — and a day with nothing left goes flat, because there it
+ * is saying "not this day" rather than "this much room".
+ */
+const OCCUPANCY_FILL: Record<OccupancyLevel, string> = {
+  open: "bg-gold",
+  busy: "bg-amber-500",
+  full: "bg-green-900/25",
+};
 
 // ---- Who's playing ------------------------------------------
 
@@ -242,13 +272,26 @@ const DayCell = memo(function DayCell({
   const occupancy = useMemo(() => dayOccupancy(openings), [openings]);
   const tally = occupancyTally(occupancy);
   const showTally = selectable && !!tally;
+  // Below md the same fact is drawn rather than written — see occupancyPercent.
+  const level = occupancyLevel(occupancy);
+  const takenPct = occupancyPercent(occupancy);
 
   // The count rides on the day's own label, because the tally it comes from is
-  // a label rather than a control and has nothing of its own to announce.
+  // a label rather than a control and has nothing of its own to announce. A full
+  // venue is said as what it is: the day is listed, and a member who can't see
+  // the cell shouldn't have to tap it to find out there's no room.
+  const split = useMemo(() => daySplit(openings), [openings]);
   const label = `${format(date, "EEEE, MMMM d")} — ${
-    has
-      ? `${openings.length} venue${openings.length === 1 ? "" : "s"} with tee times`
-      : "nothing open"
+    [
+      split.bookable > 0
+        ? `${split.bookable} venue${split.bookable === 1 ? "" : "s"} with tee times`
+        : null,
+      split.full > 0
+        ? `${split.full} fully booked`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(", ") || "nothing open"
   }${showTally ? `, ${occupancyLabel(occupancy)}` : ""}`;
 
   // Three chips (or dots, below md) is what a cell holds without the row
@@ -285,11 +328,28 @@ const DayCell = memo(function DayCell({
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-1",
         )}
       >
-        {/* Below md the day number is centred, so there's no room beside it for
-            the player tally: it gets a strip across the top instead. Reserved on
-            every day, not just ones with players, so the numbers in a week line
-            up. */}
-        <span aria-hidden className="md:hidden h-3 w-full flex-shrink-0" />
+        {/* Below md the fraction has nowhere legible to go — the cell is about a
+            thumb wide and the day number is centred in it — so how full the day
+            is becomes a bar across the top instead: full width, read at a glance,
+            and coloured for the three answers that matter. The exact numbers are
+            still in the button's label, on the cell from md up, and on the day's
+            agenda card. The strip is reserved on every day, with or without a
+            bar, so the numbers in a week line up. */}
+        <span
+          aria-hidden
+          className="md:hidden h-3 w-full flex-shrink-0 flex items-center px-0.5"
+        >
+          {showTally && (
+            <span className="h-1 w-full rounded-full bg-green-900/[0.08] overflow-hidden">
+              <span
+                className={cn("block h-full rounded-full", OCCUPANCY_FILL[level])}
+                // No floor under it: a day nobody has booked reads as an empty
+                // track, which is the honest version of "room for everyone".
+                style={{ width: `${takenPct}%` }}
+              />
+            </span>
+          )}
+        </span>
 
         {/* Date number — centred over the dots on mobile, top-left of the cell
             at md, where the tally sits to its right and the chips below. */}
@@ -315,11 +375,14 @@ const DayCell = memo(function DayCell({
             so every date in a row sits at the same height. */}
         <span className="md:hidden h-2.5 flex items-center justify-center gap-0.5">
           {shown.map((o) => (
+            // A full venue keeps its colour and loses its weight: the day is
+            // still worth opening, and the dot shouldn't read as a free seat.
             <span
               key={o.courseId}
               className={cn(
                 "w-1.5 h-1.5 rounded-full",
                 DOT[colourByVenue.get(o.courseId) ?? 0],
+                openingIsFull(o) && "opacity-40",
               )}
             />
           ))}
@@ -341,6 +404,7 @@ const DayCell = memo(function DayCell({
                 className={cn(
                   "flex items-center gap-1 min-w-0 rounded px-1 py-0.5 border text-[10px] leading-tight",
                   CHIP[idx],
+                  openingIsFull(o) && "opacity-50",
                 )}
               >
                 <span
@@ -363,19 +427,19 @@ const DayCell = memo(function DayCell({
         </span>
       </button>
 
-      {/* How full the day is — seats taken out of seats it can hold, anchored
-          top-right: in the strip above the number on a phone, level with the
-          number from md. Read-only, and pointer-events-none so the whole cell
-          stays one target: the tap opens the day, and the names are behind the
-          faces on the venue cards below. Only on a day that can seat anyone. */}
+      {/* From md up the cell is wide enough to say it in numbers: seats taken out
+          of seats it can hold, level with the date. Read-only, and
+          pointer-events-none so the whole cell stays one target — the tap opens
+          the day, and the names are behind the faces on the venue cards below.
+          Hidden below md, where the bar above says the same thing legibly. */}
       {showTally && (
         <span
           aria-hidden
           className={cn(
-            "absolute z-10 pointer-events-none",
-            "top-0.5 right-0.5 md:top-1.5 md:right-1.5",
-            "text-[9px] md:text-[10px] font-bold leading-none tabular-nums",
-            "text-green-900/50",
+            "hidden md:block absolute z-10 pointer-events-none",
+            "top-1.5 right-1.5",
+            "text-[10px] font-bold leading-none tabular-nums",
+            level === "full" ? "text-green-900/35" : "text-green-900/50",
           )}
         >
           {tally}
@@ -457,6 +521,13 @@ function AgendaDay({
           // the price helper lands on when a venue has set no rate.
           const price = venue?.pricePerPlayer ?? BOOKING_PRICE_USD;
           const venuePlayers = playersByVenue.get(o.courseId) ?? EMPTY_PLAYERS;
+          // Full: a round is on and there's no room in it. The card stays —
+          // "happening, no seats" is worth more to someone choosing a day than
+          // a gap where the venue used to be — but it can't be booked.
+          const full = openingIsFull(o);
+          // "3/12" for this venue on this day — the same two numbers the grid
+          // cell is drawn from, so a card and its cell can't disagree.
+          const seats = occupancyTally(dayOccupancy([o]));
 
           return (
             // A div, not a button: the faces beside the Book pill open the
@@ -465,12 +536,26 @@ function AgendaDay({
             // it just isn't the only one.
             <div
               key={o.courseId}
-              className="group relative w-full text-left flex items-center gap-3 rounded-xl border border-green-900/10 bg-white px-3 py-2.5 transition-colors hover:bg-green-50/50"
+              className={cn(
+                "group relative w-full text-left flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors",
+                full
+                  ? "border-green-900/[0.07] bg-green-900/[0.02]"
+                  : "border-green-900/10 bg-white hover:bg-green-50/50",
+              )}
             >
+              {/* One card, two things it can be. A venue with seats books; a
+                  full one has nothing to sell and opens the tee sheet instead,
+                  which is the only thing left to want from it. */}
               <button
                 type="button"
-                onClick={() => onPickOpening(o.courseId, dayIso)}
-                aria-label={`Book ${venue?.name ?? "this venue"} on ${format(date, "EEEE, MMMM d")}`}
+                onClick={() =>
+                  full ? onShowPlayers(dayIso) : onPickOpening(o.courseId, dayIso)
+                }
+                aria-label={
+                  full
+                    ? `${venue?.name ?? "This venue"} is fully booked on ${format(date, "EEEE, MMMM d")} — see who's playing`
+                    : `Book ${venue?.name ?? "this venue"} on ${format(date, "EEEE, MMMM d")}`
+                }
                 className="absolute inset-0 rounded-xl active:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-1"
               />
               <span
@@ -483,27 +568,48 @@ function AgendaDay({
                 <span className="block text-sm font-semibold text-green-950 truncate">
                   {venue?.name ?? "Venue"}
                 </span>
-                <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-green-900/45">
-                  {o.tees[0] && (
+                <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px] text-green-900/45">
+                  {full ? (
+                    // Neither a time nor a price: there is no tee time left to
+                    // quote and nothing to charge for. What's useful is that the
+                    // day is taken, and by how many.
+                    <span className="font-medium text-green-900/55">
+                      Fully booked
+                      {o.bookedSpots > 0 && ` · ${o.bookedSpots} playing`}
+                    </span>
+                  ) : (
                     <>
-                      <span className="flex items-center gap-1">
-                        <Clock
-                          className="w-3 h-3 flex-shrink-0"
-                          strokeWidth={2}
-                        />
-                        {formatTeeTime(o.tees[0].time)}
+                      {o.tees[0] && (
+                        <>
+                          <span className="flex items-center gap-1">
+                            <Clock
+                              className="w-3 h-3 flex-shrink-0"
+                              strokeWidth={2}
+                            />
+                            {formatTeeTime(o.tees[0].time)}
+                          </span>
+                          <span aria-hidden className="text-green-900/25">
+                            ·
+                          </span>
+                        </>
+                      )}
+                      <span className={cn("font-medium", TEXT[idx])}>
+                        {formatRoundPrice(price)}/player
                       </span>
-                      <span aria-hidden className="text-green-900/25">
-                        ·
-                      </span>
+                      {/* Where the fraction lives on a phone. The grid cell above
+                          draws it as a bar, because 46px can't hold "3/12" beside
+                          a date — this is the row the member is reading when they
+                          actually want the number, and it has the room. */}
+                      {seats && (
+                        <>
+                          <span aria-hidden className="text-green-900/25">
+                            ·
+                          </span>
+                          <span className="tabular-nums">{seats} seats</span>
+                        </>
+                      )}
                     </>
                   )}
-                  {/* The price, not the seat count: what decides whether to
-                      open this card is what the round costs, and a day with a
-                      single seat left is still a day worth booking. */}
-                  <span className={cn("font-medium", TEXT[idx])}>
-                    {formatRoundPrice(price)}/player
-                  </span>
                 </span>
                 {location && (
                   <span className="mt-0.5 flex items-center gap-1 text-[11px] text-green-900/40">
@@ -529,13 +635,35 @@ function AgendaDay({
               {/* Above the overlay so it reads as the row's action, but not a
                   target of its own — the overlay underneath is what books. */}
               <span className="relative z-10 pointer-events-none">
-                <BookIndicator />
+                {full ? <FullIndicator /> : <BookIndicator />}
               </span>
             </div>
           );
         })}
       </div>
     </div>
+  );
+}
+
+/**
+ * The card's other state: a round is happening here and there's no room in it.
+ *
+ * Deliberately not a disabled Book pill. "Book" greyed out says the action
+ * failed or is coming; "Full" says what's true of the day, which is the thing a
+ * member is actually deciding between venues on. No chevron either — the card
+ * still opens (the tee sheet), but it doesn't lead anywhere forward.
+ */
+function FullIndicator() {
+  return (
+    <span
+      className={cn(
+        "flex items-center rounded-full px-2.5 py-1 flex-shrink-0",
+        "text-[11px] font-bold uppercase tracking-wide",
+        "bg-green-900/[0.06] text-green-900/45",
+      )}
+    >
+      Full
+    </span>
   );
 }
 
@@ -654,7 +782,9 @@ function PinnedVenueDock({
   const top = useStickyHeaderOffset();
 
   // The next day each pinned venue is open, this month. Today counts; a day
-  // already gone does not.
+  // already gone does not, and neither does one that's full — the card's whole
+  // job is to send a member somewhere they can book, and the month now lists
+  // days where they can't.
   const nextByVenue = useMemo(() => {
     const out = new Map<string, { date: string; opening: CalendarOpening }>();
     const dates = Object.keys(days)
@@ -664,6 +794,7 @@ function PinnedVenueDock({
       .sort();
     for (const date of dates) {
       for (const opening of days[date] ?? []) {
+        if (openingIsFull(opening)) continue;
         if (!out.has(opening.courseId))
           out.set(opening.courseId, { date, opening });
       }
@@ -959,10 +1090,30 @@ function VenueAvailabilityCalendar({
     [visibleDays, month],
   );
 
+  // Bookable openings only — this is what the empty state's advice rests on,
+  // and "pick a highlighted day above" is wrong if every highlighted day is a
+  // round that's already full.
   const monthOpeningCount = useMemo(
-    () => agendaDays.reduce((n, d) => n + (visibleDays[d]?.length ?? 0), 0),
+    () =>
+      agendaDays.reduce(
+        (n, d) => n + daySplit(visibleDays[d] ?? EMPTY).bookable,
+        0,
+      ),
     [agendaDays, visibleDays],
   );
+
+  // How the month's days divide. A day whose every venue is full is still on the
+  // agenda — it has a round on it — but it isn't a day anyone can book, so the
+  // header counts the two separately rather than calling them all "open".
+  const { openDayCount, fullDayCount } = useMemo(() => {
+    let openDayCount = 0;
+    let fullDayCount = 0;
+    for (const d of agendaDays) {
+      if (daySplit(visibleDays[d] ?? EMPTY).bookable > 0) openDayCount++;
+      else fullDayCount++;
+    }
+    return { openDayCount, fullDayCount };
+  }, [agendaDays, visibleDays]);
 
   // `days`, not `visibleDays` — the dock is deliberately outside the filters, so
   // narrowing the month to another club must not turn a pinned venue's real day
@@ -1159,7 +1310,8 @@ function VenueAvailabilityCalendar({
                 Everything in {format(month, "MMMM")}
               </h3>
               <span className="text-[11px] text-green-900/45 flex-shrink-0">
-                {agendaDays.length} day{agendaDays.length === 1 ? "" : "s"} open
+                {openDayCount} day{openDayCount === 1 ? "" : "s"} open
+                {fullDayCount > 0 && ` · ${fullDayCount} full`}
               </span>
             </div>
             <div className="space-y-3">

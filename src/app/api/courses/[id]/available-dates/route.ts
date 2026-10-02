@@ -99,8 +99,12 @@ export const GET = withAuth(async (
 
   // One entry per open day, ascending. The counts ride along so a picker can
   // show how much room a day has without a second call.
+  //
+  // Days with no seats left are dropped: the month now lists a venue-day that's
+  // full so the member calendar can show the round happening on it, and a date
+  // picker offering one would let a host list a round into a day with no room.
   const dates = Object.entries(days)
-    .filter(([date]) => !taken.has(date))
+    .filter(([date, openings]) => !taken.has(date) && (openings[0]?.openSpots ?? 0) > 0)
     .map(([date, openings]) => ({
       date,
       openSlots: openings[0]?.openSlots ?? 0,
