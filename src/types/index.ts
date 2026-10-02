@@ -526,6 +526,14 @@ export interface EventPlayer {
   last_name: string
   avatar_url: string | null
   source: 'reserved' | 'booking'
+  /**
+   * Whether the host marked them present after the round.
+   *
+   * False means "not ticked", which is both "didn't come" and "nobody has said
+   * yet" — the host ticks who was there and nothing records an absence. Only
+   * populated where the roster is (enrichHostedEvents' withPlayers).
+   */
+  attended?: boolean
 }
 
 export interface HostedEvent {

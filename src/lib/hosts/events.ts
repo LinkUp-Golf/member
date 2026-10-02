@@ -181,6 +181,23 @@ export function canUploadProof(status: string, eventDate: string, today = new Da
   return false
 }
 
+/**
+ * Whether the host can mark who attended this round.
+ *
+ * The same window as the proof photo, and for the same reason: both are things
+ * only the round itself can answer, and the host answers them standing at the
+ * club with one phone. Shared so the checkbox and the route that saves it can't
+ * disagree about when it exists — a sheet offering ticks the server refuses is
+ * worse than a sheet that doesn't offer them.
+ */
+export function canMarkAttendance(
+  status: string,
+  eventDate: string,
+  today?: string,
+): boolean {
+  return canUploadProof(status, eventDate, today)
+}
+
 /** How a proof note reads; the UI maps these to colours. */
 export type ProofNoteTone = 'pending' | 'rejected' | 'sent'
 
@@ -391,12 +408,18 @@ export const bookedAttendeeKey = venueDayKey
  * nameless: the count beside the faces comes from filled_spots, which is counted
  * from the registrations themselves, so the number stays right either way.
  *
+ * `attended` is who the host has ticked as present (hosted_event_attendance).
+ * It's carried on the roster rather than fetched beside it because the two are
+ * read together everywhere: the host's list draws the checkbox from it, and a
+ * name with no tick is a member nobody has said anything about yet.
+ *
  * Pure, and exported for its test — the dedupe is the part worth pinning down.
  */
 export function rosterFor(
   reservedIds: string[],
   cards: Map<string, MemberCard>,
   attendees: BookedAttendee[],
+  attended?: ReadonlySet<string>,
 ): EventPlayer[] {
   const players: EventPlayer[] = []
   const seen = new Set<string>()
@@ -405,7 +428,7 @@ export function rosterFor(
     const card = cards.get(id)
     if (!card || seen.has(id)) continue
     seen.add(id)
-    players.push({ member_id: id, ...card, source: 'reserved' })
+    players.push({ member_id: id, ...card, source: 'reserved', attended: !!attended?.has(id) })
   }
 
   for (const a of attendees) {
@@ -417,6 +440,7 @@ export function rosterFor(
       last_name: a.last_name,
       avatar_url: a.avatar_url,
       source: 'booking',
+      attended: !!attended?.has(a.member_id),
     })
   }
 
@@ -428,9 +452,10 @@ export function rosterFor(
  * is given) whether they already hold an active reservation. Batches the
  * registration count into a single query across all events.
  *
- * `withPlayers` adds the roster itself — everyone at the round, with their name
- * and face. Opt-in rather than always, because it names members: the host's own
- * screens ask for it, the member-facing endpoints don't.
+ * `withPlayers` adds the roster itself — everyone at the round, with their name,
+ * face and whether the host marked them present. Opt-in rather than always,
+ * because it names members: the host's own screens ask for it, the member-facing
+ * endpoints don't.
  */
 export async function enrichHostedEvents(
   admin: AdminClient,
@@ -480,6 +505,22 @@ export async function enrichHostedEvents(
       )
     : new Map<string, MemberCard>()
 
+  // Who the host ticked as present, per event. One query for the whole list, and
+  // only where the roster was asked for — it's a property of the names, and the
+  // endpoints that don't name members have no use for it.
+  const attendedByEvent = new Map<string, Set<string>>()
+  if (opts.withPlayers) {
+    const { data: marks } = await admin
+      .from('hosted_event_attendance')
+      .select('hosted_event_id, member_id')
+      .in('hosted_event_id', ids)
+    for (const m of (marks ?? []) as { hosted_event_id: string; member_id: string }[]) {
+      const set = attendedByEvent.get(m.hosted_event_id) ?? new Set<string>()
+      set.add(m.member_id)
+      attendedByEvent.set(m.hosted_event_id, set)
+    }
+  }
+
   return events.map(e => {
     const f = filled.get(e.id) ?? 0
     const attendees = booked.get(venueDayKey(e.course_id, e.event_date)) ?? []
@@ -490,7 +531,16 @@ export async function enrichHostedEvents(
       remaining_spots: Math.max(0, e.total_spots - f),
       booked_attendees: attendees,
       booked_spots: attendees.length,
-      ...(opts.withPlayers ? { players: rosterFor(reservedBy.get(e.id) ?? [], reservedCards, attendees) } : {}),
+      ...(opts.withPlayers
+        ? {
+            players: rosterFor(
+              reservedBy.get(e.id) ?? [],
+              reservedCards,
+              attendees,
+              attendedByEvent.get(e.id),
+            ),
+          }
+        : {}),
       ...(opts.memberId
         ? {
             // Booking the venue that day connects a member to the round just as

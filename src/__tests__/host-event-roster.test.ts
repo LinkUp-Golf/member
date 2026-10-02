@@ -76,3 +76,59 @@ describe('rosterFor', () => {
     expect(rosterFor([], new Map(), [])).toEqual([])
   })
 })
+
+// Who actually came. The host ticks it after the round, against the same roster,
+// and the tick has to survive both ways onto the list — a member who reserved and
+// a member who only booked the venue were at the same round.
+describe('rosterFor — attendance', () => {
+  it('marks whoever the host ticked, on either side of the list', () => {
+    const roster = rosterFor(
+      ['m1'],
+      new Map([['m1', card('Ana')]]),
+      [attendee('m2', 'Ben'), attendee('m3', 'Cal')],
+      new Set(['m1', 'm3']),
+    )
+    expect(roster.map(p => [p.member_id, p.attended])).toEqual([
+      ['m1', true],
+      ['m2', false],
+      ['m3', true],
+    ])
+  })
+
+  it('reads an unticked name as not attended rather than as unknown', () => {
+    // There is no third state on the row: a name with no tick is somebody nobody
+    // has said anything about, and the host's job is to tick who played.
+    const roster = rosterFor(['m1'], new Map([['m1', card('Ana')]]), [], new Set())
+    expect(roster[0]?.attended).toBe(false)
+  })
+
+  it('says nobody attended when attendance was not asked for', () => {
+    // The member-facing endpoints don't load it, and `undefined` must not read
+    // as "present" on a screen that shows a tick.
+    const roster = rosterFor(['m1'], new Map([['m1', card('Ana')]]), [])
+    expect(roster[0]?.attended).toBe(false)
+  })
+
+  it('ignores a tick for somebody who is not on the round', () => {
+    // The route filters these out before saving; if one ever got in, it must not
+    // put a stranger on the roster.
+    const roster = rosterFor(
+      ['m1'],
+      new Map([['m1', card('Ana')]]),
+      [],
+      new Set(['m1', 'someone-else']),
+    )
+    expect(roster.map(p => p.member_id)).toEqual(['m1'])
+  })
+
+  it('marks a member who both reserved and booked once', () => {
+    const roster = rosterFor(
+      ['m1'],
+      new Map([['m1', card('Ana')]]),
+      [attendee('m1', 'Ana')],
+      new Set(['m1']),
+    )
+    expect(roster).toHaveLength(1)
+    expect(roster[0]).toMatchObject({ source: 'reserved', attended: true })
+  })
+})

@@ -15,6 +15,7 @@ vi.mock('@/lib/supabase-server', () => ({ createAdminClient: vi.fn() }))
 
 import {
   APPROVABLE_STATUSES,
+  canMarkAttendance,
   newEventStatus,
   REJECTABLE_STATUSES,
   canApproveEvent,
@@ -141,6 +142,47 @@ describe('canUploadProof on a pending event', () => {
     // pending event whose date has since gone by.
     expect(canUploadProof('pending_approval', '2026-08-20', today)).toBe(false)
     expect(canUploadProof('pending_approval', '2026-08-01', today)).toBe(false)
+  })
+})
+
+describe('canMarkAttendance', () => {
+  // The host ticks who played from the same row they upload the photo on, so the
+  // two windows have to be the same one: a checkbox the server would refuse is
+  // worse than no checkbox, and a photo with no attendance beside it is the job
+  // half done.
+  const cases: [string, string][] = [
+    ['upcoming', '2026-08-20'],
+    ['upcoming', today],
+    ['upcoming', '2026-08-01'],
+    ['completed', '2026-08-01'],
+    ['pending_credit_approval', '2026-08-01'],
+    ['credits_awarded', '2026-08-01'],
+    ['cancelled', '2026-08-01'],
+    ['pending_approval', '2026-08-01'],
+  ]
+
+  it('opens exactly when the proof upload does', () => {
+    for (const [status, date] of cases) {
+      expect(canMarkAttendance(status, date, today)).toBe(
+        canUploadProof(status, date, today),
+      )
+    }
+  })
+
+  it('is shut until the round has happened', () => {
+    expect(canMarkAttendance('upcoming', '2026-08-20', today)).toBe(false)
+    expect(canMarkAttendance('upcoming', today, today)).toBe(true)
+  })
+
+  it('is shut on a round that never ran', () => {
+    // Nobody played a round that was never published or was taken down.
+    expect(canMarkAttendance('pending_approval', '2026-08-01', today)).toBe(false)
+    expect(canMarkAttendance('cancelled', '2026-08-01', today)).toBe(false)
+  })
+
+  it('stays open while the credit is still being decided', () => {
+    // A host correcting the list after sending the photo is the ordinary case.
+    expect(canMarkAttendance('pending_credit_approval', '2026-08-01', today)).toBe(true)
   })
 })
 

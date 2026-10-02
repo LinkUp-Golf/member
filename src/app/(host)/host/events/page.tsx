@@ -370,6 +370,44 @@ const EventRow = memo(function EventRow({
   // than on the page: only one is ever open, and the sheet portals to the body,
   // so there is nothing for the page to coordinate.
   const [openRoster, setOpenRoster] = useState<RoundPlayers | null>(null);
+  // Whether anything was ticked while it was open. The list is only re-read on
+  // close: each tick has already been saved, and refetching under an open sheet
+  // would be a request per tap for a screen that already shows the answer.
+  const [attendanceSaved, setAttendanceSaved] = useState(false);
+
+  /**
+   * Records who played. The sheet sends the whole set on every tick, so this is
+   * a replace rather than a change, and a refusal is reported here and reverted
+   * there — the host is the only person who can tell us this, and a tick that
+   * silently didn't save would read as one that did.
+   */
+  const saveAttendance = useCallback(
+    async (memberIds: string[]) => {
+      const res = await fetch(`/api/host/events/${event.id}/attendance`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ member_ids: memberIds }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        onToast(json.error ?? "Could not save who played.", false);
+        return false;
+      }
+      setAttendanceSaved(true);
+      return true;
+    },
+    [event.id, onToast],
+  );
+
+  const closeRoster = useCallback(() => {
+    setOpenRoster(null);
+    // So reopening it shows what was saved rather than what the row was built
+    // with.
+    if (attendanceSaved) {
+      setAttendanceSaved(false);
+      onChanged();
+    }
+  }, [attendanceSaved, onChanged]);
 
   // At most one line of explanation, and only where the state needs one — four
   // possible notes stacked under every row was most of the old card's height.
@@ -415,14 +453,15 @@ const EventRow = memo(function EventRow({
         </div>
 
         <div className="flex items-center justify-end gap-2 flex-wrap">
-          {proof.canUpload && (
-            <ProofControl event={event} onDone={onChanged} onToast={onToast} />
-          )}
           {/* Who is coming, as faces, and the way into their names — the same
               gesture the member app's booking calendar uses. This used to be a
               count that opened a whole page to answer a question a row of
               circles answers in place. Nothing when the round is empty: the spot
-              line above already says "0 of 4". */}
+              line above already says "0 of 4".
+
+              To the left of the upload button on purpose: once the round has run
+              these two are one job done in one place — tick who played, then send
+              the photo of them — and the list is the half that comes first. */}
           {players.length > 0 && (
             <button
               type="button"
@@ -432,18 +471,28 @@ const EventRow = memo(function EventRow({
                   venueName: event.course?.name ?? "This venue",
                   teeTime: event.tee_time,
                   players,
+                  // Only once the round has happened, which is the same moment
+                  // the upload button appears beside this — see canMarkAttendance.
+                  ...(proof.canUpload ? { onMarkAttendance: saveAttendance } : {}),
                 })
               }
-              aria-label={`Who's coming on ${fmtDate(event.event_date)} — ${playing} ${playing === 1 ? "member" : "members"}`}
+              aria-label={
+                proof.canUpload
+                  ? `Who played on ${fmtDate(event.event_date)} — ${playing} ${playing === 1 ? "member" : "members"}, mark who attended`
+                  : `Who's coming on ${fmtDate(event.event_date)} — ${playing} ${playing === 1 ? "member" : "members"}`
+              }
               className="focus-ring rounded-full p-0.5 -m-0.5 hover:bg-gray-100"
             >
               <PlayerFaces players={players} />
             </button>
           )}
+          {proof.canUpload && (
+            <ProofControl event={event} onDone={onChanged} onToast={onToast} />
+          )}
         </div>
       </div>
 
-      <RoundPlayersSheet round={openRoster} onClose={() => setOpenRoster(null)} />
+      <RoundPlayersSheet round={openRoster} onClose={closeRoster} />
 
       {/* Either half can stand alone: a settled round has a photo worth seeing
           and nothing left to say, and a note can exist before any photo does. */}
