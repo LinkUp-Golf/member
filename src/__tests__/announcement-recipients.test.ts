@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
-  EVERYONE,
-  isEveryone,
+  NOBODY,
+  namesNobody,
   memberTags,
   membersCarryingAnyTag,
   normaliseAudience,
@@ -26,21 +26,21 @@ describe('normaliseAudience', () => {
   })
 
   it('treats anything that is not a list of strings as nothing chosen', () => {
-    expect(normaliseAudience({})).toEqual(EVERYONE)
-    expect(normaliseAudience({ tags: 'vip', memberIds: 42 })).toEqual(EVERYONE)
+    expect(normaliseAudience({})).toEqual(NOBODY)
+    expect(normaliseAudience({ tags: 'vip', memberIds: 42 })).toEqual(NOBODY)
     expect(normaliseAudience({ tags: [1, null, 'vip'] })).toEqual({ tags: ['vip'], memberIds: [] })
   })
 })
 
-describe('isEveryone', () => {
-  it('is the default, and is what every announcement written so far means', () => {
-    expect(isEveryone(EVERYONE)).toBe(true)
-    expect(isEveryone({ tags: [], memberIds: [] })).toBe(true)
+describe('namesNobody', () => {
+  it('is what an unset audience means — no email, not every address we hold', () => {
+    expect(namesNobody(NOBODY)).toBe(true)
+    expect(namesNobody({ tags: [], memberIds: [] })).toBe(true)
   })
 
   it('is false the moment anybody is named', () => {
-    expect(isEveryone({ tags: ['vip'], memberIds: [] })).toBe(false)
-    expect(isEveryone({ tags: [], memberIds: ['a'] })).toBe(false)
+    expect(namesNobody({ tags: ['vip'], memberIds: [] })).toBe(false)
+    expect(namesNobody({ tags: [], memberIds: ['a'] })).toBe(false)
   })
 })
 
@@ -86,7 +86,8 @@ describe('membersCarryingAnyTag', () => {
 
   it('matches nobody for a tag nobody carries', () => {
     // A campaign tag that exists in GHL and has no members yet is offered in
-    // the picker on purpose; it must resolve to nobody, not to everybody.
+    // the picker on purpose; it must resolve to nobody, and resolveEmailAudience
+    // hands that empty list on as an audience rather than as "unset".
     expect(membersCarryingAnyTag(roster, ['launch-2027'])).toEqual([])
   })
 

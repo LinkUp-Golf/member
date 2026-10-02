@@ -22,8 +22,9 @@ export const POST = withAuth(
       video_url?: string | null
       media_urls?: string[]
       focus_linkup_categories?: string[]
-      // Who gets it by email. Both empty — the default — means everyone in the
-      // community, exactly as before.
+      // Who gets it by email, by tag or by name. Both empty means no email is
+      // sent at all — there is no "everyone", deliberately. The post and the
+      // in-app notification reach the community either way.
       email_tags?: string[]
       email_member_ids?: string[]
     }

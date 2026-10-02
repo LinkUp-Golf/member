@@ -1,9 +1,11 @@
 // Who an announcement is emailed to.
 //
-// A broadcast reaches the whole community on both channels, and that stays the
-// default — but an admin can now name a narrower email audience, either by GHL
-// tag or by picking people. The post and the in-app notification are unchanged;
-// it's the email that's aimed.
+// The post and the in-app notification always reach the whole community. The
+// email does not: an admin says who gets it, either by GHL tag or by picking
+// people, and nobody is emailed until they do. There is deliberately no "email
+// everyone" — a broadcast to every address we hold is the send most likely to
+// collect the complaints and bounces that cost us the sending domain, and the
+// community already heard about the post on the channel built for that.
 //
 // Two ways of naming a group, and they're deliberately different in kind:
 //
@@ -32,7 +34,8 @@ export interface EmailAudience {
   memberIds: string[]
 }
 
-export const EVERYONE: EmailAudience = { tags: [], memberIds: [] }
+/** Named nobody, so nobody is emailed. What an audience starts as. */
+export const NOBODY: EmailAudience = { tags: [], memberIds: [] }
 
 /**
  * Cleans a submitted audience: trimmed, de-duplicated, nothing empty.
@@ -59,8 +62,14 @@ export function normaliseAudience(raw: {
   return { tags: strings(raw.tags), memberIds: strings(raw.memberIds) }
 }
 
-/** Nobody named means everybody — the behaviour every existing row has. */
-export function isEveryone(audience: EmailAudience): boolean {
+/**
+ * Whether this audience names anyone at all.
+ *
+ * True means no email, not "email everyone". A row written before the audience
+ * columns existed also reads as naming nobody — and that is the right answer
+ * for it, since its email went out when it was published.
+ */
+export function namesNobody(audience: EmailAudience): boolean {
   return audience.tags.length === 0 && audience.memberIds.length === 0
 }
 
@@ -90,21 +99,22 @@ export function membersCarryingAnyTag(
 }
 
 /**
- * The member ids an audience resolves to, or null for "everyone".
+ * The member ids an audience resolves to — the exact list, never a stand-in for
+ * "everyone".
  *
- * Null rather than the whole community, so the caller passes no override and
- * the existing path — one audience resolved once and handed to both channels —
- * is what runs. An audience that names people and resolves to nobody returns an
- * empty array, which is a different thing and must not silently become
- * everybody.
+ * An empty array is a real answer and the caller must pass it through as one: an
+ * audience that named nobody, and one that named a tag nobody carries, both come
+ * out as "email no one". Handing null to notifyCourse would mean "the same
+ * people the push reaches", which is the whole community, which is what this
+ * exists to stop.
  */
 export async function resolveEmailAudience(
   admin: AdminClient,
   courseId: string,
   audience: EmailAudience,
   excludeUserId?: string,
-): Promise<string[] | null> {
-  if (isEveryone(audience)) return null
+): Promise<string[]> {
+  if (namesNobody(audience)) return []
 
   const ids = new Set<string>(audience.memberIds)
 

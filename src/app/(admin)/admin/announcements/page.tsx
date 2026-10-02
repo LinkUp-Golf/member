@@ -17,7 +17,7 @@ import {
   Badge,
 } from "@/components/admin/AdminUI";
 import FormField from "@/components/admin/FormField";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatRelativeTime, titleCaseName } from "@/lib/utils";
 import MultiMediaUpload, { type MediaFile } from "@/components/ui/MultiMediaUpload";
 import type { SelectOption } from "@/components/ui/Select";
 import type { AnnouncementType, ModerationStatus } from "@/types";
@@ -34,7 +34,7 @@ interface AnnouncementRow {
   video_url: string | null;
   media_urls: string[];
   focus_linkup_categories: string[];
-  /** Who it was emailed to. Both empty means everyone — see the form. */
+  /** Who it was emailed to. Both empty means no email went out — see the form. */
   email_tags: string[];
   email_member_ids: string[];
   is_pinned: boolean;
@@ -50,9 +50,10 @@ interface AnnouncementPayload {
   media_urls: string[];
   focus_linkup_categories: string[];
   /**
-   * The email audience. Sent on publish and ignored by the PATCH route — the
-   * audience belongs to the act of publishing, so the edit form doesn't offer
-   * it and an edit can't change who already received the mail.
+   * The email audience, and the only way an email is sent: empty lists post the
+   * announcement without mailing anyone. Sent on publish and ignored by the
+   * PATCH route — the audience belongs to the act of publishing, so the edit
+   * form doesn't offer it and an edit can't change who already received the mail.
    */
   email_tags: string[];
   email_member_ids: string[];
@@ -355,8 +356,9 @@ interface AnnouncementFormValues {
 //
 // Two ways to name the group, because an admin already thinks in both: a GHL
 // tag — the segments the rest of the business is run on — or people by name.
-// Both are additive, and leaving both empty means everyone, which is why the
-// empty state says "Everyone in the community" rather than "None".
+// Both are additive, and leaving both empty sends no email at all: the post and
+// the in-app notification have already reached the community, and there is
+// deliberately no "email everyone" (see @/lib/announcements/recipients).
 
 interface AudienceOptions {
   tags: SelectOption[]
@@ -399,10 +401,15 @@ function useAudienceOptions(): AudienceOptions {
         setMembers(
           (data ?? []).map(m => ({
             value: m.id as string,
-            // The address is in the label so the search box finds people by it —
-            // two members called Dana is the ordinary case, and the email is
-            // what tells them apart.
-            label: `${m.first_name ?? ''} ${m.last_name ?? ''}`.trim() || (m.email as string),
+            // Title-cased rather than printed as stored. A name reaches us from
+            // whatever the member typed into a GHL form — 'dana okafor', 'DANA
+            // OKAFOR' — and this list is read beside the announcement's own
+            // copy, and again in the summary of who it went to. The address is
+            // the fallback for somebody we hold no name for and is left exactly
+            // as it is: an email address is not a name.
+            label:
+              titleCaseName(`${m.first_name ?? ''} ${m.last_name ?? ''}`.trim()) ||
+              (m.email as string),
           })),
         )
       })
@@ -423,7 +430,7 @@ function useAudienceOptions(): AudienceOptions {
 function audienceSummary(row: AnnouncementRow, members: SelectOption[]): string {
   const tags = row.email_tags ?? []
   const ids = row.email_member_ids ?? []
-  if (tags.length === 0 && ids.length === 0) return 'Emailed to everyone in the community.'
+  if (tags.length === 0 && ids.length === 0) return 'Posted to the community — no email was sent.'
 
   const parts: string[] = []
   if (tags.length) parts.push(`anyone tagged ${tags.join(', ')}`)
@@ -535,6 +542,67 @@ function AnnouncementForm({
     <AdminCard title={isEditing ? 'Edit announcement' : 'New community broadcast'}>
       <form onSubmit={rhfSubmit(onValid)} noValidate>
         <div className="space-y-4">
+          {isEditing ? (
+            // The mail has already gone; showing pickers here would imply it
+            // could be recalled. What's useful is the record of who got it.
+            <p className="text-xs text-gray-400">
+              {audienceSummary(initial, audience.members)}
+            </p>
+          ) : (
+            <div className="space-y-3 rounded-xl border border-gray-200 bg-gray-50/60 p-3">
+              <div>
+                <p className="text-sm font-medium text-gray-700">Email recipients</p>
+                <p className="mt-0.5 text-xs text-gray-400">
+                  Who gets this by email — chosen by tag, by name, or both. There is no
+                  &ldquo;everyone&rdquo;: leave these empty and no email is sent. The post and the
+                  in-app notification reach the whole community either way.
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <FormField label="By GHL tag" htmlFor="broadcast-email-tags">
+                  <MultiSelect
+                    id="broadcast-email-tags"
+                    options={audience.tags}
+                    values={emailTags}
+                    onChange={setEmailTags}
+                    emptyLabel={audience.loading ? 'Loading tags…' : 'No tags'}
+                    countNoun="tags"
+                    searchPlaceholder="Search tags…"
+                    disabled={saving}
+                    triggerClassName={inputCls(false) + ' flex items-center justify-between gap-2 text-left bg-white'}
+                  />
+                </FormField>
+
+                <FormField label="By member" htmlFor="broadcast-email-members">
+                  <MultiSelect
+                    id="broadcast-email-members"
+                    options={audience.members}
+                    values={emailMemberIds}
+                    onChange={setEmailMemberIds}
+                    emptyLabel={audience.loading ? 'Loading members…' : 'No members'}
+                    countNoun="members"
+                    searchPlaceholder="Search members…"
+                    disabled={saving}
+                    triggerClassName={inputCls(false) + ' flex items-center justify-between gap-2 text-left bg-white'}
+                  />
+                </FormField>
+              </div>
+
+              <p
+                className={
+                  emailTags.length === 0 && emailMemberIds.length === 0
+                    ? 'text-xs text-amber-700'
+                    : 'text-xs text-gray-400'
+                }
+              >
+                {emailTags.length === 0 && emailMemberIds.length === 0
+                  ? 'No email will be sent — this will be posted to the community only.'
+                  : 'Only the people matched above will be emailed. Anyone picked by name is emailed whether or not they carry one of the tags.'}
+              </p>
+            </div>
+          )}
+
           <FormField label="Announcement type" htmlFor="broadcast-type" required>
             <Controller
               name="type"
@@ -587,60 +655,6 @@ function AnnouncementForm({
             maxFiles={5}
             disabled={saving}
           />
-
-          {isEditing ? (
-            // The mail has already gone; showing pickers here would imply it
-            // could be recalled. What's useful is the record of who got it.
-            <p className="text-xs text-gray-400">
-              {audienceSummary(initial, audience.members)}
-            </p>
-          ) : (
-            <div className="space-y-3 rounded-xl border border-gray-200 bg-gray-50/60 p-3">
-              <div>
-                <p className="text-sm font-medium text-gray-700">Email recipients</p>
-                <p className="mt-0.5 text-xs text-gray-400">
-                  Who also gets this by email. Leave both empty to email everyone in the
-                  community — the post and the in-app notification go to everyone either way.
-                </p>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <FormField label="By GHL tag" htmlFor="broadcast-email-tags">
-                  <MultiSelect
-                    id="broadcast-email-tags"
-                    options={audience.tags}
-                    values={emailTags}
-                    onChange={setEmailTags}
-                    emptyLabel={audience.loading ? 'Loading tags…' : 'Everyone in the community'}
-                    countNoun="tags"
-                    searchPlaceholder="Search tags…"
-                    disabled={saving}
-                    triggerClassName={inputCls(false) + ' flex items-center justify-between gap-2 text-left bg-white'}
-                  />
-                </FormField>
-
-                <FormField label="By member" htmlFor="broadcast-email-members">
-                  <MultiSelect
-                    id="broadcast-email-members"
-                    options={audience.members}
-                    values={emailMemberIds}
-                    onChange={setEmailMemberIds}
-                    emptyLabel={audience.loading ? 'Loading members…' : 'Everyone in the community'}
-                    countNoun="members"
-                    searchPlaceholder="Search members…"
-                    disabled={saving}
-                    triggerClassName={inputCls(false) + ' flex items-center justify-between gap-2 text-left bg-white'}
-                  />
-                </FormField>
-              </div>
-
-              <p className="text-xs text-gray-400">
-                {emailTags.length === 0 && emailMemberIds.length === 0
-                  ? 'Every active member of the community will be emailed.'
-                  : 'Only the people matched above will be emailed. Anyone picked by name is emailed whether or not they carry one of the tags.'}
-              </p>
-            </div>
-          )}
 
           {!isEditing && (
             <p className="text-xs text-gray-400">
