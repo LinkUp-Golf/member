@@ -38,8 +38,8 @@ import {
   isPayAtClub,
   offersPayAtClub,
   offersPayNow,
-  payAtClubStage,
-  PAY_AT_CLUB_STAGE_LABELS,
+  settlingAtClub as isSettlingAtClub,
+  PAY_AT_CLUB_LABEL,
   type PaymentOption,
 } from "@/lib/bookings/payment-options";
 import CreditCouponModal from "@/components/credits/CreditCouponModal";
@@ -2022,20 +2022,15 @@ function SuccessScreen({
             they still need from this screen.
 
             The wording is whatever My Bookings will say about the same round, so
-            the two screens can't disagree: a club-only round was created
-            'payment_confirmed' and reads as settled, while one the member just
-            chose the club for keeps its 'availability_confirmed' status and reads
-            as in progress. */}
+            the two screens can't disagree — and it's the same wording whichever
+            way the round got here, because the app never learns that the club was
+            paid. Amber, not green: this is money still owed. */}
         {settlingAtClub ? (
           <p
             className="!mt-4 text-sm font-semibold rounded-xl px-3 py-2.5 text-center"
-            style={{ background: "rgba(34,197,94,0.08)", color: "#166534" }}
+            style={{ background: "rgba(234,179,8,0.08)", color: "#92640a" }}
           >
-            ✓{" "}
-            {clubOnly
-              ? PAY_AT_CLUB_STAGE_LABELS.paid
-              : PAY_AT_CLUB_STAGE_LABELS.paying}{" "}
-            · {formatUsd(booking.amountDue)}
+            {PAY_AT_CLUB_LABEL} · {formatUsd(booking.amountDue)}
           </p>
         ) : payNow ? (
           booking.paymentUrl ? (
@@ -2193,18 +2188,12 @@ const STATUS_LABELS: Record<
     color: "#166534",
     bg: "rgba(34,197,94,0.08)",
   },
-  // Not booking statuses: a row the member chose to settle at the club
-  // (payment_method 'pay_at_club'), before and after its payment is confirmed.
-  // See bookingDisplayStatus.
+  // Not a booking status: a row the member is settling with the club
+  // (payment_method 'pay_at_club'). See bookingDisplayStatus.
   paying_at_club: {
-    label: PAY_AT_CLUB_STAGE_LABELS.paying,
+    label: PAY_AT_CLUB_LABEL,
     color: "#92640a",
     bg: "rgba(234,179,8,0.08)",
-  },
-  paid_at_club: {
-    label: PAY_AT_CLUB_STAGE_LABELS.paid,
-    color: "#166534",
-    bg: "rgba(34,197,94,0.08)",
   },
   confirmed: {
     label: "Confirmed",
@@ -2219,19 +2208,14 @@ const STATUS_LABELS: Record<
   },
 };
 
-// What a row's badge says. A round being settled at the club keeps its
-// pipeline status underneath, but "Payment due" would be wrong for it: it reads
-// "Paying at club" until its payment is confirmed, then "Paid at club".
+// What a row's badge says. A round being settled at the club keeps its pipeline
+// status underneath, but neither "Payment due" nor "Payment confirmed" is true
+// of it: the money is the club's to collect, and we never hear that they have.
 function bookingDisplayStatus(row: {
   status: string;
   payment_method?: string | null;
 }): string {
-  const stage = payAtClubStage(row);
-  return stage === "paying"
-    ? "paying_at_club"
-    : stage === "paid"
-      ? "paid_at_club"
-      : row.status;
+  return isSettlingAtClub(row) ? "paying_at_club" : row.status;
 }
 
 function BookingStatusBadge({ status }: { status: string }) {

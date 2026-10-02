@@ -8,8 +8,9 @@ import {
   offersPayAtClub,
   offersPayNow,
   parsePaymentOptions,
-  payAtClubStage,
   requiresPaymentUrl,
+  settlingAtClub,
+  PAY_AT_CLUB_LABEL,
 } from '@/lib/bookings/payment-options'
 
 // A venue's payment options decide which CTAs a member sees and what the
@@ -71,23 +72,27 @@ describe('isPayAtClub', () => {
   })
 })
 
-describe('payAtClubStage', () => {
+describe('settlingAtClub', () => {
   const club = (status: string) => ({ status, payment_method: 'pay_at_club' })
 
-  it("reads 'paying' until the payment is confirmed — choosing the club isn't paying", () => {
-    expect(payAtClubStage(club('availability_confirmed'))).toBe('paying')
-    expect(payAtClubStage(club('tentative'))).toBe('paying')
+  it('is true at every stage a round at the club can be in', () => {
+    // One label, whatever the status: the app is never told the club was paid,
+    // so none of these may read as settled. See PAY_AT_CLUB_LABEL.
+    expect(settlingAtClub(club('availability_confirmed'))).toBe(true)
+    expect(settlingAtClub(club('tentative'))).toBe(true)
+    expect(settlingAtClub(club('payment_confirmed'))).toBe(true)
+    expect(settlingAtClub(club('confirmed'))).toBe(true)
   })
 
-  it("reads 'paid' once the payment is confirmed", () => {
-    expect(payAtClubStage(club('payment_confirmed'))).toBe('paid')
-    expect(payAtClubStage(club('confirmed'))).toBe('paid')
+  it('is false for a round that is not going ahead, or not paid at the club', () => {
+    expect(settlingAtClub(club('cancelled'))).toBe(false)
+    expect(settlingAtClub(club('waitlist'))).toBe(false)
+    expect(settlingAtClub({ status: 'payment_confirmed', payment_method: null })).toBe(false)
+    expect(settlingAtClub(null)).toBe(false)
   })
 
-  it('says nothing for a round that is not going ahead, or not paid at the club', () => {
-    expect(payAtClubStage(club('cancelled'))).toBeNull()
-    expect(payAtClubStage({ status: 'payment_confirmed', payment_method: null })).toBeNull()
-    expect(payAtClubStage(null)).toBeNull()
+  it('says one thing about money the club collects', () => {
+    expect(PAY_AT_CLUB_LABEL).toBe('Paying at club')
   })
 })
 
@@ -150,16 +155,20 @@ describe('PAY_AT_CLUB_BOOKING_STATUS', () => {
     expect(UNPAID_BOOKING_STATUSES).toContain(NEW_BOOKING_STATUS)
   })
 
-  it('reads as settled at the club once the round carries both halves', () => {
+  it('does not read as paid just because the round opened confirmed', () => {
+    // This is the bug the single label exists for: the round is created
+    // 'payment_confirmed' at a club-only venue, so a two-stage label called it
+    // "Paid at club" before the member had left the house.
     const round = { status: PAY_AT_CLUB_BOOKING_STATUS, payment_method: 'pay_at_club' }
     expect(isPayAtClub(round)).toBe(true)
-    expect(payAtClubStage(round)).toBe('paid')
+    expect(settlingAtClub(round)).toBe(true)
+    expect(PAY_AT_CLUB_LABEL).toBe('Paying at club')
   })
 
-  it("leaves a round the member chose the club for reading as in progress", () => {
+  it('reads the same for a round the member chose the club for', () => {
     // A venue that takes both keeps NEW_BOOKING_STATUS; only the method changes,
-    // so the two cases stay distinguishable on screen.
+    // and both rounds owe the club the same money.
     const chosen = { status: NEW_BOOKING_STATUS, payment_method: 'pay_at_club' }
-    expect(payAtClubStage(chosen)).toBe('paying')
+    expect(settlingAtClub(chosen)).toBe(true)
   })
 })
