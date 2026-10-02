@@ -8,7 +8,7 @@ import Select from '@/components/ui/Select'
 import { format, addDays, subDays, isToday, differenceInCalendarDays } from 'date-fns'
 import { formatTeeTime } from '@/lib/utils'
 import { tagsOverlap } from '@/lib/ghl/tags'
-import { payAtClubStage, PAY_AT_CLUB_STAGE_LABELS } from '@/lib/bookings/payment-options'
+import { settlingAtClub, PAY_AT_CLUB_LABEL } from '@/lib/bookings/payment-options'
 import type { AdditionalPlayer } from '@/types'
 
 type BookingStatus = 'tentative' | 'availability_confirmed' | 'payment_confirmed' | 'confirmed' | 'pending' | 'cancelled' | 'waitlist' | 'awaiting_approval'
@@ -133,7 +133,7 @@ interface AccessMemberRow {
 }
 
 type TeeSlot = { key: string; booking_date: string; tee_time: string; created_at: string; rows: BookingRow[] }
-type DateGroup = { date: string; label: string; isToday: boolean; slots: TeeSlot[]; newestCreatedAt: string }
+type DateGroup = { date: string; label: string; isToday: boolean; slots: TeeSlot[] }
 
 // Grouped by (booker + tee time + created_at) rather than just date/time —
 // two separate booking groups can land on the same tee time by coincidence
@@ -158,9 +158,16 @@ function groupBySlot(bookings: BookingRow[]): TeeSlot[] {
     .sort((a, b) => b.created_at.localeCompare(a.created_at) || a.tee_time.localeCompare(b.tee_time))
 }
 
-// Slots stay grouped under their tee date, but the groups themselves are ordered
-// by when their bookings came in — a date group ranks by its newest booking — so
-// the whole list reads newest-booked first.
+// Slots stay grouped under their tee date, and the groups run by that date,
+// latest round first.
+//
+// They used to be ordered by whichever date held the newest booking, which read
+// as newest-booked-first for the list as a whole and left the dates themselves
+// in no order at all — October 18th above October 10th above October 24th,
+// because that was the order the three bookings came in. A date is the one thing
+// in this list a reader already holds in their head, so it's what the headings
+// count down. Inside a group the slots still run newest-booked first
+// (groupBySlot), which is the order an admin works a day's requests in.
 function groupByDate(slots: TeeSlot[]): DateGroup[] {
   const map = new Map<string, TeeSlot[]>()
   for (const slot of slots) {
@@ -174,9 +181,10 @@ function groupByDate(slots: TeeSlot[]): DateGroup[] {
       label: format(new Date(`${date}T12:00:00`), 'EEEE, MMMM d, yyyy'),
       isToday: isToday(new Date(`${date}T12:00:00`)),
       slots: s,
-      newestCreatedAt: s.reduce((max, sl) => (sl.created_at > max ? sl.created_at : max), ''),
     }))
-    .sort((a, b) => b.newestCreatedAt.localeCompare(a.newestCreatedAt))
+    // 'YYYY-MM-DD' sorts chronologically as a string, so there is no date
+    // arithmetic here to get wrong across a timezone.
+    .sort((a, b) => b.date.localeCompare(a.date))
 }
 
 function playerInfo(b: BookingRow): { name: string; sub: string; badge?: string } {
@@ -361,7 +369,7 @@ function SlotCard({
             const info = playerInfo(b)
             const sm = STATUS_META[b.status] ?? STATUS_META.tentative
             const daysLeftLabel = paymentDaysLeftLabel(b)
-            const clubStage = payAtClubStage(b)
+            const atClub = settlingAtClub(b)
             const showRemindCta = !!daysLeftLabel && canRemindPayment(b)
             const alreadyReminded = remindedPaymentIds.has(b.id)
             return (
@@ -381,12 +389,12 @@ function SlotCard({
                           ⏳ {daysLeftLabel}
                         </span>
                       )}
-                      {/* Choosing to pay at the club isn't paying: "Paying at
-                          club" until the payment is confirmed, "Paid at club"
-                          after. */}
-                      {clubStage && (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 flex-shrink-0 whitespace-nowrap">
-                          {PAY_AT_CLUB_STAGE_LABELS[clubStage]}
+                      {/* The club collects this one. Amber rather than green:
+                          nothing tells us the member has paid them, so the badge
+                          doesn't say they have. */}
+                      {atClub && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 flex-shrink-0 whitespace-nowrap">
+                          {PAY_AT_CLUB_LABEL}
                         </span>
                       )}
                       {/* Credit put toward this row. The code is here because
@@ -671,8 +679,9 @@ export default function AdminBookingsPage() {
     //               "upcoming" window.
     // Past:         365 days ago → yesterday
     // A custom From/To range overrides the view-based window when both are set.
-    // The window decides *which* bookings are fetched; the order they're shown in
-    // is always newest-booked first (see groupByDate), never by tee date.
+    // The window decides *which* bookings are fetched; the order they're shown
+    // in is by tee date, latest first, with each date's own slots newest-booked
+    // first (see groupByDate).
     // Payment status (unpaid) is just another status filter — it doesn't
     // override the date window. The "days left" badge (see paymentDaysLeftLabel)
     // is what narrows attention to bookings within PAYMENT_OVERDUE_WINDOW_DAYS.

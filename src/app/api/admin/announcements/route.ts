@@ -8,6 +8,8 @@ import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
 import { NotificationTemplates } from '@/lib/push'
 import { notifyCourse, notifyFocusMembers, kept } from '@/lib/notify'
+import { normaliseAudience, resolveEmailAudience } from '@/lib/announcements/recipients'
+import { announcementImages } from '@/lib/announcements/media'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(
@@ -21,14 +23,26 @@ export const POST = withAuth(
       video_url?: string | null
       media_urls?: string[]
       focus_linkup_categories?: string[]
+      // Who gets it by email, by tag or by name. Both empty means no email is
+      // sent at all — there is no "everyone", deliberately. The post and the
+      // in-app notification reach the community either way.
+      email_tags?: string[]
+      email_member_ids?: string[]
     }
 
     if (!body.title?.trim() || !body.body?.trim() || !body.course_id) {
       return NextResponse.json({ error: 'course_id, title and body are required' }, { status: 400 })
     }
 
+    const audience = normaliseAudience({
+      tags: body.email_tags,
+      memberIds: body.email_member_ids,
+    })
+
     const admin = createAdminClient()
     const { data, error } = await admin.from('announcements').insert({
+      email_tags: audience.tags,
+      email_member_ids: audience.memberIds,
       course_id: body.course_id,
       author_id: ctx.userId,
       type: body.type ?? 'admin_broadcast',
@@ -49,11 +63,25 @@ export const POST = withAuth(
 
     // Notify course members (fire-and-forget; excludes the author).
     // When focus_linkup_categories are set, only notify subscribed members.
-    const notifPayload = NotificationTemplates.announcementBroadcast(data.title, data.body, data.type, data.id)
+    // The post's own photos ride along: the email shows them under the body, so
+    // a post about a tournament arrives looking like the post. Read off the
+    // inserted row rather than the request, so the email can only show media the
+    // announcement actually kept.
+    const notifPayload = NotificationTemplates.announcementBroadcast(
+      data.title,
+      data.body,
+      data.type,
+      data.id,
+      announcementImages(data),
+    )
     const categories: string[] = body.focus_linkup_categories ?? []
+    // The post and the in-app notification go to the community either way; only
+    // the email narrows. An empty list is a real answer — nobody was named, so
+    // nobody is emailed — and must be passed through as one.
+    const emailMemberIds = await resolveEmailAudience(admin, body.course_id, audience, ctx.userId)
     void kept((categories.length
-      ? notifyFocusMembers(body.course_id, categories, notifPayload, ctx.userId)
-      : notifyCourse(body.course_id, notifPayload, ctx.userId)
+      ? notifyFocusMembers(body.course_id, categories, notifPayload, ctx.userId, { emailMemberIds })
+      : notifyCourse(body.course_id, notifPayload, ctx.userId, { emailMemberIds })
     ).catch(() => {}))
 
     return NextResponse.json(data, { status: 201 })

@@ -4,6 +4,15 @@
 // month calendar on /book. Lists the members booked that day by venue, then by
 // tee time, so a member can see who they'd be out with before they book.
 //
+// Each tee time reads as a tee sheet does: the person taking the group out
+// first, marked as the host, then whoever has joined them. The host is the user
+// staffing the venue's GHL calendar — see @/lib/bookings/venue-hosts — so it's
+// the same person the member's own booking confirmation names, and it's the same
+// for every tee time at that venue until the club re-staffs it.
+//
+// A venue whose calendar names nobody simply has no host row. The day is still
+// readable, which is why nothing here treats a missing host as an error.
+//
 // A bottom sheet on phones and a centred dialog from md up, matching
 // VenueDayDetailSheet, which it sits beside.
 
@@ -15,36 +24,109 @@ import { format } from 'date-fns'
 import Avatar from '@/components/ui/Avatar'
 import { cn, formatTeeTime, titleCaseName } from '@/lib/utils'
 import { VENUE_DOT as DOT } from '@/components/calendar/venue-colours'
+import { buildTeeSheet, distinctPlayers, type VenueTeeSheet } from '@/lib/bookings/tee-sheet'
+import type { DaySeats } from '@/lib/bookings/occupancy'
 import type { CalendarPlayer } from '@/lib/bookings/players'
+import type { VenueHost } from '@/lib/bookings/venue-hosts'
 
 export interface WhosPlayingDay {
   /** YYYY-MM-DD */
   date: string
   players: CalendarPlayer[]
+  /**
+   * Seats taken and seats held per venue — the same numbers the day cell prints.
+   * Passed so this sheet and that cell can't disagree: whatever it can't name,
+   * it counts. Absent for a day the caller has no openings for.
+   */
+  seats?: ReadonlyMap<string, DaySeats>
 }
 
-interface TeeGroup {
-  teeTime: string
-  players: CalendarPlayer[]
-}
-
-interface VenueGroup {
-  courseId: string
+/** A venue's tee sheet, plus how this calendar draws that venue. */
+interface VenueGroup extends VenueTeeSheet {
   name: string
   colourIdx: number
-  tees: TeeGroup[]
+}
+
+/**
+ * How the seats this list can't name are said.
+ *
+ * Two things take a seat without putting a member on the sheet: a non-member
+ * guest, who has no profile to open, and a booking that isn't going ahead yet,
+ * which still holds its seat against the venue's cap. Saying so is the point —
+ * a venue reading "4 of 12 taken" above two names is a disagreement a member
+ * would otherwise have to resolve by distrusting both.
+ */
+function unnamedSeatsLine(n: number, afterNames: boolean): string {
+  const more = afterNames ? 'more ' : ''
+  return n === 1
+    ? `1 ${more}seat is taken — a guest, or a round that isn't confirmed yet.`
+    : `${n} ${more}seats are taken — guests, or rounds that aren't confirmed yet.`
+}
+
+/** Initials for a host we may have only one name for. */
+function splitName(name: string): { first: string; last: string } {
+  const parts = name.trim().split(/\s+/)
+  return { first: parts[0] ?? '', last: parts.slice(1).join(' ') }
+}
+
+/**
+ * The host, at the head of a tee time.
+ *
+ * Styled a shade heavier than the players under it — it's the one row in the
+ * group that isn't someone you might be playing alongside by chance. Opens their
+ * profile when they're a member of ours; a club employee staffing the calendar
+ * is still the host of the round and simply has no page to open.
+ */
+function HostRow({ host, isSelf }: { host: VenueHost; isSelf: boolean }) {
+  const { first, last } = splitName(host.name)
+  const row = (
+    <>
+      <Avatar
+        firstName={first}
+        lastName={last}
+        avatarUrl={host.avatarUrl}
+        size="sm"
+        className="flex-shrink-0"
+      />
+      <span className="min-w-0 flex-1 text-sm font-semibold text-green-950 truncate">
+        {titleCaseName(host.name) || 'Host'}
+      </span>
+      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-gold/20 text-green-900/70 flex-shrink-0">
+        Host
+      </span>
+      {isSelf && (
+        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-900/[0.06] text-green-900/60 flex-shrink-0">
+          You
+        </span>
+      )}
+    </>
+  )
+
+  return host.memberId && !isSelf ? (
+    <Link
+      href={`/members/${host.memberId}`}
+      className="flex items-center gap-2.5 rounded-xl -mx-1 px-1 py-0.5 hover:bg-green-50/60"
+    >
+      {row}
+    </Link>
+  ) : (
+    <div className="flex items-center gap-2.5">{row}</div>
+  )
 }
 
 export default function WhosPlayingSheet({
   day,
   venueNames,
   colourByVenue,
+  hostByVenue,
   onClose,
 }: {
   /** null closes the sheet (kept mounted through the exit transition). */
   day: WhosPlayingDay | null
   venueNames: Map<string, string>
   colourByVenue: Map<string, number>
+  /** Who runs each venue. Absent for a venue whose calendar names nobody. */
+  hostByVenue?: Map<string, VenueHost>
   onClose: () => void
 }) {
   const [mounted, setMounted] = useState(false)
@@ -80,32 +162,25 @@ export default function WhosPlayingSheet({
     }
   }, [day, onClose])
 
-  // Venue, then tee time. Players arrive sorted by tee time, so each group
-  // keeps that order; venues follow the calendar's own (name) order.
+  // The arrangement — venue, host, tee time, players — is buildTeeSheet's; all
+  // that's added here is how this calendar draws each venue, and the name order
+  // it lists them in.
   const venues = useMemo<VenueGroup[]>(() => {
     if (!shown) return []
-    const byVenue = new Map<string, Map<string, CalendarPlayer[]>>()
-    for (const p of shown.players) {
-      const tees = byVenue.get(p.courseId) ?? new Map<string, CalendarPlayer[]>()
-      const list = tees.get(p.teeTime) ?? []
-      list.push(p)
-      tees.set(p.teeTime, list)
-      byVenue.set(p.courseId, tees)
-    }
-    return Array.from(byVenue.entries())
-      .map(([courseId, tees]) => ({
-        courseId,
-        name: venueNames.get(courseId) ?? 'Venue',
-        colourIdx: colourByVenue.get(courseId) ?? 0,
-        tees: Array.from(tees.entries()).map(([teeTime, players]) => ({ teeTime, players })),
+    return buildTeeSheet(shown.players, hostByVenue, shown.seats)
+      .map(sheet => ({
+        ...sheet,
+        name: venueNames.get(sheet.courseId) ?? 'Venue',
+        colourIdx: colourByVenue.get(sheet.courseId) ?? 0,
       }))
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [shown, venueNames, colourByVenue])
+  }, [shown, venueNames, colourByVenue, hostByVenue])
 
   if (!mounted || !shown) return null
 
   const longDate = format(new Date(`${shown.date}T12:00:00`), 'EEEE, MMMM d')
-  const count = shown.players.length
+  // People, not rows — see distinctPlayers.
+  const count = distinctPlayers(shown.players)
 
   const sheet = (
     <div
@@ -171,6 +246,16 @@ export default function WhosPlayingSheet({
                   <span className={cn('w-2 h-2 rounded-full flex-shrink-0', DOT[venue.colourIdx])} />
                   <span className="truncate">{venue.name}</span>
                 </h3>
+                {/* The cell's own numbers, so the two can be read against each
+                    other, and then the honest remainder. */}
+                {venue.seats && venue.seats.totalSpots > 0 && (
+                  <p className="mt-0.5 text-[11px] text-green-900/45">
+                    {Math.min(venue.seats.bookedSpots, venue.seats.totalSpots)} of{' '}
+                    {venue.seats.totalSpots} seat
+                    {venue.seats.totalSpots === 1 ? '' : 's'} taken
+                    {venue.seats.bookedSpots >= venue.seats.totalSpots && ' · full'}
+                  </p>
+                )}
 
                 <div className="mt-2 space-y-2">
                   {venue.tees.map(tee => (
@@ -183,6 +268,13 @@ export default function WhosPlayingSheet({
                         {formatTeeTime(tee.teeTime)}
                       </p>
                       <ul className="mt-1.5 space-y-1.5">
+                        {/* The tee sheet's own order: whoever is taking the
+                            group out, then whoever has joined them. */}
+                        {venue.host && (
+                          <li key="host">
+                            <HostRow host={venue.host} isSelf={venue.hostIsSelf} />
+                          </li>
+                        )}
                         {tee.players.map(p => {
                           const name = titleCaseName(`${p.firstName} ${p.lastName}`.trim()) || 'Member'
                           const row = (
@@ -224,6 +316,22 @@ export default function WhosPlayingSheet({
                       </ul>
                     </div>
                   ))}
+
+                  {venue.unnamedSeats > 0 && (
+                    // A venue whose every seat is one of those has no tee times
+                    // here at all, so the host — still the person running the day
+                    // — gets this box to themselves.
+                    <div className="rounded-2xl border border-dashed border-green-900/[0.14] px-3 py-2.5">
+                      {venue.tees.length === 0 && venue.host && (
+                        <div className="mb-1.5">
+                          <HostRow host={venue.host} isSelf={venue.hostIsSelf} />
+                        </div>
+                      )}
+                      <p className="text-[11px] leading-relaxed text-green-900/45">
+                        {unnamedSeatsLine(venue.unnamedSeats, venue.tees.length > 0)}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </section>
             ))}

@@ -19,6 +19,7 @@ const base = (over: Partial<NotificationEmail> = {}): NotificationEmail => ({
   ctaLabel: 'Pay for your round',
   logoUrl: 'https://app.linkup.golf/logos/logo-full-color.png',
   settingsUrl: 'https://app.linkup.golf/more/settings',
+  unsubscribeUrl: 'https://app.linkup.golf/api/email/unsubscribe?t=abc.def',
   ...over,
 })
 
@@ -60,12 +61,97 @@ describe('renderNotificationEmail', () => {
     expect(text).toContain('https://app.linkup.golf/book')
   })
 
-  it('includes the hero image only when there is one', () => {
+  it('includes an image only when there is one', () => {
     expect(renderNotificationEmail(base()).html).not.toContain('<img src="https://cdn')
     const withImage = renderNotificationEmail(
-      base({ imageUrl: 'https://cdn.example.com/round.jpg' }),
+      base({ imageUrls: ['https://cdn.example.com/round.jpg'] }),
     )
     expect(withImage.html).toContain('https://cdn.example.com/round.jpg')
+  })
+
+  it('shows the first photo a post carries and counts the rest', () => {
+    // Four photos used to email as four photos: a scroll, and three downloads
+    // the reader paid for to reach a button below all of them. One photo says
+    // what the post is about and the count says there is more.
+    const { html } = renderNotificationEmail(
+      base({
+        imageUrls: [
+          'https://cdn.example.com/one.jpg',
+          'https://cdn.example.com/two.jpg',
+          'https://cdn.example.com/three.jpg',
+        ],
+      }),
+    )
+    expect(html).toContain('one.jpg')
+    expect(html).not.toContain('two.jpg')
+    expect(html).not.toContain('three.jpg')
+    expect(html.match(/<img src="https:\/\/cdn/g)).toHaveLength(1)
+    expect(html).toContain('+2 more photos')
+  })
+
+  it('counts one extra photo in the singular', () => {
+    const { html } = renderNotificationEmail(
+      base({
+        imageUrls: ['https://cdn.example.com/one.jpg', 'https://cdn.example.com/two.jpg'],
+      }),
+    )
+    expect(html).toContain('+1 more photo')
+    expect(html).not.toContain('+1 more photos')
+  })
+
+  it('says nothing about more photos when there is only the one', () => {
+    const { html } = renderNotificationEmail(
+      base({ imageUrls: ['https://cdn.example.com/one.jpg'] }),
+    )
+    expect(html).not.toContain('more photo')
+  })
+
+  it('opens the post from the photo as well as the button', () => {
+    // The rest of the photos are in the app, so the thing standing in for them
+    // has to be the way there.
+    const { html } = renderNotificationEmail(
+      base({
+        imageUrls: ['https://cdn.example.com/one.jpg', 'https://cdn.example.com/two.jpg'],
+      }),
+    )
+    // The strip and the image are each wrapped in the destination link, on top
+    // of the logo and the button.
+    expect(html.split('https://app.linkup.golf/book').length - 1).toBeGreaterThanOrEqual(4)
+  })
+
+  it('counts only the photos it can actually use', () => {
+    // An unusable URL is dropped, and a "+2" standing for two broken images
+    // would promise the member something the post hasn't got.
+    const { html } = renderNotificationEmail(
+      base({
+        imageUrls: [
+          'https://cdn.example.com/one.jpg',
+          'javascript:alert(1)',
+          null,
+          'https://cdn.example.com/two.jpg',
+        ],
+      }),
+    )
+    expect(html).toContain('+1 more photo')
+    expect(html).not.toContain('+3 more')
+  })
+
+  it('drops an image it cannot use rather than rendering a broken one', () => {
+    // safeUrl answers '#' for anything unusable, which as an <img> source is a
+    // broken image in the middle of the card.
+    const { html } = renderNotificationEmail(
+      base({
+        imageUrls: [
+          'javascript:alert(1)',
+          '',
+          null,
+          'https://cdn.example.com/real.jpg',
+        ],
+      }),
+    )
+    expect(html).toContain('real.jpg')
+    expect(html).not.toContain('javascript:')
+    expect(html.match(/<img src="https:\/\/cdn/g)).toHaveLength(1)
   })
 
   it('escapes a name rather than letting it close a tag', () => {

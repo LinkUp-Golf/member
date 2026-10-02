@@ -26,7 +26,8 @@ const PUBLIC_ROUTES = [
   '/api/auth/magic-link',         // unauthenticated users request magic links
   '/api/auth/callback',           // Supabase redirects here after magic link click
   '/api/auth/signout',            // clears session cookie server-side
-  '/api/webhooks',                // GHL webhooks secured by secret, not session
+  '/api/webhooks',                // GHL and Resend webhooks: secured by signature, not session
+  '/api/email/unsubscribe',       // reached from an inbox; the signed token is the only credential
   '/api/.well-known/vercel/flags', // Vercel toolbar flag discovery (public by design)
   '/.well-known/vercel/flags',    // RFC 8615 path the toolbar actually fetches
 ]

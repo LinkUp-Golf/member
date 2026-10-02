@@ -17,8 +17,10 @@ export const dynamic = 'force-dynamic'
 // did everything below from /admin/hosts. That queue is gone along with its
 // table — the admin was approving essentially every application, and the wait
 // was the only thing between a member deciding to host and being able to. What
-// is left of the gate is where it always mattered: an individual round is still
-// created `pending_approval` and needs a calendar before a member can book it.
+// is left of the gate is where it always mattered: a round at a club we don't
+// have yet is created `pending_approval` and needs a calendar before a member can
+// book it. A round at a venue already on LinkUp is live immediately, exactly as
+// one created from /host/events is.
 //
 // The path keeps its name so an older client still reaches it.
 
@@ -30,6 +32,7 @@ import { validateHostApplicationPayload, sanitiseText } from '@/lib/validation'
 import { logger } from '@/lib/logger'
 import { HOST_EVENT_GUEST_RATE_USD } from '@/lib/constants'
 import { openSpotsByDate } from '@/lib/bookings/availability'
+import { newEventStatus } from '@/lib/hosts/events'
 import {
   provisionGhlUser,
   hostUserIdsForCourse,
@@ -288,10 +291,12 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
   // ---- The rounds they proposed ------------------------------
   //
-  // Created straight away, exactly as POST /api/host/events would. Capacity is
-  // what the venue actually has open that day — a flat number would oversell
-  // the thin days and waste the busy ones. A club we don't have yet has no
-  // calendar to ask, so its rounds carry the host's own numbers instead.
+  // Created straight away, exactly as POST /api/host/events would — including
+  // whether they go live, which is the venue's answer rather than this route's
+  // (see newEventStatus below). Capacity is what the venue actually has open that
+  // day — a flat number would oversell the thin days and waste the busy ones. A
+  // club we don't have yet has no calendar to ask, so its rounds carry the host's
+  // own numbers instead.
   const proposed = Array.isArray(body.events) ? body.events : []
   const kept = proposed
     .map(ev => ({ ev, courseId: String(ev.venue ?? '') }))
@@ -341,10 +346,13 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
       total_spots: spots,
       member_guest_rate: rate,
       dinner: ev.dinner === true,
-      // Becoming a host grants the role, not the listing. A round still needs a
-      // GHL calendar before a member can book it, so it queues behind the same
-      // gate as anything a host creates.
-      status: 'pending_approval',
+      // The same rule as anything a host creates later (newEventStatus): a round
+      // at a venue already on LinkUp is published as it's created, because the
+      // club is set up and there is nothing for a review to decide, while a round
+      // at a club this application is proposing waits for someone to set that
+      // club up. Becoming a host grants the role; the venue is what decides
+      // whether the round is live.
+      status: newEventStatus(coursesById.get(courseId)),
     }))
 
   let createdEvents = 0

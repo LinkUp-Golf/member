@@ -1,9 +1,11 @@
 "use client";
 
-// Host: create hosted events and watch them run. There is no draft — an event
-// is live from the moment it's created, then: (event runs) → upload proof →
-// pending approval → credits awarded. An admin can take a listing down (which
-// cancels it) if it shouldn't have gone out.
+// Host: create hosted events and watch them run. There is no draft and, at a
+// venue already on LinkUp, no queue: the round is live from the moment it's
+// created, then (event runs) → upload proof → pending approval → credits
+// awarded. An admin can take a listing down (which cancels it) if it shouldn't
+// have gone out. A round at a club we don't have yet is the one exception — it
+// waits while someone sets the club up.
 //
 // A host can't change or cancel a listed round from here for now: members
 // reserve against a date and a tee time, and a round that moves or disappears
@@ -95,15 +97,11 @@ const STATUS_META: Partial<
   cancelled: { label: "Cancelled", dot: "bg-red-500", text: "text-red-600" },
 };
 
-/**
- * What an event awaiting review says, beside its title.
- *
- * It sits on the card header rather than on each date because it is one fact
- * about the whole event, and the host has nothing to do about it. Said once
- * there, the date rows underneath don't repeat it — a round waiting on us
- * shows no state chip at all, because the title already said so.
- */
-const AWAITING_REVIEW_NOTE = "We’ll notify you once it’s done.";
+// The sentence that used to follow the chip — "We'll notify you once it's done."
+// — is gone. Rounds at a venue already on LinkUp don't wait on anything now, so
+// the only events wearing this are rounds at a club we haven't set up yet, where
+// the chip alone is the fact and a promise about notifications was both noise and
+// one more thing to keep true.
 
 /** One venue's rounds. A host listing several dates at a club sees one card. */
 interface VenueGroup {
@@ -248,8 +246,9 @@ const VenueCard = memo(function VenueCard({
         <div className="min-w-0">
           {/* Title and, when the event is still with us, what's happening to
               it — the same dotted chip the date rows use for every other state,
-              so one event reads like the rest of the list. On one line,
-              wrapping rather than truncating the sentence away on a phone. */}
+              so one event reads like the rest of the list. Three words, because
+              that is the whole of what we can honestly say: the club isn't set
+              up yet. */}
           <h2 className="text-sm font-semibold text-gray-900">
             <span className="align-middle">{group.name}</span>
             {awaitingReview && (
@@ -259,7 +258,7 @@ const VenueCard = memo(function VenueCard({
                 <span
                   className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${AWAITING_REVIEW.dot}`}
                 />
-                {AWAITING_REVIEW_NOTE}
+                {AWAITING_REVIEW.label}
               </span>
             )}
           </h2>
@@ -371,6 +370,44 @@ const EventRow = memo(function EventRow({
   // than on the page: only one is ever open, and the sheet portals to the body,
   // so there is nothing for the page to coordinate.
   const [openRoster, setOpenRoster] = useState<RoundPlayers | null>(null);
+  // Whether anything was ticked while it was open. The list is only re-read on
+  // close: each tick has already been saved, and refetching under an open sheet
+  // would be a request per tap for a screen that already shows the answer.
+  const [attendanceSaved, setAttendanceSaved] = useState(false);
+
+  /**
+   * Records who played. The sheet sends the whole set on every tick, so this is
+   * a replace rather than a change, and a refusal is reported here and reverted
+   * there — the host is the only person who can tell us this, and a tick that
+   * silently didn't save would read as one that did.
+   */
+  const saveAttendance = useCallback(
+    async (memberIds: string[]) => {
+      const res = await fetch(`/api/host/events/${event.id}/attendance`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ member_ids: memberIds }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        onToast(json.error ?? "Could not save who played.", false);
+        return false;
+      }
+      setAttendanceSaved(true);
+      return true;
+    },
+    [event.id, onToast],
+  );
+
+  const closeRoster = useCallback(() => {
+    setOpenRoster(null);
+    // So reopening it shows what was saved rather than what the row was built
+    // with.
+    if (attendanceSaved) {
+      setAttendanceSaved(false);
+      onChanged();
+    }
+  }, [attendanceSaved, onChanged]);
 
   // At most one line of explanation, and only where the state needs one — four
   // possible notes stacked under every row was most of the old card's height.
@@ -416,14 +453,15 @@ const EventRow = memo(function EventRow({
         </div>
 
         <div className="flex items-center justify-end gap-2 flex-wrap">
-          {proof.canUpload && (
-            <ProofControl event={event} onDone={onChanged} onToast={onToast} />
-          )}
           {/* Who is coming, as faces, and the way into their names — the same
               gesture the member app's booking calendar uses. This used to be a
               count that opened a whole page to answer a question a row of
               circles answers in place. Nothing when the round is empty: the spot
-              line above already says "0 of 4". */}
+              line above already says "0 of 4".
+
+              To the left of the upload button on purpose: once the round has run
+              these two are one job done in one place — tick who played, then send
+              the photo of them — and the list is the half that comes first. */}
           {players.length > 0 && (
             <button
               type="button"
@@ -433,18 +471,28 @@ const EventRow = memo(function EventRow({
                   venueName: event.course?.name ?? "This venue",
                   teeTime: event.tee_time,
                   players,
+                  // Only once the round has happened, which is the same moment
+                  // the upload button appears beside this — see canMarkAttendance.
+                  ...(proof.canUpload ? { onMarkAttendance: saveAttendance } : {}),
                 })
               }
-              aria-label={`Who's coming on ${fmtDate(event.event_date)} — ${playing} ${playing === 1 ? "member" : "members"}`}
+              aria-label={
+                proof.canUpload
+                  ? `Who played on ${fmtDate(event.event_date)} — ${playing} ${playing === 1 ? "member" : "members"}, mark who attended`
+                  : `Who's coming on ${fmtDate(event.event_date)} — ${playing} ${playing === 1 ? "member" : "members"}`
+              }
               className="focus-ring rounded-full p-0.5 -m-0.5 hover:bg-gray-100"
             >
               <PlayerFaces players={players} />
             </button>
           )}
+          {proof.canUpload && (
+            <ProofControl event={event} onDone={onChanged} onToast={onToast} />
+          )}
         </div>
       </div>
 
-      <RoundPlayersSheet round={openRoster} onClose={() => setOpenRoster(null)} />
+      <RoundPlayersSheet round={openRoster} onClose={closeRoster} />
 
       {/* Either half can stand alone: a settled round has a photo worth seeing
           and nothing left to say, and a note can exist before any photo does. */}
@@ -714,7 +762,8 @@ function EventDrawer({
    *   1. POST /api/courses/request creates the venue as a pending course and
    *      grants this host access to it.
    *   2. POST /api/host/events creates a real hosted_event per date against it,
-   *      in pending_approval — the same queue any other new round lands in.
+   *      in pending_approval — the one case that still waits on a person, because
+   *      the club it runs at doesn't exist yet.
    *
    * Doing it as events rather than a filed note is what ties the host to the
    * rounds: they're attached from the start, so approving the venue approves
@@ -824,15 +873,23 @@ function EventDrawer({
       onError(json.error ?? "Could not save.");
       return;
     }
-    // Say how many were submitted when it was more than one — the host chose
-    // several dates, so a bare "Submitted" would leave them counting.
-    const created = Array.isArray(json.events) ? json.events.length : 1;
-    const submitted =
-      created > 1 ? `${created} events submitted` : "Event submitted";
+    // Say how many when it was more than one — the host chose several dates, so a
+    // bare "Published" would leave them counting.
+    //
+    // Which of the two things happened is read off the rows the server created,
+    // not guessed from which tab was open: the server decides whether a round can
+    // go live (see POST /api/host/events), and a toast that disagreed with it
+    // would be the host's only account of where their round went.
+    const rows = Array.isArray(json.events) ? json.events : [];
+    const created = rows.length || 1;
+    const live = (rows[0]?.status ?? json.event?.status) !== "pending_approval";
+    const subject = created > 1 ? `${created} events` : "Event";
     onSaved(
       isEdit
         ? "Event updated."
-        : `${submitted} for approval. We'll set up the calendar, then publish it to members.`,
+        : live
+          ? `${subject} published — members can reserve ${created > 1 ? "them" : "it"} now.`
+          : `${subject} submitted. We'll set the venue up, then publish ${created > 1 ? "them" : "it"} to members.`,
     );
   }
 
@@ -1135,14 +1192,16 @@ function EventDrawer({
 
         </form>
 
-        {/* "Submit", not "Publish" — saving sends the event for approval, and
-            the LinkUp team is what makes it live once the calendar exists. */}
+        {/* What the button does depends on which tab is open, because the two
+            genuinely do different things: a round at a venue we already have goes
+            live as it's created, while a club we don't have has to be set up by a
+            person first. The word says which. */}
         <div className="px-6 py-4 border-t border-gray-100 flex flex-col gap-2 flex-shrink-0">
           {!isEdit && (
             <p className="text-[11px] text-gray-500">
               {proposing
-                ? "We'll add the event, set up its calendar against the dates you've listed, then publish it to members."
-                : "We'll set up the calendar for this round, then publish it to members."}
+                ? "We'll add the rounds, set this venue up against the dates you've listed, then publish them to members."
+                : "This goes live as soon as you publish it — members can reserve a spot straight away."}
             </p>
           )}
           <button
@@ -1158,7 +1217,7 @@ function EventDrawer({
             ) : proposing ? (
               "Request this LinkUp"
             ) : (
-              "Submit for approval"
+              "Publish event"
             )}
           </button>
         </div>

@@ -23,12 +23,14 @@ import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-serv
 import { getAvailableSlots, createBooking, getContactByEmail, resolveMeetingDurationMins } from '@/lib/ghl/client'
 import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { logActivity } from '@/lib/activity/log'
-import { provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
+import { linkGuestToMember, provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
+import type { ProvisionedGuest } from '@/lib/bookings/non-member-guest'
 import { NotificationTemplates } from '@/lib/push'
 import { notifyMembers } from '@/lib/notify'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
-import { buildCustomSlots } from '@/lib/bookings/availability'
+import { buildCustomSlots, NON_HOLDING_STATUSES } from '@/lib/bookings/availability'
+import { isInsideJoinOnlyWindow, joinOnlyWindowMessage } from '@/lib/bookings/lead-time'
 import { bookingAmountDue } from '@/lib/bookings/price'
 import {
   PAY_AT_CLUB,
@@ -328,6 +330,36 @@ export async function POST(request: NextRequest) {
   const timeNormalized = `${lp('hour')}:${lp('minute')}:${lp('second')}`
 
   console.log('[booking/create] Resolved in event/Aviara timezone:', { bookingDate, timeNormalized })
+
+  // ---- The last few days: join a round, don't start one --------------------
+  //
+  // Inside the window a venue-day with nobody on it is closed. The calendar
+  // already hides such a day, so reaching here means either a stale month in a
+  // client that has been open a while, or someone posting straight at the
+  // endpoint — and the day is the club's either way. See @/lib/bookings/lead-time.
+  //
+  // "Today" in the venue's own timezone, like the date above: a club an hour
+  // ahead enters the window before one behind it.
+  const todayAtVenue = new Intl.DateTimeFormat('en-CA', {
+    timeZone: eventTimezone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date())
+
+  if (isInsideJoinOnlyWindow(bookingDate, todayAtVenue)) {
+    const { count: heldThatDay } = await adminSupabase
+      .from('bookings')
+      .select('id', { count: 'exact', head: true })
+      .eq('course_id', resolvedCourseId)
+      .eq('booking_date', bookingDate)
+      .not('status', 'in', NON_HOLDING_STATUSES)
+
+    if (!heldThatDay) {
+      console.log('[booking/create] Refused: inside the join-only window with nobody booked', {
+        courseId: resolvedCourseId, bookingDate, todayAtVenue,
+      })
+      return NextResponse.json({ error: joinOnlyWindowMessage() }, { status: 409 })
+    }
+  }
 
   // ---- Validate everyone up front, before touching GHL --------------------
   // Fail fast with a clear message rather than getting partway through and
@@ -678,16 +710,31 @@ export async function POST(request: NextRequest) {
         } else {
           const guest = b.additional_players?.[0]
           if (!guest?.email) return
+          let provisioned: ProvisionedGuest
           try {
             // Creates the GHL contact, tags it for access, and makes the
             // member row — the work the admin Setup button used to do.
-            contactId = await provisionNonMemberGuest(guest, adminSupabase)
+            provisioned = await provisionNonMemberGuest(guest, adminSupabase)
           } catch (err) {
             console.warn('[booking/create] Non-member setup failed (non-fatal):', guest.email, String(err))
             return
           }
+          contactId = provisioned.contactId
           email = guest.email
           phone = guest.mobile || null
+          // Hand them their own round. They have an account now, so this row is
+          // theirs to open when they sign in rather than a name on the booker's
+          // list — see linkGuestToMember. Outside the catch above, which is for
+          // "there is no contact, so there is no appointment": a seat nobody is
+          // linked to is still a seat, and the backfill catches it.
+          if (provisioned.memberId) {
+            await linkGuestToMember(adminSupabase, {
+              bookingId: b.id,
+              guest,
+              memberId: provisioned.memberId,
+            })
+            b.player_member_id = provisioned.memberId // reflected into the response
+          }
         }
 
         try {

@@ -32,6 +32,17 @@ export interface PushPayload {
   badge?: string
   /** Large image displayed inside the notification */
   image?: string
+  /**
+   * Every image the notification carries, in order, the first one included.
+   * Ignored by push, which has room for exactly one — that's `image`, and it
+   * should be the first of these.
+   *
+   * The email shows the first and says how many more there are, so this is the
+   * whole set rather than the set it renders: an announcement posted with four
+   * photos is one notification and four images, and how many of them belong in
+   * an inbox is the email's decision (see mediaBlock in @/lib/email/template).
+   */
+  images?: string[]
   /** Deduplication tag — replaces an existing notification with the same tag */
   tag?: string
   /** URL to open when the notification is tapped. Put inside data.url */

@@ -8,6 +8,8 @@ import { getCache } from '@/lib/cache'
 import { COURSE_ANN_NS, courseAnnPrefix } from '@/lib/cache/keys'
 import { NotificationTemplates } from '@/lib/push'
 import { notifyCourse, notifyFocusMembers, kept } from '@/lib/notify'
+import { normaliseAudience, resolveEmailAudience } from '@/lib/announcements/recipients'
+import { announcementImages } from '@/lib/announcements/media'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const PATCH = withAuth(
@@ -91,11 +93,31 @@ export const PATCH = withAuth(
 
     // Send push if this is a fresh publish (moderation approval), not an edit of existing post.
     if (isApproving && !wasAlreadyPublished && data.course_id) {
-      const notifPayload = NotificationTemplates.announcementBroadcast(data.title, data.body, data.type, data.id)
+      // Off the row, like the audience below: the post may have been edited
+      // between being written and being approved, and what goes in the email is
+      // whatever it carries now.
+      const notifPayload = NotificationTemplates.announcementBroadcast(
+        data.title,
+        data.body,
+        data.type,
+        data.id,
+        announcementImages(data),
+      )
       const categories: string[] = data.focus_linkup_categories ?? []
+      // Read off the row, not off this request: the email audience was chosen
+      // when the announcement was written, and approving it can be days later.
+      // This is the reason those columns exist rather than being a property of
+      // the send. A row that names nobody — including every row written before
+      // the columns existed — is published without an email.
+      const emailMemberIds = await resolveEmailAudience(
+        admin,
+        data.course_id,
+        normaliseAudience({ tags: data.email_tags, memberIds: data.email_member_ids }),
+        ctx.userId,
+      )
       void kept((categories.length
-        ? notifyFocusMembers(data.course_id, categories, notifPayload, ctx.userId)
-        : notifyCourse(data.course_id, notifPayload, ctx.userId)
+        ? notifyFocusMembers(data.course_id, categories, notifPayload, ctx.userId, { emailMemberIds })
+        : notifyCourse(data.course_id, notifPayload, ctx.userId, { emailMemberIds })
       ).catch(() => {}))
     }
 

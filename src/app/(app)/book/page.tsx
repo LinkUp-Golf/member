@@ -30,6 +30,7 @@ import VenueDayDetailSheet, {
   type VenueDayDetail,
 } from "@/components/calendar/VenueDayDetailSheet";
 import type { CalendarPlayer } from "@/lib/bookings/players";
+import type { VenueHost } from "@/lib/bookings/venue-hosts";
 import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
 import { bookingAmountDue } from "@/lib/bookings/price";
 import {
@@ -37,8 +38,8 @@ import {
   isPayAtClub,
   offersPayAtClub,
   offersPayNow,
-  payAtClubStage,
-  PAY_AT_CLUB_STAGE_LABELS,
+  settlingAtClub as isSettlingAtClub,
+  PAY_AT_CLUB_LABEL,
   type PaymentOption,
 } from "@/lib/bookings/payment-options";
 import CreditCouponModal from "@/components/credits/CreditCouponModal";
@@ -2021,20 +2022,15 @@ function SuccessScreen({
             they still need from this screen.
 
             The wording is whatever My Bookings will say about the same round, so
-            the two screens can't disagree: a club-only round was created
-            'payment_confirmed' and reads as settled, while one the member just
-            chose the club for keeps its 'availability_confirmed' status and reads
-            as in progress. */}
+            the two screens can't disagree — and it's the same wording whichever
+            way the round got here, because the app never learns that the club was
+            paid. Amber, not green: this is money still owed. */}
         {settlingAtClub ? (
           <p
             className="!mt-4 text-sm font-semibold rounded-xl px-3 py-2.5 text-center"
-            style={{ background: "rgba(34,197,94,0.08)", color: "#166534" }}
+            style={{ background: "rgba(234,179,8,0.08)", color: "#92640a" }}
           >
-            ✓{" "}
-            {clubOnly
-              ? PAY_AT_CLUB_STAGE_LABELS.paid
-              : PAY_AT_CLUB_STAGE_LABELS.paying}{" "}
-            · {formatUsd(booking.amountDue)}
+            {PAY_AT_CLUB_LABEL} · {formatUsd(booking.amountDue)}
           </p>
         ) : payNow ? (
           booking.paymentUrl ? (
@@ -2192,18 +2188,12 @@ const STATUS_LABELS: Record<
     color: "#166534",
     bg: "rgba(34,197,94,0.08)",
   },
-  // Not booking statuses: a row the member chose to settle at the club
-  // (payment_method 'pay_at_club'), before and after its payment is confirmed.
-  // See bookingDisplayStatus.
+  // Not a booking status: a row the member is settling with the club
+  // (payment_method 'pay_at_club'). See bookingDisplayStatus.
   paying_at_club: {
-    label: PAY_AT_CLUB_STAGE_LABELS.paying,
+    label: PAY_AT_CLUB_LABEL,
     color: "#92640a",
     bg: "rgba(234,179,8,0.08)",
-  },
-  paid_at_club: {
-    label: PAY_AT_CLUB_STAGE_LABELS.paid,
-    color: "#166534",
-    bg: "rgba(34,197,94,0.08)",
   },
   confirmed: {
     label: "Confirmed",
@@ -2218,19 +2208,14 @@ const STATUS_LABELS: Record<
   },
 };
 
-// What a row's badge says. A round being settled at the club keeps its
-// pipeline status underneath, but "Payment due" would be wrong for it: it reads
-// "Paying at club" until its payment is confirmed, then "Paid at club".
+// What a row's badge says. A round being settled at the club keeps its pipeline
+// status underneath, but neither "Payment due" nor "Payment confirmed" is true
+// of it: the money is the club's to collect, and we never hear that they have.
 function bookingDisplayStatus(row: {
   status: string;
   payment_method?: string | null;
 }): string {
-  const stage = payAtClubStage(row);
-  return stage === "paying"
-    ? "paying_at_club"
-    : stage === "paid"
-      ? "paid_at_club"
-      : row.status;
+  return isSettlingAtClub(row) ? "paying_at_club" : row.status;
 }
 
 function BookingStatusBadge({ status }: { status: string }) {
@@ -3848,6 +3833,10 @@ function EventSelectionScreen({
   const [calMonth, setCalMonth] = useState<Date>(() => startOfMonth(new Date()));
   const [calVenues, setCalVenues] = useState<CalendarVenue[]>([]);
   const [calDays, setCalDays] = useState<Record<string, CalendarOpening[]>>({});
+  // Who runs each venue, for the head of every tee time on the day's sheet.
+  // Arrives with the availability because a host is a property of the venue and
+  // the answer is on the same GHL calendar this request already reads.
+  const [calHosts, setCalHosts] = useState<Record<string, VenueHost>>({});
   const [calLoading, setCalLoading] = useState(false);
   const [calError, setCalError] = useState("");
   // null = every venue. A list narrows the month to just those clubs.
@@ -3889,11 +3878,17 @@ function EventSelectionScreen({
             ? (d.days as Record<string, CalendarOpening[]>)
             : {},
         );
+        setCalHosts(
+          d.hosts && typeof d.hosts === "object"
+            ? (d.hosts as Record<string, VenueHost>)
+            : {},
+        );
       })
       .catch(() => {
         if (!current) return;
         setCalVenues([]);
         setCalDays({});
+        setCalHosts({});
         setCalError("Couldn't load the calendar. Check your connection and try again.");
       })
       .finally(() => {
@@ -4055,6 +4050,11 @@ function EventSelectionScreen({
         (calDays[date] ?? []).find((o) => o.courseId === courseId) ??
         (ahead?.date === date ? ahead : null);
       if (!opening) return;
+      // The month also lists venue-days that are full, so the calendar can show
+      // that a round is happening. There is nothing to book on one: the sheet
+      // would open on an empty tee-time list and the submit would be refused.
+      // The cards don't offer it; this is the guard behind them.
+      if ("openSpots" in opening && !(opening.openSpots > 0)) return;
 
       setDayDetail({
         course,
@@ -4251,6 +4251,7 @@ function EventSelectionScreen({
             pinnedNextAvailable={pinnedNext}
             onPickOpening={openDayDetail}
             players={calPlayers}
+            hosts={calHosts}
           />
         )}
 

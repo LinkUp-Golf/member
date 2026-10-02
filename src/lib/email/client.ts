@@ -39,6 +39,12 @@ export interface EmailMessage {
   subject: string
   html: string
   text: string
+  /**
+   * Extra SMTP headers. In practice this is List-Unsubscribe and
+   * List-Unsubscribe-Post, which is what turns a reader's "unsubscribe" button
+   * into an unsubscribe rather than a spam complaint — see ./unsubscribe.
+   */
+  headers?: Record<string, string>
 }
 
 export interface EmailSendResult {
@@ -76,6 +82,13 @@ export function emailConfig(): Record<string, unknown> {
     from: from(),
     usingSandboxFrom: !process.env.EMAIL_FROM,
     replyTo: replyTo() ?? null,
+    // The two settings deliverability depends on, and neither fails loudly.
+    // Without the webhook secret nothing ever learns that an address bounced;
+    // without a signing key the one-click unsubscribe header can't be minted,
+    // which is the thing Gmail and Yahoo require of a bulk sender.
+    hasWebhookSecret: !!process.env.RESEND_WEBHOOK_SECRET,
+    canSignUnsubscribe:
+      !!process.env.EMAIL_UNSUBSCRIBE_SECRET || !!process.env.SUPABASE_SERVICE_ROLE_KEY,
   }
 }
 
@@ -133,6 +146,7 @@ export async function sendEmail(message: EmailMessage): Promise<EmailSendResult>
       to: single ? recipients : [from()],
       ...(single ? {} : { bcc: recipients }),
       ...(replyTo() ? { replyTo: replyTo() as string } : {}),
+      ...(message.headers ? { headers: message.headers } : {}),
       subject: message.subject,
       html: message.html,
       text: message.text,
@@ -183,5 +197,122 @@ export async function sendEmail(message: EmailMessage): Promise<EmailSendResult>
       },
     })
     return { sent: 0, failed: recipients.length, skipped: false }
+  }
+}
+
+/**
+ * Resend takes at most 100 messages in one batch call.
+ *
+ * The cap is theirs; the batching is ours, and ./send slices to it.
+ */
+export const BATCH_LIMIT = 100
+
+/**
+ * Sends a set of messages, one per recipient, in a single call.
+ *
+ * This is how a broadcast goes out, and the difference from calling sendEmail
+ * with fifty addresses matters in three ways:
+ *
+ *   - each member's address is in their own To: line, so the mail is addressed
+ *     to them rather than bcc'd to a copy of ourselves. A message whose To: is
+ *     the sender is a shape bulk filters know well;
+ *   - each message can carry that member's own List-Unsubscribe header, which
+ *     a shared bcc physically cannot;
+ *   - a bad address fails its own message instead of the whole send.
+ *
+ * Every message here must name exactly one recipient. That's the caller's
+ * job — ./send builds them — and anything else is dropped rather than bcc'd
+ * by accident.
+ */
+export async function sendEmailBatch(messages: EmailMessage[]): Promise<EmailSendResult> {
+  const valid = messages.filter(m => m.to.length === 1 && !!m.to[0])
+  if (valid.length !== messages.length) {
+    logger.warn('Email batch dropped messages without exactly one recipient', {
+      action: 'email.batch_invalid',
+      metadata: { given: messages.length, kept: valid.length },
+    })
+  }
+  if (valid.length === 0) return { sent: 0, failed: 0, skipped: false }
+
+  const client = getClient()
+  if (!client) {
+    logger.warn('Email batch not sent: RESEND_API_KEY is not set', {
+      action: 'email.skipped',
+      metadata: { recipients: valid.length, subject: valid[0]?.subject },
+    })
+    return { sent: 0, failed: 0, skipped: true }
+  }
+
+  logger.info('Email batch sending', {
+    action: 'email.sending',
+    metadata: {
+      ...emailConfig(),
+      subject: valid[0]?.subject,
+      recipients: valid.length,
+      to: valid.slice(0, 5).map(m => maskEmail(m.to[0] as string)),
+      mode: 'batch',
+    },
+  })
+
+  const startedAt = Date.now()
+
+  try {
+    const { data, error } = await client.batch.send(
+      valid.map(m => ({
+        from: from(),
+        to: m.to,
+        ...(replyTo() ? { replyTo: replyTo() as string } : {}),
+        ...(m.headers ? { headers: m.headers } : {}),
+        subject: m.subject,
+        html: m.html,
+        text: m.text,
+      })),
+    )
+
+    if (error) {
+      logger.error('Email batch rejected by Resend', {
+        action: 'email.failed',
+        errorCode: error.name,
+        errorMessage: error.message,
+        durationMs: Date.now() - startedAt,
+        metadata: {
+          ...emailConfig(),
+          recipients: valid.length,
+          to: valid.slice(0, 5).map(m => maskEmail(m.to[0] as string)),
+          subject: valid[0]?.subject,
+        },
+      })
+      return { sent: 0, failed: valid.length, skipped: false }
+    }
+
+    // Resend answers with one id per accepted message. Anything short of the
+    // batch we handed it is a message it didn't take, and counting the ids
+    // rather than assuming is the only way we'd ever know.
+    const accepted = data?.data?.length ?? valid.length
+
+    logger.info('Email batch sent', {
+      action: 'email.sent',
+      durationMs: Date.now() - startedAt,
+      metadata: {
+        recipients: valid.length,
+        accepted,
+        to: valid.slice(0, 5).map(m => maskEmail(m.to[0] as string)),
+        subject: valid[0]?.subject,
+        ids: (data?.data ?? []).slice(0, 5).map(d => d.id),
+      },
+    })
+    return { sent: accepted, failed: valid.length - accepted, skipped: false }
+  } catch (err) {
+    logger.error('Email batch threw', {
+      action: 'email.failed',
+      errorMessage: err instanceof Error ? err.message : String(err),
+      durationMs: Date.now() - startedAt,
+      metadata: {
+        ...emailConfig(),
+        recipients: valid.length,
+        subject: valid[0]?.subject,
+      },
+    })
+    return { sent: 0, failed: valid.length, skipped: false }
   }
 }

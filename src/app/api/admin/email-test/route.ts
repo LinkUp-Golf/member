@@ -31,7 +31,9 @@ import {
   resolveRecipients,
   sendEmailToMember,
   sendNotificationEmail,
+  unsubscribeUrl,
 } from '@/lib/email/send'
+import { suppressedAmong } from '@/lib/email/suppression'
 import { logger } from '@/lib/logger'
 import type { PushPayload } from '@/lib/push/types'
 
@@ -63,6 +65,11 @@ export const POST = withAdminAuth(async (req: NextRequest, ctx: AuthContext) => 
   if (targetMemberId) {
     const recipients = await resolveRecipients([targetMemberId])
 
+    // The newest way a notification can silently not arrive: the address is on
+    // the suppression list because it bounced, was reported as spam, or the
+    // member used the unsubscribe link. Nothing else in the app shows that.
+    const blocked = await suppressedAmong(recipients.map(r => r.email))
+
     const stages = {
       config,
       lookup: {
@@ -71,6 +78,12 @@ export const POST = withAdminAuth(async (req: NextRequest, ctx: AuthContext) => 
         // row, no address, or a membership status that has lost access.
         addressFound: recipients.length > 0,
         to: recipients[0] ? maskEmail(recipients[0].email) : null,
+      },
+      suppression: {
+        suppressed: blocked.size > 0,
+        note: blocked.size > 0
+          ? 'This address is on email_suppressions — bounced, complained or unsubscribed. Nothing will be sent to it until the row is removed.'
+          : null,
       },
     }
 
@@ -107,7 +120,10 @@ export const POST = withAdminAuth(async (req: NextRequest, ctx: AuthContext) => 
   const resolved = await resolveRecipients([ctx.memberId])
   const to = requested || resolved[0]?.email || ctx.email
 
-  const { subject, html, text } = renderNotification(SAMPLE)
+  // Rendered for this recipient, so the smoke test exercises the footer and the
+  // unsubscribe link rather than a version of the email nobody receives.
+  const { subject, html, text } = renderNotification(SAMPLE, to)
+  const blocked = await suppressedAmong([to])
   const result = await sendNotificationEmail([to], SAMPLE)
 
   logger.info('Email test run (smoke)', {
@@ -131,7 +147,16 @@ export const POST = withAdminAuth(async (req: NextRequest, ctx: AuthContext) => 
     stages: {
       config,
       lookup: { memberId: ctx.memberId, callerAddressResolved: resolved.length > 0 },
-      message: { subject, to: maskEmail(to), htmlBytes: html.length, textBytes: text.length },
+      suppression: { suppressed: blocked.size > 0 },
+      message: {
+        subject,
+        to: maskEmail(to),
+        htmlBytes: html.length,
+        textBytes: text.length,
+        // Present means the mail carries a working List-Unsubscribe header,
+        // which is what a bulk sender is required to offer.
+        oneClickUnsubscribe: !!unsubscribeUrl(to),
+      },
     },
   })
 })

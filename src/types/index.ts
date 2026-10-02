@@ -526,6 +526,14 @@ export interface EventPlayer {
   last_name: string
   avatar_url: string | null
   source: 'reserved' | 'booking'
+  /**
+   * Whether the host marked them present after the round.
+   *
+   * False means "not ticked", which is both "didn't come" and "nobody has said
+   * yet" — the host ticks who was there and nothing records an absence. Only
+   * populated where the roster is (enrichHostedEvents' withPlayers).
+   */
+  attended?: boolean
 }
 
 export interface HostedEvent {
@@ -753,6 +761,14 @@ export interface Announcement {
   video_url: string | null
   media_urls: string[]
   focus_linkup_categories: string[]
+  /**
+   * Who the announcement is emailed to: GHL tags, members by name, or both.
+   * Both empty means no email was sent — there is no "everyone". The post and
+   * the in-app notification always go to the community; only the email is
+   * aimed. See src/lib/announcements/recipients.ts.
+   */
+  email_tags: string[]
+  email_member_ids: string[]
   is_pinned: boolean
   created_at: string
 }

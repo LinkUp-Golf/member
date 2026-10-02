@@ -12,12 +12,18 @@ export const dynamic = 'force-dynamic'
 // cached per calendar+month and the fan-out is capped. The venue list matches
 // GET /api/courses exactly — a course must have a calendar and a way to be paid
 // to be bookable, so anything absent there is absent here too.
+//
+// It also answers who is running each venue, which the day's tee sheet puts at
+// the head of every tee time. That belongs here rather than on the who's-playing
+// endpoint: a host is a property of the venue, not of the day, and this request
+// is already talking to each venue's calendar — which is where the answer is.
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { venueAvailabilityForMonth } from '@/lib/bookings/availability'
+import { loadVenueHosts } from '@/lib/bookings/venue-hosts'
 import { canTakePayment } from '@/lib/bookings/payment-options'
 import { format } from 'date-fns'
 import type { Course } from '@/types'
@@ -55,13 +61,14 @@ export async function GET(req: NextRequest) {
 
   // Same payable rule as GET /api/courses, and for the same reason it isn't a
   // SQL filter there — see the note on that route.
-  const availability = await venueAvailabilityForMonth(
-    admin,
-    ((courses ?? []) as Course[]).filter(canTakePayment),
-    month,
-    startDate,
-    endDate,
-  )
+  const payable = ((courses ?? []) as Course[]).filter(canTakePayment)
 
-  return NextResponse.json({ month, ...availability })
+  // In parallel: the two halves ask GHL about the same calendars and neither
+  // needs the other's answer.
+  const [availability, hosts] = await Promise.all([
+    venueAvailabilityForMonth(admin, payable, month, startDate, endDate),
+    loadVenueHosts(admin, payable),
+  ])
+
+  return NextResponse.json({ month, ...availability, hosts })
 }

@@ -20,6 +20,7 @@ export const COURSE_LINKUPS_NS  = 'course:linkups'
 export const COURSE_MEMBERS_NS  = 'course:members'
 export const GHL_SLOTS_NS       = 'ghl:slots'
 export const GHL_CAL_RULES_NS   = 'ghl:cal:rules'
+export const GHL_USERS_NS       = 'ghl:users'
 
 // ---- TTLs --------------------------------------------------
 
@@ -31,6 +32,7 @@ export const COURSE_LINKUPS_TTL_MS = 60 * 60_000   // 1 hour — changes once pe
 export const COURSE_MEMBERS_TTL_MS = 15 * 60_000   // 15 min — status changes are admin-driven
 export const GHL_SLOTS_TTL_MS      = 30 * 60_000   // 30 min — availability shifts slowly
 export const GHL_CAL_RULES_TTL_MS  = 30 * 60_000   // 30 min — only changes when an admin edits the calendar in GHL
+export const GHL_USERS_TTL_MS      = 30 * 60_000   // 30 min — staff list, read to put a name to a calendar's host
 
 // ---- Key builders ------------------------------------------
 
@@ -86,3 +88,12 @@ export const ghlSlotsMonthKey = (calendarId: string, month: string) =>
 // Booking rules (slot duration, interval, notice, seats) for a GHL calendar.
 export const ghlCalendarRulesKey = (calendarId: string) =>
   `${GHL_CAL_RULES_NS}:${calendarId}`
+
+// The location's GHL users. One list, not per user: it's read to put a name to
+// the user staffing a venue's calendar, and asking for one costs the same call
+// as asking for all of them.
+//
+// Deliberately NOT shared with findGHLUserByEmail, which host provisioning uses
+// to decide whether to create a user — a stale list there would try to create
+// somebody who already exists.
+export const ghlUsersKey = () => `${GHL_USERS_NS}:all`

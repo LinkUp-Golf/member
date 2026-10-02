@@ -11,12 +11,23 @@
 // onto the round. The host workspace's greys are used rather than the member
 // app's navy, since that's the screen it opens over.
 //
+// Once the round has run it is also where the host records who actually came:
+// the same list, with a tick against each name. Nothing else knows the answer —
+// a reservation is an intention and a booking is a seat, neither is attendance —
+// and the host is standing at the club with the phone they upload the proof photo
+// from, which is why the two live on the same row of their list.
+//
+// The ticks are whatever the host last saved, and everything else is blank:
+// there is no "absent", so a name with no tick is both "didn't come" and "nobody
+// has said yet". That is honest about a list a host may never open, and it's why
+// a round nobody marked stores no rows at all rather than a table of falses.
+//
 // A bottom sheet on phones and a centred dialog from md up, matching the sheets
 // in the member app so the two don't behave differently on the same device.
 
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Clock, X } from 'lucide-react'
+import { Check, Clock, X } from 'lucide-react'
 import { format } from 'date-fns'
 import Avatar from '@/components/ui/Avatar'
 import { formatEventTeeTime, titleCaseName } from '@/lib/utils'
@@ -29,6 +40,16 @@ export interface RoundPlayers {
   /** HH:MM[:SS], or null when the round has no fixed tee time. */
   teeTime: string | null
   players: EventPlayer[]
+  /**
+   * Saves who was present, as the whole set. Absent means the round hasn't
+   * happened yet and the list is read-only — the same window as the proof photo,
+   * decided by the row that opens this (canMarkAttendance).
+   *
+   * Resolves true when it saved. False leaves the tick where it was: a checkbox
+   * that stays ticked after a failed save is a host believing they've recorded
+   * something they haven't.
+   */
+  onMarkAttendance?: (memberIds: string[]) => Promise<boolean>
 }
 
 /** How each person got onto the round, in the host's terms. */
@@ -49,10 +70,16 @@ export default function RoundPlayersSheet({
   const [visible, setVisible] = useState(false)
   // Held through the close animation so the sheet still has something to render.
   const [shown, setShown] = useState<RoundPlayers | null>(round)
+  // Who is ticked, and whether a save is in flight. Local because a tick has to
+  // land under the thumb that made it; the server is told immediately and a
+  // refusal puts the tick back where it was.
+  const [marked, setMarked] = useState<Set<string>>(new Set())
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (round) {
       setShown(round)
+      setMarked(new Set(round.players.filter(p => p.attended).map(p => p.member_id)))
       setMounted(true)
       const ids: number[] = []
       ids[0] = requestAnimationFrame(() => {
@@ -93,6 +120,28 @@ export default function RoundPlayersSheet({
 
   const longDate = format(new Date(`${shown.date.slice(0, 10)}T12:00:00`), 'EEEE, MMMM d')
   const count = shown.players.length
+  const save = shown.onMarkAttendance
+  const attended = shown.players.filter(p => marked.has(p.member_id)).length
+
+  /**
+   * Tick or untick one person.
+   *
+   * The whole set goes to the server, not the change: it's what this sheet has,
+   * and it makes a retry — or two quick taps — land on the same answer rather
+   * than on a sequence of them. The tick moves first and goes back if the save
+   * is refused.
+   */
+  async function toggle(memberId: string) {
+    if (!save) return
+    const next = new Set(marked)
+    if (next.has(memberId)) next.delete(memberId)
+    else next.add(memberId)
+    setMarked(next)
+    setSaving(true)
+    const ok = await save(Array.from(next))
+    setSaving(false)
+    if (!ok) setMarked(marked)
+  }
 
   const sheet = (
     <div
@@ -142,7 +191,7 @@ export default function RoundPlayersSheet({
           style={{ paddingBottom: 'max(1.5rem, calc(1.5rem + env(safe-area-inset-bottom)))' }}
         >
           <p className="text-[10px] uppercase tracking-wider font-medium text-gray-400">
-            Who&apos;s coming
+            {save ? 'Who played' : 'Who’s coming'}
           </p>
           <h2 className="mt-0.5 text-lg font-bold leading-tight text-gray-900">{longDate}</h2>
           <p className="mt-1 flex items-center gap-1.5 flex-wrap text-xs text-gray-500">
@@ -166,6 +215,19 @@ export default function RoundPlayersSheet({
             </span>
           </p>
 
+          {save && (
+            // Said once, at the top, rather than as a label on every row. The
+            // count is the host's own progress through the list, and "Saving…"
+            // replaces it while one is in flight so a slow connection shows
+            // something other than a tick that might not have landed.
+            <p className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-500">
+              <span>Tick everyone who played.</span>
+              <span className="flex-shrink-0 font-medium tabular-nums text-gray-600">
+                {saving ? 'Saving…' : `${attended} of ${count}`}
+              </span>
+            </p>
+          )}
+
           <div className="mt-4 space-y-4">
             {groups.map(group => (
               <section key={group.source}>
@@ -177,28 +239,74 @@ export default function RoundPlayersSheet({
                   </h3>
                 )}
                 <ul className="mt-1.5 space-y-1.5">
-                  {group.players.map(p => (
-                    <li key={p.member_id} className="flex items-center gap-2.5">
-                      <Avatar
-                        firstName={p.first_name}
-                        lastName={p.last_name}
-                        avatarUrl={p.avatar_url}
-                        size="sm"
-                        className="flex-shrink-0"
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-medium text-gray-900 truncate">
-                          {titleCaseName(`${p.first_name} ${p.last_name}`.trim()) || 'Member'}
-                        </span>
-                        {/* Said on the row when there's no heading to say it. */}
-                        {groups.length === 1 && (
-                          <span className="block text-xs text-gray-400">
-                            {SOURCE_LABEL[p.source]}
+                  {group.players.map(p => {
+                    const name =
+                      titleCaseName(`${p.first_name} ${p.last_name}`.trim()) || 'Member'
+                    const ticked = marked.has(p.member_id)
+                    const row = (
+                      <>
+                        <Avatar
+                          firstName={p.first_name}
+                          lastName={p.last_name}
+                          avatarUrl={p.avatar_url}
+                          size="sm"
+                          className="flex-shrink-0"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-medium text-gray-900 truncate">
+                            {name}
                           </span>
-                        )}
-                      </span>
-                    </li>
-                  ))}
+                          {/* Said on the row when there's no heading to say it. */}
+                          {groups.length === 1 && (
+                            <span className="block text-xs text-gray-400">
+                              {SOURCE_LABEL[p.source]}
+                            </span>
+                          )}
+                        </span>
+                      </>
+                    )
+
+                    if (!save) {
+                      return (
+                        <li key={p.member_id} className="flex items-center gap-2.5">
+                          {row}
+                        </li>
+                      )
+                    }
+
+                    return (
+                      <li key={p.member_id}>
+                        {/* The whole row is the target, not just the box: this is
+                            a list being worked through on a phone, one hand, at a
+                            golf club. The native checkbox is hidden rather than
+                            dropped so the row keeps a real control behind it —
+                            focus, space bar and screen readers all come free. */}
+                        <label
+                          className={`flex cursor-pointer items-center gap-2.5 rounded-xl px-1 -mx-1 py-1 transition-colors ${
+                            ticked ? 'bg-green-50' : 'hover:bg-gray-50'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="sr-only"
+                            checked={ticked}
+                            onChange={() => toggle(p.member_id)}
+                          />
+                          {row}
+                          <span
+                            aria-hidden
+                            className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border transition-colors ${
+                              ticked
+                                ? 'border-green-700 bg-green-700 text-white'
+                                : 'border-gray-300 bg-white text-transparent'
+                            }`}
+                          >
+                            <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                          </span>
+                        </label>
+                      </li>
+                    )
+                  })}
                 </ul>
               </section>
             ))}

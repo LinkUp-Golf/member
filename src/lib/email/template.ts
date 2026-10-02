@@ -1,9 +1,10 @@
 // The one email LinkUp sends.
 //
 // Every notification uses this layout: a small wordmark, a white card on the
-// app's cream, a heading, a line of explanation, an optional image, and one
-// button that opens the app where the notification points. A notification
-// that needed its own design would be one that should have been a page.
+// app's cream, a heading, a line of explanation, any images the notification
+// carries, and one button that opens the app where the notification points. A
+// notification that needed its own design would be one that should have been a
+// page.
 //
 // Deliberately restrained. This is correspondence about something that has
 // already happened to the reader — a round booked, an application answered —
@@ -35,6 +36,7 @@ const BODY_TEXT = '#555355'   // charcoal.light
 const PAGE_BG = '#F8F8FC'     // cream
 const CARD_BG = '#FFFFFF'
 const HAIRLINE = '#DDE5F5'    // green-100
+const TINT = '#F1F4FB'        // green-50 — the "+n more" strip under a photo
 const MUTED = '#8A8894'
 
 /**
@@ -62,12 +64,29 @@ export interface NotificationEmail {
   ctaLabel: string
   /** Absolute https URL of the logo above the card. */
   logoUrl: string
-  /** Optional hero image inside the card, above the button. */
-  imageUrl?: string | null
+  /**
+   * The images the notification carries, in the order they were posted.
+   *
+   * A list rather than one, and the card shows the first of them with a "+n
+   * more photos" strip under it — see mediaBlock. Pass everything the post has;
+   * deciding how many of them an email is the place for is this module's job,
+   * not the caller's. Anything unusable is dropped, and an empty list renders no
+   * media block at all.
+   */
+  imageUrls?: (string | null | undefined)[] | null
   /** Shown in the client's inbox preview line, before the body is opened. */
   preheader?: string
   /** Where "notification settings" in the footer points. */
   settingsUrl: string
+  /**
+   * The one-click unsubscribe link, unique to this recipient.
+   *
+   * Required rather than optional: an email without a way out is the email
+   * that gets reported as spam instead, and a complaint costs the sending
+   * domain what an unsubscribe doesn't. Pass '' only where there is genuinely
+   * nobody to unsubscribe — the admin smoke test — and the footer drops it.
+   */
+  unsubscribeUrl: string
 }
 
 export interface RenderedEmail {
@@ -125,6 +144,59 @@ function preheaderBlock(text: string): string {
     </div>`
 }
 
+/**
+ * The card's photo: the first one, and how many more there are.
+ *
+ * A post with four photos used to email as four photos, which made the message
+ * a scroll — and a photo in an email is downloaded by the recipient, so the
+ * other three cost them data to reach a button that was below all of them. One
+ * still carries what the post is about; the count carries that there is more,
+ * and the whole block opens the post in the app, where the rest are.
+ *
+ * The count sits in a strip along the bottom of the photo rather than on top of
+ * it. An overlaid badge needs absolute positioning, which Outlook — rendering
+ * through Word — ignores, putting the badge under or beside the image in the
+ * client most likely to be reading this. The strip is a table row, which every
+ * client has agreed on for fifteen years, and the squared-off bottom corners of
+ * the image above it make the two read as one card.
+ *
+ * Returns '' for no usable image, so the caller interpolates it unconditionally.
+ */
+function mediaBlock(imageUrls: string[], ctaUrl: string): string {
+  const first = imageUrls[0]
+  if (!first) return ''
+
+  const extra = imageUrls.length - 1
+  const radius = extra > 0 ? '10px 10px 0 0' : '10px'
+  const more = extra === 1 ? '+1 more photo' : `+${extra} more photos`
+
+  return `
+                      <tr>
+                        <td align="left" style="padding:0 0 24px 0;">
+                          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:428px;width:100%;">
+                            <tr>
+                              <td align="left" style="font-size:0;line-height:0;">
+                                <a href="${ctaUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+                                  <img src="${first}" alt="" width="428" style="display:block;border:0;outline:none;text-decoration:none;width:100%;max-width:428px;height:auto;border-radius:${radius};" />
+                                </a>
+                              </td>
+                            </tr>${
+                              extra > 0
+                                ? `
+                            <tr>
+                              <td align="left" bgcolor="${TINT}" style="background-color:${TINT};border-radius:0 0 10px 10px;padding:9px 12px;">
+                                <a href="${ctaUrl}" target="_blank" rel="noopener noreferrer" style="font-family:${FONT};font-size:12px;line-height:18px;font-weight:600;color:${NAVY};text-decoration:none;">
+                                  ${more}
+                                </a>
+                              </td>
+                            </tr>`
+                                : ''
+                            }
+                          </table>
+                        </td>
+                      </tr>`
+}
+
 /** The whole email, ready to send. */
 export function renderNotificationEmail(email: NotificationEmail): RenderedEmail {
   const heading = escapeHtml(email.heading)
@@ -133,7 +205,16 @@ export function renderNotificationEmail(email: NotificationEmail): RenderedEmail
   const ctaUrl = safeUrl(email.ctaUrl)
   const logoUrl = safeUrl(email.logoUrl)
   const settingsUrl = safeUrl(email.settingsUrl)
-  const imageUrl = email.imageUrl ? safeUrl(email.imageUrl) : null
+  // safeUrl turns anything unusable into '#', which as an unsubscribe link
+  // would be worse than none — it looks like a way out and isn't.
+  const unsubscribeUrl = email.unsubscribeUrl ? safeUrl(email.unsubscribeUrl) : ''
+  const hasUnsubscribe = !!unsubscribeUrl && unsubscribeUrl !== '#'
+  // safeUrl turns an unusable value into '#', which as an <img> source is a
+  // broken image in the middle of the card — so those are dropped instead.
+  const imageUrls = (email.imageUrls ?? [])
+    .filter((u): u is string => !!u && u.trim().length > 0)
+    .map(u => safeUrl(u))
+    .filter(u => u !== '#')
 
   const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en">
@@ -200,16 +281,7 @@ ${email.preheader ? preheaderBlock(email.preheader) : ''}
                           ${body}
                         </td>
                       </tr>
-${
-  imageUrl
-    ? `
-                      <tr>
-                        <td align="left" style="padding:0 0 24px 0;">
-                          <img src="${imageUrl}" alt="" width="428" style="display:block;border:0;outline:none;text-decoration:none;width:100%;max-width:428px;height:auto;border-radius:10px;" />
-                        </td>
-                      </tr>`
-    : ''
-}
+${mediaBlock(imageUrls, ctaUrl)}
                       <!-- The button. A bordered table cell rather than a
                            styled <a>, because Outlook drops padding and
                            background-color from an anchor and would render the
@@ -241,7 +313,11 @@ ${
           <tr>
             <td align="left" style="padding:20px 2px 0 2px;font-family:${FONT};font-size:12px;line-height:20px;color:${MUTED};">
               You're receiving this because you're a member.
-              <a href="${settingsUrl}" style="color:${NAVY};text-decoration:underline;">Notification settings</a>
+              <a href="${settingsUrl}" style="color:${NAVY};text-decoration:underline;">Notification settings</a>${
+                hasUnsubscribe
+                  ? ` &middot; <a href="${unsubscribeUrl}" style="color:${NAVY};text-decoration:underline;">Unsubscribe</a>`
+                  : ''
+              }
             </td>
           </tr>
 
@@ -263,6 +339,7 @@ ${
     '',
     "You're receiving this because you're a LinkUp Golf member.",
     `Notification settings: ${settingsUrl}`,
+    ...(hasUnsubscribe ? [`Unsubscribe: ${unsubscribeUrl}`] : []),
   ].join('\n')
 
   return { subject: email.subject?.trim() || email.heading, html, text }

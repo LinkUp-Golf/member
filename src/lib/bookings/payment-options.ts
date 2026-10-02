@@ -11,8 +11,8 @@
 //   pay_at_club  the member settles with the club on the day. Choosing it marks
 //                the booking (bookings.payment_method = 'pay_at_club'), which
 //                takes the round off the member's "payment due" list. It reads
-//                "Paying at club" until the payment is confirmed, then "Paid at
-//                club" — see payAtClubStage.
+//                "Paying at club" for as long as it reads anything — see
+//                PAY_AT_CLUB_LABEL.
 //
 // Dependency-free on purpose, like ./price: the payment banner, the bookings
 // card, the host event form and the routes that enforce these rules all read it.
@@ -112,28 +112,34 @@ export function parsePaymentOptions(value: unknown): PaymentOption[] | null {
 export const isPayAtClub = (row: { payment_method?: string | null } | null | undefined) =>
   row?.payment_method === PAY_AT_CLUB
 
-/** Statuses that mean a round's payment has come in. */
-const PAYMENT_RECEIVED_STATUSES: readonly string[] = ['payment_confirmed', 'confirmed']
 /** Statuses where the round isn't going ahead, so there's nothing to settle. */
 const NOT_GOING_AHEAD_STATUSES: readonly string[] = ['cancelled', 'waitlist']
 
-export type PayAtClubStage = 'paying' | 'paid'
-
-export const PAY_AT_CLUB_STAGE_LABELS: Record<PayAtClubStage, string> = {
-  paying: 'Paying at club',
-  paid: 'Paid at club',
-}
+/**
+ * What a round settled at the club is called, wherever it's labelled.
+ *
+ * One label, not two. It used to read "Paying at club" and then "Paid at club"
+ * once the booking's status said the payment was confirmed — but at a venue that
+ * takes nothing else, POST /api/bookings/create opens the round at
+ * PAY_AT_CLUB_BOOKING_STATUS ('payment_confirmed') the moment it's made, because
+ * there is no payment for the app to wait on. So the badge read "Paid at club"
+ * before the member had left the house.
+ *
+ * Nothing in the app ever learns that money changed hands at the counter: the
+ * club takes it, and no webhook, cron or screen tells us. So there is no honest
+ * second stage to show, and claiming one about someone else's money is worse
+ * than saying less.
+ */
+export const PAY_AT_CLUB_LABEL = 'Paying at club'
 
 /**
- * Where a pay-at-club booking has got to: 'paying' until its payment is
- * confirmed — choosing to pay at the club isn't paying — then 'paid'. null for a
- * booking not being settled at the club, or one that isn't going ahead.
+ * Whether this round is being settled at the club and still going ahead — the
+ * one question the label answers. False for a round paid through the app, and
+ * for a cancelled or waitlisted one, which has nothing to settle.
  */
-export function payAtClubStage(
+export function settlingAtClub(
   row: { status: string; payment_method?: string | null } | null | undefined,
-): PayAtClubStage | null {
-  if (!row || !isPayAtClub(row)) return null
-  if (PAYMENT_RECEIVED_STATUSES.includes(row.status)) return 'paid'
-  if (NOT_GOING_AHEAD_STATUSES.includes(row.status)) return null
-  return 'paying'
+): boolean {
+  if (!row || !isPayAtClub(row)) return false
+  return !NOT_GOING_AHEAD_STATUSES.includes(row.status)
 }

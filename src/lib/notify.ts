@@ -87,6 +87,23 @@ const NONE: NotifyResult = {
 }
 
 /**
+ * Lets a broadcast's email reach fewer people than its push does.
+ *
+ * The two channels normally share one audience, resolved once, so a
+ * notification can't mean one thing on a phone and another in an inbox — and
+ * that remains the default. The exception this exists for is an announcement
+ * whose admin named the email recipients (by GHL tag or by picking people): the
+ * post is still the community's and the in-app notification still goes to
+ * everyone, because that's what a feed post is, while the email is aimed.
+ *
+ * Undefined means "the same audience as the push", which is every other caller.
+ * An empty array means "nobody", which is a real answer and not the same thing.
+ */
+export interface AudienceOverride {
+  emailMemberIds?: string[] | null
+}
+
+/**
  * Runs both channels, and lets neither take the other down.
  *
  * allSettled rather than all: a web-push failure and a Resend outage are
@@ -200,15 +217,17 @@ export async function notifyCourse(
   courseId: string,
   payload: PushPayload,
   excludeUserId?: string,
+  audience?: AudienceOverride,
 ): Promise<NotifyResult> {
   const ids = await courseMemberIds(courseId, excludeUserId)
   if (ids.length === 0) return NONE
+  const emailIds = audience?.emailMemberIds ?? ids
   return kept(both(
     'notify.course',
     payload.title,
-    { courseId, members: ids.length },
+    { courseId, members: ids.length, emailMembers: emailIds.length },
     () => sendPushToMembers(ids, payload),
-    () => sendEmailToMembers(ids, payload),
+    () => sendEmailToMembers(emailIds, payload),
   ))
 }
 
@@ -218,15 +237,22 @@ export async function notifyFocusMembers(
   focusCategories: string[],
   payload: PushPayload,
   excludeUserId?: string,
+  audience?: AudienceOverride,
 ): Promise<NotifyResult> {
   const ids = await focusMemberIds(courseId, focusCategories, excludeUserId)
   if (ids.length === 0) return NONE
+  const emailIds = audience?.emailMemberIds ?? ids
   return kept(both(
     'notify.focus',
     payload.title,
-    { courseId, members: ids.length, categories: focusCategories.length },
+    {
+      courseId,
+      members: ids.length,
+      emailMembers: emailIds.length,
+      categories: focusCategories.length,
+    },
     () => sendPushToMembers(ids, payload),
-    () => sendEmailToMembers(ids, payload),
+    () => sendEmailToMembers(emailIds, payload),
   ))
 }
 

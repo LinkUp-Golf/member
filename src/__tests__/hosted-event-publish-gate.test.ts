@@ -1,19 +1,22 @@
 import { describe, it, expect, vi } from 'vitest'
 
-// A host-created event lands in 'pending_approval' and is invisible to members
-// until an admin approves it — that's when the LinkUp team has set up the GHL
-// calendar the event books against. Nothing in code can check the calendar
-// exists, so these rules are the whole gate: publishing an event with no
-// calendar behind it is exactly what they prevent.
+// The gate protects one thing: a round must not be bookable before the club
+// behind it is set up. So where the club IS set up — an active course, with a
+// calendar, taking bookings today — a host's round publishes as it's created, and
+// where it isn't, the round waits and approving the venue releases it. That split
+// is newEventStatus; the rules below are what the waiting half is held by.
 //
 // This gate has been removed twice before under other names ('pending_review',
 // 'draft'). These tests are what makes its absence a failing test rather than a
-// silently republished event.
+// silently republished event — and what stops the half that still needs it from
+// going with the half that doesn't.
 
 vi.mock('@/lib/supabase-server', () => ({ createAdminClient: vi.fn() }))
 
 import {
   APPROVABLE_STATUSES,
+  canMarkAttendance,
+  newEventStatus,
   REJECTABLE_STATUSES,
   canApproveEvent,
   canRejectEvent,
@@ -24,6 +27,33 @@ import {
 import { NotificationTemplates } from '@/lib/push'
 
 const today = '2026-08-14'
+
+describe('newEventStatus', () => {
+  it('publishes a round at a venue already on LinkUp', () => {
+    // The club has a calendar and takes bookings today, so there was nothing for
+    // a review to decide.
+    expect(newEventStatus({ approval_status: 'active' })).toBe('upcoming')
+  })
+
+  it('holds a round at a club we do not have yet', () => {
+    // Proposed from the host form's New LinkUp tab: no calendar, no agreed rate,
+    // nobody at the club expecting anyone.
+    expect(newEventStatus({ approval_status: 'pending' })).toBe('pending_approval')
+  })
+
+  it('holds a round at a venue in any other state', () => {
+    // A venue in a state we haven't thought of is not a venue to publish against.
+    expect(newEventStatus({ approval_status: 'rejected' })).toBe('pending_approval')
+    expect(newEventStatus({ approval_status: null })).toBe('pending_approval')
+    expect(newEventStatus({})).toBe('pending_approval')
+    expect(newEventStatus(null)).toBe('pending_approval')
+  })
+
+  it('opens at a status an admin can still publish from', () => {
+    // The waiting half has to stay inside the gate it is held by.
+    expect(APPROVABLE_STATUSES).toContain(newEventStatus({ approval_status: 'pending' }))
+  })
+})
 
 describe('canApproveEvent', () => {
   it('publishes an event awaiting approval', () => {
@@ -112,6 +142,47 @@ describe('canUploadProof on a pending event', () => {
     // pending event whose date has since gone by.
     expect(canUploadProof('pending_approval', '2026-08-20', today)).toBe(false)
     expect(canUploadProof('pending_approval', '2026-08-01', today)).toBe(false)
+  })
+})
+
+describe('canMarkAttendance', () => {
+  // The host ticks who played from the same row they upload the photo on, so the
+  // two windows have to be the same one: a checkbox the server would refuse is
+  // worse than no checkbox, and a photo with no attendance beside it is the job
+  // half done.
+  const cases: [string, string][] = [
+    ['upcoming', '2026-08-20'],
+    ['upcoming', today],
+    ['upcoming', '2026-08-01'],
+    ['completed', '2026-08-01'],
+    ['pending_credit_approval', '2026-08-01'],
+    ['credits_awarded', '2026-08-01'],
+    ['cancelled', '2026-08-01'],
+    ['pending_approval', '2026-08-01'],
+  ]
+
+  it('opens exactly when the proof upload does', () => {
+    for (const [status, date] of cases) {
+      expect(canMarkAttendance(status, date, today)).toBe(
+        canUploadProof(status, date, today),
+      )
+    }
+  })
+
+  it('is shut until the round has happened', () => {
+    expect(canMarkAttendance('upcoming', '2026-08-20', today)).toBe(false)
+    expect(canMarkAttendance('upcoming', today, today)).toBe(true)
+  })
+
+  it('is shut on a round that never ran', () => {
+    // Nobody played a round that was never published or was taken down.
+    expect(canMarkAttendance('pending_approval', '2026-08-01', today)).toBe(false)
+    expect(canMarkAttendance('cancelled', '2026-08-01', today)).toBe(false)
+  })
+
+  it('stays open while the credit is still being decided', () => {
+    // A host correcting the list after sending the photo is the ordinary case.
+    expect(canMarkAttendance('pending_credit_approval', '2026-08-01', today)).toBe(true)
   })
 })
 

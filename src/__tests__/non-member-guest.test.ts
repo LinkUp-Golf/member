@@ -13,7 +13,7 @@ vi.mock('@/lib/sync', () => ({
 
 import { getContactByEmail, createContact, addTagToContact } from '@/lib/ghl/client'
 import { syncMember } from '@/lib/sync'
-import { provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
+import { linkGuestToMember, provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
 import { ALL_ACCESS_TAGS, MEMBER_GUEST_TAG } from '@/lib/ghl/tags'
 
 const mockedLookup = vi.mocked(getContactByEmail)
@@ -74,7 +74,7 @@ describe('provisionNonMemberGuest', () => {
   it('creates the contact and tags it for access', async () => {
     const { supabase } = fakeSupabase()
 
-    const contactId = await provisionNonMemberGuest(GUEST, supabase)
+    const { contactId } = await provisionNonMemberGuest(GUEST, supabase)
 
     expect(contactId).toBe('contact-new')
     expect(mockedCreate).toHaveBeenCalledOnce()
@@ -106,17 +106,30 @@ describe('provisionNonMemberGuest', () => {
     mockedLookup.mockResolvedValue({ id: 'contact-existing' } as never)
     const { supabase } = fakeSupabase()
 
-    expect(await provisionNonMemberGuest(GUEST, supabase)).toBe('contact-existing')
+    expect((await provisionNonMemberGuest(GUEST, supabase)).contactId).toBe('contact-existing')
     expect(mockedCreate).not.toHaveBeenCalled()
   })
 
   it('reuses an existing member instead of making another auth user', async () => {
     const { supabase, calls } = fakeSupabase({ memberIds: ['member-existing'] })
 
-    await provisionNonMemberGuest(GUEST, supabase)
+    const { memberId } = await provisionNonMemberGuest(GUEST, supabase)
 
     expect(calls.createUser).toBe(0)
+    expect(memberId).toBe('member-existing')
     expect(mockedSync).toHaveBeenCalledOnce()
+  })
+
+  it('returns the member it made, so the caller can hand them the round', async () => {
+    // Without this the guest is provisioned an account they can sign into and
+    // the booking row still names nobody, which is the whole bug: the one
+    // person for whom the app is new opens it to no rounds at all.
+    const { supabase } = fakeSupabase()
+
+    expect(await provisionNonMemberGuest(GUEST, supabase)).toEqual({
+      contactId: 'contact-new',
+      memberId: 'new-user',
+    })
   })
 
   it('recovers when a concurrent provision wins the unique email', async () => {
@@ -127,7 +140,7 @@ describe('provisionNonMemberGuest', () => {
       createUserResult: { data: { user: null as never }, error: { message: 'duplicate key' } },
     })
 
-    const contactId = await provisionNonMemberGuest(GUEST, supabase)
+    const { contactId } = await provisionNonMemberGuest(GUEST, supabase)
 
     expect(contactId).toBe('contact-new')
     expect(calls.createUser).toBe(1)
@@ -142,7 +155,12 @@ describe('provisionNonMemberGuest', () => {
       createUserResult: { data: { user: null as never }, error: { message: 'boom' } },
     })
 
-    await expect(provisionNonMemberGuest(GUEST, supabase)).resolves.toBe('contact-new')
+    await expect(provisionNonMemberGuest(GUEST, supabase)).resolves.toEqual({
+      contactId: 'contact-new',
+      // Nobody to give the round to. It still happens, and the backfill in
+      // 20261002000001 links the row once the sync has caught up.
+      memberId: null,
+    })
   })
 
   it('throws when the contact itself cannot be resolved', async () => {
@@ -152,5 +170,85 @@ describe('provisionNonMemberGuest', () => {
     const { supabase } = fakeSupabase()
 
     await expect(provisionNonMemberGuest(GUEST, supabase)).rejects.toThrow('GHL down')
+  })
+})
+
+/**
+ * Records the update the link makes: the columns, the row it names, and the
+ * filter that decides which rows it is allowed to touch.
+ */
+function fakeBookings({ error = null as { message: string } | null } = {}) {
+  const update = { payload: null as Record<string, unknown> | null, id: '', nullOnly: false }
+
+  const client = {
+    from: (table: string) => {
+      if (table !== 'bookings') throw new Error(`unexpected table ${table}`)
+      return {
+        update: (payload: Record<string, unknown>) => {
+          update.payload = payload
+          return {
+            eq: (_col: string, value: string) => {
+              update.id = value
+              return {
+                is: (col: string, value: null) => {
+                  update.nullOnly = col === 'player_member_id' && value === null
+                  return Promise.resolve({ error })
+                },
+              }
+            },
+          }
+        },
+      }
+    },
+  }
+
+  return { admin: client as unknown as SupabaseClient, update }
+}
+
+describe('linkGuestToMember', () => {
+  const guest = { email: 'ada@example.com', firstName: 'Ada', lastName: 'Byron', mobile: '+15550001' }
+
+  it('puts the member on their own booking row', async () => {
+    const { admin, update } = fakeBookings()
+
+    await linkGuestToMember(admin, { bookingId: 'booking-1', guest, memberId: 'member-1' })
+
+    expect(update.id).toBe('booking-1')
+    expect(update.payload?.player_member_id).toBe('member-1')
+  })
+
+  it('writes the stored player the way an invited member\'s row reads', async () => {
+    // A provisioned guest's row should be indistinguishable from a member added
+    // by name — the shape 20260708000001 established and its successor looks for.
+    const { admin, update } = fakeBookings()
+
+    await linkGuestToMember(admin, { bookingId: 'booking-1', guest, memberId: 'member-1' })
+
+    const players = update.payload?.additional_players as Array<Record<string, unknown>>
+    expect(players).toHaveLength(1)
+    expect(players[0]).toMatchObject({
+      email: 'ada@example.com',
+      firstName: 'Ada',
+      memberId: 'member-1',
+      isNonMember: false,
+    })
+  })
+
+  it('only ever fills a link that is empty', async () => {
+    // Two seats naming the same new guest race through provisioning, and an
+    // admin may have linked the row by hand. Last write must not win.
+    const { admin, update } = fakeBookings()
+
+    await linkGuestToMember(admin, { bookingId: 'booking-1', guest, memberId: 'member-1' })
+
+    expect(update.nullOnly).toBe(true)
+  })
+
+  it('swallows a failure — the seat and the appointment are already made', async () => {
+    const { admin } = fakeBookings({ error: { message: 'row locked' } })
+
+    await expect(
+      linkGuestToMember(admin, { bookingId: 'booking-1', guest, memberId: 'member-1' }),
+    ).resolves.toBeUndefined()
   })
 })

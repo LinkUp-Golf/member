@@ -35,7 +35,8 @@ import { NotificationTemplates } from '@/lib/push'
 import { notifyMembers } from '@/lib/notify'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findMembersWithPendingPayment } from '@/lib/bookings/pending-payment'
-import { provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
+import { linkGuestToMember, provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
+import type { ProvisionedGuest } from '@/lib/bookings/non-member-guest'
 import { bookingAmountDue } from '@/lib/bookings/price'
 import {
   PAY_AT_CLUB,
@@ -400,16 +401,28 @@ export const POST = withAuth(async (
       } else {
         const guest = b.additional_players?.[0]
         if (!guest?.email) return
+        let provisioned: ProvisionedGuest
         try {
           // Creates the GHL contact, tags it for access, and makes the member
           // row — the work the admin Setup button used to do.
-          contactId = await provisionNonMemberGuest(guest, admin)
+          provisioned = await provisionNonMemberGuest(guest, admin)
         } catch (err) {
           console.warn('[booking/players] Non-member setup failed (non-fatal):', guest.email, String(err))
           return
         }
+        contactId = provisioned.contactId
         email = guest.email
         phone = guest.mobile || null
+        // And then hand them their own round, the same as the create route does
+        // — see linkGuestToMember.
+        if (provisioned.memberId) {
+          await linkGuestToMember(admin, {
+            bookingId: b.id,
+            guest,
+            memberId: provisioned.memberId,
+          })
+          b.player_member_id = provisioned.memberId
+        }
       }
 
       try {
