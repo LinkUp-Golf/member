@@ -1061,13 +1061,25 @@ function VenueAvailabilityCalendar({
   }, [players, allowed]);
 
   // Memoised so the sheet sees a stable day while it's open.
-  const playersDay = useMemo(
-    () =>
-      playersDate
-        ? { date: playersDate, players: visiblePlayers[playersDate] ?? EMPTY_PLAYERS }
-        : null,
-    [playersDate, visiblePlayers],
-  );
+  //
+  // The day's seat counts go with it: the sheet lists the members it can name,
+  // and the cell's "4/12" counts every seat held — a guest's and an unconfirmed
+  // round's included. Handing it both lets it account for the difference instead
+  // of leaving two numbers that don't match on two surfaces.
+  const playersDay = useMemo(() => {
+    if (!playersDate) return null;
+    const openings = visibleDays[playersDate] ?? EMPTY;
+    return {
+      date: playersDate,
+      players: visiblePlayers[playersDate] ?? EMPTY_PLAYERS,
+      seats: new Map(
+        openings.map((o) => [
+          o.courseId,
+          { bookedSpots: o.bookedSpots, totalSpots: o.totalSpots },
+        ]),
+      ),
+    };
+  }, [playersDate, visiblePlayers, visibleDays]);
 
   // A fixed 6-week grid would keep the height stable, but an agenda sits right
   // below it — trailing blank weeks would just push it down, so the grid ends

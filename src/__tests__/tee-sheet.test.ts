@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildTeeSheet } from '@/lib/bookings/tee-sheet'
+import { buildTeeSheet, distinctPlayers } from '@/lib/bookings/tee-sheet'
 import { hostDisplayName } from '@/lib/bookings/venue-hosts'
 import type { CalendarPlayer } from '@/lib/bookings/players'
 import type { VenueHost } from '@/lib/bookings/venue-hosts'
@@ -136,5 +136,119 @@ describe('hostDisplayName', () => {
   it('is empty when neither side can name them, so no host row is shown', () => {
     expect(hostDisplayName(null, undefined)).toBe('')
     expect(hostDisplayName('', { firstName: '', lastName: '' })).toBe('')
+  })
+})
+
+// The count beside the list and the list itself come from different places: the
+// day cell counts every seat held against the venue's cap, while this can only
+// name members whose round is going ahead. The gap is real, so it's counted —
+// these are the cases where it would otherwise read as a bug.
+describe('buildTeeSheet — seats the list cannot name', () => {
+  const seats = (bookedSpots: number, totalSpots: number) =>
+    new Map([['aviara', { bookedSpots, totalSpots }]])
+
+  it('carries the venue its own two numbers', () => {
+    const sheets = buildTeeSheet([player({ memberId: 'a' })], null, seats(4, 12))
+    expect(sheets[0]?.seats).toEqual({ bookedSpots: 4, totalSpots: 12 })
+  })
+
+  it('counts the seats it has accounted for by name', () => {
+    const sheets = buildTeeSheet(
+      [
+        player({ memberId: 'a', teeTime: '13:30:00' }),
+        player({ memberId: 'b', teeTime: '13:30:00' }),
+      ],
+      null,
+      seats(4, 12),
+    )
+    expect(sheets[0]?.listedSeats).toBe(2)
+    expect(sheets[0]?.unnamedSeats).toBe(2)
+  })
+
+  it('counts a member playing two tee times as the two seats they occupy', () => {
+    // Both rows hold a seat against the cap, so neither is "unnamed" — a member
+    // out twice must not make the sheet claim a guest it hasn't got.
+    const sheets = buildTeeSheet(
+      [
+        player({ memberId: 'a', teeTime: '13:30:00' }),
+        player({ memberId: 'a', teeTime: '15:00:00' }),
+      ],
+      null,
+      seats(2, 12),
+    )
+    expect(sheets[0]?.listedSeats).toBe(2)
+    expect(sheets[0]?.unnamedSeats).toBe(0)
+  })
+
+  it('counts the host\'s own booking as the seat it is', () => {
+    // The host is filtered out of their tee group so they aren't listed twice,
+    // but the seat they booked is still taken.
+    const hosts = new Map([['aviara', host({ memberId: 'ash' })]])
+    const sheets = buildTeeSheet(
+      [player({ memberId: 'ash' }), player({ memberId: 'b' })],
+      hosts,
+      seats(2, 12),
+    )
+    expect(sheets[0]?.tees[0]?.players.map(p => p.memberId)).toEqual(['b'])
+    expect(sheets[0]?.unnamedSeats).toBe(0)
+  })
+
+  it('returns a venue whose seats are all taken by people it cannot name', () => {
+    // Two guests, or two bookings awaiting approval: the day says it's full, so
+    // the sheet has to be able to show why rather than looking empty.
+    const sheets = buildTeeSheet([], null, seats(2, 2))
+    expect(sheets.map(s => s.courseId)).toEqual(['aviara'])
+    expect(sheets[0]?.tees).toEqual([])
+    expect(sheets[0]?.unnamedSeats).toBe(2)
+  })
+
+  it('leaves out a venue with seats to spare and nobody on it', () => {
+    // An open venue with no players is not a "who's playing" answer.
+    const sheets = buildTeeSheet([], null, seats(0, 12))
+    expect(sheets).toEqual([])
+  })
+
+  it('never reports a negative remainder', () => {
+    // The two numbers are read a moment apart, so a booking made in between can
+    // leave more named than counted. That's not a guest.
+    const sheets = buildTeeSheet(
+      [player({ memberId: 'a' }), player({ memberId: 'b' })],
+      null,
+      seats(1, 12),
+    )
+    expect(sheets[0]?.unnamedSeats).toBe(0)
+  })
+
+  it('says nothing about seats when the caller did not say', () => {
+    const sheets = buildTeeSheet([player({ memberId: 'a' })])
+    expect(sheets[0]?.seats).toBeNull()
+    expect(sheets[0]?.unnamedSeats).toBe(0)
+  })
+})
+
+describe('distinctPlayers', () => {
+  it('counts people, not rows', () => {
+    // The day arrives as one entry per member per venue per tee time, so the
+    // header counted the same member twice for a double tee time.
+    expect(
+      distinctPlayers([
+        player({ memberId: 'a', teeTime: '13:30:00' }),
+        player({ memberId: 'a', teeTime: '15:00:00' }),
+        player({ memberId: 'b', teeTime: '13:30:00' }),
+      ]),
+    ).toBe(2)
+  })
+
+  it('counts a member at two clubs on one day once', () => {
+    expect(
+      distinctPlayers([
+        player({ memberId: 'a', courseId: 'aviara' }),
+        player({ memberId: 'a', courseId: 'torrey' }),
+      ]),
+    ).toBe(1)
+  })
+
+  it('is zero for a day with nobody on it', () => {
+    expect(distinctPlayers([])).toBe(0)
   })
 })

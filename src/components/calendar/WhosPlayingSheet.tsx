@@ -24,7 +24,8 @@ import { format } from 'date-fns'
 import Avatar from '@/components/ui/Avatar'
 import { cn, formatTeeTime, titleCaseName } from '@/lib/utils'
 import { VENUE_DOT as DOT } from '@/components/calendar/venue-colours'
-import { buildTeeSheet, type VenueTeeSheet } from '@/lib/bookings/tee-sheet'
+import { buildTeeSheet, distinctPlayers, type VenueTeeSheet } from '@/lib/bookings/tee-sheet'
+import type { DaySeats } from '@/lib/bookings/occupancy'
 import type { CalendarPlayer } from '@/lib/bookings/players'
 import type { VenueHost } from '@/lib/bookings/venue-hosts'
 
@@ -32,12 +33,34 @@ export interface WhosPlayingDay {
   /** YYYY-MM-DD */
   date: string
   players: CalendarPlayer[]
+  /**
+   * Seats taken and seats held per venue — the same numbers the day cell prints.
+   * Passed so this sheet and that cell can't disagree: whatever it can't name,
+   * it counts. Absent for a day the caller has no openings for.
+   */
+  seats?: ReadonlyMap<string, DaySeats>
 }
 
 /** A venue's tee sheet, plus how this calendar draws that venue. */
 interface VenueGroup extends VenueTeeSheet {
   name: string
   colourIdx: number
+}
+
+/**
+ * How the seats this list can't name are said.
+ *
+ * Two things take a seat without putting a member on the sheet: a non-member
+ * guest, who has no profile to open, and a booking that isn't going ahead yet,
+ * which still holds its seat against the venue's cap. Saying so is the point —
+ * a venue reading "4 of 12 taken" above two names is a disagreement a member
+ * would otherwise have to resolve by distrusting both.
+ */
+function unnamedSeatsLine(n: number, afterNames: boolean): string {
+  const more = afterNames ? 'more ' : ''
+  return n === 1
+    ? `1 ${more}seat is taken — a guest, or a round that isn't confirmed yet.`
+    : `${n} ${more}seats are taken — guests, or rounds that aren't confirmed yet.`
 }
 
 /** Initials for a host we may have only one name for. */
@@ -144,7 +167,7 @@ export default function WhosPlayingSheet({
   // it lists them in.
   const venues = useMemo<VenueGroup[]>(() => {
     if (!shown) return []
-    return buildTeeSheet(shown.players, hostByVenue)
+    return buildTeeSheet(shown.players, hostByVenue, shown.seats)
       .map(sheet => ({
         ...sheet,
         name: venueNames.get(sheet.courseId) ?? 'Venue',
@@ -156,7 +179,8 @@ export default function WhosPlayingSheet({
   if (!mounted || !shown) return null
 
   const longDate = format(new Date(`${shown.date}T12:00:00`), 'EEEE, MMMM d')
-  const count = shown.players.length
+  // People, not rows — see distinctPlayers.
+  const count = distinctPlayers(shown.players)
 
   const sheet = (
     <div
@@ -222,6 +246,16 @@ export default function WhosPlayingSheet({
                   <span className={cn('w-2 h-2 rounded-full flex-shrink-0', DOT[venue.colourIdx])} />
                   <span className="truncate">{venue.name}</span>
                 </h3>
+                {/* The cell's own numbers, so the two can be read against each
+                    other, and then the honest remainder. */}
+                {venue.seats && venue.seats.totalSpots > 0 && (
+                  <p className="mt-0.5 text-[11px] text-green-900/45">
+                    {Math.min(venue.seats.bookedSpots, venue.seats.totalSpots)} of{' '}
+                    {venue.seats.totalSpots} seat
+                    {venue.seats.totalSpots === 1 ? '' : 's'} taken
+                    {venue.seats.bookedSpots >= venue.seats.totalSpots && ' · full'}
+                  </p>
+                )}
 
                 <div className="mt-2 space-y-2">
                   {venue.tees.map(tee => (
@@ -282,6 +316,22 @@ export default function WhosPlayingSheet({
                       </ul>
                     </div>
                   ))}
+
+                  {venue.unnamedSeats > 0 && (
+                    // A venue whose every seat is one of those has no tee times
+                    // here at all, so the host — still the person running the day
+                    // — gets this box to themselves.
+                    <div className="rounded-2xl border border-dashed border-green-900/[0.14] px-3 py-2.5">
+                      {venue.tees.length === 0 && venue.host && (
+                        <div className="mb-1.5">
+                          <HostRow host={venue.host} isSelf={venue.hostIsSelf} />
+                        </div>
+                      )}
+                      <p className="text-[11px] leading-relaxed text-green-900/45">
+                        {unnamedSeatsLine(venue.unnamedSeats, venue.tees.length > 0)}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </section>
             ))}
