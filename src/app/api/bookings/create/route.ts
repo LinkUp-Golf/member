@@ -23,7 +23,8 @@ import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-serv
 import { getAvailableSlots, createBooking, getContactByEmail, resolveMeetingDurationMins } from '@/lib/ghl/client'
 import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { logActivity } from '@/lib/activity/log'
-import { provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
+import { linkGuestToMember, provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
+import type { ProvisionedGuest } from '@/lib/bookings/non-member-guest'
 import { NotificationTemplates } from '@/lib/push'
 import { notifyMembers } from '@/lib/notify'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
@@ -709,16 +710,31 @@ export async function POST(request: NextRequest) {
         } else {
           const guest = b.additional_players?.[0]
           if (!guest?.email) return
+          let provisioned: ProvisionedGuest
           try {
             // Creates the GHL contact, tags it for access, and makes the
             // member row — the work the admin Setup button used to do.
-            contactId = await provisionNonMemberGuest(guest, adminSupabase)
+            provisioned = await provisionNonMemberGuest(guest, adminSupabase)
           } catch (err) {
             console.warn('[booking/create] Non-member setup failed (non-fatal):', guest.email, String(err))
             return
           }
+          contactId = provisioned.contactId
           email = guest.email
           phone = guest.mobile || null
+          // Hand them their own round. They have an account now, so this row is
+          // theirs to open when they sign in rather than a name on the booker's
+          // list — see linkGuestToMember. Outside the catch above, which is for
+          // "there is no contact, so there is no appointment": a seat nobody is
+          // linked to is still a seat, and the backfill catches it.
+          if (provisioned.memberId) {
+            await linkGuestToMember(adminSupabase, {
+              bookingId: b.id,
+              guest,
+              memberId: provisioned.memberId,
+            })
+            b.player_member_id = provisioned.memberId // reflected into the response
+          }
         }
 
         try {
