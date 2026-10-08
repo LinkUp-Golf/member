@@ -50,8 +50,8 @@ export const memberDetailKey = (memberId: string) =>
 // Published announcements for a course.
 // Course-scoped, not user-scoped — same content for all course members.
 // Variant key includes limit so different page sizes don't collide.
-export const courseAnnKey    = (courseId: string, limit: number) =>
-  `${COURSE_ANN_NS}:${courseId}:${limit}`
+export const courseAnnKey    = (courseId: string, limit: number, type: string | null = null) =>
+  `${COURSE_ANN_NS}:${courseId}:${limit}${type ? `:${type}` : ''}`
 export const courseAnnPrefix = (courseId: string) =>
   `${COURSE_ANN_NS}:${courseId}:`
 
