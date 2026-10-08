@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
+import { ChevronUp, ChevronDown } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { createClient } from "@/lib/supabase";
 import { COURSE_SLUGS } from "@/lib/ghl/tags";
@@ -39,6 +40,7 @@ export default function AdminPromotionsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editTarget, setEditTarget] = useState<Promotion | null>(null);
   const [courseId, setCourseId] = useState("");
+  const [reordering, setReordering] = useState(false);
 
   useEffect(() => { loadData() }, []);
 
@@ -97,6 +99,26 @@ export default function AdminPromotionsPage() {
     await loadData();
   }
 
+  // Members see promotions in this same order (sort_order, then newest), so
+  // moving a row here moves it in their list too.
+  async function move(index: number, delta: -1 | 1) {
+    const target = index + delta;
+    if (target < 0 || target >= promotions.length) return;
+    const next = promotions.map((p, i) =>
+      i === index ? promotions[target] : i === target ? promotions[index] : p
+    ) as Promotion[];
+    const previous = promotions;
+    setPromotions(next);
+    setReordering(true);
+    const res = await fetch("/api/admin/promotions/reorder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: next.map(p => p.id) }),
+    }).catch(() => null);
+    if (!res?.ok) setPromotions(previous);
+    setReordering(false);
+  }
+
   function openCreate() { setShowCreate(true); setEditTarget(null); }
   function openEdit(p: Promotion) { setEditTarget(p); setShowCreate(false); }
 
@@ -126,11 +148,36 @@ export default function AdminPromotionsPage() {
       )}
 
       <AdminTable
-        headers={["Media", "Promotion", "Partner", "Scope", "Expires", "Status", "Actions"]}
+        headers={["Order", "Media", "Promotion", "Partner", "Scope", "Expires", "Status", "Actions"]}
         empty={loading ? "Loading…" : promotions.length === 0 ? "No promotions yet." : undefined}
       >
-        {promotions.map(p => (
+        {promotions.map((p, i) => (
           <AdminTr key={p.id}>
+            <AdminTd>
+              <div className="flex items-center gap-1">
+                <span className="w-5 text-xs text-gray-400 tabular-nums text-right">{i + 1}</span>
+                <div className="flex flex-col">
+                  <button
+                    type="button"
+                    aria-label={`Move ${p.title} up`}
+                    onClick={() => move(i, -1)}
+                    disabled={reordering || i === 0}
+                    className="p-0.5 rounded text-gray-500 hover:bg-gray-100 disabled:opacity-25 disabled:hover:bg-transparent"
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Move ${p.title} down`}
+                    onClick={() => move(i, 1)}
+                    disabled={reordering || i === promotions.length - 1}
+                    className="p-0.5 rounded text-gray-500 hover:bg-gray-100 disabled:opacity-25 disabled:hover:bg-transparent"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </AdminTd>
             <AdminTd><PromotionThumb promo={p} /></AdminTd>
             <AdminTd>
               <p className="font-medium text-gray-900 max-w-xs truncate">{p.title}</p>

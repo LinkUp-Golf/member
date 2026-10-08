@@ -39,6 +39,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
         .eq('active', true)
         .or(`course_id.is.null,course_id.eq.${ctx.homeCourseId}`)
         .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: false })
 
       if (limit > 0) query = query.limit(limit)
 
