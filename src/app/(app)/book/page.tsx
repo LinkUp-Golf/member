@@ -1606,13 +1606,16 @@ function ConfirmScreen({
           <div className="px-1 space-y-2.5">
             <p className="section-label">What happens next</p>
             {[
-              "Availability verified with the course",
-              "Payment link sent to your email",
-              "Payment confirms your booking",
-            ].map((s, i) => (
-              <div key={i} className="flex items-center gap-3">
+              { step: "Receive confirmation email and reminder emails" },
+              {
+                step: "Pay at the pro shop when you arrive",
+                detail:
+                  "Introductions are made 15 minutes prior to first group tee time, so please arrive at least 30 minutes before first group tee time and be at the starter area 15 minutes prior.",
+              },
+            ].map(({ step, detail }, i) => (
+              <div key={i} className="flex items-start gap-3">
                 <span
-                  className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
+                  className="flex-shrink-0 w-5 h-5 mt-px rounded-full flex items-center justify-center text-[10px] font-bold"
                   style={{
                     background: "rgba(133,187,101,0.12)",
                     color: "var(--color-green-700)",
@@ -1620,12 +1623,22 @@ function ConfirmScreen({
                 >
                   {i + 1}
                 </span>
-                <span
-                  className="text-sm"
-                  style={{ color: "rgba(0,38,105,0.5)" }}
-                >
-                  {s}
-                </span>
+                <div className="min-w-0">
+                  <p
+                    className="text-sm"
+                    style={{ color: "rgba(0,38,105,0.5)" }}
+                  >
+                    {step}
+                  </p>
+                  {detail && (
+                    <p
+                      className="text-xs mt-1 leading-relaxed"
+                      style={{ color: "rgba(0,38,105,0.4)" }}
+                    >
+                      {detail}
+                    </p>
+                  )}
+                </div>
               </div>
             ))}
           </div>
