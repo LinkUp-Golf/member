@@ -2128,7 +2128,7 @@ function SuccessScreen({
             className="text-sm leading-relaxed"
             style={{ color: "rgba(0,38,105,0.7)" }}
           >
-            Reserve me a seat at the group table for drinks or dinner after the
+            Reserve me a spot at the group table for drinks or dinner after the
             round.
           </span>
         </label>

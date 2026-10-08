@@ -1532,7 +1532,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
                     { label: 'Date range',            value: formatRule(selectedCalendar.allowBookingFor, selectedCalendar.allowBookingForUnit) },
                     { label: 'Pre-buffer',            value: formatRule(selectedCalendar.preBuffer, selectedCalendar.preBufferUnit) },
                     { label: 'Post-buffer',           value: formatRule(selectedCalendar.slotBuffer, selectedCalendar.slotBufferUnit) },
-                    { label: 'Seats per class',       value: selectedCalendar.appoinmentPerSlot ? `${selectedCalendar.appoinmentPerSlot}` : 'Unlimited' },
+                    { label: 'Spots per class',       value: selectedCalendar.appoinmentPerSlot ? `${selectedCalendar.appoinmentPerSlot}` : 'Unlimited' },
                   ].map(({ label, value }) => (
                     <div key={label} className="px-4 py-2.5">
                       <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-0.5">{label}</p>
@@ -1713,10 +1713,10 @@ function ManageSlotsDrawer({ course, onClose, onToast }: {
     const slots: Array<{ tee_time: string; seats: number; source: 'ghl' | 'custom' }> = []
 
     const checkSeats = (teeTime: string, seats: number): string | null => {
-      if (!Number.isInteger(seats) || seats < 1) return `Seats for ${hhmmLabel(teeTime)} must be a whole number ≥ 1.`
+      if (!Number.isInteger(seats) || seats < 1) return `Spots for ${hhmmLabel(teeTime)} must be a whole number ≥ 1.`
       const { floor, ceil } = seatBounds(booked[teeTime] ?? 0, calendarSeats)
-      if (seats > ceil) return `Seats for ${hhmmLabel(teeTime)} can't exceed the calendar capacity of ${ceil}.`
-      if (seats < floor) return `${booked[teeTime] ?? 0} already booked at ${hhmmLabel(teeTime)} — seats must be at least ${floor}.`
+      if (seats > ceil) return `Spots for ${hhmmLabel(teeTime)} can't exceed the calendar capacity of ${ceil}.`
+      if (seats < floor) return `${booked[teeTime] ?? 0} already booked at ${hhmmLabel(teeTime)} — spots must be at least ${floor}.`
       return null
     }
 
@@ -1826,7 +1826,7 @@ function ManageSlotsDrawer({ course, onClose, onToast }: {
                                 onChange={e => updateGhlRow(i, { seats: Number(e.target.value) })}
                                 className={`${seatInput} disabled:opacity-40`}
                               />
-                              <span className="text-[11px] text-gray-400">seats</span>
+                              <span className="text-[11px] text-gray-400">spots</span>
                             </span>
                           </label>
                           {bad && (
@@ -1876,7 +1876,7 @@ function ManageSlotsDrawer({ course, onClose, onToast }: {
                               onChange={e => updateCustomRow(r.key, { seats: Number(e.target.value) })}
                               className={seatInput}
                             />
-                            <span className="text-[11px] text-gray-400">seats</span>
+                            <span className="text-[11px] text-gray-400">spots</span>
                             <button type="button" onClick={() => removeCustomRow(r.key)} aria-label="Remove slot" className="text-gray-400 hover:text-red-500 text-lg leading-none px-1">✕</button>
                           </div>
                           {bad && (

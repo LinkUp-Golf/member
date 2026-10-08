@@ -560,7 +560,7 @@ export async function POST(request: NextRequest) {
   // Step 2: Atomically reserve seats + insert rows. The DB serializes
   // concurrent bookings for this course+date under an advisory lock and rejects
   // the WHOLE group if it would exceed the daily cap (raises DAY_FULL:<remaining>).
-  console.log('[booking/create] Reserving', rows.length, 'seat(s); daily cap', maxPlayersPerDay)
+  console.log('[booking/create] Reserving', rows.length, 'spot(s); daily cap', maxPlayersPerDay)
 
   const { data: insertedBookings, error: insertError } = await adminSupabase
     .rpc('create_bookings_for_day', {
