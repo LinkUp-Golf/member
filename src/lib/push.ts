@@ -323,6 +323,18 @@ export const NotificationTemplates = {
     cta:   'Open LinkUp',
   }),
 
+  // A booker pinging someone from one of their cancelled rounds about the round
+  // they've booked since. The direct message carries the same ask; this is the
+  // push and email, pointed at /book because the answer is a booking.
+  playerPinged: (bookerFirstName: string, courseName: string, date: string, time: string): PushPayload => ({
+    title: `${titleCaseName(bookerFirstName)} wants you on their round`,
+    body:  `${titleCaseName(bookerFirstName)} is playing ${courseName} on ${date} at ${time} and there's a spot for you. Book it before it goes.`,
+    url:   '/book',
+    tag:   'player-pinged',
+    subject: `${titleCaseName(bookerFirstName)} wants you at ${courseName} on ${date}`,
+    cta:   'Book your spot',
+  }),
+
   bookingInvite: (bookerFirstName: string, date: string, time: string): PushPayload => ({
     title: `${titleCaseName(bookerFirstName)} invited you to play`,
     body:  `You've been added to a tee time on ${date} at ${time}. Check My Bookings for details.`,

@@ -116,7 +116,10 @@ export const POST = withAuth(async (
 
   // ---- Validate the incoming players (mirrors create) ---------------------
   for (const p of rawExtraPlayers) {
-    if (!validateEmail(p.email).valid) {
+    // A member's address is read from their row below, so only a non-member's
+    // has to come from the client — the booker may not know a member's address.
+    const needsEmail = p.isNonMember || !p.memberId
+    if (needsEmail && !validateEmail(p.email).valid) {
       return NextResponse.json({ error: 'A valid email is required for each added player' }, { status: 400 })
     }
     for (const name of [p.firstName, p.lastName]) {
@@ -216,6 +219,7 @@ export const POST = withAuth(async (
       if (row.id === ctx.userId) {
         return NextResponse.json({ error: "You're already on this booking." }, { status: 409 })
       }
+      p.email = row.email
     }
 
     // Member-guest FIFO gate stays (same policy as create): a member who owes
