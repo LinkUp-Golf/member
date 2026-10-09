@@ -605,7 +605,7 @@ function AgendaDay({
                           <span aria-hidden className="text-green-900/25">
                             ·
                           </span>
-                          <span className="tabular-nums">{seats} seats</span>
+                          <span className="tabular-nums">{seats} spots</span>
                         </>
                       )}
                     </>

@@ -59,8 +59,8 @@ interface VenueGroup extends VenueTeeSheet {
 function unnamedSeatsLine(n: number, afterNames: boolean): string {
   const more = afterNames ? 'more ' : ''
   return n === 1
-    ? `1 ${more}seat is taken — a guest, or a round that isn't confirmed yet.`
-    : `${n} ${more}seats are taken — guests, or rounds that aren't confirmed yet.`
+    ? `1 ${more}spot is taken — a guest, or a round that isn't confirmed yet.`
+    : `${n} ${more}spots are taken — guests, or rounds that aren't confirmed yet.`
 }
 
 /** Initials for a host we may have only one name for. */

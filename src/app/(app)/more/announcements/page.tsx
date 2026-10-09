@@ -34,7 +34,9 @@ export default function AnnouncementsPage() {
   }, [user])
 
   async function loadAnnouncements() {
-    const response = await apiClient.get<Announcement[]>('/api/announcements')
+    // Announcements only — promotions, new courses and member events each have
+    // their own page, and the home feed is where they're mixed together.
+    const response = await apiClient.get<Announcement[]>('/api/announcements?type=admin_broadcast')
     setAnnouncements(response.data ?? [])
     setLoading(false)
   }

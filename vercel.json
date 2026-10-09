@@ -19,6 +19,10 @@
     {
       "path": "/api/cron/credit-coupons",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/hosted-event-proof-reminders",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

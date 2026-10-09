@@ -492,6 +492,18 @@ export const NotificationTemplates = {
     cta:   'View your event',
   }),
 
+  // Sent to the host 20 minutes after their round tees off, by the
+  // hosted-event-proof-reminders cron — the group has gone off and the host is
+  // still at the club with the phone that would take the photo.
+  hostedEventProofReminder: (courseName: string, date: string, eventId: string): PushPayload => ({
+    title: 'Upload your round photo',
+    body:  `Your ${courseName} round on ${date} is under way — upload a photo of the group as proof to earn your host credit.`,
+    url:   '/host/events',
+    tag:   `hosted-event-proof-reminder-${eventId}`,
+    subject: `Upload proof for your ${courseName} round`,
+    cta:   'Upload your proof',
+  }),
+
   hostedEventProofSubmitted: (hostName: string, courseName: string, date: string): PushPayload => ({
     title: 'Event proof submitted',
     body:  `${titleCaseName(hostName)} uploaded proof for their ${courseName} event on ${date}. Review it to approve credits.`,

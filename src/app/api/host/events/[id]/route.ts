@@ -262,7 +262,7 @@ export const PATCH = withHostAuth(
             .in('status', ACTIVE_BOOKING_STATUSES)
           if (seats != null && nextSpots > seats) {
             return NextResponse.json(
-              { error: `That booking holds ${seats} seat${seats === 1 ? '' : 's'} — you can't offer more than that.` },
+              { error: `That booking holds ${seats} spot${seats === 1 ? '' : 's'} — you can't offer more than that.` },
               { status: 400 }
             )
           }

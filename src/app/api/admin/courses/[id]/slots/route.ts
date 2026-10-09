@@ -162,17 +162,17 @@ export const PUT = withAuth(
       }
       const seats = Number(raw.seats)
       if (!Number.isInteger(seats) || seats < 1) {
-        return NextResponse.json({ error: `Seats for ${teeTime} must be a whole number ≥ 1` }, { status: 400 })
+        return NextResponse.json({ error: `Spots for ${teeTime} must be a whole number ≥ 1` }, { status: 400 })
       }
       if (calendarSeats != null && seats > calendarSeats) {
-        return NextResponse.json({ error: `Seats for ${teeTime} can't exceed the calendar capacity of ${calendarSeats}.` }, { status: 400 })
+        return NextResponse.json({ error: `Spots for ${teeTime} can't exceed the calendar capacity of ${calendarSeats}.` }, { status: 400 })
       }
       const bookedHere = bookedByTime[teeTime] ?? 0
       // Floor is booked+1, but never above the calendar ceiling (degenerate case
       // where a slot is already at capacity — then only the ceiling is allowed).
       const floor = calendarSeats != null ? Math.min(bookedHere + 1, calendarSeats) : bookedHere + 1
       if (seats < floor) {
-        return NextResponse.json({ error: `${bookedHere} already booked at ${teeTime} — seats must be at least ${floor}.` }, { status: 400 })
+        return NextResponse.json({ error: `${bookedHere} already booked at ${teeTime} — spots must be at least ${floor}.` }, { status: 400 })
       }
       const source = raw.source === 'ghl' ? 'ghl' : 'custom'
       byTime.set(teeTime, { course_id: id, slot_date: date, tee_time: teeTime, seats, source })
