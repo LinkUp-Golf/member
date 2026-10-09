@@ -13,7 +13,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MessageCircle, Star } from "lucide-react";
 import { formatTeeTime, cn, bookingToLocalDate } from "@/lib/utils";
 import { createClient } from "@/lib/supabase";
-import RecommendedPlayers from "@/components/bookings/RecommendedPlayers";
 import BookingSurveySheet, {
   type SurveyTarget,
 } from "@/components/surveys/BookingSurveySheet";
@@ -2833,7 +2832,6 @@ function MyBookingsTab({
                 onCancel={setCancelTarget}
                 onEditGuest={setEditTarget}
                 onAddPlayer={setAddTarget}
-                onPlayersAdded={onPlayersAdded}
                 wallet={wallet}
                 onChosePayAtClub={onChosePayAtClub}
               />
@@ -2934,7 +2932,6 @@ function BookingCard({
   onCancel,
   onEditGuest,
   onAddPlayer,
-  onPlayersAdded,
   wallet,
   onChosePayAtClub,
 }: {
@@ -2943,7 +2940,6 @@ function BookingCard({
   onCancel: (target: CancelTarget) => void;
   onEditGuest: (target: EditGuestTarget) => void;
   onAddPlayer: (target: AddPlayerTarget) => void;
-  onPlayersAdded: (rows: Booking[]) => void;
   onChosePayAtClub: (bookingId: string) => void;
   // Credit, so a payable row here offers the same choice the payment banner
   // does. Undefined means the member has none and nothing extra is rendered.
@@ -3387,17 +3383,6 @@ function BookingCard({
               Add player
             </button>
           )}
-
-          {/* Players from the booker's cancelled rounds — ping or add them */}
-          {iAmBooker &&
-            hoursUntil > 0 &&
-            group.primary.status !== "cancelled" && (
-              <RecommendedPlayers
-                bookingId={group.primary.id}
-                canAdd={canAddPlayers}
-                onPlayersAdded={onPlayersAdded}
-              />
-            )}
         </div>
       )}
 
