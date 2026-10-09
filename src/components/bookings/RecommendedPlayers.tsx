@@ -104,7 +104,7 @@ export default function RecommendedPlayers({ bookingId, canAdd, onPlayersAdded }
     <div className="px-4 py-3 border-t" style={{ borderColor: "rgba(0,38,105,0.06)" }}>
       <div className="flex items-baseline justify-between gap-2 mb-2">
         <p className="text-xs font-semibold" style={{ color: "var(--color-green-900)" }}>
-          Players from your cancelled rounds
+          Players who cancelled — invite them back
         </p>
         <p className="text-[11px] tabular-nums" style={{ color: "rgba(0,38,105,0.45)" }}>
           {pingsLeft === 0 ? "No spots left to ping" : `${pingsLeft} ping${pingsLeft === 1 ? "" : "s"} left`}

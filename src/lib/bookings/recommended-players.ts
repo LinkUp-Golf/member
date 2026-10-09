@@ -3,9 +3,14 @@
 //
 // A member who cancels a round and books another usually means to play with
 // the same people, and the people on the cancelled round have nothing telling
-// them there's a new one. So each of the booker's upcoming rounds lists the
-// members from their recent cancelled rows, and the booker can ping them — a
-// direct message asking them along — or add them outright.
+// them there's a new one. So each of the booker's upcoming rounds lists:
+//
+//   • the members on the booker's own recent cancelled rows, and
+//   • the members who cancelled a spot at the same venue on the same day —
+//     people who wanted to play that event and dropped out of it,
+//
+// and the booker can ping them — a direct message asking them along — or add
+// them outright. The same-event ones come first: they wanted this very day.
 //
 // A ping asks someone to take a spot, so the pings waiting on a round can never
 // outnumber the spots the day has open: pinging five people for two spots is
@@ -104,7 +109,13 @@ export async function loadRecommendations(
     .toISOString()
     .slice(0, 10)
 
-  const [cancelledRes, playing, pingsRes] = await Promise.all([
+  const [sameEventRes, cancelledRes, playing, pingsRes] = await Promise.all([
+    admin
+      .from('bookings')
+      .select('member_id, player_member_id, guest_name, booking_date')
+      .eq('course_id', booking.course_id)
+      .eq('booking_date', booking.booking_date)
+      .eq('status', 'cancelled'),
     admin
       .from('bookings')
       .select('member_id, player_member_id, guest_name, booking_date')
@@ -123,7 +134,10 @@ export async function loadRecommendations(
   )
   const waitingPings = [...pings].filter(([id, kind]) => kind === 'ping' && !playing.has(id)).length
 
-  const ids = recommendFromCancelled((cancelledRes.data ?? []) as CancelledRow[], booking.member_id, playing)
+  const ids = [...new Set([
+    ...recommendFromCancelled((sameEventRes.data ?? []) as CancelledRow[], booking.member_id, playing),
+    ...recommendFromCancelled((cancelledRes.data ?? []) as CancelledRow[], booking.member_id, playing),
+  ])]
   if (ids.length === 0) return { recommended: [], waitingPings }
 
   const { data: members } = await admin

@@ -33,6 +33,13 @@ describe('recommendFromCancelled', () => {
     expect(recommendFromCancelled(rows, ME, new Set())).toEqual(['a', 'b'])
   })
 
+  it('names someone who cancelled their own booking at the same event', () => {
+    // Same venue and day, booked and cancelled by B on their own — the row
+    // seats B, so B is recommended to A.
+    const rows = [row({ member_id: 'b' }), row({ member_id: ME })]
+    expect(recommendFromCancelled(rows, ME, new Set())).toEqual(['b'])
+  })
+
   it('leaves out anyone already playing that day', () => {
     const rows = [
       row({ player_member_id: 'a', guest_name: 'A' }),

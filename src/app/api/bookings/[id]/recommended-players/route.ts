@@ -4,8 +4,9 @@ export const dynamic = 'force-dynamic'
 // GET  /api/bookings/[id]/recommended-players
 // POST /api/bookings/[id]/recommended-players  { memberId, action: 'ping' | 'invite' }
 //
-// The players from the booker's recent cancelled rounds, recommended on a
-// round they've booked since (see src/lib/bookings/recommended-players.ts).
+// The members who cancelled out of this same event (venue and day), and the
+// players from the booker's recent cancelled rounds, recommended on a round
+// they've booked (see src/lib/bookings/recommended-players.ts).
 //
 // 'ping' asks one of them to come and book: a direct message from the booker,
 // plus a push and an email. The pings waiting on a round may not outnumber the
