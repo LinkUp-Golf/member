@@ -16,6 +16,7 @@ import {
   requiresPaymentUrl,
   type PaymentOption,
 } from '@/lib/bookings/payment-options'
+import { daysUntil } from '@/lib/bookings/lead-time'
 import { MAX_PINNED_COURSES } from '@/lib/constants'
 import type { Course, CourseApprovalStatus } from '@/types'
 
@@ -196,6 +197,7 @@ export default function AdminCoursesPage() {
   const [rejectReason, setRejectReason] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [managingSlots, setManagingSlots] = useState<CourseRow | null>(null)
+  const [openingDays, setOpeningDays] = useState<CourseRow | null>(null)
   const [reordering, setReordering] = useState(false)
   const [reorderList, setReorderList] = useState<CourseRow[]>([])
   const [savingOrder, setSavingOrder] = useState(false)
@@ -634,6 +636,9 @@ export default function AdminCoursesPage() {
                           {course.approval_status === 'active' && course.custom_slots_enabled && (
                             <CourseMenuItem label="Manage slots" disabled={isProcessing} onClick={() => { setManagingSlots(course); closeMenu() }} />
                           )}
+                          {course.approval_status === 'active' && (
+                            <CourseMenuItem label="Open days" disabled={isProcessing} onClick={() => { setOpeningDays(course); closeMenu() }} />
+                          )}
                           <CourseMenuItem label="Edit" disabled={isProcessing} onClick={() => { setEditingCourse(course); setShowCreate(true); closeMenu() }} />
                           <CourseMenuItem label="Delete" danger disabled={isProcessing} onClick={() => { setDeletingId(course.id); closeMenu() }} />
                         </>
@@ -764,6 +769,9 @@ export default function AdminCoursesPage() {
                     {course.approval_status === 'active' && course.custom_slots_enabled && (
                       <AdminButton label="Manage slots" onClick={() => setManagingSlots(course)} variant="ghost" size="sm" disabled={isProcessing} />
                     )}
+                    {course.approval_status === 'active' && (
+                      <AdminButton label="Open days" onClick={() => setOpeningDays(course)} variant="ghost" size="sm" disabled={isProcessing} />
+                    )}
                     <AdminButton label="Edit" onClick={() => { setEditingCourse(course); setShowCreate(true) }} variant="ghost" size="sm" disabled={isProcessing} />
                     <AdminButton label="Delete" onClick={() => setDeletingId(course.id)} variant="danger" size="sm" disabled={isProcessing} />
                   </div>
@@ -812,6 +820,14 @@ export default function AdminCoursesPage() {
         <ManageSlotsDrawer
           course={managingSlots}
           onClose={() => setManagingSlots(null)}
+          onToast={showToast}
+        />
+      )}
+
+      {openingDays && (
+        <OpenDaysModal
+          course={openingDays}
+          onClose={() => setOpeningDays(null)}
           onToast={showToast}
         />
       )}
@@ -999,6 +1015,133 @@ function DeleteCourseModal({
       </div>
     </div>
   )
+}
+
+// ---- Force a day open inside the join-only window -----------
+
+interface OpenDay {
+  date: string
+  bookedSpots: number
+  openTeeTimes: number
+  forcedOpen: boolean
+}
+
+/**
+ * The venue's next few days, and a switch on each to open it to members.
+ *
+ * Inside the window (src/lib/bookings/lead-time.ts) a day nobody has booked is
+ * closed — members can join a round but not start one. Opening a day here lifts
+ * that for this venue on that day. A day with a booking is open already, so its
+ * switch is shown on but does nothing until the bookings go away; the row says
+ * which reason is keeping it open.
+ */
+function OpenDaysModal({ course, onClose, onToast }: {
+  course: Course
+  onClose: () => void
+  onToast: (msg: string, ok?: boolean) => void
+}) {
+  const [days, setDays] = useState<OpenDay[] | null>(null)
+  const [windowDays, setWindowDays] = useState(3)
+  const [today, setToday] = useState('')
+  const [saving, setSaving] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    const res = await fetch(`/api/admin/courses/${course.id}/open-days`)
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) { onToast(json.error ?? 'Failed to load days.', false); setDays([]); return }
+    setDays(json.days ?? [])
+    setWindowDays(json.windowDays ?? 3)
+    setToday(json.today ?? '')
+  }, [course.id, onToast])
+
+  useEffect(() => { load() }, [load])
+
+  async function toggle(day: OpenDay) {
+    const open = !day.forcedOpen
+    setSaving(day.date)
+    try {
+      const res = await fetch(`/api/admin/courses/${course.id}/open-days`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: day.date, open }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) { onToast(json.error ?? 'Failed to update day.', false); return }
+      setDays(ds => (ds ?? []).map(d => d.date === day.date ? { ...d, forcedOpen: open } : d))
+      onToast(open ? `${dayLabel(day.date, today)} is open for booking.` : `${dayLabel(day.date, today)} is back to the normal rule.`)
+    } catch {
+      onToast('Network error. Check your connection and try again.', false)
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button type="button" aria-label="Close" className="absolute inset-0 bg-black/40" onClick={onClose} />
+
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <h2 className="text-lg font-bold text-gray-900 mb-1">Open days</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          Within {windowDays} days, members can only join a day at <span className="font-medium text-gray-700">{course.name}</span> that
+          someone has already booked. Open a day to let them start a round on it too.
+        </p>
+
+        {days === null ? (
+          <p className="text-sm text-gray-400 py-6 text-center">Loading…</p>
+        ) : days.length === 0 ? (
+          <p className="text-sm text-gray-400 py-6 text-center">Nothing to show.</p>
+        ) : (
+          <ul className="divide-y divide-gray-100 border border-gray-100 rounded-xl mb-5">
+            {days.map(day => {
+              const isOpen = day.forcedOpen || day.bookedSpots > 0
+              const status = day.bookedSpots > 0
+                ? `Open — ${day.bookedSpots} booked`
+                : day.forcedOpen ? 'Open — opened by an admin' : 'Closed — nobody booked yet'
+              return (
+                <li key={day.date} className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">{dayLabel(day.date, today)}</p>
+                    <p className={`text-xs ${isOpen ? 'text-green-700' : 'text-gray-500'}`}>{status}</p>
+                    {day.forcedOpen && day.openTeeTimes === 0 && (
+                      <p className="text-xs text-amber-600 mt-0.5">The calendar has no tee times open this day, so members still won&apos;t see it.</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={day.forcedOpen}
+                    aria-label={`Force ${dayLabel(day.date, today)} open`}
+                    disabled={saving === day.date}
+                    onClick={() => toggle(day)}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors disabled:opacity-50 ${day.forcedOpen ? 'bg-green-700' : 'bg-gray-200'}`}
+                  >
+                    <span className={`inline-block h-5 w-5 mt-0.5 rounded-full bg-white shadow transition-transform ${day.forcedOpen ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-full py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** "Today", "Tomorrow", else "Sat, Oct 17" — for a 'YYYY-MM-DD' at the venue. */
+function dayLabel(date: string, today: string): string {
+  const diff = today ? daysUntil(date, today) : Number.NaN
+  if (diff === 0) return 'Today'
+  if (diff === 1) return 'Tomorrow'
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
 }
 
 // ---- Booking rule display helpers ---------------------------
