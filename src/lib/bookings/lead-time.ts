@@ -8,9 +8,14 @@
 //
 // So the rule is about the day rather than the member: inside the window, a
 // venue-day with no bookings on it is closed, and a venue-day with any booking
-// on it stays open to everyone. Nothing about who is asking, and nothing to
-// override — the first booking is what opens the day, and inside the window
-// there is no way to make one.
+// on it stays open to everyone. Nothing about who is asking — the first
+// booking is what opens the day, and inside the window a member has no way to
+// make one.
+//
+// The one exception is an admin's: a venue-day in `course_open_days` is open
+// regardless, because the club has said yes to it (see forcedOpen below). That
+// lifts this rule and nothing else — the calendar and the daily cap still
+// decide what can actually be booked.
 //
 // Outside the window nothing changes. Everything here reduces to "true" for a
 // date more than the window away, which is the great majority of the calendar.
@@ -80,9 +85,16 @@ export function dayIsBookable(params: {
   today: string
   bookedSpots: number
   windowDays?: number
+  /** An admin has opened this venue-day by hand (`course_open_days`). */
+  forcedOpen?: boolean
 }): boolean {
   if (!isInsideJoinOnlyWindow(params.date, params.today, params.windowDays)) return true
-  return params.bookedSpots > 0
+  return params.bookedSpots > 0 || params.forcedOpen === true
+}
+
+/** The key `loadForcedOpenDays` returns a venue-day under. */
+export function openDayKey(courseId: string, date: string): string {
+  return `${courseId}|${date}`
 }
 
 /** What a member is told when the day they picked has nobody on it yet. */

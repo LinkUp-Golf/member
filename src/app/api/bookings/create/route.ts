@@ -29,8 +29,8 @@ import { NotificationTemplates } from '@/lib/push'
 import { notifyMembers } from '@/lib/notify'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
-import { buildCustomSlots, NON_HOLDING_STATUSES } from '@/lib/bookings/availability'
-import { isInsideJoinOnlyWindow, joinOnlyWindowMessage } from '@/lib/bookings/lead-time'
+import { buildCustomSlots, loadForcedOpenDays, NON_HOLDING_STATUSES } from '@/lib/bookings/availability'
+import { isInsideJoinOnlyWindow, joinOnlyWindowMessage, openDayKey } from '@/lib/bookings/lead-time'
 import { bookingAmountDue } from '@/lib/bookings/price'
 import {
   PAY_AT_CLUB,
@@ -346,14 +346,19 @@ export async function POST(request: NextRequest) {
   }).format(new Date())
 
   if (isInsideJoinOnlyWindow(bookingDate, todayAtVenue)) {
-    const { count: heldThatDay } = await adminSupabase
-      .from('bookings')
-      .select('id', { count: 'exact', head: true })
-      .eq('course_id', resolvedCourseId)
-      .eq('booking_date', bookingDate)
-      .not('status', 'in', NON_HOLDING_STATUSES)
+    const [{ count: heldThatDay }, forcedOpen] = await Promise.all([
+      adminSupabase
+        .from('bookings')
+        .select('id', { count: 'exact', head: true })
+        .eq('course_id', resolvedCourseId)
+        .eq('booking_date', bookingDate)
+        .not('status', 'in', NON_HOLDING_STATUSES),
+      // An admin may have opened the day by hand — the same table the
+      // calendar reads, so a day it offers isn't refused here.
+      loadForcedOpenDays(adminSupabase, [resolvedCourseId], bookingDate, bookingDate),
+    ])
 
-    if (!heldThatDay) {
+    if (!heldThatDay && !forcedOpen.has(openDayKey(resolvedCourseId, bookingDate))) {
       console.log('[booking/create] Refused: inside the join-only window with nobody booked', {
         courseId: resolvedCourseId, bookingDate, todayAtVenue,
       })

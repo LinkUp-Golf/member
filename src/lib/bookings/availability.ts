@@ -12,7 +12,7 @@ import { getCache, withCache } from '@/lib/cache'
 import { GHL_SLOTS_NS, GHL_SLOTS_TTL_MS, ghlSlotsKey, ghlSlotsMonthKey } from '@/lib/cache/keys'
 import { AVIARA_TIMEZONE, FALLBACK_ROUND_DURATION_MINUTES, DEFAULT_MAX_PLAYERS_PER_DAY } from '@/lib/constants'
 import { bookingAmountDue } from '@/lib/bookings/price'
-import { dayIsBookable, JOIN_ONLY_WINDOW_DAYS } from '@/lib/bookings/lead-time'
+import { dayIsBookable, JOIN_ONLY_WINDOW_DAYS, openDayKey } from '@/lib/bookings/lead-time'
 import type { createAdminClient } from '@/lib/supabase-server'
 import type { Course, GHLBookingSlot } from '@/types'
 
@@ -27,6 +27,35 @@ type AdminClient = ReturnType<typeof createAdminClient>
  * would let the calendar and the submit disagree.
  */
 export const NON_HOLDING_STATUSES = '(cancelled,waitlist)'
+
+/**
+ * Venue-days an admin has forced open inside the join-only window, as
+ * `openDayKey(courseId, date)` keys, for dates in [startDate, endDate].
+ *
+ * Exported because POST /api/bookings/create asks the same question as the
+ * calendar, and must get the same answer. A read that fails returns nothing,
+ * which is the rule as it was before overrides existed — a broken override
+ * table closes days it would have opened, never the other way round.
+ */
+export async function loadForcedOpenDays(
+  admin: AdminClient,
+  courseIds: string[],
+  startDate: string,
+  endDate: string,
+): Promise<Set<string>> {
+  if (courseIds.length === 0) return new Set()
+  const { data, error } = await admin
+    .from('course_open_days')
+    .select('course_id, open_date')
+    .in('course_id', courseIds)
+    .gte('open_date', startDate)
+    .lte('open_date', endDate)
+  if (error) {
+    console.error('[availability] Could not read course_open_days', error.message)
+    return new Set()
+  }
+  return new Set((data ?? []).map(r => openDayKey(r.course_id as string, r.open_date as string)))
+}
 
 // How many courses we ask GHL about at once when filtering by date. One call
 // per course is unavoidable — GHL has no cross-calendar availability endpoint —
@@ -122,7 +151,7 @@ export async function buildCustomSlots(
  * every bookable course at once, and without this each member browsing dates
  * would fan out a fresh call per course per keystroke.
  */
-async function slotsForDate(admin: AdminClient, course: Course, date: string): Promise<GHLBookingSlot[]> {
+export async function slotsForDate(admin: AdminClient, course: Course, date: string): Promise<GHLBookingSlot[]> {
   const timezone = course.timezone || AVIARA_TIMEZONE
   const durationMins = course.meeting_duration_mins || FALLBACK_ROUND_DURATION_MINUTES
 
@@ -335,15 +364,22 @@ export async function venueAvailabilityForMonth(
 ): Promise<MonthAvailability> {
   if (courses.length === 0) return { venues: [], days: {} }
 
+  const windowDays = options.joinOnlyWindowDays ?? JOIN_ONLY_WINDOW_DAYS
+
   // Seats already held per venue per day, in one query rather than one per
-  // course-day.
-  const { data: bookingRows } = await admin
-    .from('bookings')
-    .select('course_id, booking_date')
-    .in('course_id', courses.map(c => c.id))
-    .gte('booking_date', startDate)
-    .lte('booking_date', endDate)
-    .not('status', 'in', NON_HOLDING_STATUSES)
+  // course-day — and, alongside it, the days an admin has opened by hand.
+  const [{ data: bookingRows }, forcedOpen] = await Promise.all([
+    admin
+      .from('bookings')
+      .select('course_id, booking_date')
+      .in('course_id', courses.map(c => c.id))
+      .gte('booking_date', startDate)
+      .lte('booking_date', endDate)
+      .not('status', 'in', NON_HOLDING_STATUSES),
+    windowDays > 0
+      ? loadForcedOpenDays(admin, courses.map(c => c.id), startDate, endDate)
+      : Promise.resolve(new Set<string>()),
+  ])
 
   const held = new Map<string, number>()
   for (const row of bookingRows ?? []) {
@@ -365,14 +401,15 @@ export async function venueAvailabilityForMonth(
       const heldThatDay = held.get(`${course.id}|${date}`) ?? 0
 
       // A day inside the last-minute window is only open if someone is already
-      // going. Checked before the calendar so a day nobody has booked costs
-      // nothing to rule out.
+      // going, or an admin has opened it. Checked before the calendar so a day
+      // nobody has booked costs nothing to rule out.
       if (
         !dayIsBookable({
           date,
           today: todayAtVenue,
           bookedSpots: heldThatDay,
-          windowDays: options.joinOnlyWindowDays ?? JOIN_ONLY_WINDOW_DAYS,
+          windowDays,
+          forcedOpen: forcedOpen.has(openDayKey(course.id, date)),
         })
       ) {
         continue
@@ -609,7 +646,8 @@ function formatDateOnly(d: Date): string {
  *
  * Three things can rule a course out, and all three matter: its calendar may
  * have nothing open, our own per-course daily cap may already be spent, or the
- * date may be inside the last-minute window with nobody booked on it yet. The
+ * date may be inside the last-minute window with nobody booked on it yet (and
+ * no admin has opened it). The
  * cap is enforced atomically at booking time and the window is enforced in
  * POST /api/bookings/create, so a course that passes only the calendar check
  * would list as available and then be refused on submit.
@@ -622,13 +660,16 @@ export async function coursesWithAvailabilityOn(
   if (courses.length === 0) return []
 
   // Seats already held at each course on this date, in one query rather than
-  // one per course.
-  const { data: bookingRows } = await admin
-    .from('bookings')
-    .select('course_id')
-    .in('course_id', courses.map(c => c.id))
-    .eq('booking_date', date)
-    .not('status', 'in', NON_HOLDING_STATUSES)
+  // one per course, and which of them an admin has opened by hand.
+  const [{ data: bookingRows }, forcedOpen] = await Promise.all([
+    admin
+      .from('bookings')
+      .select('course_id')
+      .in('course_id', courses.map(c => c.id))
+      .eq('booking_date', date)
+      .not('status', 'in', NON_HOLDING_STATUSES),
+    loadForcedOpenDays(admin, courses.map(c => c.id), date, date),
+  ])
 
   const heldByCourse = new Map<string, number>()
   for (const row of bookingRows ?? []) {
@@ -646,6 +687,7 @@ export async function coursesWithAvailabilityOn(
       date,
       today: formatInTimeZone(new Date(), course.timezone || AVIARA_TIMEZONE, 'yyyy-MM-dd'),
       bookedSpots: held,
+      forcedOpen: forcedOpen.has(openDayKey(course.id, date)),
     })
   })
 

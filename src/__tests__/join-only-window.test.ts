@@ -110,3 +110,20 @@ describe('joinOnlyWindowMessage', () => {
     expect(joinOnlyWindowMessage(5)).toContain('within 5 days')
   })
 })
+
+describe('dayIsBookable — a day an admin has forced open', () => {
+  it('opens a day inside the window that nobody has booked', () => {
+    expect(dayIsBookable({ date: TODAY, today: TODAY, bookedSpots: 0, forcedOpen: true })).toBe(true)
+    expect(dayIsBookable({ date: '2026-06-12', today: TODAY, bookedSpots: 0, forcedOpen: true })).toBe(true)
+  })
+
+  it('leaves the rule alone when the flag is absent or false', () => {
+    expect(dayIsBookable({ date: TODAY, today: TODAY, bookedSpots: 0 })).toBe(false)
+    expect(dayIsBookable({ date: TODAY, today: TODAY, bookedSpots: 0, forcedOpen: false })).toBe(false)
+  })
+
+  it('changes nothing for a day that was open anyway', () => {
+    expect(dayIsBookable({ date: TODAY, today: TODAY, bookedSpots: 2, forcedOpen: true })).toBe(true)
+    expect(dayIsBookable({ date: '2026-06-20', today: TODAY, bookedSpots: 0, forcedOpen: true })).toBe(true)
+  })
+})
