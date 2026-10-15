@@ -323,12 +323,40 @@ export const NotificationTemplates = {
     cta:   'Open LinkUp',
   }),
 
-  bookingInvite: (bookerFirstName: string, date: string, time: string): PushPayload => ({
+  // An added player's invitation to a round. Names the round and says who's
+  // paying, and opens the invitation screen where they accept or decline.
+  bookingInvite: (
+    bookerFirstName: string,
+    eventName: string,
+    date: string,
+    time: string,
+    paidByBooker: boolean,
+    bookingId: string,
+  ): PushPayload => ({
     title: `${titleCaseName(bookerFirstName)} invited you to play`,
-    body:  `You've been added to a tee time on ${date} at ${time}. Check My Bookings for details.`,
+    body:  `${eventName} on ${date} at ${time}. ${paidByBooker ? `${titleCaseName(bookerFirstName)} is paying for your round.` : "You'll pay for your own round."} Accept or decline your invitation.`,
+    url:   `/book/invitations/${bookingId}`,
+    tag:   `booking-invite-${bookingId}`,
+    subject: `${titleCaseName(bookerFirstName)} invited you to ${eventName} on ${date}`,
+    cta:   'Respond to invitation',
+  }),
+
+  // The booker hears each player's answer.
+  bookingInviteAccepted: (playerName: string, eventName: string, date: string): PushPayload => ({
+    title: `${playerName} is in`,
+    body:  `${playerName} accepted your invitation to ${eventName} on ${date}.`,
     url:   '/book',
-    tag:   'booking-invite',
-    subject: `${titleCaseName(bookerFirstName)} added you to a tee time on ${date}`,
+    tag:   'booking-invite-response',
+    subject: `${playerName} accepted your invitation to ${eventName}`,
+    cta:   'View the tee time',
+  }),
+
+  bookingInviteDeclined: (playerName: string, eventName: string, date: string): PushPayload => ({
+    title: `${playerName} can't make it`,
+    body:  `${playerName} declined your invitation to ${eventName} on ${date}. Their spot has been released.`,
+    url:   '/book',
+    tag:   'booking-invite-response',
+    subject: `${playerName} declined your invitation to ${eventName}`,
     cta:   'View the tee time',
   }),
 

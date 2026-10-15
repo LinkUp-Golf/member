@@ -25,14 +25,14 @@ import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { logActivity } from '@/lib/activity/log'
 import { linkGuestToMember, provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
 import type { ProvisionedGuest } from '@/lib/bookings/non-member-guest'
-import { NotificationTemplates } from '@/lib/push'
-import { notifyMembers } from '@/lib/notify'
+import { sendBookingInvitations } from '@/lib/bookings/send-invitations'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
 import { buildCustomSlots, loadForcedOpenDays, NON_HOLDING_STATUSES } from '@/lib/bookings/availability'
 import { isInsideJoinOnlyWindow, joinOnlyWindowMessage, openDayKey } from '@/lib/bookings/lead-time'
 import { bookingAmountDue } from '@/lib/bookings/price'
 import { allowsNonMemberGuests, NON_MEMBER_GUESTS_DISABLED_MESSAGE } from '@/lib/bookings/guest-policy'
+import { isPaidBy, PAID_BY_REQUIRED_MESSAGE } from '@/lib/bookings/invitations'
 import {
   PAY_AT_CLUB,
   coursePaymentOptions,
@@ -40,7 +40,7 @@ import {
   type PaymentOption,
 } from '@/lib/bookings/payment-options'
 import { format } from 'date-fns'
-import { titleCaseName } from '@/lib/utils'
+import { formatTeeTime, titleCaseName } from '@/lib/utils'
 import type { AdditionalPlayer } from '@/types'
 
 // Total players per booking is capped at 4 (mirrors validateBookingPayload),
@@ -199,6 +199,10 @@ export async function POST(request: NextRequest) {
     const isNonMember = p.isNonMember || !p.memberId
     if (isNonMember && (typeof p.mobile !== 'string' || p.mobile.trim().length < 7)) {
       return NextResponse.json({ error: 'A phone number is required for each non-member guest' }, { status: 400 })
+    }
+    // Who pays for this seat is the booker's to say, and there's no default.
+    if (!isPaidBy(p.paidBy)) {
+      return NextResponse.json({ error: PAID_BY_REQUIRED_MESSAGE }, { status: 400 })
     }
   }
 
@@ -548,6 +552,9 @@ export async function POST(request: NextRequest) {
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: null as string | null,
       payment_method: paymentMethod,
+      // An added player is invited, not just placed — see @/lib/bookings/invitations.
+      paid_by_booker: p.paidBy === 'booker',
+      invite_status: 'pending',
     })),
     // Non-members take a seat on the same terms as anyone else. Their GHL
     // contact and member row are created below, right after the seats are
@@ -567,6 +574,9 @@ export async function POST(request: NextRequest) {
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: null as string | null,
       payment_method: paymentMethod,
+      // An added player is invited, not just placed — see @/lib/bookings/invitations.
+      paid_by_booker: p.paidBy === 'booker',
+      invite_status: 'pending',
     })),
   ]
 
@@ -664,6 +674,7 @@ export async function POST(request: NextRequest) {
     player_member_id: string | null
     ghl_booking_id: string | null
     additional_players: AdditionalPlayer[] | null
+    paid_by_booker: boolean | null
   }
   const created = insertedBookings as InsertedBooking[]
   console.log('[booking/create] Reserved bookings:', created.map(b => b.id))
@@ -768,17 +779,18 @@ export async function POST(request: NextRequest) {
 
   const displayDate = format(new Date(`${bookingDate}T12:00:00`), 'EEEE, MMMM d')
 
-  // Notify members who were invited as additional players
-  const invitedMemberIds = memberPlayers
-    .map(p => p.memberId)
-    .filter((id): id is string => Boolean(id))
-  if (invitedMemberIds.length) {
-    const displayTime = timeNormalized.slice(0, 5)
-    void notifyMembers(
-      invitedMemberIds,
-      NotificationTemplates.bookingInvite(member.first_name, displayDate, displayTime)
-    ).catch(() => {})
-  }
+  // Invite every added player who has an account by now — fellow members, and
+  // non-member guests provisioned above. Each invitation is its own row's, since
+  // it says who's paying for that seat and opens that row's answer screen.
+  void sendBookingInvitations(
+    created.filter(b => b.id !== primaryBooking.id),
+    {
+      bookerFirstName: member.first_name,
+      eventName: courseForResponse?.name ?? eventCourseName,
+      displayDate,
+      displayTime: formatTeeTime(timeNormalized),
+    },
+  )
 
   console.log('[booking/create] Success, primaryBookingId:', primaryBookingId)
 

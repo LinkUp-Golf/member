@@ -9,6 +9,7 @@ import { format, addDays, subDays, isToday, differenceInCalendarDays } from 'dat
 import { formatTeeTime } from '@/lib/utils'
 import { tagsOverlap } from '@/lib/ghl/tags'
 import { settlingAtClub, PAY_AT_CLUB_LABEL } from '@/lib/bookings/payment-options'
+import { inviteStatusLabel } from '@/lib/bookings/invitations'
 import type { AdditionalPlayer } from '@/types'
 
 type BookingStatus = 'tentative' | 'availability_confirmed' | 'payment_confirmed' | 'confirmed' | 'pending' | 'cancelled' | 'waitlist' | 'awaiting_approval'
@@ -29,6 +30,10 @@ interface BookingRow {
   admin_notes: string | null
   /** 'pay_at_club' when the member chose to settle with the club. */
   payment_method: 'pay_at_club' | null
+  /** The booker covers this added player's seat. */
+  paid_by_booker?: boolean
+  /** An added player's answer to their invitation; null on older rows and the booker's own. */
+  invite_status?: 'pending' | 'accepted' | 'declined' | null
   ghl_opportunity_id: string | null
   member: { first_name: string; last_name: string; email: string } | null
   player?: { id: string; first_name: string; last_name: string; email: string } | null
@@ -398,6 +403,21 @@ function SlotCard({
                           {info.badge}
                         </span>
                       )}
+                      {/* An added player's answer, and who's covering them. */}
+                      {b.invite_status && (
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 whitespace-nowrap ${
+                          b.invite_status === 'accepted' ? 'bg-emerald-50 text-emerald-700'
+                            : b.invite_status === 'declined' ? 'bg-gray-100 text-gray-500'
+                            : 'bg-yellow-50 text-yellow-700'
+                        }`}>
+                          {inviteStatusLabel(b.invite_status)}
+                        </span>
+                      )}
+                      {b.invite_status && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 flex-shrink-0 whitespace-nowrap">
+                          {b.paid_by_booker ? 'Booker pays' : 'Pays own'}
+                        </span>
+                      )}
                       {daysLeftLabel && (
                         <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 flex-shrink-0 whitespace-nowrap">
                           ⏳ {daysLeftLabel}
@@ -741,7 +761,7 @@ export default function AdminBookingsPage() {
 
     if (matchingCourseIds.length === 0) { setBookings([]); setLoading(false); return }
 
-    const SELECT = 'id, member_id, created_at, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, payment_method, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name, meeting_duration_mins)'
+    const SELECT = 'id, member_id, created_at, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, payment_method, paid_by_booker, invite_status, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name, meeting_duration_mins)'
     const SELECT_NO_DINNER = SELECT.replace('dinner_rsvp, ', '')
 
     function buildQuery(select: string) {

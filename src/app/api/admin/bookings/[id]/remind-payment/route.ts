@@ -25,7 +25,7 @@ export const POST = withAuth(
 
     const { data: booking, error } = await admin
       .from('bookings')
-      .select('id, member_id, player_member_id, guest_name, additional_players, booking_date, tee_time, status, payment_method, course:courses!bookings_course_id_fkey(name, payment_url)')
+      .select('id, member_id, player_member_id, guest_name, additional_players, booking_date, tee_time, status, payment_method, paid_by_booker, course:courses!bookings_course_id_fkey(name, payment_url)')
       .eq('id', id)
       .single()
 
@@ -45,7 +45,12 @@ export const POST = withAuth(
     let firstName = ''
     let email = ''
 
-    if (booking.player_member_id) {
+    if (booking.paid_by_booker) {
+      // The booker said they'd cover this player, so the reminder is theirs.
+      const { data: member } = await admin.from('members').select('first_name, email').eq('id', booking.member_id).single()
+      firstName = member?.first_name ?? ''
+      email = member?.email ?? ''
+    } else if (booking.player_member_id) {
       const { data: member } = await admin.from('members').select('first_name, email').eq('id', booking.player_member_id).single()
       firstName = member?.first_name ?? ''
       email = member?.email ?? ''

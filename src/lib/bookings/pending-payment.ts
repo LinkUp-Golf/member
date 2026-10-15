@@ -121,14 +121,21 @@ export async function findPendingPaymentBookings(
 ): Promise<PendingPaymentBooking[]> {
   const { data } = await admin
     .from('bookings')
-    .select('id, member_id, course_id, booking_date, tee_time, status, guest_name, player_member_id, amount_charged, booker:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name, payment_url, payment_options, cost_per_player)')
+    .select('id, member_id, course_id, booking_date, tee_time, status, guest_name, player_member_id, paid_by_booker, amount_charged, booker:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name, payment_url, payment_options, cost_per_player)')
     .or(`member_id.eq.${memberId},player_member_id.eq.${memberId}`)
     .in('status', UNPAID_BOOKING_STATUSES)
     .is('payment_method', null)
     .gte('booking_date', todayStr())
     .order('booking_date', { ascending: true })
 
-  return (data ?? []).map((row) => {
+  // A seat the booker said they'd pay for is the booker's to pay — it reaches
+  // them through member_id — so it isn't owed by the player it was added for.
+  // create_bookings_for_day applies the same rule in SQL.
+  const owed = (data ?? []).filter(
+    (row) => !(row.member_id !== memberId && row.player_member_id === memberId && row.paid_by_booker),
+  )
+
+  return owed.map((row) => {
     const course = row.course as unknown as { name: string; payment_url: string | null; payment_options: string[] | null; cost_per_player: number | null } | null
     // The querying member's own round is either their primary row (no guest
     // name) or one where they were the invited player, regardless of who
@@ -197,7 +204,7 @@ export async function findMembersWithPendingPayment(
 
   const { data } = await admin
     .from('bookings')
-    .select('member_id, player_member_id')
+    .select('member_id, player_member_id, paid_by_booker')
     .or(orClause)
     .in('status', UNPAID_BOOKING_STATUSES)
     .is('payment_method', null)
@@ -206,7 +213,8 @@ export async function findMembersWithPendingPayment(
   const idSet = new Set(ids)
   for (const row of data ?? []) {
     if (row.member_id && idSet.has(row.member_id)) blocked.add(row.member_id)
-    if (row.player_member_id && idSet.has(row.player_member_id)) {
+    // An added player whose booker is paying for them owes nothing on it.
+    if (row.player_member_id && idSet.has(row.player_member_id) && !row.paid_by_booker) {
       blocked.add(row.player_member_id)
     }
   }
