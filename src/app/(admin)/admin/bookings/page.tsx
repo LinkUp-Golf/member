@@ -10,6 +10,7 @@ import { formatTeeTime } from '@/lib/utils'
 import { tagsOverlap } from '@/lib/ghl/tags'
 import { settlingAtClub, PAY_AT_CLUB_LABEL } from '@/lib/bookings/payment-options'
 import { inviteStatusLabel } from '@/lib/bookings/invitations'
+import AdminNewBookingDrawer from '@/components/admin/AdminNewBookingDrawer'
 import type { AdditionalPlayer } from '@/types'
 
 type BookingStatus = 'tentative' | 'availability_confirmed' | 'payment_confirmed' | 'confirmed' | 'pending' | 'cancelled' | 'waitlist' | 'awaiting_approval'
@@ -673,6 +674,7 @@ export default function AdminBookingsPage() {
   const [deletingBookingId, setDeletingBookingId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<BookingRow | null>(null)
   const [moveTarget, setMoveTarget] = useState<TeeSlot | null>(null)
+  const [showNewBooking, setShowNewBooking] = useState(false)
   const noteRef = useRef<HTMLTextAreaElement>(null)
 
   const [activeTab, setActiveTab] = useState<'bookings' | 'access'>('bookings')
@@ -1295,6 +1297,20 @@ export default function AdminBookingsPage() {
         </div>
       )}
 
+      {showNewBooking && (
+        <AdminNewBookingDrawer
+          members={allMembers}
+          defaultCourseId={courseFilter !== 'all' ? courseFilter : null}
+          onClose={() => setShowNewBooking(false)}
+          onBooked={msg => {
+            setShowNewBooking(false)
+            setRequestToast({ msg, ok: true })
+            setTimeout(() => setRequestToast(null), 4000)
+            loadBookings()
+          }}
+        />
+      )}
+
       {moveTarget && (
         <MoveBookingModal
           slot={moveTarget}
@@ -1318,6 +1334,14 @@ export default function AdminBookingsPage() {
             ? `${courseList.length} active course${courseList.length !== 1 ? 's' : ''}`
             : undefined}
         />
+        <div className="flex flex-col sm:flex-row items-end sm:items-start gap-2 flex-shrink-0">
+        <button
+          type="button"
+          onClick={() => setShowNewBooking(true)}
+          className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold rounded-[10px] bg-green-900 text-white hover:bg-green-800 transition-colors whitespace-nowrap"
+        >
+          + New booking
+        </button>
         {/* Upcoming / Who's Playing / Past toggle — compact on mobile */}
         <div className="flex p-0.5 rounded-xl flex-shrink-0 self-start" style={{ background: 'rgba(0,38,105,0.06)' }}>
           {(['all', 'upcoming', 'whos-playing', 'past'] as const).map(v => (
@@ -1333,6 +1357,7 @@ export default function AdminBookingsPage() {
               {VIEW_LABELS[v]}
             </button>
           ))}
+        </div>
         </div>
       </div>
 

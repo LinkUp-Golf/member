@@ -360,6 +360,17 @@ export const NotificationTemplates = {
     cta:   'View the tee time',
   }),
 
+  // An admin made a booking on this member's behalf — it's on their account,
+  // and this is how they find out.
+  bookingMadeForYou: (courseName: string, date: string, time: string): PushPayload => ({
+    title: "You're booked in",
+    body:  `The LinkUp team booked you a tee time at ${courseName} on ${date} at ${time}. Check My Bookings for details.`,
+    url:   '/book',
+    tag:   'booking-made-for-you',
+    subject: `You're booked in at ${courseName} on ${date}`,
+    cta:   'View the tee time',
+  }),
+
   // An admin moved a round to another day or tee time — every player on it
   // hears, since the old date is the one already in their calendar.
   bookingMoved: (courseName: string, date: string, time: string): PushPayload => ({
