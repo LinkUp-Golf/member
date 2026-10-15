@@ -133,6 +133,10 @@ export interface Course {
   // (see CustomSlot / course_custom_slots) instead of coming live from GHL.
   custom_slots_enabled: boolean
 
+  // Members may add non-member guests to a round here. Off by default — see
+  // src/lib/bookings/guest-policy.ts.
+  allow_non_member_guests: boolean
+
   // Optional description shown in the admin and used as the GHL group description
   description: string | null
 
@@ -281,6 +285,8 @@ export interface Booking {
     meeting_duration_mins?: number | null
     /** The venue's green fee — what a payment surface quotes. */
     cost_per_player?: number | null
+    /** Whether players can be added here as non-member guests. */
+    allow_non_member_guests?: boolean
   } | null
 }
 

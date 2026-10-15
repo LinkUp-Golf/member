@@ -456,11 +456,16 @@ export const PATCH = withAuth(
       // it. The other five scheduling columns are not: a calendar is created on
       // GHL_CALENDAR_RULES, so nothing reads them and no screen sends them.
       'meeting_duration_mins', 'seats_per_class', 'max_players_per_day',
-      'custom_slots_enabled', 'pinned', 'payment_options',
+      'custom_slots_enabled', 'pinned', 'payment_options', 'allow_non_member_guests',
     ]
     const updates: Record<string, unknown> = {}
     for (const key of allowed) {
       if (key in body) updates[key] = body[key]
+    }
+    // A column that defaults to off stays a real boolean — a stray "false"
+    // string would otherwise switch non-member guests on.
+    if ('allow_non_member_guests' in updates) {
+      updates.allow_non_member_guests = updates.allow_non_member_guests === true
     }
 
     // Cap on pinned venues, the same rule pinned announcements are held to.

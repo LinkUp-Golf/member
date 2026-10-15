@@ -32,6 +32,7 @@ import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPayme
 import { buildCustomSlots, loadForcedOpenDays, NON_HOLDING_STATUSES } from '@/lib/bookings/availability'
 import { isInsideJoinOnlyWindow, joinOnlyWindowMessage, openDayKey } from '@/lib/bookings/lead-time'
 import { bookingAmountDue } from '@/lib/bookings/price'
+import { allowsNonMemberGuests, NON_MEMBER_GUESTS_DISABLED_MESSAGE } from '@/lib/bookings/guest-policy'
 import {
   PAY_AT_CLUB,
   coursePaymentOptions,
@@ -270,7 +271,7 @@ export async function POST(request: NextRequest) {
 
   const { data: course } = await adminSupabase
     .from('courses')
-    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, cost_per_player')
+    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, cost_per_player, allow_non_member_guests')
     .eq('id', courseId || resolvedCourseId)
     .eq('approval_status', 'active')
     .single()
@@ -285,6 +286,13 @@ export async function POST(request: NextRequest) {
     eventDurationMinutes = course.meeting_duration_mins || FALLBACK_ROUND_DURATION_MINUTES
     eventCourseName = course.name
     resolvedCourseId = course.id
+  }
+
+  // Non-member guests only where the venue takes them. The booking screen hides
+  // the option at a venue that doesn't, so this is a stale screen or a direct
+  // post — refused before any GHL work.
+  if (nonMemberPlayers.length > 0 && !allowsNonMemberGuests(course)) {
+    return NextResponse.json({ error: NON_MEMBER_GUESTS_DISABLED_MESSAGE }, { status: 400 })
   }
 
   // The appointment's length is whatever this course's GHL calendar says a round

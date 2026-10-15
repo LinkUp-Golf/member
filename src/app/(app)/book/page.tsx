@@ -33,6 +33,7 @@ import type { CalendarPlayer } from "@/lib/bookings/players";
 import type { VenueHost } from "@/lib/bookings/venue-hosts";
 import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
 import { bookingAmountDue } from "@/lib/bookings/price";
+import { allowsNonMemberGuests } from "@/lib/bookings/guest-policy";
 import {
   coursePaymentOptions,
   isPayAtClub,
@@ -408,6 +409,7 @@ export default function BookPage() {
         inviteMemberId={inviteMemberId}
         bookerEmail={user?.email ?? ""}
         eventName={selectedEvent?.name ?? null}
+        allowNonMembers={allowsNonMemberGuests(selectedEvent)}
         // Same rule the row's amount_charged is written with, so the price
         // quoted here and the one on the success screen a tap later agree.
         pricePerPlayer={bookingAmountDue({
@@ -938,6 +940,7 @@ function ConfirmScreen({
   bookerEmail,
   eventName,
   pricePerPlayer,
+  allowNonMembers,
 }: {
   slot: GHLBookingSlot;
   date: string;
@@ -950,6 +953,8 @@ function ConfirmScreen({
   bookerEmail: string;
   eventName?: string | null;
   pricePerPlayer: number;
+  /** The venue takes non-member guests — see @/lib/bookings/guest-policy. */
+  allowNonMembers: boolean;
 }) {
   const maxAdditional = Math.max(0, (slot.spotsOpen ?? 1) - 1);
   const [collapsed, setCollapsed] = useState<boolean[]>([]);
@@ -1434,7 +1439,9 @@ function ConfirmScreen({
                         </>
                       ) : (
                         <div className="pt-3 space-y-3">
-                          {/* Member / Non-member segmented toggle */}
+                          {/* Member / Non-member segmented toggle — only where
+                              the venue takes non-member guests. */}
+                          {allowNonMembers && (
                           <div
                             className="flex gap-1 p-1 rounded-xl"
                             style={{ background: "rgba(0,38,105,0.05)" }}
@@ -1470,6 +1477,7 @@ function ConfirmScreen({
                               );
                             })}
                           </div>
+                          )}
 
                           {kind === "member" ? (
                             <MemberAutocomplete
@@ -3353,6 +3361,7 @@ function BookingCard({
                   courseName,
                   dateLabel: format(bookingDate, "EEE, MMM d"),
                   timeLabel: bookingTime,
+                  allowNonMembers: allowsNonMemberGuests(group.primary.course),
                   excludeMemberIds: [
                     group.primary.member_id,
                     ...activePlayers
@@ -3410,6 +3419,8 @@ interface AddPlayerTarget {
   dateLabel: string;
   timeLabel: string;
   excludeMemberIds: string[];
+  /** The venue takes non-member guests — see @/lib/bookings/guest-policy. */
+  allowNonMembers: boolean;
 }
 
 type AddPlayerForm = {
@@ -3640,7 +3651,9 @@ function AddPlayerModal({
           noValidate
           className="space-y-4"
         >
-          {/* Member / Non-member toggle */}
+          {/* Member / Non-member toggle — only where the venue takes
+              non-member guests. */}
+          {target.allowNonMembers && (
           <div
             className="flex gap-1 p-1 rounded-xl"
             style={{ background: "rgba(0,38,105,0.05)" }}
@@ -3673,6 +3686,7 @@ function AddPlayerModal({
               );
             })}
           </div>
+          )}
 
           {kind === "member" ? (
             selected ? (

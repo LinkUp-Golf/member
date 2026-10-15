@@ -138,6 +138,7 @@ export const POST = withAuth(
         payment_options: paymentOptions,
         required_tags: requiredTags,
         max_players_per_day: body.max_players_per_day ?? undefined,
+        allow_non_member_guests: body.allow_non_member_guests === true,
         approval_status: 'active',
         reviewed_by: ctx.userId,
       })

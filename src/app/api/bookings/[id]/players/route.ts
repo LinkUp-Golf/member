@@ -38,6 +38,7 @@ import { findMembersWithPendingPayment } from '@/lib/bookings/pending-payment'
 import { linkGuestToMember, provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
 import type { ProvisionedGuest } from '@/lib/bookings/non-member-guest'
 import { bookingAmountDue } from '@/lib/bookings/price'
+import { allowsNonMemberGuests, NON_MEMBER_GUESTS_DISABLED_MESSAGE } from '@/lib/bookings/guest-policy'
 import {
   PAY_AT_CLUB,
   coursePaymentOptions,
@@ -166,12 +167,17 @@ export const POST = withAuth(async (
   // ---- Resolve course + calendar settings ---------------------------------
   const { data: course } = await admin
     .from('courses')
-    .select('id, ghl_calendar_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, max_players_per_day, cost_per_player')
+    .select('id, ghl_calendar_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, max_players_per_day, cost_per_player, allow_non_member_guests')
     .eq('id', primary.course_id)
     .single()
 
   if (!course?.ghl_calendar_id) {
     return NextResponse.json({ error: 'This course is not set up for booking.' }, { status: 422 })
+  }
+
+  // Non-member guests only where the venue takes them — the same rule as create.
+  if (nonMemberPlayers.length > 0 && !allowsNonMemberGuests(course)) {
+    return NextResponse.json({ error: NON_MEMBER_GUESTS_DISABLED_MESSAGE }, { status: 400 })
   }
 
   const eventCalendarId = course.ghl_calendar_id
