@@ -95,7 +95,7 @@ export default function HostLayout({ children }: { children: React.ReactNode }) 
         <div className="px-4 py-3 border-t border-white/[0.07] flex items-center justify-between gap-2">
           {isMember ? (
             <Link href={DEFAULT_LANDING_PATH} className="text-xs text-white/40 hover:text-white/70 transition-colors truncate">
-              ← Back to LinkUp
+              ← Return to Member screen
             </Link>
           ) : <span />}
           <SidebarSignOut />
@@ -111,7 +111,7 @@ export default function HostLayout({ children }: { children: React.ReactNode }) 
           {isMember && (
             <Link
               href={DEFAULT_LANDING_PATH}
-              aria-label="Back to LinkUp"
+              aria-label="Return to Member screen"
               className="focus-ring -ml-1 p-1 rounded-lg text-white/50 hover:text-white transition-colors flex-shrink-0"
             >
               <ChevronLeft className="w-5 h-5" strokeWidth={2} />
