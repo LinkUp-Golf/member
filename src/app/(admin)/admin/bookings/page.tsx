@@ -268,6 +268,7 @@ function SlotCard({
   onRemindPayment,
   deletingBookingId,
   onRequestDelete,
+  onMove,
 }: {
   slot: TeeSlot
   showCourseName: boolean
@@ -287,6 +288,7 @@ function SlotCard({
   onRemindPayment: (id: string) => void
   deletingBookingId: string | null
   onRequestDelete: (b: BookingRow) => void
+  onMove: (slot: TeeSlot) => void
 }) {
   const isExpanded = expandedSlots.has(slot.key)
   const totalAmount = slot.rows.reduce((sum, b) => sum + Number(b.amount_charged), 0)
@@ -365,6 +367,18 @@ function SlotCard({
       {/* Expanded: per-player rows */}
       {isExpanded && (
         <div className="divide-y divide-gray-50 border-t border-gray-100">
+          {/* The group moves as one — see POST /api/admin/bookings/[id]/move. */}
+          {activeRows.length > 0 && (
+            <div className="px-4 py-2 flex justify-end bg-gray-50/60">
+              <button
+                type="button"
+                onClick={() => onMove(slot)}
+                className="text-xs font-medium px-2.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Move to another date
+              </button>
+            </div>
+          )}
           {slot.rows.map(b => {
             const info = playerInfo(b)
             const sm = STATUS_META[b.status] ?? STATUS_META.tentative
@@ -638,6 +652,7 @@ export default function AdminBookingsPage() {
   const [remindedPaymentIds, setRemindedPaymentIds] = useState<Set<string>>(new Set())
   const [deletingBookingId, setDeletingBookingId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<BookingRow | null>(null)
+  const [moveTarget, setMoveTarget] = useState<TeeSlot | null>(null)
   const noteRef = useRef<HTMLTextAreaElement>(null)
 
   const [activeTab, setActiveTab] = useState<'bookings' | 'access'>('bookings')
@@ -1104,6 +1119,7 @@ export default function AdminBookingsPage() {
     onSaveNote: saveNote, savingNote, noteRef,
     remindingPayment, remindedPaymentIds, onRemindPayment: remindPayment,
     deletingBookingId, onRequestDelete: setDeleteTarget,
+    onMove: setMoveTarget,
   }
 
   // Shared between the desktop inline grid and the mobile drawer — id suffix
@@ -1257,6 +1273,19 @@ export default function AdminBookingsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {moveTarget && (
+        <MoveBookingModal
+          slot={moveTarget}
+          onClose={() => setMoveTarget(null)}
+          onMoved={(msg, ok) => {
+            setMoveTarget(null)
+            setRequestToast({ msg, ok })
+            setTimeout(() => setRequestToast(null), 4000)
+            loadBookings()
+          }}
+        />
       )}
 
       {/* Header row: title + view toggle */}
@@ -1555,6 +1584,113 @@ function DateGroupedSlots({
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+// ---- Move a booking group to another date ------------------------------
+
+/**
+ * Moves the whole tee-time group — booker and every player booked with them —
+ * to another day and, optionally, another tee time. The server holds the new
+ * day to the venue's cap and moves each GHL appointment to match.
+ */
+function MoveBookingModal({
+  slot,
+  onClose,
+  onMoved,
+}: {
+  slot: TeeSlot
+  onClose: () => void
+  onMoved: (msg: string, ok: boolean) => void
+}) {
+  const first = slot.rows[0]
+  const [date, setDate] = useState(slot.booking_date)
+  const [time, setTime] = useState(slot.tee_time.slice(0, 5))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const players = slot.rows.filter(b => b.status !== 'cancelled').length
+  const unchanged = date === slot.booking_date && time === slot.tee_time.slice(0, 5)
+
+  async function submit() {
+    if (!first) return
+    setSaving(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/admin/bookings/${first.id}/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date, teeTime: time }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) { setError(json.error ?? 'Failed to move the booking.'); return }
+      const when = `${format(new Date(`${date}T12:00:00`), 'EEE, MMM d')} at ${formatTeeTime(`${time}:00`)}`
+      onMoved(
+        json.ghlFailed
+          ? `Moved to ${when}, but ${json.ghlFailed} GHL appointment${json.ghlFailed === 1 ? '' : 's'} couldn't be updated.`
+          : `Moved to ${when}. Players have been notified.`,
+        !json.ghlFailed,
+      )
+    } catch {
+      setError('Network error. Please try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
+      <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-5">
+        <h2 className="text-sm font-bold text-gray-800">Move booking</h2>
+        <p className="text-xs text-gray-500 mt-1">
+          {first?.course?.name ? `${first.course.name} · ` : ''}
+          {format(new Date(`${slot.booking_date}T12:00:00`), 'EEE, MMM d')} at {formatTeeTime(slot.tee_time)}
+          {' · '}{players} player{players === 1 ? '' : 's'}. Everyone in this group moves together and is notified.
+        </p>
+
+        <div className="grid grid-cols-2 gap-3 mt-4">
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">New date</span>
+            <input
+              type="date"
+              value={date}
+              min={format(new Date(), 'yyyy-MM-dd')}
+              onChange={e => setDate(e.target.value)}
+              className="w-full px-2.5 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Tee time</span>
+            <input
+              type="time"
+              value={time}
+              onChange={e => setTime(e.target.value)}
+              className="w-full px-2.5 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
+            />
+          </label>
+        </div>
+
+        {error && <p className="text-xs text-red-600 mt-3">{error}</p>}
+
+        <div className="flex gap-2 mt-5">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={saving || unchanged || !date || !time}
+            className="flex-1 py-2.5 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 disabled:opacity-50 transition-colors"
+          >
+            {saving ? 'Moving…' : 'Move booking'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

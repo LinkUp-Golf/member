@@ -332,6 +332,17 @@ export const NotificationTemplates = {
     cta:   'View the tee time',
   }),
 
+  // An admin moved a round to another day or tee time — every player on it
+  // hears, since the old date is the one already in their calendar.
+  bookingMoved: (courseName: string, date: string, time: string): PushPayload => ({
+    title: 'Your tee time has moved',
+    body:  `Your round at ${courseName} is now on ${date} at ${time}. Check My Bookings for details.`,
+    url:   '/book',
+    tag:   'booking-moved',
+    subject: `Your round at ${courseName} has moved to ${date}`,
+    cta:   'View the tee time',
+  }),
+
   bookingPaymentReady: (date: string, time: string): PushPayload => ({
     title: 'Your tee time is confirmed — pay now',
     body:  `Your booking on ${date} at ${time} is ready for payment. Tap to complete your booking.`,

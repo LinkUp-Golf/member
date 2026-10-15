@@ -737,6 +737,40 @@ export async function cancelBooking(eventId: string, contactId?: string): Promis
   }
 }
 
+// Moves an existing appointment to a new start/end — an admin moving a round to
+// another day. Same endpoint as cancelBooking; free-slot validation is skipped
+// for the same reason createBooking skips it: the seats were already reserved
+// on our side, and GHL's calendar doesn't know about our daily cap.
+export async function rescheduleBooking(eventId: string, params: {
+  startTime: string   // "YYYY-MM-DDTHH:MM:SS±HHMM"
+  endTime: string
+  timezone: string
+}): Promise<boolean> {
+  try {
+    await ghlFetch(`/calendars/events/appointments/${eventId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        startTime: params.startTime,
+        endTime: params.endTime,
+        selectedTimezone: params.timezone,
+        ignoreFreeSlotValidation: true,
+        ignoreDateRange: true,
+        toNotify: true,
+        channel: 'web_app',
+        source: GHL_OPPORTUNITY_SOURCE,
+      }),
+    })
+    return true
+  } catch (err) {
+    logger.warn('rescheduleBooking failed', {
+      action: 'ghl_booking_reschedule',
+      errorMessage: String(err),
+      metadata: { eventId },
+    })
+    return false
+  }
+}
+
 // Hard-deletes a GHL appointment/event (as opposed to cancelBooking, which
 // only flips its status to "cancelled"). Used when an admin removes a booking
 // outright. Returns true when the appointment is gone — including when GHL
