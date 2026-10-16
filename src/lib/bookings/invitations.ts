@@ -9,11 +9,21 @@
 // they accept or decline from the invitation screen. A decline cancels the row,
 // which frees the seat. The booker hears either way.
 //
+// An invitation nobody answers expires INVITE_RESPONSE_CUTOFF_HOURS before the
+// tee time, at the venue: from then it can't be answered, and the
+// booking-invite-expiry cron marks it 'expired' and frees the seat, so a spot
+// isn't held on the day for someone who never said yes.
+//
 // Pure, so the booking screen, the admin booking form, both booking routes and
 // the invitation screen all read the same rules.
 
+import { fromZonedTime } from 'date-fns-tz'
+
 export type PaidBy = 'booker' | 'self'
-export type InviteStatus = 'pending' | 'accepted' | 'declined'
+export type InviteStatus = 'pending' | 'accepted' | 'declined' | 'expired'
+
+/** How long before the tee time an unanswered invitation stops being answerable. */
+export const INVITE_RESPONSE_CUTOFF_HOURS = 5
 export type InviteResponse = 'accept' | 'decline'
 
 /** What the server says when an added player arrives without a choice. */
@@ -50,21 +60,39 @@ export function inviteStatusLabel(status: InviteStatus | null | undefined): stri
   if (status === 'pending') return 'Invite pending'
   if (status === 'accepted') return 'Accepted'
   if (status === 'declined') return 'Declined'
+  if (status === 'expired') return 'Expired'
   return null
+}
+
+/**
+ * The moment an unanswered invitation expires: INVITE_RESPONSE_CUTOFF_HOURS
+ * before the tee time, read as wall-clock time at the venue. Null when the
+ * date or time can't be read — the caller then treats it as already expired,
+ * since a deadline we can't work out is not one to hold a seat open for.
+ */
+export function inviteExpiresAt(bookingDate: string, teeTime: string, timezone: string): Date | null {
+  const time = teeTime.length === 5 ? `${teeTime}:00` : teeTime.slice(0, 8)
+  const tee = fromZonedTime(`${bookingDate}T${time}`, timezone)
+  if (Number.isNaN(tee.getTime())) return null
+  return new Date(tee.getTime() - INVITE_RESPONSE_CUTOFF_HOURS * 60 * 60 * 1000)
+}
+
+/** Whether an invitation has run out of time to be answered. */
+export function inviteHasExpired(expiresAt: Date | null, now: Date = new Date()): boolean {
+  return !expiresAt || now.getTime() >= expiresAt.getTime()
 }
 
 /** Whether an invitation can still be answered. */
 export function canRespondToInvite(params: {
   inviteStatus: InviteStatus | null | undefined
   bookingStatus: string
-  /** 'YYYY-MM-DD' of the round. */
-  bookingDate: string
-  /** 'YYYY-MM-DD' today. */
-  today: string
+  /** From inviteExpiresAt. */
+  expiresAt: Date | null
+  now?: Date
 }): boolean {
   if (params.inviteStatus !== 'pending') return false
   if (params.bookingStatus === 'cancelled') return false
-  return params.bookingDate >= params.today
+  return !inviteHasExpired(params.expiresAt, params.now)
 }
 
 export interface NextStep {

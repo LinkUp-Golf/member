@@ -280,7 +280,7 @@ export interface Booking {
   /** The booker covers this added player's seat. */
   paid_by_booker?: boolean
   /** An added player's answer to their invitation; null on the booker's own row. */
-  invite_status?: 'pending' | 'accepted' | 'declined' | null
+  invite_status?: 'pending' | 'accepted' | 'declined' | 'expired' | null
   created_at: string
   booker_name?: string | null
   course?: {

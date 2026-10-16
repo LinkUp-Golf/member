@@ -38,6 +38,8 @@ import { allowsNonMemberGuests } from "@/lib/bookings/guest-policy";
 import WhatHappensNext from "@/components/booking/WhatHappensNext";
 import {
   PAID_BY_OPTIONS,
+  inviteExpiresAt,
+  inviteHasExpired,
   inviteStatusLabel,
   paidByShortLabel,
   type PaidBy,
@@ -3174,7 +3176,14 @@ function BookingCard({
   const pendingInvite = iAmBooker
     ? null
     : (group.players.find(
-        (p) => p.player_member_id === userId && p.invite_status === "pending" && p.status !== "cancelled",
+        (p) =>
+          p.player_member_id === userId &&
+          p.invite_status === "pending" &&
+          p.status !== "cancelled" &&
+          // Past the cutoff there's nothing left to answer.
+          !inviteHasExpired(
+            inviteExpiresAt(p.booking_date, p.tee_time, p.course?.timezone || AVIARA_TIMEZONE),
+          ),
       ) ?? null);
 
   return (

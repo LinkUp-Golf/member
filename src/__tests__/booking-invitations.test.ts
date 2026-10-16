@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   canRespondToInvite,
+  INVITE_RESPONSE_CUTOFF_HOURS,
+  inviteExpiresAt,
+  inviteHasExpired,
   inviteStatusLabel,
   isInviteResponse,
   isPaidBy,
@@ -44,26 +47,57 @@ describe('whatHappensNext', () => {
   })
 })
 
-describe('canRespondToInvite', () => {
-  const base = { inviteStatus: 'pending' as const, bookingStatus: 'tentative', bookingDate: '2026-10-20', today: '2026-10-16' }
-
-  it('is open for a pending invitation to an upcoming round', () => {
-    expect(canRespondToInvite(base)).toBe(true)
-    expect(canRespondToInvite({ ...base, bookingDate: '2026-10-16' })).toBe(true)
+describe('inviteExpiresAt', () => {
+  it('is five hours before the tee time, at the venue', () => {
+    // 1:30 PM Pacific daylight time is 20:30 UTC; five hours earlier is 15:30.
+    expect(inviteExpiresAt('2026-10-20', '13:30:00', 'America/Los_Angeles')?.toISOString())
+      .toBe('2026-10-20T15:30:00.000Z')
+    expect(INVITE_RESPONSE_CUTOFF_HOURS).toBe(5)
   })
 
-  it('is closed once answered', () => {
+  it('reaches into the day before for an early tee time', () => {
+    // 7:00 AM Pacific is 14:00 UTC; five hours earlier is 09:00 UTC, 2 AM local.
+    expect(inviteExpiresAt('2026-10-20', '07:00', 'America/Los_Angeles')?.toISOString())
+      .toBe('2026-10-20T09:00:00.000Z')
+    // 3:00 AM local, five hours earlier, is the previous evening there.
+    expect(inviteExpiresAt('2026-10-20', '03:00:00', 'America/Los_Angeles')?.toISOString())
+      .toBe('2026-10-20T05:00:00.000Z')
+  })
+
+  it('is null when the date cannot be read', () => {
+    expect(inviteExpiresAt('not-a-date', '13:30:00', 'America/Los_Angeles')).toBeNull()
+  })
+})
+
+describe('canRespondToInvite', () => {
+  const expiresAt = new Date('2026-10-20T15:30:00Z')
+  const before = new Date('2026-10-20T15:29:00Z')
+  const base = { inviteStatus: 'pending' as const, bookingStatus: 'tentative', expiresAt, now: before }
+
+  it('is open for a pending invitation before its cutoff', () => {
+    expect(canRespondToInvite(base)).toBe(true)
+  })
+
+  it('closes at the cutoff', () => {
+    expect(canRespondToInvite({ ...base, now: expiresAt })).toBe(false)
+    expect(canRespondToInvite({ ...base, now: new Date('2026-10-20T18:00:00Z') })).toBe(false)
+    expect(inviteHasExpired(expiresAt, before)).toBe(false)
+    expect(inviteHasExpired(expiresAt, expiresAt)).toBe(true)
+  })
+
+  it('treats an unreadable deadline as passed', () => {
+    expect(canRespondToInvite({ ...base, expiresAt: null })).toBe(false)
+  })
+
+  it('is closed once answered or expired', () => {
     expect(canRespondToInvite({ ...base, inviteStatus: 'accepted' })).toBe(false)
     expect(canRespondToInvite({ ...base, inviteStatus: 'declined' })).toBe(false)
+    expect(canRespondToInvite({ ...base, inviteStatus: 'expired' })).toBe(false)
   })
 
-  it('is closed for a row nobody was asked about', () => {
+  it('is closed for a row nobody was asked about, or a cancelled round', () => {
     expect(canRespondToInvite({ ...base, inviteStatus: null })).toBe(false)
-  })
-
-  it('is closed for a cancelled or past round', () => {
     expect(canRespondToInvite({ ...base, bookingStatus: 'cancelled' })).toBe(false)
-    expect(canRespondToInvite({ ...base, bookingDate: '2026-10-15' })).toBe(false)
   })
 })
 
@@ -77,6 +111,7 @@ describe('labels', () => {
     expect(inviteStatusLabel('pending')).toBe('Invite pending')
     expect(inviteStatusLabel('accepted')).toBe('Accepted')
     expect(inviteStatusLabel('declined')).toBe('Declined')
+    expect(inviteStatusLabel('expired')).toBe('Expired')
     expect(inviteStatusLabel(null)).toBeNull()
   })
 })

@@ -12,7 +12,12 @@ import AppShell from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/Loading";
 import WhatHappensNext from "@/components/booking/WhatHappensNext";
 import { formatTeeTime } from "@/lib/utils";
-import { paidByLabel, type InviteResponse, type InviteStatus } from "@/lib/bookings/invitations";
+import {
+  INVITE_RESPONSE_CUTOFF_HOURS,
+  paidByLabel,
+  type InviteResponse,
+  type InviteStatus,
+} from "@/lib/bookings/invitations";
 
 interface Invitation {
   id: string;
@@ -24,6 +29,8 @@ interface Invitation {
   paidByBooker: boolean;
   inviteStatus: InviteStatus | null;
   bookingStatus: string;
+  /** ISO — when an unanswered invitation stops being answerable. */
+  expiresAt: string | null;
   canRespond: boolean;
 }
 
@@ -140,6 +147,14 @@ export default function InvitationPage({ params }: { params: { id: string } }) {
 
             {error && <p className="text-sm text-red-600">{error}</p>}
 
+            {invite.canRespond && invite.expiresAt && (
+              <p className="text-xs text-center" style={{ color: "rgba(0,38,105,0.5)" }}>
+                Please respond by {format(new Date(invite.expiresAt), "EEEE, MMMM d 'at' h:mm a")}
+                {" "}({INVITE_RESPONSE_CUTOFF_HOURS} hours before tee time). After that the
+                invitation expires and your spot is released.
+              </p>
+            )}
+
             {invite.canRespond ? (
               <div className="flex gap-3">
                 <button
@@ -167,7 +182,9 @@ export default function InvitationPage({ params }: { params: { id: string } }) {
                     ? "You're in — see you on the course."
                     : invite.inviteStatus === "declined"
                       ? `You declined. ${invite.bookerName} has been told.`
-                      : "This invitation can no longer be answered."}
+                      : invite.inviteStatus === "expired"
+                        ? `This invitation expired — it needed an answer ${INVITE_RESPONSE_CUTOFF_HOURS} hours before tee time, so your spot was released.`
+                        : "This invitation can no longer be answered."}
                 </p>
                 <Link href="/book" className="btn btn-gold btn-full justify-center mt-4">
                   Go to My Bookings

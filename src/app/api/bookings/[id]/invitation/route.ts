@@ -29,6 +29,8 @@ import { logger } from '@/lib/logger'
 import { AVIARA_TIMEZONE } from '@/lib/constants'
 import {
   canRespondToInvite,
+  inviteExpiresAt,
+  inviteHasExpired,
   isInviteResponse,
   type InviteStatus,
 } from '@/lib/bookings/invitations'
@@ -68,11 +70,8 @@ async function loadInvitation(id: string | undefined, memberId: string) {
   return (data as unknown as InvitationRow | null) ?? null
 }
 
-function todayAt(row: InvitationRow): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: row.course?.timezone || AVIARA_TIMEZONE,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date())
+function expiresAt(row: InvitationRow): Date | null {
+  return inviteExpiresAt(row.booking_date, row.tee_time, row.course?.timezone || AVIARA_TIMEZONE)
 }
 
 function bookerName(row: InvitationRow): string {
@@ -84,6 +83,12 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext, routeCtx
   const row = await loadInvitation(routeCtx?.params?.['id'], ctx.memberId)
   if (!row) return NextResponse.json({ error: 'Invitation not found' }, { status: 404 })
 
+  const expires = expiresAt(row)
+  // Past the cutoff an unanswered invitation is expired, whether or not the
+  // expiry cron has reached it yet.
+  const inviteStatus: InviteStatus | null =
+    row.invite_status === 'pending' && inviteHasExpired(expires) ? 'expired' : row.invite_status
+
   return NextResponse.json({
     id: row.id,
     eventName: row.course?.name ?? 'LinkUp round',
@@ -92,13 +97,13 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext, routeCtx
     teeTime: row.tee_time,
     bookerName: bookerName(row),
     paidByBooker: row.paid_by_booker === true,
-    inviteStatus: row.invite_status,
+    inviteStatus,
     bookingStatus: row.status,
+    expiresAt: expires?.toISOString() ?? null,
     canRespond: canRespondToInvite({
       inviteStatus: row.invite_status,
       bookingStatus: row.status,
-      bookingDate: row.booking_date,
-      today: todayAt(row),
+      expiresAt: expires,
     }),
   })
 })
@@ -113,11 +118,13 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext, routeCtx
   const row = await loadInvitation(routeCtx?.params?.['id'], ctx.memberId)
   if (!row) return NextResponse.json({ error: 'Invitation not found' }, { status: 404 })
 
+  if (row.invite_status === 'pending' && inviteHasExpired(expiresAt(row))) {
+    return NextResponse.json({ error: 'This invitation has expired.' }, { status: 409 })
+  }
   if (!canRespondToInvite({
     inviteStatus: row.invite_status,
     bookingStatus: row.status,
-    bookingDate: row.booking_date,
-    today: todayAt(row),
+    expiresAt: expiresAt(row),
   })) {
     return NextResponse.json({ error: 'This invitation can no longer be answered.' }, { status: 409 })
   }

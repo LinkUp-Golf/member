@@ -29,6 +29,7 @@ describe('coverage of the template set', () => {
     NotificationTemplates.bookingInvite('Dana', 'Aviara', 'Sat', '1:30pm', true, 'b1'),
     NotificationTemplates.bookingInviteAccepted('Sam', 'Aviara', 'Sat'),
     NotificationTemplates.bookingInviteDeclined('Sam', 'Aviara', 'Sat'),
+    NotificationTemplates.bookingInviteExpired('Sam', 'Aviara', 'Sat'),
     NotificationTemplates.bookingMoved('Aviara', 'Sat', '1:30pm'),
     NotificationTemplates.bookingMadeForYou('Aviara', 'Sat', '1:30pm'),
     NotificationTemplates.bookingPaymentReady('Sat', '1:30pm'),

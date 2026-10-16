@@ -351,6 +351,16 @@ export const NotificationTemplates = {
     cta:   'View the tee time',
   }),
 
+  // Nobody answered before the cutoff, so the seat was released.
+  bookingInviteExpired: (playerName: string, eventName: string, date: string): PushPayload => ({
+    title: `${playerName} didn't respond`,
+    body:  `${playerName}'s invitation to ${eventName} on ${date} expired without an answer. Their spot has been released.`,
+    url:   '/book',
+    tag:   'booking-invite-response',
+    subject: `${playerName}'s invitation to ${eventName} expired`,
+    cta:   'View the tee time',
+  }),
+
   bookingInviteDeclined: (playerName: string, eventName: string, date: string): PushPayload => ({
     title: `${playerName} can't make it`,
     body:  `${playerName} declined your invitation to ${eventName} on ${date}. Their spot has been released.`,

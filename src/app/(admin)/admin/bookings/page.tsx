@@ -34,7 +34,7 @@ interface BookingRow {
   /** The booker covers this added player's seat. */
   paid_by_booker?: boolean
   /** An added player's answer to their invitation; null on older rows and the booker's own. */
-  invite_status?: 'pending' | 'accepted' | 'declined' | null
+  invite_status?: 'pending' | 'accepted' | 'declined' | 'expired' | null
   ghl_opportunity_id: string | null
   member: { first_name: string; last_name: string; email: string } | null
   player?: { id: string; first_name: string; last_name: string; email: string } | null
@@ -408,7 +408,7 @@ function SlotCard({
                       {b.invite_status && (
                         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 whitespace-nowrap ${
                           b.invite_status === 'accepted' ? 'bg-emerald-50 text-emerald-700'
-                            : b.invite_status === 'declined' ? 'bg-gray-100 text-gray-500'
+                            : b.invite_status === 'declined' || b.invite_status === 'expired' ? 'bg-gray-100 text-gray-500'
                             : 'bg-yellow-50 text-yellow-700'
                         }`}>
                           {inviteStatusLabel(b.invite_status)}
