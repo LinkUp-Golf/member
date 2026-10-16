@@ -56,9 +56,9 @@ export default function ReferralPartnerApplicationPage() {
             <div className="card card-pad mb-5 space-y-3">
               <p className="section-label">How it works</p>
               <Step n={1} text="Apply to become a referral partner and tell us how you'd grow the community." />
-              <Step n={2} text="An admin reviews your application and sets your commission rate." />
-              <Step n={3} text="Refer members and non-members — we track every one of them for you." />
-              <Step n={4} text="Earn commission on each referral who becomes a paying member, paid monthly." />
+              <Step n={2} text="We will review your application and contact you to discuss referral rewards." />
+              <Step n={3} text="Track all of your referral fees on your referral partner dashboard." />
+              <Step n={4} text="Referral fees are paid monthly." />
             </div>
 
             {/* Already a partner */}

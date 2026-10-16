@@ -9,6 +9,9 @@ import { format, addDays, subDays, isToday, differenceInCalendarDays } from 'dat
 import { formatTeeTime } from '@/lib/utils'
 import { tagsOverlap } from '@/lib/ghl/tags'
 import { settlingAtClub, PAY_AT_CLUB_LABEL } from '@/lib/bookings/payment-options'
+import { inviteStatusLabel } from '@/lib/bookings/invitations'
+import AdminNewBookingDrawer from '@/components/admin/AdminNewBookingDrawer'
+import { slotWallTime, useVenueSlots } from '@/hooks/useVenueSlots'
 import type { AdditionalPlayer } from '@/types'
 
 type BookingStatus = 'tentative' | 'availability_confirmed' | 'payment_confirmed' | 'confirmed' | 'pending' | 'cancelled' | 'waitlist' | 'awaiting_approval'
@@ -29,6 +32,10 @@ interface BookingRow {
   admin_notes: string | null
   /** 'pay_at_club' when the member chose to settle with the club. */
   payment_method: 'pay_at_club' | null
+  /** The booker covers this added player's seat. */
+  paid_by_booker?: boolean
+  /** An added player's answer to their invitation; null on older rows and the booker's own. */
+  invite_status?: 'pending' | 'accepted' | 'declined' | 'expired' | null
   ghl_opportunity_id: string | null
   member: { first_name: string; last_name: string; email: string } | null
   player?: { id: string; first_name: string; last_name: string; email: string } | null
@@ -268,6 +275,7 @@ function SlotCard({
   onRemindPayment,
   deletingBookingId,
   onRequestDelete,
+  onMove,
 }: {
   slot: TeeSlot
   showCourseName: boolean
@@ -287,6 +295,7 @@ function SlotCard({
   onRemindPayment: (id: string) => void
   deletingBookingId: string | null
   onRequestDelete: (b: BookingRow) => void
+  onMove: (slot: TeeSlot) => void
 }) {
   const isExpanded = expandedSlots.has(slot.key)
   const totalAmount = slot.rows.reduce((sum, b) => sum + Number(b.amount_charged), 0)
@@ -384,6 +393,21 @@ function SlotCard({
                           {info.badge}
                         </span>
                       )}
+                      {/* An added player's answer, and who's covering them. */}
+                      {b.invite_status && (
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 whitespace-nowrap ${
+                          b.invite_status === 'accepted' ? 'bg-emerald-50 text-emerald-700'
+                            : b.invite_status === 'declined' || b.invite_status === 'expired' ? 'bg-gray-100 text-gray-500'
+                            : 'bg-yellow-50 text-yellow-700'
+                        }`}>
+                          {inviteStatusLabel(b.invite_status)}
+                        </span>
+                      )}
+                      {b.invite_status && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 flex-shrink-0 whitespace-nowrap">
+                          {b.paid_by_booker ? 'Booker pays' : 'Pays own'}
+                        </span>
+                      )}
                       {daysLeftLabel && (
                         <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 flex-shrink-0 whitespace-nowrap">
                           ⏳ {daysLeftLabel}
@@ -478,6 +502,21 @@ function SlotCard({
                       className="min-w-0 flex-1 text-xs text-left text-gray-400 hover:text-gray-600 transition-colors italic truncate">
                       {b.admin_notes ?? 'Add note…'}
                     </button>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                    {/* Moves the whole group this row belongs to, not just this
+                        player — see POST /api/admin/bookings/[id]/move. */}
+                    {b.status !== 'cancelled' && (
+                      <button
+                        type="button"
+                        onClick={() => onMove(slot)}
+                        className="flex-shrink-0 flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800 px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5m-9-6h.008v.008H12v-.008zM12 15h.008v.008H12V15zm0 2.25h.008v.008H12v-.008zM9.75 15h.008v.008H9.75V15zm0 2.25h.008v.008H9.75v-.008zM7.5 15h.008v.008H7.5V15zm0 2.25h.008v.008H7.5v-.008zm6.75-4.5h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V15zm0 2.25h.008v.008h-.008v-.008zm2.25-4.5h.008v.008H16.5v-.008zm0 2.25h.008v.008H16.5V15z" />
+                        </svg>
+                        Move
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => onRequestDelete(b)}
@@ -489,6 +528,7 @@ function SlotCard({
                       </svg>
                       {deletingBookingId === b.id ? 'Deleting…' : 'Delete'}
                     </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -638,6 +678,8 @@ export default function AdminBookingsPage() {
   const [remindedPaymentIds, setRemindedPaymentIds] = useState<Set<string>>(new Set())
   const [deletingBookingId, setDeletingBookingId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<BookingRow | null>(null)
+  const [moveTarget, setMoveTarget] = useState<TeeSlot | null>(null)
+  const [showNewBooking, setShowNewBooking] = useState(false)
   const noteRef = useRef<HTMLTextAreaElement>(null)
 
   const [activeTab, setActiveTab] = useState<'bookings' | 'access'>('bookings')
@@ -726,7 +768,7 @@ export default function AdminBookingsPage() {
 
     if (matchingCourseIds.length === 0) { setBookings([]); setLoading(false); return }
 
-    const SELECT = 'id, member_id, created_at, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, payment_method, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name, meeting_duration_mins)'
+    const SELECT = 'id, member_id, created_at, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, payment_method, paid_by_booker, invite_status, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name, meeting_duration_mins)'
     const SELECT_NO_DINNER = SELECT.replace('dinner_rsvp, ', '')
 
     function buildQuery(select: string) {
@@ -1104,6 +1146,7 @@ export default function AdminBookingsPage() {
     onSaveNote: saveNote, savingNote, noteRef,
     remindingPayment, remindedPaymentIds, onRemindPayment: remindPayment,
     deletingBookingId, onRequestDelete: setDeleteTarget,
+    onMove: setMoveTarget,
   }
 
   // Shared between the desktop inline grid and the mobile drawer — id suffix
@@ -1259,6 +1302,33 @@ export default function AdminBookingsPage() {
         </div>
       )}
 
+      {showNewBooking && (
+        <AdminNewBookingDrawer
+          members={allMembers}
+          defaultCourseId={courseFilter !== 'all' ? courseFilter : null}
+          onClose={() => setShowNewBooking(false)}
+          onBooked={msg => {
+            setShowNewBooking(false)
+            setRequestToast({ msg, ok: true })
+            setTimeout(() => setRequestToast(null), 4000)
+            loadBookings()
+          }}
+        />
+      )}
+
+      {moveTarget && (
+        <MoveBookingModal
+          slot={moveTarget}
+          onClose={() => setMoveTarget(null)}
+          onMoved={(msg, ok) => {
+            setMoveTarget(null)
+            setRequestToast({ msg, ok })
+            setTimeout(() => setRequestToast(null), 4000)
+            loadBookings()
+          }}
+        />
+      )}
+
       {/* Header row: title + view toggle */}
       <div className="flex items-start justify-between gap-3 mb-5">
         <AdminPageHeader
@@ -1269,6 +1339,14 @@ export default function AdminBookingsPage() {
             ? `${courseList.length} active course${courseList.length !== 1 ? 's' : ''}`
             : undefined}
         />
+        <div className="flex flex-col sm:flex-row items-end sm:items-start gap-2 flex-shrink-0">
+        <button
+          type="button"
+          onClick={() => setShowNewBooking(true)}
+          className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold rounded-[10px] bg-green-900 text-white hover:bg-green-800 transition-colors whitespace-nowrap"
+        >
+          + New booking
+        </button>
         {/* Upcoming / Who's Playing / Past toggle — compact on mobile */}
         <div className="flex p-0.5 rounded-xl flex-shrink-0 self-start" style={{ background: 'rgba(0,38,105,0.06)' }}>
           {(['all', 'upcoming', 'whos-playing', 'past'] as const).map(v => (
@@ -1284,6 +1362,7 @@ export default function AdminBookingsPage() {
               {VIEW_LABELS[v]}
             </button>
           ))}
+        </div>
         </div>
       </div>
 
@@ -1555,6 +1634,147 @@ function DateGroupedSlots({
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+// ---- Move a booking group to another date ------------------------------
+
+/**
+ * Moves the whole tee-time group — booker and every player booked with them —
+ * to another day, onto one of that day's open tee times (the same ones a member
+ * booking is offered — see useVenueSlots). A time without room for the whole
+ * group is shown but can't be picked. The server re-checks the slot, holds the
+ * new day to the venue's cap, and moves each GHL appointment to match.
+ */
+function MoveBookingModal({
+  slot,
+  onClose,
+  onMoved,
+}: {
+  slot: TeeSlot
+  onClose: () => void
+  onMoved: (msg: string, ok: boolean) => void
+}) {
+  const first = slot.rows[0]
+  const [date, setDate] = useState(slot.booking_date)
+  const [time, setTime] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const players = slot.rows.filter(b => b.status !== 'cancelled').length
+  const currentTime = slot.tee_time.slice(0, 5)
+  const { openSlots, loading, error: slotsError } = useVenueSlots(first?.course_id, date)
+
+  // A tee time picked for one day means nothing on another.
+  useEffect(() => { setTime('') }, [date])
+
+  async function submit() {
+    if (!first || !time) return
+    setSaving(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/admin/bookings/${first.id}/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date, teeTime: time }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) { setError(json.error ?? 'Failed to move the booking.'); return }
+      const when = `${format(new Date(`${date}T12:00:00`), 'EEE, MMM d')} at ${formatTeeTime(`${time}:00`)}`
+      onMoved(
+        json.ghlFailed
+          ? `Moved to ${when}, but ${json.ghlFailed} GHL appointment${json.ghlFailed === 1 ? '' : 's'} couldn't be updated.`
+          : `Moved to ${when}. Players have been notified.`,
+        !json.ghlFailed,
+      )
+    } catch {
+      setError('Network error. Please try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
+      <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 className="text-sm font-bold text-gray-800">Move booking</h2>
+        <p className="text-xs text-gray-500 mt-1">
+          {first?.course?.name ? `${first.course.name} · ` : ''}
+          {format(new Date(`${slot.booking_date}T12:00:00`), 'EEE, MMM d')} at {formatTeeTime(slot.tee_time)}
+          {' · '}{players} player{players === 1 ? '' : 's'}. Everyone in this group moves together and is notified.
+        </p>
+
+        <label className="flex flex-col gap-1 mt-4">
+          <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">New date</span>
+          <input
+            type="date"
+            value={date}
+            min={format(new Date(), 'yyyy-MM-dd')}
+            onChange={e => setDate(e.target.value)}
+            className="w-full px-2.5 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
+          />
+        </label>
+
+        <div className="mt-4">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Open tee times</p>
+          {!date ? (
+            <p className="text-xs text-gray-400">Pick a date first.</p>
+          ) : loading ? (
+            <p className="text-xs text-gray-400">Loading tee times…</p>
+          ) : slotsError ? (
+            <p className="text-xs text-red-600">{slotsError}</p>
+          ) : openSlots.length === 0 ? (
+            <p className="text-xs text-gray-500">No tee times open at this venue on this day.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {openSlots.map(s => {
+                const hhmm = slotWallTime(s.startTime)
+                const isCurrent = date === slot.booking_date && hhmm === currentTime
+                const tooSmall = (s.spotsOpen ?? 0) < players
+                const disabled = isCurrent || tooSmall
+                return (
+                  <button
+                    key={s.startTime}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setTime(hhmm)}
+                    title={isCurrent ? 'Already on this tee time' : tooSmall ? `Not enough room for ${players}` : undefined}
+                    className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                      time === hhmm
+                        ? 'bg-green-900 text-white border-green-900'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    {formatTeeTime(`${hhmm}:00`)}
+                    <span className="font-normal opacity-70"> · {s.spotsOpen} open</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {error && <p className="text-xs text-red-600 mt-3">{error}</p>}
+
+        <div className="flex gap-2 mt-5">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={saving || !date || !time}
+            className="flex-1 py-2.5 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 disabled:opacity-50 transition-colors"
+          >
+            {saving ? 'Moving…' : 'Move booking'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

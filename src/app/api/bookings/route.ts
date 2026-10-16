@@ -114,7 +114,7 @@ async function attachCourses(rows: Array<Record<string, unknown>>) {
     .from('courses')
     // meeting_duration_mins lets the client work out when a round finished —
     // My Bookings uses it to decide when to offer "Rate round".
-    .select('id, name, city, state, payment_url, payment_options, timezone, meeting_duration_mins')
+    .select('id, name, city, state, payment_url, payment_options, timezone, meeting_duration_mins, allow_non_member_guests')
     .in('id', courseIds)
 
   const byId = new Map((courses ?? []).map(c => [c.id as string, c]))
@@ -131,6 +131,7 @@ async function attachCourses(rows: Array<Record<string, unknown>>) {
             payment_options: coursePaymentOptions(c),
             timezone: c.timezone,
             meeting_duration_mins: c.meeting_duration_mins ?? null,
+            allow_non_member_guests: c.allow_non_member_guests === true,
           }
         : null,
     }

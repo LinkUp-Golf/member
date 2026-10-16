@@ -1176,6 +1176,7 @@ type CourseFormValues = {
   payment_options: PaymentOption[]
   required_tags: string[]
   custom_slots_enabled: boolean
+  allow_non_member_guests: boolean
 }
 
 function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onManageSlots }: {
@@ -1216,6 +1217,8 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
       payment_options: coursePaymentOptions(editingCourse),
       required_tags: editingCourse?.required_tags ?? [],
       custom_slots_enabled: editingCourse?.custom_slots_enabled ?? false,
+      // Off unless an admin turns it on — see src/lib/bookings/guest-policy.ts.
+      allow_non_member_guests: editingCourse?.allow_non_member_guests ?? false,
     },
   })
 
@@ -1685,6 +1688,23 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
                 </div>
               </div>
             )}
+
+            {/* Non-member guests. Adding a fellow member is always allowed;
+                adding someone without an account is this venue's call. */}
+            <label className="mt-4 flex items-start gap-3 rounded-xl border border-gray-100 px-4 py-3 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-green-700 focus:ring-green-600"
+                {...register('allow_non_member_guests')}
+              />
+              <span>
+                <span className="block text-sm font-medium text-gray-700">Allow non-member guests</span>
+                <span className={infoText}>
+                  When on, members booking here can add players who aren&rsquo;t LinkUp members.
+                  When off, they can only add fellow members.
+                </span>
+              </span>
+            </label>
 
             {/* Custom (admin-curated) tee times. When on, members see only the
                 slots the admin curates per date (in the "Manage dates & slots"

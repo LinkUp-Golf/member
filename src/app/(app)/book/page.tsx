@@ -9,6 +9,7 @@ import AppShell from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/Loading";
 import EmptyState from "@/components/ui/EmptyState";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MessageCircle, Star } from "lucide-react";
 import { formatTeeTime, cn, bookingToLocalDate } from "@/lib/utils";
@@ -33,6 +34,16 @@ import type { CalendarPlayer } from "@/lib/bookings/players";
 import type { VenueHost } from "@/lib/bookings/venue-hosts";
 import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
 import { bookingAmountDue } from "@/lib/bookings/price";
+import { allowsNonMemberGuests } from "@/lib/bookings/guest-policy";
+import WhatHappensNext from "@/components/booking/WhatHappensNext";
+import {
+  PAID_BY_OPTIONS,
+  inviteExpiresAt,
+  inviteHasExpired,
+  inviteStatusLabel,
+  paidByShortLabel,
+  type PaidBy,
+} from "@/lib/bookings/invitations";
 import {
   coursePaymentOptions,
   isPayAtClub,
@@ -408,6 +419,7 @@ export default function BookPage() {
         inviteMemberId={inviteMemberId}
         bookerEmail={user?.email ?? ""}
         eventName={selectedEvent?.name ?? null}
+        allowNonMembers={allowsNonMemberGuests(selectedEvent)}
         // Same rule the row's amount_charged is written with, so the price
         // quoted here and the one on the success screen a tap later agree.
         pricePerPlayer={bookingAmountDue({
@@ -938,6 +950,7 @@ function ConfirmScreen({
   bookerEmail,
   eventName,
   pricePerPlayer,
+  allowNonMembers,
 }: {
   slot: GHLBookingSlot;
   date: string;
@@ -950,6 +963,8 @@ function ConfirmScreen({
   bookerEmail: string;
   eventName?: string | null;
   pricePerPlayer: number;
+  /** The venue takes non-member guests — see @/lib/bookings/guest-policy. */
+  allowNonMembers: boolean;
 }) {
   const maxAdditional = Math.max(0, (slot.spotsOpen ?? 1) - 1);
   const [collapsed, setCollapsed] = useState<boolean[]>([]);
@@ -959,6 +974,9 @@ function ConfirmScreen({
   // Per-row entry mode. Member is the default; non-member captures a guest's
   // name/phone/email and flags the booking for admin review.
   const [playerKinds, setPlayerKinds] = useState<PlayerKind[]>([]);
+  // Who pays for each added player's seat. Required, with no default — null
+  // until the booker picks, and submit stays disabled until every row has one.
+  const [paidBys, setPaidBys] = useState<Array<PaidBy | null>>([]);
   const [members, setMembers] = useState<MemberWithProfile[]>([]);
   // Member ids flagged as having a payment due on an existing booking. The FIFO
   // rule bars a booker from adding such a member to a group round, so a flagged
@@ -1033,6 +1051,7 @@ function ConfirmScreen({
     setCollapsed((prev) => [...prev, false]);
     setPlayerSelections((prev) => [...prev, member]);
     setPlayerKinds((prev) => [...prev, "member"]);
+    setPaidBys((prev) => [...prev, null]);
   }, [members, inviteMemberId, maxAdditional, append]);
 
   function addPlayer() {
@@ -1041,6 +1060,7 @@ function ConfirmScreen({
     setCollapsed((prev) => [...prev, false]);
     setPlayerSelections((prev) => [...prev, null]);
     setPlayerKinds((prev) => [...prev, "member"]);
+    setPaidBys((prev) => [...prev, null]);
   }
 
   function removePlayer(i: number) {
@@ -1048,6 +1068,7 @@ function ConfirmScreen({
     setCollapsed((prev) => prev.filter((_, idx) => idx !== i));
     setPlayerSelections((prev) => prev.filter((_, idx) => idx !== i));
     setPlayerKinds((prev) => prev.filter((_, idx) => idx !== i));
+    setPaidBys((prev) => prev.filter((_, idx) => idx !== i));
   }
 
   // Switch a row between member-search and non-member entry, clearing any
@@ -1071,6 +1092,7 @@ function ConfirmScreen({
   // A row is valid when a member is selected, or — for non-members — a valid
   // email and phone have been entered (names are optional).
   function rowValid(i: number): boolean {
+    if (!paidBys[i]) return false;
     if (playerKinds[i] === "non_member") {
       const p = watchedPlayers?.[i];
       return (
@@ -1170,6 +1192,7 @@ function ConfirmScreen({
               ...p,
               memberId: playerSelections[i]?.id,
               isNonMember: playerKinds[i] === "non_member",
+              paidBy: paidBys[i] ?? undefined,
             })),
           ),
         )}
@@ -1434,7 +1457,9 @@ function ConfirmScreen({
                         </>
                       ) : (
                         <div className="pt-3 space-y-3">
-                          {/* Member / Non-member segmented toggle */}
+                          {/* Member / Non-member segmented toggle — only where
+                              the venue takes non-member guests. */}
+                          {allowNonMembers && (
                           <div
                             className="flex gap-1 p-1 rounded-xl"
                             style={{ background: "rgba(0,38,105,0.05)" }}
@@ -1470,6 +1495,7 @@ function ConfirmScreen({
                               );
                             })}
                           </div>
+                          )}
 
                           {kind === "member" ? (
                             <MemberAutocomplete
@@ -1574,6 +1600,21 @@ function ConfirmScreen({
                       )}
                     </div>
                   )}
+
+                  {/* Who pays — required for every added player. */}
+                  <div
+                    className="px-4 pb-3 pt-2 border-t"
+                    style={{ borderColor: "rgba(0,38,105,0.07)" }}
+                  >
+                    <PaidByChoice
+                      value={paidBys[i] ?? null}
+                      onChange={(v) =>
+                        setPaidBys((prev) =>
+                          prev.map((x, idx) => (idx === i ? v : x)),
+                        )
+                      }
+                    />
+                  </div>
                 </div>
               );
             })}
@@ -1603,45 +1644,7 @@ function ConfirmScreen({
           </div>
 
           {/* What happens next */}
-          <div className="px-1 space-y-2.5">
-            <p className="section-label">What happens next</p>
-            {[
-              { step: "Receive confirmation email and reminder emails" },
-              {
-                step: "Pay at the pro shop when you arrive",
-                detail:
-                  "Introductions are made 15 minutes prior to first group tee time, so please arrive at least 30 minutes before first group tee time and be at the starter area 15 minutes prior.",
-              },
-            ].map(({ step, detail }, i) => (
-              <div key={i} className="flex items-start gap-3">
-                <span
-                  className="flex-shrink-0 w-5 h-5 mt-px rounded-full flex items-center justify-center text-[10px] font-bold"
-                  style={{
-                    background: "rgba(133,187,101,0.12)",
-                    color: "var(--color-green-700)",
-                  }}
-                >
-                  {i + 1}
-                </span>
-                <div className="min-w-0">
-                  <p
-                    className="text-sm"
-                    style={{ color: "rgba(0,38,105,0.5)" }}
-                  >
-                    {step}
-                  </p>
-                  {detail && (
-                    <p
-                      className="text-xs mt-1 leading-relaxed"
-                      style={{ color: "rgba(0,38,105,0.4)" }}
-                    >
-                      {detail}
-                    </p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+          <WhatHappensNext />
 
           {error && (
             <div
@@ -1677,6 +1680,65 @@ function ConfirmScreen({
           </p>
         </div>
       </form>
+    </div>
+  );
+}
+
+// ---- Who pays for an added player ---------------------------
+
+/**
+ * The required "who pays" choice on an added player. Nothing is selected until
+ * the booker picks — see @/lib/bookings/invitations.
+ */
+function PaidByChoice({
+  value,
+  onChange,
+}: {
+  value: PaidBy | null;
+  onChange: (v: PaidBy) => void;
+}) {
+  return (
+    <div>
+      <p
+        className="text-[11px] font-semibold mb-1.5"
+        style={{ color: "rgba(0,38,105,0.5)" }}
+      >
+        Who pays for this player?{" "}
+        <span style={{ color: value ? "rgba(0,38,105,0.35)" : "#dc2626" }}>
+          (required)
+        </span>
+      </p>
+      <div
+        className="flex gap-1 p-1 rounded-xl"
+        role="radiogroup"
+        aria-label="Who pays for this player"
+        style={{ background: "rgba(0,38,105,0.05)" }}
+      >
+        {PAID_BY_OPTIONS.map(({ value: v, label }) => {
+          const active = value === v;
+          return (
+            <button
+              key={v}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => onChange(v)}
+              className="flex-1 py-2 text-xs font-semibold rounded-lg transition-all"
+              style={
+                active
+                  ? {
+                      background: "white",
+                      color: "var(--color-green-900)",
+                      boxShadow: "0 1px 3px rgba(0,38,105,0.12)",
+                    }
+                  : { color: "rgba(0,38,105,0.5)" }
+              }
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -3025,10 +3087,18 @@ function BookingCard({
           isYou: true,
           adminNotes: group.primary.admin_notes ?? null,
           editablePlayer: null as AdditionalPlayer | null,
+          tag: null as string | null,
         },
         ...activePlayers.map((p) => ({
           id: p.id,
           name: p.guest_name ?? "Guest",
+          // Their answer and who's paying — only on rows added since players
+          // were invited; older rows were never asked.
+          tag: p.invite_status
+            ? [inviteStatusLabel(p.invite_status), paidByShortLabel(p.paid_by_booker === true)]
+                .filter(Boolean)
+                .join(" · ")
+            : null,
           status: bookingDisplayStatus(p),
           ghlBookingId: p.ghl_booking_id ?? null,
           canCancel: hoursUntil > 0 && CANCELLABLE.includes(p.status),
@@ -3057,16 +3127,25 @@ function BookingCard({
             canCancel: myRow
               ? hoursUntil > 0 && CANCELLABLE.includes(myRow.status)
               : false,
+            // A seat the booker is covering isn't this player's to pay.
             canPay:
-              myRow?.status === "availability_confirmed" && !isPayAtClub(myRow),
+              myRow?.status === "availability_confirmed" &&
+              !isPayAtClub(myRow) &&
+              !myRow.paid_by_booker,
             amountDue: bookingAmountDue(myRow ?? group.primary),
             isYou: true,
             adminNotes: myRow?.admin_notes ?? null,
             editablePlayer: null as AdditionalPlayer | null,
+            tag: myRow?.invite_status
+              ? myRow.paid_by_booker
+                ? "Paid by booker"
+                : "You pay"
+              : null,
           },
           {
             id: group.primary.id,
             name: myRow?.booker_name ?? "Booker",
+            tag: null as string | null,
             status: bookingDisplayStatus(group.primary),
             ghlBookingId: null,
             canCancel: false,
@@ -3079,6 +3158,7 @@ function BookingCard({
           ...otherPlayers.map((p) => ({
             id: p.id,
             name: p.guest_name ?? "Guest",
+            tag: null as string | null,
             status: bookingDisplayStatus(p),
             ghlBookingId: null,
             canCancel: false,
@@ -3092,6 +3172,19 @@ function BookingCard({
       })();
 
   const hasPaymentDue = allRows.some((row) => row.canPay);
+  // This member's own row, when it's an invitation they haven't answered.
+  const pendingInvite = iAmBooker
+    ? null
+    : (group.players.find(
+        (p) =>
+          p.player_member_id === userId &&
+          p.invite_status === "pending" &&
+          p.status !== "cancelled" &&
+          // Past the cutoff there's nothing left to answer.
+          !inviteHasExpired(
+            inviteExpiresAt(p.booking_date, p.tee_time, p.course?.timezone || AVIARA_TIMEZONE),
+          ),
+      ) ?? null);
 
   return (
     <div
@@ -3169,6 +3262,22 @@ function BookingCard({
         </div>
       </div>
 
+      {/* An invitation still waiting on this member's answer. */}
+      {!iAmBooker && pendingInvite && (
+        <Link
+          href={`/book/invitations/${pendingInvite.id}`}
+          className="flex items-center justify-between gap-2 px-4 py-2.5 border-t text-xs font-semibold"
+          style={{
+            borderColor: "rgba(0,38,105,0.06)",
+            background: "rgba(133,187,101,0.08)",
+            color: "var(--color-green-700)",
+          }}
+        >
+          <span>You&apos;ve been invited — accept or decline</span>
+          <span aria-hidden>→</span>
+        </Link>
+      )}
+
       {/* Expandable players panel */}
       {canExpand && expanded && (
         <div
@@ -3195,6 +3304,14 @@ function BookingCard({
                   >
                     {row.name}
                   </span>
+                  {row.tag && (
+                    <span
+                      className="text-[10px] flex-shrink-0 whitespace-nowrap"
+                      style={{ color: "rgba(0,38,105,0.4)" }}
+                    >
+                      {row.tag}
+                    </span>
+                  )}
                   {row.adminNotes && (
                     <div className="relative group flex-shrink-0">
                       <span
@@ -3353,6 +3470,7 @@ function BookingCard({
                   courseName,
                   dateLabel: format(bookingDate, "EEE, MMM d"),
                   timeLabel: bookingTime,
+                  allowNonMembers: allowsNonMemberGuests(group.primary.course),
                   excludeMemberIds: [
                     group.primary.member_id,
                     ...activePlayers
@@ -3410,6 +3528,8 @@ interface AddPlayerTarget {
   dateLabel: string;
   timeLabel: string;
   excludeMemberIds: string[];
+  /** The venue takes non-member guests — see @/lib/bookings/guest-policy. */
+  allowNonMembers: boolean;
 }
 
 type AddPlayerForm = {
@@ -3439,6 +3559,9 @@ function AddPlayerModal({
   const [memberError, setMemberError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Who pays for this player's seat — required, no default.
+  const [paidBy, setPaidBy] = useState<PaidBy | null>(null);
+  const [paidByError, setPaidByError] = useState("");
 
   const {
     register,
@@ -3478,6 +3601,8 @@ function AddPlayerModal({
       setMounted(true);
       setKind("member");
       setSelected(null);
+      setPaidBy(null);
+      setPaidByError("");
       setMemberError("");
       setSubmitError("");
       reset({ firstName: "", lastName: "", mobile: "", email: "" });
@@ -3525,6 +3650,10 @@ function AddPlayerModal({
   }
 
   const onValid = async (values: AddPlayerForm) => {
+    if (!paidBy) {
+      setPaidByError("Choose who pays for this player.");
+      return;
+    }
     let player: AdditionalPlayer;
     if (kind === "member") {
       if (!selected) {
@@ -3538,6 +3667,7 @@ function AddPlayerModal({
         mobile: selected.phone ?? "",
         memberId: selected.id,
         isNonMember: false,
+        paidBy,
       };
     } else {
       player = {
@@ -3546,6 +3676,7 @@ function AddPlayerModal({
         email: values.email,
         mobile: values.mobile,
         isNonMember: true,
+        paidBy,
       };
     }
 
@@ -3640,7 +3771,9 @@ function AddPlayerModal({
           noValidate
           className="space-y-4"
         >
-          {/* Member / Non-member toggle */}
+          {/* Member / Non-member toggle — only where the venue takes
+              non-member guests. */}
+          {target.allowNonMembers && (
           <div
             className="flex gap-1 p-1 rounded-xl"
             style={{ background: "rgba(0,38,105,0.05)" }}
@@ -3673,6 +3806,7 @@ function AddPlayerModal({
               );
             })}
           </div>
+          )}
 
           {kind === "member" ? (
             selected ? (
@@ -3785,6 +3919,19 @@ function AddPlayerModal({
               </p>
             </div>
           )}
+
+          <div>
+            <PaidByChoice
+              value={paidBy}
+              onChange={(v) => {
+                setPaidBy(v);
+                setPaidByError("");
+              }}
+            />
+            {paidByError && (
+              <p className="text-xs mt-1 text-red-600">{paidByError}</p>
+            )}
+          </div>
 
           {submitError && (
             <p className="text-xs" style={{ color: "rgba(220,38,38,0.85)" }}>

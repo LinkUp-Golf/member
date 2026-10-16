@@ -25,13 +25,16 @@ import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { logActivity } from '@/lib/activity/log'
 import { linkGuestToMember, provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
 import type { ProvisionedGuest } from '@/lib/bookings/non-member-guest'
+import { sendBookingInvitations } from '@/lib/bookings/send-invitations'
 import { NotificationTemplates } from '@/lib/push'
-import { notifyMembers } from '@/lib/notify'
-import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
+import { notifyMember } from '@/lib/notify'
+import { validateEmail, validateString, sanitiseText, validateUUID } from '@/lib/validation'
 import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
 import { buildCustomSlots, loadForcedOpenDays, NON_HOLDING_STATUSES } from '@/lib/bookings/availability'
 import { isInsideJoinOnlyWindow, joinOnlyWindowMessage, openDayKey } from '@/lib/bookings/lead-time'
 import { bookingAmountDue } from '@/lib/bookings/price'
+import { allowsNonMemberGuests, NON_MEMBER_GUESTS_DISABLED_MESSAGE } from '@/lib/bookings/guest-policy'
+import { isPaidBy, PAID_BY_REQUIRED_MESSAGE } from '@/lib/bookings/invitations'
 import {
   PAY_AT_CLUB,
   coursePaymentOptions,
@@ -39,7 +42,7 @@ import {
   type PaymentOption,
 } from '@/lib/bookings/payment-options'
 import { format } from 'date-fns'
-import { titleCaseName } from '@/lib/utils'
+import { formatTeeTime, titleCaseName } from '@/lib/utils'
 import type { AdditionalPlayer } from '@/types'
 
 // Total players per booking is capped at 4 (mirrors validateBookingPayload),
@@ -167,11 +170,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   }
 
-  const { startTime: slotStartTime, focusLinkupId, additionalPlayers, courseId } = body as {
+  const { startTime: slotStartTime, focusLinkupId, additionalPlayers, courseId, onBehalfOfMemberId } = body as {
     startTime: string
     focusLinkupId?: string
     additionalPlayers?: AdditionalPlayer[]
     courseId?: string
+    /** Admin only: book as this member — see below. */
+    onBehalfOfMemberId?: string
   }
   const rawExtraPlayers = additionalPlayers ?? []
 
@@ -198,6 +203,10 @@ export async function POST(request: NextRequest) {
     const isNonMember = p.isNonMember || !p.memberId
     if (isNonMember && (typeof p.mobile !== 'string' || p.mobile.trim().length < 7)) {
       return NextResponse.json({ error: 'A phone number is required for each non-member guest' }, { status: 400 })
+    }
+    // Who pays for this seat is the booker's to say, and there's no default.
+    if (!isPaidBy(p.paidBy)) {
+      return NextResponse.json({ error: PAID_BY_REQUIRED_MESSAGE }, { status: 400 })
     }
   }
 
@@ -226,10 +235,39 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid startTime value' }, { status: 400 })
   }
 
-  const { data: member, error: memberError } = await supabase
+  const adminSupabase = createAdminClient()
+
+  // ---- Who the booking is for -------------------------------------------
+  //
+  // Normally the signed-in member. An admin may book on a member's behalf from
+  // /admin/bookings by naming them: the round is then that member's in every
+  // respect — their row, their payment-due gate, their invitations sent under
+  // their name — and goes through every rule below exactly as if they had
+  // booked it themselves. Only the identity check differs.
+  let bookerId = user.id
+  let bookedByAdminId: string | null = null
+  if (onBehalfOfMemberId && onBehalfOfMemberId !== user.id) {
+    if (!validateUUID(onBehalfOfMemberId, 'member id').valid) {
+      return NextResponse.json({ error: 'Invalid member' }, { status: 400 })
+    }
+    const { data: caller } = await adminSupabase
+      .from('members')
+      .select('is_admin')
+      .eq('id', user.id)
+      .single()
+    if (!caller?.is_admin) {
+      return NextResponse.json({ error: 'Only an admin can book for another member.' }, { status: 403 })
+    }
+    bookerId = onBehalfOfMemberId
+    bookedByAdminId = user.id
+  }
+
+  // Through the service role when an admin is booking for someone else — the
+  // member row isn't theirs to read under RLS.
+  const { data: member, error: memberError } = await (bookedByAdminId ? adminSupabase : supabase)
     .from('members')
     .select('id, home_course_id, first_name, last_name, email, phone, ghl_contact_id')
-    .eq('id', user.id)
+    .eq('id', bookerId)
     .single()
 
   if (memberError || !member) {
@@ -237,9 +275,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Member not found' }, { status: 404 })
   }
 
-  console.log('[booking/create] Member found:', { memberId: member.id, courseId: member.home_course_id })
+  console.log('[booking/create] Member found:', { memberId: member.id, courseId: member.home_course_id, bookedByAdminId })
 
-  const adminSupabase = createAdminClient()
+  // Nobody can be both the booker and one of their own added players.
+  if (extraPlayers.some(p => p.memberId === bookerId)) {
+    return NextResponse.json({ error: 'The booker is already on this tee time — remove them from the added players.' }, { status: 400 })
+  }
 
   // First-in-first-out: a member may only hold bookings awaiting payment
   // (status 'availability_confirmed' — a payment link has been sent) — every
@@ -248,7 +289,7 @@ export async function POST(request: NextRequest) {
   // production, a member may already have more than one booking awaiting
   // payment on their account; surface all of them, not just one. Check this
   // before touching GHL so a blocked member fails fast with a clear message.
-  const pendingBookings = await findPendingPaymentBookings(adminSupabase, user.id)
+  const pendingBookings = await findPendingPaymentBookings(adminSupabase, bookerId)
   if (pendingBookings.length) {
     return NextResponse.json(
       { error: pendingPaymentBlockMessage(pendingBookings), pendingBookings },
@@ -270,7 +311,7 @@ export async function POST(request: NextRequest) {
 
   const { data: course } = await adminSupabase
     .from('courses')
-    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, cost_per_player')
+    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, cost_per_player, allow_non_member_guests')
     .eq('id', courseId || resolvedCourseId)
     .eq('approval_status', 'active')
     .single()
@@ -285,6 +326,13 @@ export async function POST(request: NextRequest) {
     eventDurationMinutes = course.meeting_duration_mins || FALLBACK_ROUND_DURATION_MINUTES
     eventCourseName = course.name
     resolvedCourseId = course.id
+  }
+
+  // Non-member guests only where the venue takes them. The booking screen hides
+  // the option at a venue that doesn't, so this is a stale screen or a direct
+  // post — refused before any GHL work.
+  if (nonMemberPlayers.length > 0 && !allowsNonMemberGuests(course)) {
+    return NextResponse.json({ error: NON_MEMBER_GUESTS_DISABLED_MESSAGE }, { status: 400 })
   }
 
   // The appointment's length is whatever this course's GHL calendar says a round
@@ -512,7 +560,7 @@ export async function POST(request: NextRequest) {
   // guest, and each pending non-member (held while awaiting admin approval).
   const rows = [
     {
-      member_id: user.id,
+      member_id: bookerId,
       course_id: resolvedCourseId,
       booking_date: bookingDate,
       tee_time: timeNormalized,
@@ -527,7 +575,7 @@ export async function POST(request: NextRequest) {
       payment_method: paymentMethod,
     },
     ...memberPlayers.map((p) => ({
-      member_id: user.id,
+      member_id: bookerId,
       course_id: resolvedCourseId,
       booking_date: bookingDate,
       tee_time: timeNormalized,
@@ -540,13 +588,16 @@ export async function POST(request: NextRequest) {
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: null as string | null,
       payment_method: paymentMethod,
+      // An added player is invited, not just placed — see @/lib/bookings/invitations.
+      paid_by_booker: p.paidBy === 'booker',
+      invite_status: 'pending',
     })),
     // Non-members take a seat on the same terms as anyone else. Their GHL
     // contact and member row are created below, right after the seats are
     // reserved — the admin Setup step this used to wait on never decided
     // anything, it just typed in what the booker had already supplied.
     ...nonMemberPlayers.map((p) => ({
-      member_id: user.id,
+      member_id: bookerId,
       course_id: resolvedCourseId,
       booking_date: bookingDate,
       tee_time: timeNormalized,
@@ -559,6 +610,9 @@ export async function POST(request: NextRequest) {
       focus_linkup_id: focusLinkupId ?? null,
       ghl_booking_id: null as string | null,
       payment_method: paymentMethod,
+      // An added player is invited, not just placed — see @/lib/bookings/invitations.
+      paid_by_booker: p.paidBy === 'booker',
+      invite_status: 'pending',
     })),
   ]
 
@@ -585,9 +639,9 @@ export async function POST(request: NextRequest) {
       const ids = new Set(
         (pendingRace[1] ?? '').split(',').map(s => s.trim()).filter(Boolean)
       )
-      const bookerBlocked = ids.has(user.id)
+      const bookerBlocked = ids.has(bookerId)
       const guestNames = [...ids]
-        .filter(id => id !== user.id)
+        .filter(id => id !== bookerId)
         .map(id => {
           const r = memberRowById[id]
           return r ? titleCaseName(`${r.first_name} ${r.last_name}`.trim()) : 'A player'
@@ -656,6 +710,7 @@ export async function POST(request: NextRequest) {
     player_member_id: string | null
     ghl_booking_id: string | null
     additional_players: AdditionalPlayer[] | null
+    paid_by_booker: boolean | null
   }
   const created = insertedBookings as InsertedBooking[]
   console.log('[booking/create] Reserved bookings:', created.map(b => b.id))
@@ -760,17 +815,18 @@ export async function POST(request: NextRequest) {
 
   const displayDate = format(new Date(`${bookingDate}T12:00:00`), 'EEEE, MMMM d')
 
-  // Notify members who were invited as additional players
-  const invitedMemberIds = memberPlayers
-    .map(p => p.memberId)
-    .filter((id): id is string => Boolean(id))
-  if (invitedMemberIds.length) {
-    const displayTime = timeNormalized.slice(0, 5)
-    void notifyMembers(
-      invitedMemberIds,
-      NotificationTemplates.bookingInvite(member.first_name, displayDate, displayTime)
-    ).catch(() => {})
-  }
+  // Invite every added player who has an account by now — fellow members, and
+  // non-member guests provisioned above. Each invitation is its own row's, since
+  // it says who's paying for that seat and opens that row's answer screen.
+  void sendBookingInvitations(
+    created.filter(b => b.id !== primaryBooking.id),
+    {
+      bookerFirstName: member.first_name,
+      eventName: courseForResponse?.name ?? eventCourseName,
+      displayDate,
+      displayTime: formatTeeTime(timeNormalized),
+    },
+  )
 
   console.log('[booking/create] Success, primaryBookingId:', primaryBookingId)
 
@@ -782,8 +838,21 @@ export async function POST(request: NextRequest) {
     targetId: primaryBookingId,
     targetLabel: courseForResponse?.name ?? null,
     path: '/book',
-    metadata: { players: 1 + rawExtraPlayers.length, bookingDate },
+    metadata: { players: 1 + rawExtraPlayers.length, bookingDate, ...(bookedByAdminId ? { bookedByAdminId } : {}) },
   })
+
+  // A member an admin booked for hears about it — the round is on their
+  // account, and nothing else would tell them.
+  if (bookedByAdminId) {
+    void notifyMember(
+      bookerId,
+      NotificationTemplates.bookingMadeForYou(
+        courseForResponse?.name ?? eventCourseName,
+        displayDate,
+        formatTeeTime(timeNormalized),
+      ),
+    ).catch(() => {})
+  }
 
   // Availability was checked against the course's GHL calendar before any of
   // this ran, so there is nothing left to confirm — the round opens with

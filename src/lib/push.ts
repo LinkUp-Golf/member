@@ -323,12 +323,72 @@ export const NotificationTemplates = {
     cta:   'Open LinkUp',
   }),
 
-  bookingInvite: (bookerFirstName: string, date: string, time: string): PushPayload => ({
+  // An added player's invitation to a round. Names the round and says who's
+  // paying, and opens the invitation screen where they accept or decline.
+  bookingInvite: (
+    bookerFirstName: string,
+    eventName: string,
+    date: string,
+    time: string,
+    paidByBooker: boolean,
+    bookingId: string,
+  ): PushPayload => ({
     title: `${titleCaseName(bookerFirstName)} invited you to play`,
-    body:  `You've been added to a tee time on ${date} at ${time}. Check My Bookings for details.`,
+    body:  `${eventName} on ${date} at ${time}. ${paidByBooker ? `${titleCaseName(bookerFirstName)} is paying for your round.` : "You'll pay for your own round."} Accept or decline your invitation.`,
+    url:   `/book/invitations/${bookingId}`,
+    tag:   `booking-invite-${bookingId}`,
+    subject: `${titleCaseName(bookerFirstName)} invited you to ${eventName} on ${date}`,
+    cta:   'Respond to invitation',
+  }),
+
+  // The booker hears each player's answer.
+  bookingInviteAccepted: (playerName: string, eventName: string, date: string): PushPayload => ({
+    title: `${playerName} is in`,
+    body:  `${playerName} accepted your invitation to ${eventName} on ${date}.`,
     url:   '/book',
-    tag:   'booking-invite',
-    subject: `${titleCaseName(bookerFirstName)} added you to a tee time on ${date}`,
+    tag:   'booking-invite-response',
+    subject: `${playerName} accepted your invitation to ${eventName}`,
+    cta:   'View the tee time',
+  }),
+
+  // Nobody answered before the cutoff, so the seat was released.
+  bookingInviteExpired: (playerName: string, eventName: string, date: string): PushPayload => ({
+    title: `${playerName} didn't respond`,
+    body:  `${playerName}'s invitation to ${eventName} on ${date} expired without an answer. Their spot has been released.`,
+    url:   '/book',
+    tag:   'booking-invite-response',
+    subject: `${playerName}'s invitation to ${eventName} expired`,
+    cta:   'View the tee time',
+  }),
+
+  bookingInviteDeclined: (playerName: string, eventName: string, date: string): PushPayload => ({
+    title: `${playerName} can't make it`,
+    body:  `${playerName} declined your invitation to ${eventName} on ${date}. Their spot has been released.`,
+    url:   '/book',
+    tag:   'booking-invite-response',
+    subject: `${playerName} declined your invitation to ${eventName}`,
+    cta:   'View the tee time',
+  }),
+
+  // An admin made a booking on this member's behalf — it's on their account,
+  // and this is how they find out.
+  bookingMadeForYou: (courseName: string, date: string, time: string): PushPayload => ({
+    title: "You're booked in",
+    body:  `The LinkUp team booked you a tee time at ${courseName} on ${date} at ${time}. Check My Bookings for details.`,
+    url:   '/book',
+    tag:   'booking-made-for-you',
+    subject: `You're booked in at ${courseName} on ${date}`,
+    cta:   'View the tee time',
+  }),
+
+  // An admin moved a round to another day or tee time — every player on it
+  // hears, since the old date is the one already in their calendar.
+  bookingMoved: (courseName: string, date: string, time: string): PushPayload => ({
+    title: 'Your tee time has moved',
+    body:  `Your round at ${courseName} is now on ${date} at ${time}. Check My Bookings for details.`,
+    url:   '/book',
+    tag:   'booking-moved',
+    subject: `Your round at ${courseName} has moved to ${date}`,
     cta:   'View the tee time',
   }),
 

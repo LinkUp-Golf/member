@@ -133,6 +133,10 @@ export interface Course {
   // (see CustomSlot / course_custom_slots) instead of coming live from GHL.
   custom_slots_enabled: boolean
 
+  // Members may add non-member guests to a round here. Off by default — see
+  // src/lib/bookings/guest-policy.ts.
+  allow_non_member_guests: boolean
+
   // Optional description shown in the admin and used as the GHL group description
   description: string | null
 
@@ -246,6 +250,11 @@ export interface AdditionalPlayer {
   memberId?: string
   /** True when this player was added as a non-member invite (no member account). */
   isNonMember?: boolean
+  /**
+   * Who pays for this player's seat — required when adding a player. Stored on
+   * the row as bookings.paid_by_booker. See @/lib/bookings/invitations.
+   */
+  paidBy?: 'booker' | 'self'
 }
 
 export interface Booking {
@@ -268,6 +277,10 @@ export interface Booking {
   admin_notes?: string | null
   /** 'pay_at_club' once the member chose to settle with the club; null = checkout. */
   payment_method?: 'pay_at_club' | null
+  /** The booker covers this added player's seat. */
+  paid_by_booker?: boolean
+  /** An added player's answer to their invitation; null on the booker's own row. */
+  invite_status?: 'pending' | 'accepted' | 'declined' | 'expired' | null
   created_at: string
   booker_name?: string | null
   course?: {
@@ -281,6 +294,8 @@ export interface Booking {
     meeting_duration_mins?: number | null
     /** The venue's green fee — what a payment surface quotes. */
     cost_per_player?: number | null
+    /** Whether players can be added here as non-member guests. */
+    allow_non_member_guests?: boolean
   } | null
 }
 

@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/hosted-event-proof-reminders",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/booking-invite-expiry",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

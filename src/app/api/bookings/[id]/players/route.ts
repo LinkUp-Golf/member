@@ -31,20 +31,21 @@ import {
   resolveMeetingDurationMins,
 } from '@/lib/ghl/client'
 import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
-import { NotificationTemplates } from '@/lib/push'
-import { notifyMembers } from '@/lib/notify'
+import { sendBookingInvitations } from '@/lib/bookings/send-invitations'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findMembersWithPendingPayment } from '@/lib/bookings/pending-payment'
 import { linkGuestToMember, provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
 import type { ProvisionedGuest } from '@/lib/bookings/non-member-guest'
 import { bookingAmountDue } from '@/lib/bookings/price'
+import { allowsNonMemberGuests, NON_MEMBER_GUESTS_DISABLED_MESSAGE } from '@/lib/bookings/guest-policy'
+import { isPaidBy, PAID_BY_REQUIRED_MESSAGE } from '@/lib/bookings/invitations'
 import {
   PAY_AT_CLUB,
   coursePaymentOptions,
   offersPayNow,
 } from '@/lib/bookings/payment-options'
 import { format } from 'date-fns'
-import { titleCaseName } from '@/lib/utils'
+import { formatTeeTime, titleCaseName } from '@/lib/utils'
 import type { AuthContext } from '@/lib/auth/types'
 import type { AdditionalPlayer } from '@/types'
 import {
@@ -128,6 +129,10 @@ export const POST = withAuth(async (
     if (isNonMember && (typeof p.mobile !== 'string' || p.mobile.trim().length < 7)) {
       return NextResponse.json({ error: 'A phone number is required for each non-member guest' }, { status: 400 })
     }
+    // Who pays for this seat is the booker's to say, and there's no default.
+    if (!isPaidBy(p.paidBy)) {
+      return NextResponse.json({ error: PAID_BY_REQUIRED_MESSAGE }, { status: 400 })
+    }
   }
 
   // Strip any HTML from free-text names before they reach GHL / the DB.
@@ -166,12 +171,17 @@ export const POST = withAuth(async (
   // ---- Resolve course + calendar settings ---------------------------------
   const { data: course } = await admin
     .from('courses')
-    .select('id, ghl_calendar_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, max_players_per_day, cost_per_player')
+    .select('id, ghl_calendar_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, max_players_per_day, cost_per_player, allow_non_member_guests')
     .eq('id', primary.course_id)
     .single()
 
   if (!course?.ghl_calendar_id) {
     return NextResponse.json({ error: 'This course is not set up for booking.' }, { status: 422 })
+  }
+
+  // Non-member guests only where the venue takes them — the same rule as create.
+  if (nonMemberPlayers.length > 0 && !allowsNonMemberGuests(course)) {
+    return NextResponse.json({ error: NON_MEMBER_GUESTS_DISABLED_MESSAGE }, { status: 400 })
   }
 
   const eventCalendarId = course.ghl_calendar_id
@@ -312,6 +322,9 @@ export const POST = withAuth(async (
       focus_linkup_id: primary.focus_linkup_id ?? null,
       ghl_booking_id: null as string | null,
       payment_method: paymentMethod,
+      // An added player is invited, not just placed — see @/lib/bookings/invitations.
+      paid_by_booker: p.paidBy === 'booker',
+      invite_status: 'pending',
     })),
     ...nonMemberPlayers.map((p) => ({
       member_id: ctx.userId,
@@ -327,6 +340,9 @@ export const POST = withAuth(async (
       focus_linkup_id: primary.focus_linkup_id ?? null,
       ghl_booking_id: null as string | null,
       payment_method: paymentMethod,
+      // An added player is invited, not just placed — see @/lib/bookings/invitations.
+      paid_by_booker: p.paidBy === 'booker',
+      invite_status: 'pending',
     })),
   ]
 
@@ -378,6 +394,7 @@ export const POST = withAuth(async (
     player_member_id: string | null
     guest_name: string | null
     additional_players: AdditionalPlayer[] | null
+    paid_by_booker: boolean | null
   }
   const created = (insertedRows ?? []) as InsertedBooking[]
 
@@ -438,21 +455,20 @@ export const POST = withAuth(async (
   )
 
   const displayDate = format(new Date(`${primary.booking_date}T12:00:00`), 'EEEE, MMMM d')
-  const displayTime = primary.tee_time.slice(0, 5)
 
-  // Notify invited members.
-  const invitedMemberIds = memberPlayers.map((p) => p.memberId).filter((mid): mid is string => Boolean(mid))
-  if (invitedMemberIds.length) {
-    const { data: booker } = await admin
-      .from('members')
-      .select('first_name')
-      .eq('id', ctx.userId)
-      .single()
-    void notifyMembers(
-      invitedMemberIds,
-      NotificationTemplates.bookingInvite(booker?.first_name ?? 'A member', displayDate, displayTime),
-    ).catch(() => {})
-  }
+  // Invite every added player who has an account by now — fellow members, and
+  // non-member guests provisioned above. See sendBookingInvitations.
+  const { data: booker } = await admin
+    .from('members')
+    .select('first_name')
+    .eq('id', primary.member_id)
+    .single()
+  void sendBookingInvitations(created, {
+    bookerFirstName: booker?.first_name ?? 'A member',
+    eventName: course.name,
+    displayDate,
+    displayTime: formatTeeTime(primary.tee_time),
+  })
 
   // Echo the resolved course onto each new row so the client can render it
   // immediately (the RPC returns raw rows with no join).
