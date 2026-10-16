@@ -11,7 +11,7 @@
 //     allow_non_member_guests — see @/lib/bookings/guest-policy);
 //   • who pays for each added player, required (@/lib/bookings/invitations).
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { format } from 'date-fns'
 import { createClient } from '@/lib/supabase'
 import Select from '@/components/ui/Select'
@@ -19,7 +19,8 @@ import { formatTeeTime } from '@/lib/utils'
 import { validateEmail } from '@/lib/validation'
 import { allowsNonMemberGuests } from '@/lib/bookings/guest-policy'
 import { PAID_BY_OPTIONS, type PaidBy } from '@/lib/bookings/invitations'
-import type { AdditionalPlayer, GHLBookingSlot } from '@/types'
+import { slotWallTime, useVenueSlots } from '@/hooks/useVenueSlots'
+import type { AdditionalPlayer } from '@/types'
 
 export interface BookableMember {
   id: string
@@ -57,9 +58,7 @@ function memberLabel(m: BookableMember): string {
 }
 
 function slotTime(iso: string): string {
-  // startTime carries the venue's own offset, so the wall-clock time is the
-  // string's own — no re-zoning in the admin's browser.
-  return formatTeeTime(iso.split('T')[1]?.slice(0, 8) ?? '00:00:00')
+  return formatTeeTime(`${slotWallTime(iso)}:00`)
 }
 
 function newPlayer(): PlayerDraft {
@@ -91,9 +90,6 @@ export default function AdminNewBookingDrawer({
   const [memberId, setMemberId] = useState('')
   const [courseId, setCourseId] = useState(defaultCourseId ?? '')
   const [date, setDate] = useState('')
-  const [slotsByDate, setSlotsByDate] = useState<Record<string, GHLBookingSlot[]>>({})
-  const [loadedMonth, setLoadedMonth] = useState('')
-  const [loadingSlots, setLoadingSlots] = useState(false)
   const [slotStart, setSlotStart] = useState('')
   const [players, setPlayers] = useState<PlayerDraft[]>([])
   const [submitting, setSubmitting] = useState(false)
@@ -113,29 +109,8 @@ export default function AdminNewBookingDrawer({
   const venue = venues.find(v => v.id === courseId) ?? null
   const nonMembersAllowed = allowsNonMemberGuests(venue)
 
-  // Tee times come a month at a time from the same endpoint the member's
-  // booking screen reads.
-  const month = date.slice(0, 7)
-  useEffect(() => {
-    if (!courseId || !month) return
-    const key = `${courseId}|${month}`
-    if (key === loadedMonth) return
-    setLoadingSlots(true)
-    setSlotStart('')
-    fetch(`/api/bookings/create?month=${month}&courseId=${courseId}`)
-      .then(r => r.json())
-      .then(d => {
-        setSlotsByDate(d.slots ?? {})
-        setLoadedMonth(key)
-      })
-      .catch(() => setSlotsByDate({}))
-      .finally(() => setLoadingSlots(false))
-  }, [courseId, month, loadedMonth])
-
-  const openSlots = useMemo(
-    () => (slotsByDate[date] ?? []).filter(s => s.available && (s.spotsOpen ?? 0) > 0),
-    [slotsByDate, date],
-  )
+  // The same tee times a member booking is offered — see useVenueSlots.
+  const { openSlots, loading: loadingSlots } = useVenueSlots(courseId, date)
   const slot = openSlots.find(s => s.startTime === slotStart) ?? null
   const maxAdditional = Math.min(MAX_ADDITIONAL, Math.max(0, (slot?.spotsOpen ?? 1) - 1))
 
@@ -270,7 +245,7 @@ export default function AdminNewBookingDrawer({
               <span className={label}>Venue</span>
               <Select
                 value={courseId}
-                onChange={v => { setCourseId(v); setSlotStart(''); setLoadedMonth('') }}
+                onChange={v => { setCourseId(v); setSlotStart('') }}
                 options={venues.map(v => ({ value: v.id, label: v.name }))}
                 placeholder="Choose a venue"
                 searchPlaceholder="Search venues…"

@@ -11,6 +11,7 @@ import { tagsOverlap } from '@/lib/ghl/tags'
 import { settlingAtClub, PAY_AT_CLUB_LABEL } from '@/lib/bookings/payment-options'
 import { inviteStatusLabel } from '@/lib/bookings/invitations'
 import AdminNewBookingDrawer from '@/components/admin/AdminNewBookingDrawer'
+import { slotWallTime, useVenueSlots } from '@/hooks/useVenueSlots'
 import type { AdditionalPlayer } from '@/types'
 
 type BookingStatus = 'tentative' | 'availability_confirmed' | 'payment_confirmed' | 'confirmed' | 'pending' | 'cancelled' | 'waitlist' | 'awaiting_approval'
@@ -1637,8 +1638,10 @@ function DateGroupedSlots({
 
 /**
  * Moves the whole tee-time group — booker and every player booked with them —
- * to another day and, optionally, another tee time. The server holds the new
- * day to the venue's cap and moves each GHL appointment to match.
+ * to another day, onto one of that day's open tee times (the same ones a member
+ * booking is offered — see useVenueSlots). A time without room for the whole
+ * group is shown but can't be picked. The server re-checks the slot, holds the
+ * new day to the venue's cap, and moves each GHL appointment to match.
  */
 function MoveBookingModal({
   slot,
@@ -1651,14 +1654,18 @@ function MoveBookingModal({
 }) {
   const first = slot.rows[0]
   const [date, setDate] = useState(slot.booking_date)
-  const [time, setTime] = useState(slot.tee_time.slice(0, 5))
+  const [time, setTime] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const players = slot.rows.filter(b => b.status !== 'cancelled').length
-  const unchanged = date === slot.booking_date && time === slot.tee_time.slice(0, 5)
+  const currentTime = slot.tee_time.slice(0, 5)
+  const { openSlots, loading, error: slotsError } = useVenueSlots(first?.course_id, date)
+
+  // A tee time picked for one day means nothing on another.
+  useEffect(() => { setTime('') }, [date])
 
   async function submit() {
-    if (!first) return
+    if (!first || !time) return
     setSaving(true)
     setError('')
     try {
@@ -1685,7 +1692,7 @@ function MoveBookingModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
-      <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-5">
+      <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-5 max-h-[90vh] overflow-y-auto">
         <h2 className="text-sm font-bold text-gray-800">Move booking</h2>
         <p className="text-xs text-gray-500 mt-1">
           {first?.course?.name ? `${first.course.name} · ` : ''}
@@ -1693,26 +1700,54 @@ function MoveBookingModal({
           {' · '}{players} player{players === 1 ? '' : 's'}. Everyone in this group moves together and is notified.
         </p>
 
-        <div className="grid grid-cols-2 gap-3 mt-4">
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">New date</span>
-            <input
-              type="date"
-              value={date}
-              min={format(new Date(), 'yyyy-MM-dd')}
-              onChange={e => setDate(e.target.value)}
-              className="w-full px-2.5 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Tee time</span>
-            <input
-              type="time"
-              value={time}
-              onChange={e => setTime(e.target.value)}
-              className="w-full px-2.5 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
-            />
-          </label>
+        <label className="flex flex-col gap-1 mt-4">
+          <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">New date</span>
+          <input
+            type="date"
+            value={date}
+            min={format(new Date(), 'yyyy-MM-dd')}
+            onChange={e => setDate(e.target.value)}
+            className="w-full px-2.5 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-900/20"
+          />
+        </label>
+
+        <div className="mt-4">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Open tee times</p>
+          {!date ? (
+            <p className="text-xs text-gray-400">Pick a date first.</p>
+          ) : loading ? (
+            <p className="text-xs text-gray-400">Loading tee times…</p>
+          ) : slotsError ? (
+            <p className="text-xs text-red-600">{slotsError}</p>
+          ) : openSlots.length === 0 ? (
+            <p className="text-xs text-gray-500">No tee times open at this venue on this day.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {openSlots.map(s => {
+                const hhmm = slotWallTime(s.startTime)
+                const isCurrent = date === slot.booking_date && hhmm === currentTime
+                const tooSmall = (s.spotsOpen ?? 0) < players
+                const disabled = isCurrent || tooSmall
+                return (
+                  <button
+                    key={s.startTime}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setTime(hhmm)}
+                    title={isCurrent ? 'Already on this tee time' : tooSmall ? `Not enough room for ${players}` : undefined}
+                    className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                      time === hhmm
+                        ? 'bg-green-900 text-white border-green-900'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    {formatTeeTime(`${hhmm}:00`)}
+                    <span className="font-normal opacity-70"> · {s.spotsOpen} open</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         {error && <p className="text-xs text-red-600 mt-3">{error}</p>}
@@ -1729,7 +1764,7 @@ function MoveBookingModal({
           <button
             type="button"
             onClick={submit}
-            disabled={saving || unchanged || !date || !time}
+            disabled={saving || !date || !time}
             className="flex-1 py-2.5 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 disabled:opacity-50 transition-colors"
           >
             {saving ? 'Moving…' : 'Move booking'}

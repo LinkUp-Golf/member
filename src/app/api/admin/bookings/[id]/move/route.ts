@@ -2,13 +2,17 @@ export const dynamic = 'force-dynamic'
 
 // ============================================================
 // POST /api/admin/bookings/[id]/move
-//   body { date: 'YYYY-MM-DD', teeTime?: 'HH:mm' }
+//   body { date: 'YYYY-MM-DD', teeTime: 'HH:mm' }
 //
 // Moves the booking group this row belongs to — the booker's seat and every
-// player they booked with in the same go — to another day, and optionally
-// another tee time (the current one if omitted). A group moves whole: moving
-// one row would leave a player on a different day from the people they booked
-// with.
+// player they booked with in the same go — to another day and tee time. A group
+// moves whole: moving one row would leave a player on a different day from the
+// people they booked with.
+//
+// The tee time must be one the venue actually has open that day with room for
+// the whole group — the same slots a member booking would be offered (curated
+// slots where the venue curates that date, its GHL calendar otherwise). The
+// admin screen only offers those; this is the check behind it.
 //
 // The new day is held to the same daily cap and curated-slot seats as a new
 // booking, atomically (move_booking_group). Then each row's GHL appointment is
@@ -29,6 +33,8 @@ import { notifyMembers } from '@/lib/notify'
 import { validateDate } from '@/lib/validation'
 import { formatTeeTime } from '@/lib/utils'
 import { logger } from '@/lib/logger'
+import { slotsForDate } from '@/lib/bookings/availability'
+import type { Course } from '@/types'
 import {
   AVIARA_TIMEZONE,
   DEFAULT_MAX_PLAYERS_PER_DAY,
@@ -48,9 +54,9 @@ export const POST = withAuth(
     if (!validateDate(date, 'date').valid) {
       return NextResponse.json({ error: 'Pick a date to move the booking to.' }, { status: 400 })
     }
-    const teeTimeIn = typeof body?.teeTime === 'string' && body.teeTime ? body.teeTime : null
-    if (teeTimeIn && !TIME_RE.test(teeTimeIn)) {
-      return NextResponse.json({ error: 'Tee time must be HH:mm.' }, { status: 400 })
+    const teeTimeIn = typeof body?.teeTime === 'string' ? body.teeTime : ''
+    if (!TIME_RE.test(teeTimeIn)) {
+      return NextResponse.json({ error: 'Pick one of the open tee times.' }, { status: 400 })
     }
 
     const admin = createAdminClient()
@@ -64,7 +70,7 @@ export const POST = withAuth(
 
     const { data: course } = await admin
       .from('courses')
-      .select('id, name, timezone, ghl_calendar_id, meeting_duration_mins, max_players_per_day')
+      .select('*')
       .eq('id', row.course_id)
       .single()
     if (!course) return NextResponse.json({ error: 'Course not found' }, { status: 404 })
@@ -79,7 +85,7 @@ export const POST = withAuth(
     }
 
     // 'HH:MM:SS', the shape the column holds.
-    const teeTime = teeTimeIn ? `${teeTimeIn}:00` : String(row.tee_time)
+    const teeTime = `${teeTimeIn}:00`
     if (date === row.booking_date && teeTime === String(row.tee_time)) {
       return NextResponse.json({ error: 'That is the date and time it is already on.' }, { status: 400 })
     }
@@ -87,13 +93,32 @@ export const POST = withAuth(
     // The group: every row the booker made in the same statement for this slot.
     const { data: group } = await admin
       .from('bookings')
-      .select('id')
+      .select('id, status')
       .eq('member_id', row.member_id)
       .eq('created_at', row.created_at)
       .eq('booking_date', row.booking_date)
       .eq('tee_time', row.tee_time)
     const ids = (group ?? []).map(g => g.id as string)
     if (ids.length === 0) ids.push(row.id)
+    // Seats the group actually holds — cancelled and waitlisted rows move with
+    // it but don't need room.
+    const needed = Math.max(
+      1,
+      (group ?? []).filter(g => g.status !== 'cancelled' && g.status !== 'waitlist').length,
+    )
+
+    // The tee time has to be open that day, with room for everyone moving.
+    const slots = await slotsForDate(admin, course as Course, date)
+    const target = slots.find(s => (s.startTime.split('T')[1] ?? '').slice(0, 5) === teeTimeIn)
+    if (!target || !target.available || (target.spotsOpen ?? 0) <= 0) {
+      return NextResponse.json({ error: "That tee time isn't open on that day. Pick one of the open tee times." }, { status: 409 })
+    }
+    if ((target.spotsOpen ?? 0) < needed) {
+      return NextResponse.json(
+        { error: `That tee time has ${target.spotsOpen} spot${target.spotsOpen === 1 ? '' : 's'} open — not enough for this group of ${needed}.` },
+        { status: 409 },
+      )
+    }
 
     const { data: moved, error: moveError } = await admin.rpc('move_booking_group', {
       p_ids: ids,
