@@ -374,18 +374,6 @@ function SlotCard({
       {/* Expanded: per-player rows */}
       {isExpanded && (
         <div className="divide-y divide-gray-50 border-t border-gray-100">
-          {/* The group moves as one — see POST /api/admin/bookings/[id]/move. */}
-          {activeRows.length > 0 && (
-            <div className="px-4 py-2 flex justify-end bg-gray-50/60">
-              <button
-                type="button"
-                onClick={() => onMove(slot)}
-                className="text-xs font-medium px-2.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                Move to another date
-              </button>
-            </div>
-          )}
           {slot.rows.map(b => {
             const info = playerInfo(b)
             const sm = STATUS_META[b.status] ?? STATUS_META.tentative
@@ -514,6 +502,21 @@ function SlotCard({
                       className="min-w-0 flex-1 text-xs text-left text-gray-400 hover:text-gray-600 transition-colors italic truncate">
                       {b.admin_notes ?? 'Add note…'}
                     </button>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                    {/* Moves the whole group this row belongs to, not just this
+                        player — see POST /api/admin/bookings/[id]/move. */}
+                    {b.status !== 'cancelled' && (
+                      <button
+                        type="button"
+                        onClick={() => onMove(slot)}
+                        className="flex-shrink-0 flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800 px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5m-9-6h.008v.008H12v-.008zM12 15h.008v.008H12V15zm0 2.25h.008v.008H12v-.008zM9.75 15h.008v.008H9.75V15zm0 2.25h.008v.008H9.75v-.008zM7.5 15h.008v.008H7.5V15zm0 2.25h.008v.008H7.5v-.008zm6.75-4.5h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V15zm0 2.25h.008v.008h-.008v-.008zm2.25-4.5h.008v.008H16.5v-.008zm0 2.25h.008v.008H16.5V15z" />
+                        </svg>
+                        Move
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => onRequestDelete(b)}
@@ -525,6 +528,7 @@ function SlotCard({
                       </svg>
                       {deletingBookingId === b.id ? 'Deleting…' : 'Delete'}
                     </button>
+                    </div>
                   </div>
                 )}
               </div>
