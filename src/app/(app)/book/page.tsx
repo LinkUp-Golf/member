@@ -3007,7 +3007,6 @@ function BookingCard({
   // does. Undefined means the member has none and nothing extra is rendered.
   wallet?: ReturnType<typeof useCreditWallet>;
 }) {
-  const [expanded, setExpanded] = useState(false);
   // The payable row whose credit modal is open, with what it costs.
   const [creditTarget, setCreditTarget] = useState<{
     id: string;
@@ -3065,8 +3064,6 @@ function BookingCard({
     hoursUntil > 0 &&
     group.primary.status !== "cancelled" &&
     totalPlayers < MAX_GROUP_PLAYERS;
-  // All bookings (booker and invited) use the same collapsible card style.
-  const canExpand = true;
 
   // ---- Build allRows -------------------------------------------------
   // Booker: "You" = primary row, full actions on all rows
@@ -3172,6 +3169,20 @@ function BookingCard({
       })();
 
   const hasPaymentDue = allRows.some((row) => row.canPay);
+  const openAddPlayer = () =>
+    onAddPlayer({
+      bookingId: group.primary.id,
+      courseName,
+      dateLabel: format(bookingDate, "EEE, MMM d"),
+      timeLabel: bookingTime,
+      allowNonMembers: allowsNonMemberGuests(group.primary.course),
+      excludeMemberIds: [
+        group.primary.member_id,
+        ...activePlayers
+          .map((p) => p.player_member_id)
+          .filter((mid): mid is string => Boolean(mid)),
+      ],
+    });
   // This member's own row, when it's an invitation they haven't answered.
   const pendingInvite = iAmBooker
     ? null
@@ -3209,7 +3220,7 @@ function BookingCard({
           )}
         </p>
 
-        {/* Date · time · player toggle — all on one line */}
+        {/* Date · time · Add player — all on one line */}
         <div className="flex items-center justify-between gap-2">
           <p
             className="text-sm font-semibold"
@@ -3232,30 +3243,32 @@ function BookingCard({
                 💳 Payment due
               </span>
             )}
-            {canExpand && (
+            {/* Add player — booker only, upcoming & not full */}
+            {canAddPlayers && (
               <button
                 type="button"
-                onClick={() => setExpanded((v) => !v)}
-                className="flex items-center gap-1 text-xs font-medium flex-shrink-0"
-                style={{ color: "rgba(0,38,105,0.45)" }}
+                onClick={openAddPlayer}
+                className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0 transition-colors hover:bg-green-50"
+                style={{
+                  background: "rgba(133,187,101,0.1)",
+                  color: "var(--color-green-700)",
+                }}
               >
-                {totalPlayers}p
                 <svg
-                  className={cn(
-                    "w-3 h-3 transition-transform duration-200",
-                    expanded ? "rotate-180" : "",
-                  )}
+                  className="w-3 h-3"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
                   strokeWidth={2.5}
+                  aria-hidden
                 >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    d="M19.5 8.25l-7.5 7.5-7.5-7.5"
+                    d="M12 4.5v15m7.5-7.5h-15"
                   />
                 </svg>
+                Add player
               </button>
             )}
           </div>
@@ -3278,231 +3291,191 @@ function BookingCard({
         </Link>
       )}
 
-      {/* Expandable players panel */}
-      {canExpand && expanded && (
-        <div
-          className="border-t"
-          style={{ borderColor: "rgba(0,38,105,0.06)" }}
-        >
-          {allRows.map((row, idx) => {
-            const canPay = row.canPay;
-            const editablePlayer = row.editablePlayer;
-            return (
-              <div
-                key={row.id}
-                className="flex items-center gap-2.5 px-4 py-2.5"
-                style={{
-                  borderTop:
-                    idx === 0 ? "none" : "1px solid rgba(0,38,105,0.04)",
-                }}
-              >
-                {/* Name + admin note indicator */}
-                <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                  <span
-                    className="text-xs font-medium truncate capitalize"
-                    style={{ color: "var(--color-green-900)" }}
-                  >
-                    {row.name}
-                  </span>
-                  {row.tag && (
-                    <span
-                      className="text-[10px] flex-shrink-0 whitespace-nowrap"
-                      style={{ color: "rgba(0,38,105,0.4)" }}
-                    >
-                      {row.tag}
-                    </span>
-                  )}
-                  {row.adminNotes && (
-                    <div className="relative group flex-shrink-0">
-                      <span
-                        title={row.adminNotes}
-                        className="flex items-center justify-center w-4 h-4 rounded-full text-[10px] leading-none cursor-help flex-shrink-0"
-                        style={{
-                          background: "rgba(234,179,8,0.15)",
-                          color: "#92640a",
-                        }}
-                        aria-label={`Admin note: ${row.adminNotes}`}
-                      >
-                        ⚠
-                      </span>
-                      <div
-                        className="absolute left-0 bottom-full mb-1.5 hidden group-hover:block w-56 max-w-[70vw] rounded-lg px-3 py-2 text-[11px] leading-snug shadow-lg z-20"
-                        style={{
-                          background: "var(--color-green-900)",
-                          color: "white",
-                        }}
-                      >
-                        {row.adminNotes}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Status badge or Pay CTA */}
-                {!canPay && <BookingStatusBadge status={row.status} />}
-                {/* Credit, offered on the same row as the Pay link — or the code
-                    already covering it, which is what the member needs by then. */}
-                {canPay && payNow && (() => {
-                  const held = wallet?.couponForBooking(row.id) ?? null;
-                  // Same rule as the payment banner: credit is only offered when
-                  // it covers the row in full.
-                  if (!held && !wallet?.coversBill(row.amountDue)) return null;
-                  const open = () =>
-                    setCreditTarget({ id: row.id, amountDue: row.amountDue });
-                  // A held code reports what it's worth; the offer stays a verb.
-                  // Compact here — this row also carries Edit and Cancel.
-                  return held ? (
-                    <CreditReadyChip amount={Number(held.amount)} onOpen={open} compact />
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={open}
-                      className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
-                      style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
-                    >
-                      Use credits
-                    </button>
-                  );
-                })()}
-                {/* Pay at club, where the venue takes it. Shortened beside
-                    Pay → — this row also carries Edit and Cancel. */}
-                {canPay && payAtClub && (
-                  <button
-                    type="button"
-                    onClick={() => payRowAtClub(row.id)}
-                    disabled={markingId === row.id}
-                    className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0 disabled:opacity-50"
-                    style={
-                      payNow
-                        ? { background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }
-                        : { background: "rgba(146,100,10,0.1)", color: "#92640a" }
-                    }
-                  >
-                    {markingId === row.id
-                      ? "Saving…"
-                      : payNow
-                        ? "At club"
-                        : "Pay at club"}
-                  </button>
-                )}
-                {canPay && payNow &&
-                  (group.primary.course?.payment_url ? (
-                    <a
-                      href={group.primary.course.payment_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
-                      style={{
-                        background: "rgba(146,100,10,0.1)",
-                        color: "#92640a",
-                      }}
-                    >
-                      Pay →
-                    </a>
-                  ) : (
-                    <span className="text-[11px] text-gray-400 flex-shrink-0">
-                      Payment link pending
-                    </span>
-                  ))}
-
-                {/* Edit — booker only, while the guest is still awaiting approval */}
-                {editablePlayer && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onEditGuest({
-                        bookingId: row.id,
-                        player: editablePlayer,
-                      })
-                    }
-                    className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
-                    style={{
-                      color: "rgba(0,38,105,0.55)",
-                      background: "rgba(0,38,105,0.06)",
-                    }}
-                  >
-                    Edit
-                  </button>
-                )}
-
-                {/* Cancel */}
-                {row.canCancel && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onCancel({
-                        bookingDateTime: localDt.toISOString(),
-                        title: row.isYou
-                          ? "Cancel my booking"
-                          : `Cancel ${row.name}'s booking`,
-                        ghlBookingId: row.ghlBookingId,
-                      })
-                    }
-                    className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
-                    style={{
-                      color: "rgba(220,38,38,0.65)",
-                      background: "rgba(220,38,38,0.06)",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-            );
-          })}
-
-          {payError && (
-            <p
-              className="px-4 py-2 text-xs border-t"
-              style={{ color: "#b91c1c", borderColor: "rgba(0,38,105,0.06)" }}
-            >
-              {payError}
-            </p>
-          )}
-
-          {/* Add player — booker only, upcoming & not full */}
-          {canAddPlayers && (
-            <button
-              type="button"
-              onClick={() =>
-                onAddPlayer({
-                  bookingId: group.primary.id,
-                  courseName,
-                  dateLabel: format(bookingDate, "EEE, MMM d"),
-                  timeLabel: bookingTime,
-                  allowNonMembers: allowsNonMemberGuests(group.primary.course),
-                  excludeMemberIds: [
-                    group.primary.member_id,
-                    ...activePlayers
-                      .map((p) => p.player_member_id)
-                      .filter((mid): mid is string => Boolean(mid)),
-                  ],
-                })
-              }
-              className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-semibold transition-colors border-t hover:bg-green-50"
+      {/* Players — always shown */}
+      <div
+        className="border-t"
+        style={{ borderColor: "rgba(0,38,105,0.06)" }}
+      >
+        {allRows.map((row, idx) => {
+          const canPay = row.canPay;
+          const editablePlayer = row.editablePlayer;
+          return (
+            <div
+              key={row.id}
+              className="flex items-center gap-2.5 px-4 py-2.5"
               style={{
-                borderColor: "rgba(0,38,105,0.06)",
-                color: "var(--color-green-700)",
+                borderTop:
+                  idx === 0 ? "none" : "1px solid rgba(0,38,105,0.04)",
               }}
             >
-              <svg
-                className="w-3.5 h-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12 4.5v15m7.5-7.5h-15"
-                />
-              </svg>
-              Add player
-            </button>
-          )}
-        </div>
-      )}
+              {/* Name + admin note indicator */}
+              <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                <span
+                  className="text-xs font-medium truncate capitalize"
+                  style={{ color: "var(--color-green-900)" }}
+                >
+                  {row.name}
+                </span>
+                {row.tag && (
+                  <span
+                    className="text-[10px] flex-shrink-0 whitespace-nowrap"
+                    style={{ color: "rgba(0,38,105,0.4)" }}
+                  >
+                    {row.tag}
+                  </span>
+                )}
+                {row.adminNotes && (
+                  <div className="relative group flex-shrink-0">
+                    <span
+                      title={row.adminNotes}
+                      className="flex items-center justify-center w-4 h-4 rounded-full text-[10px] leading-none cursor-help flex-shrink-0"
+                      style={{
+                        background: "rgba(234,179,8,0.15)",
+                        color: "#92640a",
+                      }}
+                      aria-label={`Admin note: ${row.adminNotes}`}
+                    >
+                      ⚠
+                    </span>
+                    <div
+                      className="absolute left-0 bottom-full mb-1.5 hidden group-hover:block w-56 max-w-[70vw] rounded-lg px-3 py-2 text-[11px] leading-snug shadow-lg z-20"
+                      style={{
+                        background: "var(--color-green-900)",
+                        color: "white",
+                      }}
+                    >
+                      {row.adminNotes}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Credit, offered on the same row as the Pay link — or the code
+                  already covering it, which is what the member needs by then. */}
+              {canPay && payNow && (() => {
+                const held = wallet?.couponForBooking(row.id) ?? null;
+                // Same rule as the payment banner: credit is only offered when
+                // it covers the row in full.
+                if (!held && !wallet?.coversBill(row.amountDue)) return null;
+                const open = () =>
+                  setCreditTarget({ id: row.id, amountDue: row.amountDue });
+                // A held code reports what it's worth; the offer stays a verb.
+                // Compact here — this row also carries Edit and Cancel.
+                return held ? (
+                  <CreditReadyChip amount={Number(held.amount)} onOpen={open} compact />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={open}
+                    className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
+                    style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+                  >
+                    Use credits
+                  </button>
+                );
+              })()}
+              {/* Pay at club, where the venue takes it. Shortened beside
+                  Pay → — this row also carries Edit and Cancel. */}
+              {canPay && payAtClub && (
+                <button
+                  type="button"
+                  onClick={() => payRowAtClub(row.id)}
+                  disabled={markingId === row.id}
+                  className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0 disabled:opacity-50"
+                  style={
+                    payNow
+                      ? { background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }
+                      : { background: "rgba(146,100,10,0.1)", color: "#92640a" }
+                  }
+                >
+                  {markingId === row.id
+                    ? "Saving…"
+                    : payNow
+                      ? "At club"
+                      : "Pay at club"}
+                </button>
+              )}
+              {canPay && payNow &&
+                (group.primary.course?.payment_url ? (
+                  <a
+                    href={group.primary.course.payment_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
+                    style={{
+                      background: "rgba(146,100,10,0.1)",
+                      color: "#92640a",
+                    }}
+                  >
+                    Pay →
+                  </a>
+                ) : (
+                  <span className="text-[11px] text-gray-400 flex-shrink-0">
+                    Payment link pending
+                  </span>
+                ))}
+
+              {/* Edit — booker only, while the guest is still awaiting approval */}
+              {editablePlayer && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onEditGuest({
+                      bookingId: row.id,
+                      player: editablePlayer,
+                    })
+                  }
+                  className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
+                  style={{
+                    color: "rgba(0,38,105,0.55)",
+                    background: "rgba(0,38,105,0.06)",
+                  }}
+                >
+                  Edit
+                </button>
+              )}
+
+              {/* Cancel, then the status pill — what the seat is and the
+                  one way to give it up, read together. */}
+              {(!canPay || row.canCancel) && (
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  {row.canCancel && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onCancel({
+                          bookingDateTime: localDt.toISOString(),
+                          title: row.isYou
+                            ? "Cancel my booking"
+                            : `Cancel ${row.name}'s booking`,
+                          ghlBookingId: row.ghlBookingId,
+                        })
+                      }
+                      className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
+                      style={{
+                        color: "rgba(220,38,38,0.65)",
+                        background: "rgba(220,38,38,0.06)",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                  {!canPay && <BookingStatusBadge status={row.status} />}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {payError && (
+          <p
+            className="px-4 py-2 text-xs border-t"
+            style={{ color: "#b91c1c", borderColor: "rgba(0,38,105,0.06)" }}
+          >
+            {payError}
+          </p>
+        )}
+      </div>
 
       {creditTarget && (
         <CreditCouponModal
