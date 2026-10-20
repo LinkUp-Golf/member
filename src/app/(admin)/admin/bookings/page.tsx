@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase'
 import { AdminPageHeader, StatCard } from '@/components/admin/AdminUI'
 import Select from '@/components/ui/Select'
 import { format, addDays, subDays, isToday, differenceInCalendarDays } from 'date-fns'
-import { formatTeeTime } from '@/lib/utils'
+import { formatTeeTime, titleCaseName } from '@/lib/utils'
 import { tagsOverlap } from '@/lib/ghl/tags'
 import { settlingAtClub, PAY_AT_CLUB_LABEL } from '@/lib/bookings/payment-options'
 import { inviteStatusLabel } from '@/lib/bookings/invitations'
@@ -39,7 +39,7 @@ interface BookingRow {
   ghl_opportunity_id: string | null
   member: { first_name: string; last_name: string; email: string } | null
   player?: { id: string; first_name: string; last_name: string; email: string } | null
-  course?: { name: string; id?: string; meeting_duration_mins?: number | null } | null
+  course?: { name: string; id?: string } | null
   course_id?: string
   // Attached after loading (see loadBookings) — a booking with credit put
   // toward it. Void/expired codes are kept rather than dropped: they say credit
@@ -58,12 +58,6 @@ const STATUS_META: Record<BookingStatus, { label: string; colour: string; dot: s
   waitlist:              { label: 'Waitlist',          colour: 'bg-gray-100 text-gray-400',   dot: 'bg-gray-300'   },
 }
 
-// Statuses an admin can manually move a booking through — the payment pipeline
-// only. Other values (cancelled, awaiting_approval, and legacy confirmed /
-// pending / waitlist) aren't manual targets. If a row is already in one of
-// those, it's still shown as the current (selected) option so the control
-// renders correctly, but only these three can be chosen.
-const STATUS_ACTIONS: BookingStatus[] = ['tentative', 'availability_confirmed', 'payment_confirmed']
 const STATUS_FILTERS =['all', 'tentative', 'awaiting_approval', 'availability_confirmed', 'payment_confirmed', 'confirmed', 'cancelled', 'payment_overdue'] as const
 type StatusFilter = typeof STATUS_FILTERS[number]
 
@@ -139,14 +133,21 @@ interface AccessMemberRow {
   ghl_tags: string[]
 }
 
+// One booking: the rows inserted together for one booker. A tee time can hold
+// several of them, and two separate bookings landing on the same tee time by
+// coincidence must not be merged into one — so this is keyed by
+// (booker + tee time + created_at) rather than just date/time. Rows inserted
+// together (one transaction) share the exact same created_at, since Postgres
+// evaluates now() once per statement.
 type TeeSlot = { key: string; booking_date: string; tee_time: string; created_at: string; rows: BookingRow[] }
-type DateGroup = { date: string; label: string; isToday: boolean; slots: TeeSlot[] }
+// Every booking at one venue on one date and tee time — one card in the list.
+type TeeTimeGroup = { key: string; booking_date: string; tee_time: string; isToday: boolean; slots: TeeSlot[] }
 
-// Grouped by (booker + tee time + created_at) rather than just date/time —
-// two separate booking groups can land on the same tee time by coincidence
-// and must not be merged into one slot. Rows inserted together (one
-// transaction) share the exact same created_at, since Postgres evaluates
-// now() once per statement.
+// The booker's own seat, as opposed to a member or guest they added.
+function isBookerRow(b: BookingRow): boolean {
+  return !b.guest_name && !b.player_member_id
+}
+
 function groupBySlot(bookings: BookingRow[]): TeeSlot[] {
   const map = new Map<string, BookingRow[]>()
   for (const b of bookings) {
@@ -155,53 +156,57 @@ function groupBySlot(bookings: BookingRow[]): TeeSlot[] {
     arr.push(b)
     map.set(key, arr)
   }
-  return [...map.entries()]
-    .map(([key, rows]) => {
-      const first = rows[0]!
-      return { key, booking_date: first.booking_date, tee_time: first.tee_time, created_at: first.created_at, rows }
-    })
-    // Most recently booked first — an admin works the list from the newest
-    // request down, not from whichever tee time happens to be earliest.
-    .sort((a, b) => b.created_at.localeCompare(a.created_at) || a.tee_time.localeCompare(b.tee_time))
+  return [...map.entries()].map(([key, rows]) => {
+    const first = rows[0]!
+    // The booker heads their own group; the players they added follow.
+    const ordered = [...rows].sort((a, b) => Number(isBookerRow(b)) - Number(isBookerRow(a)))
+    return { key, booking_date: first.booking_date, tee_time: first.tee_time, created_at: first.created_at, rows: ordered }
+  })
 }
 
-// Slots stay grouped under their tee date, and the groups run by that date,
-// latest round first.
+// Bookings gathered under their date + tee time, one card each.
 //
-// They used to be ordered by whichever date held the newest booking, which read
-// as newest-booked-first for the list as a whole and left the dates themselves
-// in no order at all — October 18th above October 10th above October 24th,
-// because that was the order the three bookings came in. A date is the one thing
-// in this list a reader already holds in their head, so it's what the headings
-// count down. Inside a group the slots still run newest-booked first
-// (groupBySlot), which is the order an admin works a day's requests in.
-function groupByDate(slots: TeeSlot[]): DateGroup[] {
+// Dates run latest round first — a date is the one thing in this list a reader
+// already holds in their head, so it's what the headings count down. Within a date
+// the tee times run in the order the day plays, and within a tee time the
+// bookings run in the order they came in, so the first box is the first player
+// who claimed the slot. Keyed by venue as well: two venues can share a tee time,
+// and the all-bookings view can list both.
+function groupByTeeTime(slots: TeeSlot[]): TeeTimeGroup[] {
   const map = new Map<string, TeeSlot[]>()
   for (const slot of slots) {
-    const arr = map.get(slot.booking_date) ?? []
+    const key = `${slot.booking_date}_${slot.tee_time}_${slot.rows[0]?.course_id ?? ''}`
+    const arr = map.get(key) ?? []
     arr.push(slot)
-    map.set(slot.booking_date, arr)
+    map.set(key, arr)
   }
   return [...map.entries()]
-    .map(([date, s]) => ({
-      date,
-      label: format(new Date(`${date}T12:00:00`), 'EEEE, MMMM d, yyyy'),
-      isToday: isToday(new Date(`${date}T12:00:00`)),
-      slots: s,
-    }))
-    // 'YYYY-MM-DD' sorts chronologically as a string, so there is no date
-    // arithmetic here to get wrong across a timezone.
-    .sort((a, b) => b.date.localeCompare(a.date))
+    .map(([key, s]) => {
+      const { booking_date, tee_time } = s[0] as TeeSlot
+      return {
+        key,
+        booking_date,
+        tee_time,
+        isToday: isToday(new Date(`${booking_date}T12:00:00`)),
+        slots: [...s].sort((a, b) => a.created_at.localeCompare(b.created_at)),
+      }
+    })
+    // 'YYYY-MM-DD' and 'HH:MM:SS' both sort chronologically as strings, so
+    // there is no date arithmetic here to get wrong across a timezone.
+    .sort((a, b) => b.booking_date.localeCompare(a.booking_date) || a.tee_time.localeCompare(b.tee_time) || a.key.localeCompare(b.key))
 }
 
+// Names arrive as typed — at signup, from GHL, or into a guest form — so they're
+// title-cased here rather than trusted. The contact line is left as it is: an
+// email address has to stay as written to be recognised.
 function playerInfo(b: BookingRow): { name: string; sub: string; badge?: string } {
   if (b.guest_name) {
     const guest = b.additional_players?.[0]
     const contact = [guest?.email, guest?.mobile].filter(Boolean).join(' · ')
-    return { name: b.guest_name, sub: contact || 'Non-member guest', badge: 'Guest' }
+    return { name: titleCaseName(b.guest_name.trim()), sub: contact || 'Non-member guest', badge: 'Guest' }
   }
-  if (b.player) return { name: `${b.player.first_name ?? ''} ${b.player.last_name ?? ''}`.trim(), sub: b.player.email ?? '', badge: 'Invited' }
-  return { name: `${b.member?.first_name ?? ''} ${b.member?.last_name ?? ''}`.trim(), sub: b.member?.email ?? '' }
+  if (b.player) return { name: titleCaseName(`${b.player.first_name ?? ''} ${b.player.last_name ?? ''}`.trim()), sub: b.player.email ?? '', badge: 'Invited' }
+  return { name: titleCaseName(`${b.member?.first_name ?? ''} ${b.member?.last_name ?? ''}`.trim()), sub: b.member?.email ?? '' }
 }
 
 /**
@@ -232,57 +237,15 @@ function paymentDaysLeftLabel(b: BookingRow): string | null {
   return `${daysLeft} days left`
 }
 
-// Whether a payment reminder can be sent for this row. The GHL webhook matches
-// the contact by email: members (booker or invited) always have one from
-// signup; a non-member guest is only reachable if an email was captured at
-// booking time.
-function canRemindPayment(b: BookingRow): boolean {
-  if (b.player_member_id) return true
-  if (!b.guest_name) return true
-  return !!b.additional_players?.[0]?.email
-}
+// ---- Tee-time card ---------------------------------------------------
+//
+// One tree per tee time, under its date: the time is the root and each booking
+// a branch, drawn as a box. A member who booked alone is a box of one, and a
+// group booking keeps its players together in one box, so who came with whom reads at a glance. Nothing
+// collapses — an admin working a day needs every player, status and balance in
+// view without opening each slot to find them.
 
-// A round's length is a per-course setting held on that course's GHL calendar and
-// mirrored onto courses.meeting_duration_mins. Returns null when the course (and
-// so its duration) isn't known, in which case the caller shows only the tee time.
-function slotEndTime(teeTime: string, durationMins: number | null | undefined): string | null {
-  if (!durationMins) return null
-  const [th = 0, tm = 0] = teeTime.split(':').map(Number)
-  // Wrap into a 24h clock for display — a late tee time + round duration can
-  // cross midnight (e.g. hour 25), which formatTeeTime can't render correctly.
-  const endMins = (th * 60 + tm + durationMins) % 1440
-  return formatTeeTime(`${String(Math.floor(endMins / 60)).padStart(2, '0')}:${String(endMins % 60).padStart(2, '0')}:00`)
-}
-
-// ---- Slot card (collapsible) ----------------------------------------
-
-function SlotCard({
-  slot,
-  showCourseName,
-  expandedSlots,
-  onToggle,
-  updatingStatus,
-  onUpdateStatus,
-  editingNote,
-  noteValues,
-  onEditNote,
-  onNoteChange,
-  onSaveNote,
-  savingNote,
-  noteRef,
-  remindingPayment,
-  remindedPaymentIds,
-  onRemindPayment,
-  deletingBookingId,
-  onRequestDelete,
-  onMove,
-}: {
-  slot: TeeSlot
-  showCourseName: boolean
-  expandedSlots: Set<string>
-  onToggle: (key: string) => void
-  updatingStatus: string | null
-  onUpdateStatus: (id: string, status: BookingStatus) => void
+type RowActions = {
   editingNote: string | null
   noteValues: Record<string, string>
   onEditNote: (id: string | null) => void
@@ -290,52 +253,50 @@ function SlotCard({
   onSaveNote: (id: string) => void
   savingNote: string | null
   noteRef: React.RefObject<HTMLTextAreaElement>
-  remindingPayment: string | null
-  remindedPaymentIds: Set<string>
-  onRemindPayment: (id: string) => void
   deletingBookingId: string | null
   onRequestDelete: (b: BookingRow) => void
   onMove: (slot: TeeSlot) => void
-}) {
-  const isExpanded = expandedSlots.has(slot.key)
-  const totalAmount = slot.rows.reduce((sum, b) => sum + Number(b.amount_charged), 0)
-  const activeRows = slot.rows.filter(b => b.status !== 'cancelled')
+}
+
+function TeeTimeCard({ group, showCourseName, actions }: { group: TeeTimeGroup; showCourseName: boolean; actions: RowActions }) {
+  const rows = group.slots.flatMap(s => s.rows)
+  const activeRows = rows.filter(b => b.status !== 'cancelled')
   const paidCount = activeRows.filter(b => ['payment_confirmed', 'confirmed'].includes(b.status)).length
   const allPaid = activeRows.length > 0 && paidCount === activeRows.length
+  const totalAmount = rows.reduce((sum, b) => sum + Number(b.amount_charged), 0)
+  const hasAttention = rows.some(b => ['awaiting_approval', 'tentative'].includes(b.status))
+  const courseName = rows[0]?.course?.name
 
   // Status breakdown for the slot header
-  const statusBreakdown = slot.rows.reduce<Record<string, number>>((acc, b) => {
+  const statusBreakdown = rows.reduce<Record<string, number>>((acc, b) => {
     acc[b.status] = (acc[b.status] ?? 0) + 1
     return acc
   }, {})
-  const hasAttention = slot.rows.some(b => ['awaiting_approval', 'tentative'].includes(b.status))
-  const slotEnd = slotEndTime(slot.tee_time, slot.rows[0]?.course?.meeting_duration_mins)
 
   return (
-    <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
-      {/* Slot header — always visible, clickable to toggle */}
-      <button
-        type="button"
-        className="w-full px-4 py-3 text-left flex items-center justify-between gap-2 hover:bg-gray-50 transition-colors"
-        onClick={() => onToggle(slot.key)}
-      >
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <svg
-            className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-          </svg>
+    <div>
+      {/* The tee time is the tree's root — no card around it, just the node. */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-stretch gap-2 min-w-0 flex-1">
+          {/* Clock node, with the trunk starting beneath it */}
+          <div className="flex flex-col items-center flex-shrink-0 w-6" aria-hidden="true">
+            <span
+              className="w-6 h-6 rounded-full flex items-center justify-center"
+              style={{ background: 'rgba(0,38,105,0.06)', color: 'var(--color-green-900)' }}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </span>
+            <span className="flex-1 w-px bg-gray-200" />
+          </div>
           <div className="min-w-0 flex-1">
             {/* Time + course + attention — first line */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <p className="text-sm font-semibold text-gray-800 whitespace-nowrap">
-                {formatTeeTime(slot.tee_time)}
-                {slotEnd && ` – ${slotEnd}`}
-              </p>
-              {showCourseName && slot.rows[0]?.course?.name && (
+            <div className="flex items-center gap-2 flex-wrap min-h-6">
+              <p className="text-sm font-semibold text-gray-800 whitespace-nowrap">{formatTeeTime(group.tee_time)}</p>
+              {showCourseName && courseName && (
                 <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 whitespace-nowrap">
-                  {slot.rows[0].course.name}
+                  {courseName}
                 </span>
               )}
               {hasAttention && (
@@ -343,7 +304,7 @@ function SlotCard({
               )}
             </div>
             {/* Status chips — scrollable on mobile */}
-            <div className="flex items-center gap-1 mt-1 overflow-x-auto pb-0.5 hide-scrollbar">
+            <div className="flex items-center gap-1 mt-0.5 overflow-x-auto pb-0.5 hide-scrollbar">
               {Object.entries(statusBreakdown).map(([status, count]) => {
                 const meta = STATUS_META[status as BookingStatus]
                 return (
@@ -357,185 +318,186 @@ function SlotCard({
           </div>
         </div>
 
-        {/* Amount + count — always visible */}
-        <div className="flex-shrink-0 text-right">
-          <p className="text-xs font-semibold text-green-700">${totalAmount.toFixed(0)}</p>
-          <p className="text-[10px] text-gray-400">{slot.rows.length}p</p>
+        {/* Amount + count */}
+        <div className="flex-shrink-0 flex flex-wrap items-center justify-end gap-x-1.5 gap-y-1 text-right">
+          <span className="text-xs font-semibold text-green-700">${totalAmount.toFixed(0)}</span>
+          <span className="text-[10px] text-gray-400">· {rows.length}p</span>
           {activeRows.length > 0 && (
-            <span className={`inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${
+            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${
               allPaid ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'
             }`}>
-              {allPaid ? '✓' : '⚠'} {paidCount}/{activeRows.length} members paid
+              {allPaid ? '✓' : '⚠'} {paidCount}/{activeRows.length} paid
             </span>
           )}
         </div>
-      </button>
+      </div>
 
-      {/* Expanded: per-player rows */}
-      {isExpanded && (
-        <div className="divide-y divide-gray-50 border-t border-gray-100">
-          {slot.rows.map(b => {
-            const info = playerInfo(b)
-            const sm = STATUS_META[b.status] ?? STATUS_META.tentative
-            const daysLeftLabel = paymentDaysLeftLabel(b)
-            const atClub = settlingAtClub(b)
-            const showRemindCta = !!daysLeftLabel && canRemindPayment(b)
-            const alreadyReminded = remindedPaymentIds.has(b.id)
-            return (
-              <div key={b.id} className="px-4 py-3">
-                {/* Top: name + status (side by side) */}
-                <div className="flex items-start justify-between gap-2 mb-1.5">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <p className="text-sm font-medium text-gray-800 truncate">{info.name}</p>
-                      {info.badge && (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 flex-shrink-0">
-                          {info.badge}
-                        </span>
-                      )}
-                      {/* An added player's answer, and who's covering them. */}
-                      {b.invite_status && (
-                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 whitespace-nowrap ${
-                          b.invite_status === 'accepted' ? 'bg-emerald-50 text-emerald-700'
-                            : b.invite_status === 'declined' || b.invite_status === 'expired' ? 'bg-gray-100 text-gray-500'
-                            : 'bg-yellow-50 text-yellow-700'
-                        }`}>
-                          {inviteStatusLabel(b.invite_status)}
-                        </span>
-                      )}
-                      {b.invite_status && (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 flex-shrink-0 whitespace-nowrap">
-                          {b.paid_by_booker ? 'Booker pays' : 'Pays own'}
-                        </span>
-                      )}
-                      {daysLeftLabel && (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 flex-shrink-0 whitespace-nowrap">
-                          ⏳ {daysLeftLabel}
-                        </span>
-                      )}
-                      {/* The club collects this one. Amber rather than green:
-                          nothing tells us the member has paid them, so the badge
-                          doesn't say they have. */}
-                      {atClub && (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 flex-shrink-0 whitespace-nowrap">
-                          {PAY_AT_CLUB_LABEL}
-                        </span>
-                      )}
-                      {/* Credit put toward this row. The code is here because
-                          it's what a member quotes when they call about it. */}
-                      {b.credit_coupon && (
-                        <span
-                          title={`${b.credit_coupon.code} · $${b.credit_coupon.amount.toFixed(2)} · ${COUPON_STATUS_LABEL[b.credit_coupon.status]}`}
-                          className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 whitespace-nowrap ${
-                            b.credit_coupon.status === 'void' || b.credit_coupon.status === 'expired'
-                              ? 'bg-gray-100 text-gray-400'
-                              : 'bg-amber-50 text-amber-700'
-                          }`}
-                        >
-                          🎟 ${b.credit_coupon.amount.toFixed(0)} credit
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-400 mt-0.5 truncate">{info.sub}</p>
-                  </div>
-
-                  {/* Status + dinner — stacked, right-aligned */}
-                  <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                    <div className="flex items-center gap-1.5">
-                      {showRemindCta && (
-                        <button
-                          type="button"
-                          onClick={() => onRemindPayment(b.id)}
-                          disabled={remindingPayment === b.id || alreadyReminded}
-                          className="text-xs font-medium px-2.5 py-1 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:hover:bg-red-600 whitespace-nowrap transition-colors"
-                        >
-                          {remindingPayment === b.id ? 'Sending…' : alreadyReminded ? '✓ Sent' : 'Send reminder'}
-                        </button>
-                      )}
-                      <select
-                        value={b.status}
-                        disabled={updatingStatus === b.id}
-                        onChange={e => onUpdateStatus(b.id, e.target.value as BookingStatus)}
-                        className={`text-xs font-semibold rounded-lg px-2 py-1 border border-transparent outline-none cursor-pointer disabled:opacity-50 transition-colors max-w-[140px] sm:max-w-none ${sm.colour}`}
-                      >
-                        {(STATUS_ACTIONS.includes(b.status) ? STATUS_ACTIONS : [b.status, ...STATUS_ACTIONS]).map(s => (
-                          <option key={s} value={s}>{STATUS_META[s].label}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {b.dinner_rsvp ? (
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${
-                        b.dinner_rsvp === 'yes'   ? 'bg-green-50 text-green-600' :
-                        b.dinner_rsvp === 'maybe' ? 'bg-yellow-50 text-yellow-600' :
-                                                    'bg-gray-100 text-gray-400'
-                      }`}>
-                        🍽 {b.dinner_rsvp === 'yes' ? 'Yes' : b.dinner_rsvp === 'no' ? 'No' : 'Maybe'}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-
-                {/* Note — full width below */}
-                {editingNote === b.id ? (
-                  <div className="flex flex-col gap-1.5 mt-1" onClick={e => e.stopPropagation()} role="presentation">
-                    <textarea
-                      ref={noteRef}
-                      rows={2}
-                      value={noteValues[b.id] ?? ''}
-                      onChange={e => onNoteChange(b.id, e.target.value)}
-                      className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-green-900/20"
-                    />
-                    <div className="flex gap-1.5">
-                      <button onClick={() => onSaveNote(b.id)} disabled={savingNote === b.id}
-                        className="text-xs px-2.5 py-1 rounded-lg bg-green-900 text-white disabled:opacity-50">
-                        {savingNote === b.id ? 'Saving…' : 'Save'}
-                      </button>
-                      <button onClick={() => onEditNote(null)} className="text-xs px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600">
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between gap-2 mt-1">
-                    <button onClick={() => onEditNote(b.id)}
-                      className="min-w-0 flex-1 text-xs text-left text-gray-400 hover:text-gray-600 transition-colors italic truncate">
-                      {b.admin_notes ?? 'Add note…'}
-                    </button>
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                    {/* Moves the whole group this row belongs to, not just this
-                        player — see POST /api/admin/bookings/[id]/move. */}
-                    {b.status !== 'cancelled' && (
-                      <button
-                        type="button"
-                        onClick={() => onMove(slot)}
-                        className="flex-shrink-0 flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800 px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5m-9-6h.008v.008H12v-.008zM12 15h.008v.008H12V15zm0 2.25h.008v.008H12v-.008zM9.75 15h.008v.008H9.75V15zm0 2.25h.008v.008H9.75v-.008zM7.5 15h.008v.008H7.5V15zm0 2.25h.008v.008H7.5v-.008zm6.75-4.5h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V15zm0 2.25h.008v.008h-.008v-.008zm2.25-4.5h.008v.008H16.5v-.008zm0 2.25h.008v.008H16.5V15z" />
-                        </svg>
-                        Move
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => onRequestDelete(b)}
-                      disabled={deletingBookingId === b.id}
-                      className="flex-shrink-0 flex items-center gap-1 text-xs font-medium text-red-500 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                      </svg>
-                      {deletingBookingId === b.id ? 'Deleting…' : 'Delete'}
-                    </button>
-                    </div>
-                  </div>
-                )}
+      {/* Branches — one box per booking; the players booked together share a
+          box. Each branch draws its own piece of the trunk, so the line stops
+          at the last booking rather than running past it. */}
+      <div>
+        {group.slots.map((slot, si) => {
+          const isLast = si === group.slots.length - 1
+          return (
+            <div key={slot.key} className="relative pl-6 pt-2">
+              <span aria-hidden="true" className={`absolute left-3 top-0 w-px bg-gray-200 ${isLast ? 'h-7' : 'h-full'}`} />
+              <span aria-hidden="true" className="absolute left-3 top-7 w-3 h-px bg-gray-200" />
+              <div className="bg-white rounded-lg border border-gray-100 shadow-sm divide-y divide-gray-50">
+                {slot.rows.map((b, i) => (
+                  <PlayerRow key={b.id} b={b} slot={slot} isFirst={i === 0} inGroup={slot.rows.length > 1} actions={actions} />
+                ))}
               </div>
-            )
-          })}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// Move is live on the first row of each box only, because it moves the whole
+// booking — see POST /api/admin/bookings/[id]/move.
+//
+// No per-row price: within a tee time every seat costs the same, so the figure
+// repeated down the list said nothing the slot's total above it doesn't. What
+// can make one seat differ — credit put toward it, the booker covering it, the
+// club collecting it — has its own chip.
+function PlayerRow({ b, slot, isFirst, inGroup, actions }: { b: BookingRow; slot: TeeSlot; isFirst: boolean; inGroup: boolean; actions: RowActions }) {
+  const {
+    editingNote, noteValues, onEditNote, onNoteChange, onSaveNote,
+    savingNote, noteRef, deletingBookingId, onRequestDelete, onMove,
+  } = actions
+  const info = playerInfo(b)
+  const daysLeftLabel = paymentDaysLeftLabel(b)
+  const atClub = settlingAtClub(b)
+  const canMove = isFirst && slot.rows.some(r => r.status !== 'cancelled')
+  // In a group the booker is worth naming; alone, they're the only one there.
+  const badge = info.badge ?? (inGroup && isBookerRow(b) ? 'Booker' : undefined)
+  const chip = 'text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 whitespace-nowrap'
+
+  return (
+    <div className="px-3 py-2.5">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className={`text-sm font-medium truncate ${b.status === 'cancelled' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+              {info.name || info.sub}
+            </p>
+            {badge && <span className={`${chip} bg-gray-100 text-gray-500`}>{badge}</span>}
+            {/* An added player's answer, and who's covering them. */}
+            {b.invite_status && (
+              <span className={`${chip} ${
+                b.invite_status === 'accepted' ? 'bg-emerald-50 text-emerald-700'
+                  : b.invite_status === 'declined' || b.invite_status === 'expired' ? 'bg-gray-100 text-gray-500'
+                  : 'bg-yellow-50 text-yellow-700'
+              }`}>
+                {inviteStatusLabel(b.invite_status)}
+              </span>
+            )}
+            {b.invite_status && (
+              <span className={`${chip} bg-gray-100 text-gray-500`}>{b.paid_by_booker ? 'Booker pays' : 'Pays own'}</span>
+            )}
+            {daysLeftLabel && <span className={`${chip} bg-red-50 text-red-600`}>⏳ {daysLeftLabel}</span>}
+            {/* The club collects this one. Amber rather than green: nothing
+                tells us the member has paid them, so the badge doesn't say
+                they have. */}
+            {atClub && <span className={`${chip} bg-amber-50 text-amber-700`}>{PAY_AT_CLUB_LABEL}</span>}
+            {/* Credit put toward this row. The code is shown because it's
+                what a member quotes when they call about it. */}
+            {b.credit_coupon && (
+              <span className={`${chip} ${
+                b.credit_coupon.status === 'void' || b.credit_coupon.status === 'expired'
+                  ? 'bg-gray-100 text-gray-400'
+                  : 'bg-amber-50 text-amber-700'
+              }`}>
+                🎟 ${b.credit_coupon.amount.toFixed(0)} · <span className="font-mono">{b.credit_coupon.code}</span> · {COUPON_STATUS_LABEL[b.credit_coupon.status]}
+              </span>
+            )}
+            {b.dinner_rsvp && (
+              <span className={`${chip} ${
+                b.dinner_rsvp === 'yes'   ? 'bg-green-50 text-green-600' :
+                b.dinner_rsvp === 'maybe' ? 'bg-yellow-50 text-yellow-600' :
+                                            'bg-gray-100 text-gray-400'
+              }`}>
+                🍽 {b.dinner_rsvp === 'yes' ? 'Yes' : b.dinner_rsvp === 'no' ? 'No' : 'Maybe'}
+              </span>
+            )}
+          </div>
+          {info.name && info.sub && <p className="text-xs text-gray-400 mt-0.5 truncate">{info.sub}</p>}
         </div>
-      )}
+
+        {/* Actions */}
+        <div className="flex items-center gap-1 sm:flex-shrink-0 -ml-1.5 sm:ml-0">
+          <button
+            type="button"
+            onClick={() => onEditNote(b.id)}
+            title={b.admin_notes ? 'Edit note' : 'Add note'}
+            aria-label={b.admin_notes ? 'Edit note' : 'Add note'}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+            </svg>
+          </button>
+          {/* On every row so the actions line up, but live only on the first:
+              Move takes the whole booking with it, so a group's other players
+              point back at the row that moves them. */}
+          <button
+            type="button"
+            onClick={() => onMove(slot)}
+            disabled={!canMove}
+            title={canMove ? (inGroup ? 'Move this group' : 'Move booking') : isFirst ? 'Cancelled bookings can’t be moved' : 'Moves with the group — use Move on the first player'}
+            aria-label={inGroup ? 'Move this group' : 'Move booking'}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={() => onRequestDelete(b)}
+            disabled={deletingBookingId === b.id}
+            title="Delete booking"
+            aria-label={`Delete booking for ${info.name || 'player'}`}
+            className="p-1.5 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Admin note — shown when there is one, editable in place. */}
+      {editingNote === b.id ? (
+        <div className="flex flex-col gap-1.5 mt-2">
+          <textarea
+            ref={noteRef}
+            rows={2}
+            value={noteValues[b.id] ?? ''}
+            onChange={e => onNoteChange(b.id, e.target.value)}
+            className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-green-900/20"
+          />
+          <div className="flex gap-1.5">
+            <button onClick={() => onSaveNote(b.id)} disabled={savingNote === b.id}
+              className="text-xs px-2.5 py-1 rounded-lg bg-green-900 text-white disabled:opacity-50">
+              {savingNote === b.id ? 'Saving…' : 'Save'}
+            </button>
+            <button onClick={() => onEditNote(null)} className="text-xs px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600">
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : b.admin_notes ? (
+        <button
+          type="button"
+          onClick={() => onEditNote(b.id)}
+          className="mt-1 w-full text-left text-xs italic text-gray-500 hover:text-gray-700 transition-colors break-words"
+        >
+          {b.admin_notes}
+        </button>
+      ) : null}
     </div>
   )
 }
@@ -669,13 +631,9 @@ export default function AdminBookingsPage() {
   const [debouncedEventName, setDebouncedEventName] = useState('')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
-  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null)
   const [editingNote, setEditingNote] = useState<string | null>(null)
   const [noteValues, setNoteValues] = useState<Record<string, string>>({})
   const [savingNote, setSavingNote] = useState<string | null>(null)
-  const [expandedSlots, setExpandedSlots] = useState<Set<string>>(new Set())
-  const [remindingPayment, setRemindingPayment] = useState<string | null>(null)
-  const [remindedPaymentIds, setRemindedPaymentIds] = useState<Set<string>>(new Set())
   const [deletingBookingId, setDeletingBookingId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<BookingRow | null>(null)
   const [moveTarget, setMoveTarget] = useState<TeeSlot | null>(null)
@@ -723,7 +681,7 @@ export default function AdminBookingsPage() {
     // A custom From/To range overrides the view-based window when both are set.
     // The window decides *which* bookings are fetched; the order they're shown
     // in is by tee date, latest first, with each date's own slots newest-booked
-    // first (see groupByDate).
+    // first (see groupByTeeTime).
     // Payment status (unpaid) is just another status filter — it doesn't
     // override the date window. The "days left" badge (see paymentDaysLeftLabel)
     // is what narrows attention to bookings within PAYMENT_OVERDUE_WINDOW_DAYS.
@@ -768,7 +726,7 @@ export default function AdminBookingsPage() {
 
     if (matchingCourseIds.length === 0) { setBookings([]); setLoading(false); return }
 
-    const SELECT = 'id, member_id, created_at, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, payment_method, paid_by_booker, invite_status, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name, meeting_duration_mins)'
+    const SELECT = 'id, member_id, created_at, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, payment_method, paid_by_booker, invite_status, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name)'
     const SELECT_NO_DINNER = SELECT.replace('dinner_rsvp, ', '')
 
     function buildQuery(select: string) {
@@ -841,7 +799,6 @@ export default function AdminBookingsPage() {
     const initial: Record<string, string> = {}
     enriched.forEach(b => { initial[b.id] = b.admin_notes ?? '' })
     setNoteValues(initial)
-    setExpandedSlots(new Set()) // collapse all on fresh load
     setLoading(false)
   }, [view, courseFilter, locationFilter, tagFilter, debouncedEventName, statusFilter, dinnerFilter, customFrom, customTo])
 
@@ -1003,6 +960,7 @@ export default function AdminBookingsPage() {
   }, [filtered, courseFilter, courseList])
 
   const allSlots = useMemo(() => groupBySlot(filtered), [filtered])
+  const allTeeTimes = useMemo(() => groupByTeeTime(allSlots), [allSlots])
 
   // Stats
   const confirmed  = bookings.filter(b => ['confirmed', 'payment_confirmed', 'availability_confirmed'].includes(b.status)).length
@@ -1013,28 +971,6 @@ export default function AdminBookingsPage() {
   // credit went back to the member and paid for nothing.
   const creditRows = bookings.filter(b => b.credit_coupon && b.credit_coupon.status !== 'void' && b.credit_coupon.status !== 'expired')
   const creditTotal = creditRows.reduce((s, b) => s + Number(b.credit_coupon?.amount ?? 0), 0)
-
-  async function updateStatus(bookingId: string, status: BookingStatus) {
-    setUpdatingStatus(bookingId)
-    try {
-      const res = await fetch(`/api/admin/bookings/${bookingId}/status`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
-      })
-      if (res.ok) {
-        setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status } : b))
-      } else {
-        const json = await res.json().catch(() => ({}))
-        setRequestToast({ msg: json.error ?? 'Failed to update status. Please try again.', ok: false })
-        setTimeout(() => setRequestToast(null), 3500)
-      }
-    } catch {
-      setRequestToast({ msg: 'Network error. Please try again.', ok: false })
-      setTimeout(() => setRequestToast(null), 3500)
-    } finally {
-      setUpdatingStatus(null)
-    }
-  }
 
   async function saveNote(bookingId: string) {
     setSavingNote(bookingId)
@@ -1057,20 +993,6 @@ export default function AdminBookingsPage() {
     } finally {
       setSavingNote(null)
     }
-  }
-
-  async function remindPayment(bookingId: string) {
-    setRemindingPayment(bookingId)
-    const res = await fetch(`/api/admin/bookings/${bookingId}/remind-payment`, { method: 'POST' })
-    if (res.ok) {
-      setRemindedPaymentIds(prev => new Set(prev).add(bookingId))
-      setRequestToast({ msg: 'Payment reminder texted.', ok: true })
-    } else {
-      const json = await res.json().catch(() => ({}))
-      setRequestToast({ msg: json.error ?? 'Failed to send reminder. Please try again.', ok: false })
-    }
-    setTimeout(() => setRequestToast(null), 3500)
-    setRemindingPayment(null)
   }
 
   async function confirmDeleteBooking() {
@@ -1100,23 +1022,6 @@ export default function AdminBookingsPage() {
     }
   }
 
-  function toggleSlot(key: string) {
-    setExpandedSlots(prev => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
-
-  function expandAll() {
-    setExpandedSlots(new Set(allSlots.map(s => s.key)))
-  }
-
-  function collapseAll() {
-    setExpandedSlots(new Set())
-  }
-
   function exportCSV() {
     const headers = ['Course', 'Player', 'Email', 'Type', 'Date', 'Tee Time', 'Status', 'Payment', 'Credit code', 'Credit amount', 'Dinner RSVP', 'Admin Notes']
     const rows = filtered.map(b => {
@@ -1137,14 +1042,11 @@ export default function AdminBookingsPage() {
     URL.revokeObjectURL(url)
   }
 
-  const slotProps = {
-    expandedSlots, onToggle: toggleSlot,
-    updatingStatus, onUpdateStatus: updateStatus,
+  const rowActions: RowActions = {
     editingNote, noteValues,
     onEditNote: setEditingNote,
     onNoteChange: (id: string, val: string) => setNoteValues(prev => ({ ...prev, [id]: val })),
     onSaveNote: saveNote, savingNote, noteRef,
-    remindingPayment, remindedPaymentIds, onRemindPayment: remindPayment,
     deletingBookingId, onRequestDelete: setDeleteTarget,
     onMove: setMoveTarget,
   }
@@ -1487,12 +1389,6 @@ export default function AdminBookingsPage() {
               </span>
             )}
           </button>
-          {allSlots.length > 0 && (
-            <div className="hidden sm:flex items-center gap-1">
-              <button onClick={expandAll}  className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-50">Expand all</button>
-              <button onClick={collapseAll} className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-50">Collapse</button>
-            </div>
-          )}
           <button onClick={exportCSV} disabled={filtered.length === 0}
             className="flex-shrink-0 flex items-center gap-1 px-3 py-2 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors">
             ↓ <span className="hidden sm:inline">CSV</span>
@@ -1540,11 +1436,10 @@ export default function AdminBookingsPage() {
           <p className="text-xs text-gray-400 mt-1">Try adjusting the filters or switching between Upcoming / Past.</p>
         </div>
       ) : byCourse ? (
-        /* All-courses view: grouped by course → date → slot */
+        /* All-courses view: grouped by course, then one card per date + tee time */
         <div className="space-y-8">
           {byCourse.map(({ course, bookings: cb }) => {
-            const courseSlots = groupBySlot(cb)
-            const dateGroups = groupByDate(courseSlots)
+            const teeTimes = groupByTeeTime(groupBySlot(cb))
             const courseRevenue = cb.filter(isLinkUpRevenue).reduce((s, b) => s + Number(b.amount_charged), 0)
             const courseAttention = cb.filter(b => b.status === 'awaiting_approval').length
 
@@ -1570,19 +1465,19 @@ export default function AdminBookingsPage() {
                   <div className="h-px flex-1 bg-gray-100" />
                 </div>
 
-                <DateGroupedSlots dateGroups={dateGroups} showCourseName={false} slotProps={slotProps} />
+                <TeeTimeList groups={teeTimes} showCourseName={false} actions={rowActions} />
               </div>
             )
           })}
         </div>
       ) : (
-        /* Single course / filtered view: grouped by date → slot */
-        <DateGroupedSlots dateGroups={groupByDate(allSlots)} showCourseName={courseList.length > 1} slotProps={slotProps} />
+        /* Single course / filtered view: one card per date + tee time */
+        <TeeTimeList groups={allTeeTimes} showCourseName={courseList.length > 1} actions={rowActions} />
       )}
 
       {!loading && filtered.length > 0 && (
         <p className="text-xs text-gray-400 mt-5 text-right">
-          {filtered.length} player{filtered.length !== 1 ? 's' : ''} · {allSlots.length} tee slot{allSlots.length !== 1 ? 's' : ''} · {VIEW_LABELS[view].toLowerCase()}
+          {filtered.length} player{filtered.length !== 1 ? 's' : ''} · {allSlots.length} booking{allSlots.length !== 1 ? 's' : ''} · {allTeeTimes.length} tee time{allTeeTimes.length !== 1 ? 's' : ''} · {VIEW_LABELS[view].toLowerCase()}
         </p>
       )}
         </>
@@ -1591,49 +1486,55 @@ export default function AdminBookingsPage() {
   )
 }
 
-// ---- Date-grouped slot list ------------------------------------------
+// ---- Date-grouped tee-time list --------------------------------------
 
-function DateGroupedSlots({
-  dateGroups,
+function TeeTimeList({
+  groups,
   showCourseName,
-  slotProps,
+  actions,
 }: {
-  dateGroups: DateGroup[]
+  groups: TeeTimeGroup[]
   showCourseName: boolean
-  slotProps: Omit<Parameters<typeof SlotCard>[0], 'slot' | 'showCourseName'>
+  actions: RowActions
 }) {
-  if (dateGroups.length === 0) return null
+  if (groups.length === 0) return null
+  // groups arrive date-ordered (groupByTeeTime), so a date's tee times are adjacent.
+  const dates: { date: string; isToday: boolean; teeTimes: TeeTimeGroup[] }[] = []
+  for (const g of groups) {
+    const last = dates[dates.length - 1]
+    if (last?.date === g.booking_date) last.teeTimes.push(g)
+    else dates.push({ date: g.booking_date, isToday: g.isToday, teeTimes: [g] })
+  }
   return (
     <div className="space-y-4">
-      {dateGroups.map(dg => (
-        <div key={dg.date}>
-          {/* Date header */}
-          <div className="flex items-center gap-2 mb-2">
-            <div
-              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full"
-              style={dg.isToday
-                ? { background: 'var(--color-green-900)', color: 'white' }
-                : { background: 'rgba(0,38,105,0.05)', color: 'rgba(0,38,105,0.6)' }
-              }
-            >
-              {dg.isToday && <span className="w-1.5 h-1.5 rounded-full bg-green-400" />}
-              {dg.label}
-              {dg.isToday && <span className="ml-0.5 font-bold">— Today</span>}
+      {dates.map(dg => {
+        const players = dg.teeTimes.reduce((s, t) => s + t.slots.reduce((n, sl) => n + sl.rows.length, 0), 0)
+        return (
+          <div key={dg.date}>
+            {/* Date header */}
+            <div className="flex items-center gap-2 mb-2">
+              <div
+                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full"
+                style={dg.isToday
+                  ? { background: 'var(--color-green-900)', color: 'white' }
+                  : { background: 'rgba(0,38,105,0.05)', color: 'rgba(0,38,105,0.6)' }
+                }
+              >
+                {dg.isToday && <span className="w-1.5 h-1.5 rounded-full bg-green-400" />}
+                {format(new Date(`${dg.date}T12:00:00`), 'EEEE, MMMM d, yyyy')}
+                {dg.isToday && <span className="ml-0.5 font-bold">— Today</span>}
+              </div>
+              <div className="h-px flex-1 bg-gray-100" />
+              <span className="text-[10px] text-gray-400">{players} player{players !== 1 ? 's' : ''}</span>
             </div>
-            <div className="h-px flex-1 bg-gray-100" />
-            <span className="text-[10px] text-gray-400">
-              {dg.slots.reduce((s, sl) => s + sl.rows.length, 0)} player{dg.slots.reduce((s, sl) => s + sl.rows.length, 0) !== 1 ? 's' : ''}
-            </span>
-          </div>
 
-          {/* Slots for this date */}
-          <div className="space-y-2 pl-1">
-            {dg.slots.map(slot => (
-              <SlotCard key={slot.key} slot={slot} showCourseName={showCourseName} {...slotProps} />
-            ))}
+            {/* Tee times for this date */}
+            <div className="space-y-5 pl-1 pt-1">
+              {dg.teeTimes.map(g => <TeeTimeCard key={g.key} group={g} showCourseName={showCourseName} actions={actions} />)}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
