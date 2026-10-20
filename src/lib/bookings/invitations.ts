@@ -44,12 +44,6 @@ export const PAID_BY_OPTIONS: ReadonlyArray<{ value: PaidBy; label: string }> = 
   { value: 'self', label: 'They pay' },
 ]
 
-/** How the invited player is told who's paying. */
-export function paidByLabel(paidByBooker: boolean, bookerName?: string | null): string {
-  if (!paidByBooker) return "You'll pay for your own round"
-  return bookerName ? `${bookerName} is paying for your round` : 'Your round is paid for by the booker'
-}
-
 /** The short tag beside a player on the booker's own card. */
 export function paidByShortLabel(paidByBooker: boolean): string {
   return paidByBooker ? 'You pay' : 'Pays own'

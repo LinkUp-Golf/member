@@ -1,7 +1,7 @@
 "use client";
 
 // An added player's invitation to a round: what it is, when, who invited them
-// and who's paying — and Accept / Decline while it can still be answered.
+// — and Accept / Decline while it can still be answered.
 // The rules are in @/lib/bookings/invitations; the data is
 // GET/POST /api/bookings/[id]/invitation.
 
@@ -14,7 +14,6 @@ import WhatHappensNext from "@/components/booking/WhatHappensNext";
 import { formatTeeTime } from "@/lib/utils";
 import {
   INVITE_RESPONSE_CUTOFF_HOURS,
-  paidByLabel,
   type InviteResponse,
   type InviteStatus,
 } from "@/lib/bookings/invitations";
@@ -131,16 +130,6 @@ export default function InvitationPage({ params }: { params: { id: string } }) {
                 {format(new Date(`${invite.bookingDate}T12:00:00`), "EEEE, MMMM d, yyyy")} ·{" "}
                 {formatTeeTime(invite.teeTime)}
               </p>
-              <div
-                className="mt-3 pt-3 border-t text-sm font-medium"
-                style={{
-                  borderColor: "rgba(0,38,105,0.07)",
-                  color: invite.paidByBooker ? "var(--color-green-700)" : "#92640a",
-                }}
-              >
-                {invite.paidByBooker ? "✓ " : ""}
-                {paidByLabel(invite.paidByBooker, invite.bookerName)}
-              </div>
             </div>
 
             <WhatHappensNext paidByBooker={invite.paidByBooker} />
