@@ -67,11 +67,7 @@ import type {
   MemberWithProfile,
   Course,
 } from "@/types";
-import {
-  POLICY_TIERS,
-  GHL_CANCEL_BOOKING_URL,
-  AVIARA_TIMEZONE,
-} from "@/lib/constants";
+import { AVIARA_TIMEZONE } from "@/lib/constants";
 import { validateEmail } from "@/lib/validation";
 
 type PlayerKind = "member" | "non_member";
@@ -2312,31 +2308,30 @@ function BookingStatusBadge({ status }: { status: string }) {
   );
 }
 
-function getPolicyTier(bookingDateTime: string) {
-  const hours = differenceInHours(new Date(bookingDateTime), new Date());
-  if (hours >= 72) return POLICY_TIERS[0];
-  if (hours >= 48) return POLICY_TIERS[1];
-  return POLICY_TIERS[2];
-}
-
+// Confirms a seat is being given up, then removes it — the row from LinkUp and
+// its appointment from GHL (DELETE /api/bookings/[id]). There is nothing to
+// fill in and no form to send the member off to: the answer is yes or no.
 function CancelModal({
-  open,
-  bookingDateTime,
-  title,
-  ghlBookingId,
+  target,
   onDismiss,
+  onCancelled,
 }: {
-  open: boolean;
-  bookingDateTime: string;
-  title: string;
-  ghlBookingId: string | null;
+  target: CancelTarget | null;
   onDismiss: () => void;
+  onCancelled: () => void;
 }) {
+  const open = !!target;
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  // Held through the closing animation, after the parent has cleared target.
+  const [shown, setShown] = useState<CancelTarget | null>(target);
 
   useEffect(() => {
     if (open) {
+      setShown(target);
+      setError("");
       setMounted(true);
       const ids: number[] = [];
       ids[0] = requestAnimationFrame(() => {
@@ -2348,14 +2343,30 @@ function CancelModal({
       const t = setTimeout(() => setMounted(false), 320);
       return () => clearTimeout(t);
     }
-  }, [open]);
+  }, [open, target]);
 
-  const activeTier = bookingDateTime ? getPolicyTier(bookingDateTime) : null;
-  const cancelUrl = ghlBookingId
-    ? `${GHL_CANCEL_BOOKING_URL}?event_id=${ghlBookingId}`
-    : GHL_CANCEL_BOOKING_URL;
+  async function confirm() {
+    if (!shown) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/bookings/${shown.bookingId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error ?? "Couldn't cancel this booking. Try again.");
+        return;
+      }
+      onCancelled();
+    } catch {
+      setError("Network error. Check your connection and try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
-  if (!mounted) return null;
+  if (!mounted || !shown) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center md:p-6">
@@ -2371,9 +2382,12 @@ function CancelModal({
           transition: "opacity 200ms ease-out",
           willChange: "opacity",
         }}
-        onClick={onDismiss}
+        onClick={submitting ? undefined : onDismiss}
       />
       <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="cancel-booking-title"
         className={[
           "relative bg-white rounded-t-3xl md:rounded-3xl px-5 pt-5 pb-8 space-y-4 w-full md:max-w-md",
           visible ? "translate-y-0" : "translate-y-full",
@@ -2386,113 +2400,69 @@ function CancelModal({
           willChange: "transform",
         }}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between">
+        <div>
           <p
+            id="cancel-booking-title"
             className="font-sans font-black text-lg"
             style={{ color: "var(--color-green-900)" }}
           >
-            {title}
+            {shown.title}
           </p>
-          <button
-            onClick={onDismiss}
-            className="w-8 h-8 rounded-full flex items-center justify-center"
-            style={{
-              background: "rgba(0,38,105,0.06)",
-              color: "rgba(0,38,105,0.5)",
-            }}
+          <p className="text-sm mt-1.5" style={{ color: "rgba(0,38,105,0.6)" }}>
+            {shown.isYou
+              ? "Your spot on this round will be cancelled."
+              : `${shown.playerName}'s spot on this round will be cancelled.`}{" "}
+            This can&apos;t be undone.
+          </p>
+        </div>
+
+        {/* The round being given up */}
+        <div
+          className="rounded-2xl px-4 py-3"
+          style={{
+            background: "rgba(0,38,105,0.03)",
+            border: "1px solid rgba(0,38,105,0.08)",
+          }}
+        >
+          <p
+            className="text-[10px] font-semibold uppercase tracking-wider truncate"
+            style={{ color: "rgba(0,38,105,0.35)" }}
           >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
+            {shown.courseName}
+          </p>
+          <p
+            className="text-sm font-semibold mt-0.5"
+            style={{ color: "var(--color-green-900)" }}
+          >
+            {shown.dateLabel}
+            <span className="font-normal" style={{ color: "rgba(0,38,105,0.45)" }}>
+              {" "}· {shown.timeLabel}
+            </span>
+          </p>
+        </div>
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onDismiss}
+            disabled={submitting}
+            className="flex-1 py-3.5 rounded-2xl text-sm font-semibold disabled:opacity-50"
+            style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={confirm}
+            disabled={submitting}
+            className="flex-1 py-3.5 rounded-2xl text-sm font-semibold disabled:opacity-60"
+            style={{ background: "rgba(220,38,38,0.9)", color: "white" }}
+          >
+            {submitting ? "Cancelling…" : "Confirm"}
           </button>
         </div>
-
-        {/* Cancellation policy */}
-        <div
-          className="rounded-2xl overflow-hidden"
-          style={{ border: "1px solid rgba(0,38,105,0.08)" }}
-        >
-          <div
-            className="px-4 py-2.5"
-            style={{ background: "rgba(0,38,105,0.03)" }}
-          >
-            <p
-              className="text-[10px] uppercase tracking-wider font-semibold"
-              style={{ color: "rgba(0,38,105,0.4)" }}
-            >
-              Cancellation policy
-            </p>
-          </div>
-          {POLICY_TIERS.map((tier) => {
-            const isActive = activeTier === tier;
-            return (
-              <div
-                key={tier.label}
-                className="flex items-start gap-3 px-4 py-3"
-                style={{
-                  background: isActive ? tier.bg : "white",
-                  borderTop: "1px solid rgba(0,38,105,0.06)",
-                }}
-              >
-                <div
-                  className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5"
-                  style={{
-                    background: isActive ? tier.color : "rgba(0,38,105,0.15)",
-                  }}
-                />
-                <div className="flex-1 min-w-0">
-                  <p
-                    className="text-xs font-semibold"
-                    style={{
-                      color: isActive ? tier.color : "rgba(0,38,105,0.45)",
-                    }}
-                  >
-                    {tier.label}
-                  </p>
-                  <p
-                    className="text-xs mt-0.5"
-                    style={{
-                      color: isActive ? tier.color : "rgba(0,38,105,0.35)",
-                    }}
-                  >
-                    {tier.desc}
-                  </p>
-                </div>
-                {isActive && (
-                  <span
-                    className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
-                    style={{ background: tier.bg, color: tier.color }}
-                  >
-                    {tier.credit}
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* CTA */}
-        <button
-          onClick={() => {
-            window.open(cancelUrl, "_blank", "noopener,noreferrer");
-            onDismiss();
-          }}
-          className="w-full py-3.5 rounded-2xl text-sm font-semibold text-center"
-          style={{ background: "rgba(220,38,38,0.9)", color: "white" }}
-        >
-          Continue to cancellation form
-        </button>
       </div>
     </div>
   );
@@ -2746,14 +2716,19 @@ function groupBookings(bookings: Booking[]): BookingGroup[] {
 }
 
 interface CancelTarget {
-  bookingDateTime: string;
+  bookingId: string;
   title: string;
-  ghlBookingId: string | null;
+  /** Whose seat it is — "You", or the player's name. */
+  playerName: string;
+  isYou: boolean;
+  courseName: string;
+  dateLabel: string;
+  timeLabel: string;
 }
 
 function MyBookingsTab({
   bookings,
-  onRefresh: _onRefresh,
+  onRefresh,
   onSwitchToBook: _onSwitchToBook,
   onUpdateBooking,
   onPlayersAdded,
@@ -2834,11 +2809,12 @@ function MyBookingsTab({
   return (
     <div className="px-5 md:px-8 py-5 pb-8 md:max-w-2xl md:mx-auto">
       <CancelModal
-        open={!!cancelTarget}
-        bookingDateTime={cancelTarget?.bookingDateTime ?? ""}
-        title={cancelTarget?.title ?? "Cancel booking"}
-        ghlBookingId={cancelTarget?.ghlBookingId ?? null}
+        target={cancelTarget}
         onDismiss={() => setCancelTarget(null)}
+        onCancelled={() => {
+          setCancelTarget(null);
+          onRefresh();
+        }}
       />
 
       <EditGuestModal
@@ -3069,11 +3045,15 @@ function BookingCard({
   // Booker: "You" = primary row, full actions on all rows
   // Invited member: "You" = their own player row, can only cancel their own
   // Status labels are identical for both — same STATUS_LABELS throughout
+  // A booker who cancelled their own seat no longer has a row here — the group
+  // then leads with one of their players, who mustn't be labelled "You".
+  const primaryIsMine =
+    !group.primary.guest_name && !group.primary.player_member_id;
   const allRows = iAmBooker
     ? [
         {
           id: group.primary.id,
-          name: "You",
+          name: primaryIsMine ? "You" : (group.primary.guest_name ?? "Guest"),
           status: bookingDisplayStatus(group.primary),
           ghlBookingId: group.primary.ghl_booking_id ?? null,
           canCancel: canCancelPrimary,
@@ -3081,7 +3061,7 @@ function BookingCard({
             group.primary.status === "availability_confirmed" &&
             !isPayAtClub(group.primary),
           amountDue: bookingAmountDue(group.primary),
-          isYou: true,
+          isYou: primaryIsMine,
           adminNotes: group.primary.admin_notes ?? null,
           editablePlayer: null as AdditionalPlayer | null,
           tag: null as string | null,
@@ -3444,11 +3424,15 @@ function BookingCard({
                       type="button"
                       onClick={() =>
                         onCancel({
-                          bookingDateTime: localDt.toISOString(),
+                          bookingId: row.id,
                           title: row.isYou
-                            ? "Cancel my booking"
-                            : `Cancel ${row.name}'s booking`,
-                          ghlBookingId: row.ghlBookingId,
+                            ? "Cancel my booking?"
+                            : `Cancel ${row.name}'s booking?`,
+                          playerName: row.name,
+                          isYou: row.isYou,
+                          courseName,
+                          dateLabel: format(bookingDate, "EEE, MMM d"),
+                          timeLabel: bookingTime,
                         })
                       }
                       className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
