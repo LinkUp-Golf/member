@@ -19,6 +19,12 @@ import type { PayoutMethod } from '@/types'
 // died in Settings signed back in to Settings.
 export const DEFAULT_LANDING_PATH = '/book'
 
+// The member's own bookings list — /book's second tab, kept in the URL so it
+// can be linked to and so the shell can tell when a guest is looking at it
+// (see @/lib/auth/guest-paths).
+export const MY_BOOKINGS_TAB = 'my-bookings'
+export const MY_BOOKINGS_PATH = `/book?tab=${MY_BOOKINGS_TAB}`
+
 // ---- GHL API ------------------------------------------------
 
 export const GHL_BASE_URL = 'https://services.leadconnectorhq.com'

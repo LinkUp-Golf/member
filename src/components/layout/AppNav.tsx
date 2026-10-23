@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, memo, type ReactNode } from "react";
+import { Suspense, useEffect, useState, useCallback, memo, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -10,10 +10,10 @@ import Icon, { type IconName } from "@/components/ui/Icon";
 import { FullScreenLoader } from "@/components/ui/Loading";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useProfile } from "@/hooks/useProfile";
-import BookingSurveyPrompt from "@/components/surveys/BookingSurveyPrompt";
 import { getMoreItems } from "@/lib/nav/moreItems";
 import { useMemberRoles } from "@/hooks/useMemberRoles";
 import { hasPartnerTag, hasHostTag } from "@/lib/ghl/tags";
+import GuestRedirect from "@/components/layout/GuestRedirect";
 import SidebarSignOut from "@/components/layout/SidebarSignOut";
 
 // Extracted + memoized so a pathname change (i.e. every navigation) only
@@ -117,20 +117,18 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
   const moreGroups = getMoreItems(roles);
   const [dismissed, setDismissed] = useState(true); // start hidden, reveal after mount
 
-  // A non-member (a referral partner / host with no golf membership, so no home
-  // course) has no membership features — the member app is hidden from them and
-  // they're sent to their workspace. Enforced app-wide here since AppNav wraps
-  // every member route.
+  // A referral partner / host with no golf membership (so no home course) has
+  // a workspace of their own, and is sent there. Anyone else without a home
+  // course is a guest, and GuestRedirect below keeps them to their own pages.
   const isNonMember = !loading && !!profile && !profile.home_course_id;
+  const roleTags = profile?.ghl_tags ?? [];
+  const workspace = !isNonMember ? null
+    : hasPartnerTag(roleTags) ? "/partner"
+    : hasHostTag(roleTags) ? "/host"
+    : null;
   useEffect(() => {
-    if (!isNonMember) return;
-    const tags = profile?.ghl_tags ?? [];
-    router.replace(
-      hasPartnerTag(tags) ? "/partner"
-      : hasHostTag(tags) ? "/host"
-      : "/membership-required"
-    );
-  }, [isNonMember, profile, router]);
+    if (workspace) router.replace(workspace);
+  }, [workspace, router]);
 
   // Applies the member's saved text-size preference once it loads. The shell
   // (nav/sidebar) renders immediately at the browser default — there's no
@@ -182,18 +180,20 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
     setDismissed(true);
   }, []);
 
-  // Don't paint the member shell/features for a non-member — hold a loader
-  // while the effect above redirects them to their workspace.
-  if (isNonMember) {
+  // Don't paint the member shell for someone on their way to their workspace —
+  // hold a loader while the effect above redirects them.
+  if (workspace) {
     return <FullScreenLoader />;
   }
 
   return (
     <div className="app-shell">
-      {/* Post-round satisfaction survey. Lives at the shell so it can surface
-          on whichever screen the member is on when a round finishes — it fires
-          on the booking's own clock, not on navigation. */}
-      <BookingSurveyPrompt />
+      {/* A guest (signed in, no membership) is sent to /become-a-member from
+          any page that isn't theirs. Suspense because it reads the query. */}
+      <Suspense fallback={null}>
+        <GuestRedirect />
+      </Suspense>
+
 
       {/* Sidebar — tablet+ */}
       <aside className="app-sidebar">

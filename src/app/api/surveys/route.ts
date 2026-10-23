@@ -118,4 +118,4 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   }
 
   return NextResponse.json({ ok: true })
-})
+}, { allowGuests: true })

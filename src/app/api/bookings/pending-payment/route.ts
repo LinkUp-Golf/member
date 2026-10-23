@@ -23,5 +23,5 @@ export const GET = withAuth(
     const pendingBookings = await findPendingPaymentBookings(admin, ctx.userId)
     return NextResponse.json({ pendingBookings })
   },
-  { skipGHLCheck: true },
+  { skipGHLCheck: true, allowGuests: true },
 )

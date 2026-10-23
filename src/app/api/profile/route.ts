@@ -22,7 +22,7 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   return NextResponse.json(data)
-})
+}, { allowGuests: true })
 
 export const PATCH = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   const supabase = createRouteHandlerClient(cookies())
@@ -72,4 +72,4 @@ export const PATCH = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   await getCache(MEMBER_DETAIL_NS).delete(memberDetailKey(ctx.userId)).catch(() => {})
 
   return NextResponse.json(data)
-})
+}, { allowGuests: true })

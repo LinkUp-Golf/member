@@ -44,7 +44,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   ])
 
   return NextResponse.json({ summary, coupons, canRedeem })
-}, { skipGHLCheck: true })
+}, { skipGHLCheck: true, allowGuests: true })
 
 export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   const body = await req.json().catch(() => ({})) as Record<string, unknown>
@@ -186,4 +186,4 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     },
     { status: result.existing ? 200 : 201 }
   )
-})
+}, { allowGuests: true })

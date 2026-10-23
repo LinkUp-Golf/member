@@ -24,7 +24,7 @@ import { cookies } from 'next/headers'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { logActivity } from '@/lib/activity/log'
 import { getContactByEmail } from '@/lib/ghl/client'
-import { hasAnyAccessTag, hasPartnerTag, hasHostTag } from '@/lib/ghl/tags'
+import { hasPartnerTag, hasHostTag } from '@/lib/ghl/tags'
 import { workspaceLandingPath } from '@/lib/auth/landing'
 import { syncMember } from '@/lib/sync'
 import { safeRedirectPath } from '@/lib/utils'
@@ -61,9 +61,11 @@ export async function GET(request: NextRequest) {
 
   reqLog.info('Session established', { userId: user.id })
 
-  // ---- Phase 2: GHL membership authorization -----------------
+  // ---- Phase 2: GHL authorization ----------------------------
+  // A GHL contact is what lets someone in — member or not. A non-member is a
+  // guest once inside (isGuestOnly) and is shown how to become a member.
   const contact = await getContactByEmail(user.email)
-  const authorized = contact ? hasAnyAccessTag(contact.tags ?? []) : false
+  const authorized = !!contact
 
   if (!authorized) {
     reqLog.warn('GHL auth failed at confirm — destroying session', {
@@ -73,7 +75,7 @@ export async function GET(request: NextRequest) {
     auditLog('LOGIN_DENIED', {
       requestId,
       userId: user.id,
-      metadata: { reason: 'ghl_tag_missing_at_confirm', hasContact: !!contact },
+      metadata: { reason: 'ghl_contact_missing_at_confirm', hasContact: !!contact },
     })
     await supabase.auth.signOut()
     return NextResponse.redirect(new URL('/membership-required', request.url))

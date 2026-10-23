@@ -7,7 +7,6 @@ import {
   inviteStatusLabel,
   isInviteResponse,
   isPaidBy,
-  paidByLabel,
   whatHappensNext,
 } from '@/lib/bookings/invitations'
 
@@ -102,11 +101,6 @@ describe('canRespondToInvite', () => {
 })
 
 describe('labels', () => {
-  it('says who is paying', () => {
-    expect(paidByLabel(true, 'Dana Smith')).toBe('Dana Smith is paying for your round')
-    expect(paidByLabel(false, 'Dana Smith')).toBe("You'll pay for your own round")
-  })
-
   it('names each answer, and nothing for an unasked row', () => {
     expect(inviteStatusLabel('pending')).toBe('Invite pending')
     expect(inviteStatusLabel('accepted')).toBe('Accepted')

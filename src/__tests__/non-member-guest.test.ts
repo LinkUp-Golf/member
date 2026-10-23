@@ -14,7 +14,7 @@ vi.mock('@/lib/sync', () => ({
 import { getContactByEmail, createContact, addTagToContact } from '@/lib/ghl/client'
 import { syncMember } from '@/lib/sync'
 import { linkGuestToMember, provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
-import { ALL_ACCESS_TAGS, MEMBER_GUEST_TAG } from '@/lib/ghl/tags'
+import { MEMBER_GUEST_TAG, MEMBERSHIP_TAGS } from '@/lib/ghl/tags'
 
 const mockedLookup = vi.mocked(getContactByEmail)
 const mockedCreate = vi.mocked(createContact)
@@ -71,23 +71,20 @@ beforeEach(() => {
 })
 
 describe('provisionNonMemberGuest', () => {
-  it('creates the contact and tags it for access', async () => {
+  it('creates the contact and gives it the guest tag only', async () => {
     const { supabase } = fakeSupabase()
 
     const { contactId } = await provisionNonMemberGuest(GUEST, supabase)
 
     expect(contactId).toBe('contact-new')
     expect(mockedCreate).toHaveBeenCalledOnce()
-    // Every access tag, or the app won't recognise them and GHL's membership
-    // workflows won't fire — plus member-guest, so GHL can tell someone a
-    // member brought along from someone who bought a membership.
-    expect(mockedTag).toHaveBeenCalledTimes(ALL_ACCESS_TAGS.length + 1)
-    for (const tag of [...ALL_ACCESS_TAGS, MEMBER_GUEST_TAG]) {
-      expect(mockedTag).toHaveBeenCalledWith('contact-new', tag)
-    }
+    // The guest tag is their access. No membership tag: those fire GHL's
+    // membership workflow and count toward referral commission.
+    expect(mockedTag).toHaveBeenCalledOnce()
+    expect(mockedTag).toHaveBeenCalledWith('contact-new', MEMBER_GUEST_TAG)
   })
 
-  it('mirrors the guest tag onto the member row it syncs', async () => {
+  it('mirrors the guest tag, and no membership tag, onto the member row it syncs', async () => {
     // members.ghl_tags is what the app reads; a tag that only exists in GHL
     // until the next full sync is a tag the app can't act on today.
     const { supabase } = fakeSupabase()
@@ -96,8 +93,35 @@ describe('provisionNonMemberGuest', () => {
 
     expect(mockedSync).toHaveBeenCalledOnce()
     const [{ contact }] = mockedSync.mock.calls[0] as [{ contact: { tags: string[] } }]
-    expect(contact.tags).toContain(MEMBER_GUEST_TAG)
-    for (const tag of ALL_ACCESS_TAGS) expect(contact.tags).toContain(tag)
+    expect(contact.tags).toEqual([MEMBER_GUEST_TAG])
+    for (const tag of MEMBERSHIP_TAGS) expect(contact.tags).not.toContain(tag)
+  })
+
+  it('leaves a contact that can already sign in exactly as it is', async () => {
+    // A member named as a guest doesn't need the guest tag to play, and
+    // carrying it would keep them in the app after their membership ended.
+    // Their member row is synced from the tags they hold, so it isn't demoted.
+    mockedLookup.mockResolvedValue({ id: 'contact-member', tags: ['avi member - active'] } as never)
+    const { supabase } = fakeSupabase({ memberIds: ['member-existing'] })
+
+    await provisionNonMemberGuest(GUEST, supabase)
+
+    expect(mockedTag).not.toHaveBeenCalled()
+    const [{ contact }] = mockedSync.mock.calls[0] as [{ contact: { tags: string[] } }]
+    expect(contact.tags).toEqual(['avi member - active'])
+  })
+
+  it('gives a contact with no access the guest tag, keeping what it had', async () => {
+    // A lapsed member or a lead: in GHL already, but nothing lets them in.
+    mockedLookup.mockResolvedValue({ id: 'contact-lead', tags: ['newsletter'] } as never)
+    const { supabase } = fakeSupabase()
+
+    await provisionNonMemberGuest(GUEST, supabase)
+
+    expect(mockedTag).toHaveBeenCalledOnce()
+    expect(mockedTag).toHaveBeenCalledWith('contact-lead', MEMBER_GUEST_TAG)
+    const [{ contact }] = mockedSync.mock.calls[0] as [{ contact: { tags: string[] } }]
+    expect(contact.tags).toEqual(['newsletter', MEMBER_GUEST_TAG])
   })
 
   it('reuses an existing contact rather than creating a second one', async () => {

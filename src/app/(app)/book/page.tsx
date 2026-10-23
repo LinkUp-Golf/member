@@ -67,11 +67,7 @@ import type {
   MemberWithProfile,
   Course,
 } from "@/types";
-import {
-  POLICY_TIERS,
-  GHL_CANCEL_BOOKING_URL,
-  AVIARA_TIMEZONE,
-} from "@/lib/constants";
+import { AVIARA_TIMEZONE, MY_BOOKINGS_TAB } from "@/lib/constants";
 import { validateEmail } from "@/lib/validation";
 
 type PlayerKind = "member" | "non_member";
@@ -131,6 +127,7 @@ async function markPayAtClub(bookingId: string): Promise<string | null> {
 export default function BookPage() {
   const { user } = useProfile();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const inviteMemberId = searchParams?.get("invite") ?? null;
 
 
@@ -175,7 +172,18 @@ export default function BookPage() {
   // it's refreshed from several triggers (mount, tab focus/visibility) that can
   // fire near-simultaneously.
   const myBookingsRefreshInFlight = useRef(false);
-  const [activeTab, setActiveTab] = useState<"book" | "myBookings">("book");
+  // The tab lives in the URL (?tab=my-bookings) rather than in state, so My
+  // bookings can be linked to — the guest overlay sends people there — and so
+  // the shell can tell which tab is open.
+  const activeTab: "book" | "myBookings" =
+    searchParams?.get("tab") === MY_BOOKINGS_TAB ? "myBookings" : "book";
+  const setActiveTab = (tab: "book" | "myBookings") => {
+    const params = new URLSearchParams(searchParams?.toString());
+    if (tab === "myBookings") params.set("tab", MY_BOOKINGS_TAB);
+    else params.delete("tab");
+    const qs = params.toString();
+    router.replace(qs ? `/book?${qs}` : "/book", { scroll: false });
+  };
   // FIFO payment gate — every one of the member's bookings awaiting payment.
   // Starts loading=true (rather than assuming none) so the tee-time slot
   // list doesn't briefly render as bookable before the check resolves.
@@ -2312,31 +2320,30 @@ function BookingStatusBadge({ status }: { status: string }) {
   );
 }
 
-function getPolicyTier(bookingDateTime: string) {
-  const hours = differenceInHours(new Date(bookingDateTime), new Date());
-  if (hours >= 72) return POLICY_TIERS[0];
-  if (hours >= 48) return POLICY_TIERS[1];
-  return POLICY_TIERS[2];
-}
-
+// Confirms a seat is being given up, then removes it — the row from LinkUp and
+// its appointment from GHL (DELETE /api/bookings/[id]). There is nothing to
+// fill in and no form to send the member off to: the answer is yes or no.
 function CancelModal({
-  open,
-  bookingDateTime,
-  title,
-  ghlBookingId,
+  target,
   onDismiss,
+  onCancelled,
 }: {
-  open: boolean;
-  bookingDateTime: string;
-  title: string;
-  ghlBookingId: string | null;
+  target: CancelTarget | null;
   onDismiss: () => void;
+  onCancelled: () => void;
 }) {
+  const open = !!target;
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  // Held through the closing animation, after the parent has cleared target.
+  const [shown, setShown] = useState<CancelTarget | null>(target);
 
   useEffect(() => {
     if (open) {
+      setShown(target);
+      setError("");
       setMounted(true);
       const ids: number[] = [];
       ids[0] = requestAnimationFrame(() => {
@@ -2348,14 +2355,30 @@ function CancelModal({
       const t = setTimeout(() => setMounted(false), 320);
       return () => clearTimeout(t);
     }
-  }, [open]);
+  }, [open, target]);
 
-  const activeTier = bookingDateTime ? getPolicyTier(bookingDateTime) : null;
-  const cancelUrl = ghlBookingId
-    ? `${GHL_CANCEL_BOOKING_URL}?event_id=${ghlBookingId}`
-    : GHL_CANCEL_BOOKING_URL;
+  async function confirm() {
+    if (!shown) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/bookings/${shown.bookingId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error ?? "Couldn't cancel this booking. Try again.");
+        return;
+      }
+      onCancelled();
+    } catch {
+      setError("Network error. Check your connection and try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
-  if (!mounted) return null;
+  if (!mounted || !shown) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center md:p-6">
@@ -2371,9 +2394,12 @@ function CancelModal({
           transition: "opacity 200ms ease-out",
           willChange: "opacity",
         }}
-        onClick={onDismiss}
+        onClick={submitting ? undefined : onDismiss}
       />
       <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="cancel-booking-title"
         className={[
           "relative bg-white rounded-t-3xl md:rounded-3xl px-5 pt-5 pb-8 space-y-4 w-full md:max-w-md",
           visible ? "translate-y-0" : "translate-y-full",
@@ -2386,113 +2412,69 @@ function CancelModal({
           willChange: "transform",
         }}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between">
+        <div>
           <p
+            id="cancel-booking-title"
             className="font-sans font-black text-lg"
             style={{ color: "var(--color-green-900)" }}
           >
-            {title}
+            {shown.title}
           </p>
-          <button
-            onClick={onDismiss}
-            className="w-8 h-8 rounded-full flex items-center justify-center"
-            style={{
-              background: "rgba(0,38,105,0.06)",
-              color: "rgba(0,38,105,0.5)",
-            }}
+          <p className="text-sm mt-1.5" style={{ color: "rgba(0,38,105,0.6)" }}>
+            {shown.isYou
+              ? "Your spot on this round will be cancelled."
+              : `${shown.playerName}'s spot on this round will be cancelled.`}{" "}
+            This can&apos;t be undone.
+          </p>
+        </div>
+
+        {/* The round being given up */}
+        <div
+          className="rounded-2xl px-4 py-3"
+          style={{
+            background: "rgba(0,38,105,0.03)",
+            border: "1px solid rgba(0,38,105,0.08)",
+          }}
+        >
+          <p
+            className="text-[10px] font-semibold uppercase tracking-wider truncate"
+            style={{ color: "rgba(0,38,105,0.35)" }}
           >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
+            {shown.courseName}
+          </p>
+          <p
+            className="text-sm font-semibold mt-0.5"
+            style={{ color: "var(--color-green-900)" }}
+          >
+            {shown.dateLabel}
+            <span className="font-normal" style={{ color: "rgba(0,38,105,0.45)" }}>
+              {" "}· {shown.timeLabel}
+            </span>
+          </p>
+        </div>
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onDismiss}
+            disabled={submitting}
+            className="flex-1 py-3.5 rounded-2xl text-sm font-semibold disabled:opacity-50"
+            style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={confirm}
+            disabled={submitting}
+            className="flex-1 py-3.5 rounded-2xl text-sm font-semibold disabled:opacity-60"
+            style={{ background: "rgba(220,38,38,0.9)", color: "white" }}
+          >
+            {submitting ? "Cancelling…" : "Confirm"}
           </button>
         </div>
-
-        {/* Cancellation policy */}
-        <div
-          className="rounded-2xl overflow-hidden"
-          style={{ border: "1px solid rgba(0,38,105,0.08)" }}
-        >
-          <div
-            className="px-4 py-2.5"
-            style={{ background: "rgba(0,38,105,0.03)" }}
-          >
-            <p
-              className="text-[10px] uppercase tracking-wider font-semibold"
-              style={{ color: "rgba(0,38,105,0.4)" }}
-            >
-              Cancellation policy
-            </p>
-          </div>
-          {POLICY_TIERS.map((tier) => {
-            const isActive = activeTier === tier;
-            return (
-              <div
-                key={tier.label}
-                className="flex items-start gap-3 px-4 py-3"
-                style={{
-                  background: isActive ? tier.bg : "white",
-                  borderTop: "1px solid rgba(0,38,105,0.06)",
-                }}
-              >
-                <div
-                  className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5"
-                  style={{
-                    background: isActive ? tier.color : "rgba(0,38,105,0.15)",
-                  }}
-                />
-                <div className="flex-1 min-w-0">
-                  <p
-                    className="text-xs font-semibold"
-                    style={{
-                      color: isActive ? tier.color : "rgba(0,38,105,0.45)",
-                    }}
-                  >
-                    {tier.label}
-                  </p>
-                  <p
-                    className="text-xs mt-0.5"
-                    style={{
-                      color: isActive ? tier.color : "rgba(0,38,105,0.35)",
-                    }}
-                  >
-                    {tier.desc}
-                  </p>
-                </div>
-                {isActive && (
-                  <span
-                    className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
-                    style={{ background: tier.bg, color: tier.color }}
-                  >
-                    {tier.credit}
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* CTA */}
-        <button
-          onClick={() => {
-            window.open(cancelUrl, "_blank", "noopener,noreferrer");
-            onDismiss();
-          }}
-          className="w-full py-3.5 rounded-2xl text-sm font-semibold text-center"
-          style={{ background: "rgba(220,38,38,0.9)", color: "white" }}
-        >
-          Continue to cancellation form
-        </button>
       </div>
     </div>
   );
@@ -2746,14 +2728,19 @@ function groupBookings(bookings: Booking[]): BookingGroup[] {
 }
 
 interface CancelTarget {
-  bookingDateTime: string;
+  bookingId: string;
   title: string;
-  ghlBookingId: string | null;
+  /** Whose seat it is — "You", or the player's name. */
+  playerName: string;
+  isYou: boolean;
+  courseName: string;
+  dateLabel: string;
+  timeLabel: string;
 }
 
 function MyBookingsTab({
   bookings,
-  onRefresh: _onRefresh,
+  onRefresh,
   onSwitchToBook: _onSwitchToBook,
   onUpdateBooking,
   onPlayersAdded,
@@ -2834,11 +2821,12 @@ function MyBookingsTab({
   return (
     <div className="px-5 md:px-8 py-5 pb-8 md:max-w-2xl md:mx-auto">
       <CancelModal
-        open={!!cancelTarget}
-        bookingDateTime={cancelTarget?.bookingDateTime ?? ""}
-        title={cancelTarget?.title ?? "Cancel booking"}
-        ghlBookingId={cancelTarget?.ghlBookingId ?? null}
+        target={cancelTarget}
         onDismiss={() => setCancelTarget(null)}
+        onCancelled={() => {
+          setCancelTarget(null);
+          onRefresh();
+        }}
       />
 
       <EditGuestModal
@@ -3007,7 +2995,6 @@ function BookingCard({
   // does. Undefined means the member has none and nothing extra is rendered.
   wallet?: ReturnType<typeof useCreditWallet>;
 }) {
-  const [expanded, setExpanded] = useState(false);
   // The payable row whose credit modal is open, with what it costs.
   const [creditTarget, setCreditTarget] = useState<{
     id: string;
@@ -3065,18 +3052,20 @@ function BookingCard({
     hoursUntil > 0 &&
     group.primary.status !== "cancelled" &&
     totalPlayers < MAX_GROUP_PLAYERS;
-  // All bookings (booker and invited) use the same collapsible card style.
-  const canExpand = true;
 
   // ---- Build allRows -------------------------------------------------
   // Booker: "You" = primary row, full actions on all rows
   // Invited member: "You" = their own player row, can only cancel their own
   // Status labels are identical for both — same STATUS_LABELS throughout
+  // A booker who cancelled their own seat no longer has a row here — the group
+  // then leads with one of their players, who mustn't be labelled "You".
+  const primaryIsMine =
+    !group.primary.guest_name && !group.primary.player_member_id;
   const allRows = iAmBooker
     ? [
         {
           id: group.primary.id,
-          name: "You",
+          name: primaryIsMine ? "You" : (group.primary.guest_name ?? "Guest"),
           status: bookingDisplayStatus(group.primary),
           ghlBookingId: group.primary.ghl_booking_id ?? null,
           canCancel: canCancelPrimary,
@@ -3084,7 +3073,7 @@ function BookingCard({
             group.primary.status === "availability_confirmed" &&
             !isPayAtClub(group.primary),
           amountDue: bookingAmountDue(group.primary),
-          isYou: true,
+          isYou: primaryIsMine,
           adminNotes: group.primary.admin_notes ?? null,
           editablePlayer: null as AdditionalPlayer | null,
           tag: null as string | null,
@@ -3172,6 +3161,20 @@ function BookingCard({
       })();
 
   const hasPaymentDue = allRows.some((row) => row.canPay);
+  const openAddPlayer = () =>
+    onAddPlayer({
+      bookingId: group.primary.id,
+      courseName,
+      dateLabel: format(bookingDate, "EEE, MMM d"),
+      timeLabel: bookingTime,
+      allowNonMembers: allowsNonMemberGuests(group.primary.course),
+      excludeMemberIds: [
+        group.primary.member_id,
+        ...activePlayers
+          .map((p) => p.player_member_id)
+          .filter((mid): mid is string => Boolean(mid)),
+      ],
+    });
   // This member's own row, when it's an invitation they haven't answered.
   const pendingInvite = iAmBooker
     ? null
@@ -3209,7 +3212,7 @@ function BookingCard({
           )}
         </p>
 
-        {/* Date · time · player toggle — all on one line */}
+        {/* Date · time · Add player — all on one line */}
         <div className="flex items-center justify-between gap-2">
           <p
             className="text-sm font-semibold"
@@ -3232,30 +3235,32 @@ function BookingCard({
                 💳 Payment due
               </span>
             )}
-            {canExpand && (
+            {/* Add player — booker only, upcoming & not full */}
+            {canAddPlayers && (
               <button
                 type="button"
-                onClick={() => setExpanded((v) => !v)}
-                className="flex items-center gap-1 text-xs font-medium flex-shrink-0"
-                style={{ color: "rgba(0,38,105,0.45)" }}
+                onClick={openAddPlayer}
+                className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0 transition-colors hover:bg-green-50"
+                style={{
+                  background: "rgba(133,187,101,0.1)",
+                  color: "var(--color-green-700)",
+                }}
               >
-                {totalPlayers}p
                 <svg
-                  className={cn(
-                    "w-3 h-3 transition-transform duration-200",
-                    expanded ? "rotate-180" : "",
-                  )}
+                  className="w-3 h-3"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
                   strokeWidth={2.5}
+                  aria-hidden
                 >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    d="M19.5 8.25l-7.5 7.5-7.5-7.5"
+                    d="M12 4.5v15m7.5-7.5h-15"
                   />
                 </svg>
+                Add player
               </button>
             )}
           </div>
@@ -3278,231 +3283,195 @@ function BookingCard({
         </Link>
       )}
 
-      {/* Expandable players panel */}
-      {canExpand && expanded && (
-        <div
-          className="border-t"
-          style={{ borderColor: "rgba(0,38,105,0.06)" }}
-        >
-          {allRows.map((row, idx) => {
-            const canPay = row.canPay;
-            const editablePlayer = row.editablePlayer;
-            return (
-              <div
-                key={row.id}
-                className="flex items-center gap-2.5 px-4 py-2.5"
-                style={{
-                  borderTop:
-                    idx === 0 ? "none" : "1px solid rgba(0,38,105,0.04)",
-                }}
-              >
-                {/* Name + admin note indicator */}
-                <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                  <span
-                    className="text-xs font-medium truncate capitalize"
-                    style={{ color: "var(--color-green-900)" }}
-                  >
-                    {row.name}
-                  </span>
-                  {row.tag && (
-                    <span
-                      className="text-[10px] flex-shrink-0 whitespace-nowrap"
-                      style={{ color: "rgba(0,38,105,0.4)" }}
-                    >
-                      {row.tag}
-                    </span>
-                  )}
-                  {row.adminNotes && (
-                    <div className="relative group flex-shrink-0">
-                      <span
-                        title={row.adminNotes}
-                        className="flex items-center justify-center w-4 h-4 rounded-full text-[10px] leading-none cursor-help flex-shrink-0"
-                        style={{
-                          background: "rgba(234,179,8,0.15)",
-                          color: "#92640a",
-                        }}
-                        aria-label={`Admin note: ${row.adminNotes}`}
-                      >
-                        ⚠
-                      </span>
-                      <div
-                        className="absolute left-0 bottom-full mb-1.5 hidden group-hover:block w-56 max-w-[70vw] rounded-lg px-3 py-2 text-[11px] leading-snug shadow-lg z-20"
-                        style={{
-                          background: "var(--color-green-900)",
-                          color: "white",
-                        }}
-                      >
-                        {row.adminNotes}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Status badge or Pay CTA */}
-                {!canPay && <BookingStatusBadge status={row.status} />}
-                {/* Credit, offered on the same row as the Pay link — or the code
-                    already covering it, which is what the member needs by then. */}
-                {canPay && payNow && (() => {
-                  const held = wallet?.couponForBooking(row.id) ?? null;
-                  // Same rule as the payment banner: credit is only offered when
-                  // it covers the row in full.
-                  if (!held && !wallet?.coversBill(row.amountDue)) return null;
-                  const open = () =>
-                    setCreditTarget({ id: row.id, amountDue: row.amountDue });
-                  // A held code reports what it's worth; the offer stays a verb.
-                  // Compact here — this row also carries Edit and Cancel.
-                  return held ? (
-                    <CreditReadyChip amount={Number(held.amount)} onOpen={open} compact />
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={open}
-                      className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
-                      style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
-                    >
-                      Use credits
-                    </button>
-                  );
-                })()}
-                {/* Pay at club, where the venue takes it. Shortened beside
-                    Pay → — this row also carries Edit and Cancel. */}
-                {canPay && payAtClub && (
-                  <button
-                    type="button"
-                    onClick={() => payRowAtClub(row.id)}
-                    disabled={markingId === row.id}
-                    className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0 disabled:opacity-50"
-                    style={
-                      payNow
-                        ? { background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }
-                        : { background: "rgba(146,100,10,0.1)", color: "#92640a" }
-                    }
-                  >
-                    {markingId === row.id
-                      ? "Saving…"
-                      : payNow
-                        ? "At club"
-                        : "Pay at club"}
-                  </button>
-                )}
-                {canPay && payNow &&
-                  (group.primary.course?.payment_url ? (
-                    <a
-                      href={group.primary.course.payment_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
-                      style={{
-                        background: "rgba(146,100,10,0.1)",
-                        color: "#92640a",
-                      }}
-                    >
-                      Pay →
-                    </a>
-                  ) : (
-                    <span className="text-[11px] text-gray-400 flex-shrink-0">
-                      Payment link pending
-                    </span>
-                  ))}
-
-                {/* Edit — booker only, while the guest is still awaiting approval */}
-                {editablePlayer && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onEditGuest({
-                        bookingId: row.id,
-                        player: editablePlayer,
-                      })
-                    }
-                    className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
-                    style={{
-                      color: "rgba(0,38,105,0.55)",
-                      background: "rgba(0,38,105,0.06)",
-                    }}
-                  >
-                    Edit
-                  </button>
-                )}
-
-                {/* Cancel */}
-                {row.canCancel && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onCancel({
-                        bookingDateTime: localDt.toISOString(),
-                        title: row.isYou
-                          ? "Cancel my booking"
-                          : `Cancel ${row.name}'s booking`,
-                        ghlBookingId: row.ghlBookingId,
-                      })
-                    }
-                    className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
-                    style={{
-                      color: "rgba(220,38,38,0.65)",
-                      background: "rgba(220,38,38,0.06)",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-            );
-          })}
-
-          {payError && (
-            <p
-              className="px-4 py-2 text-xs border-t"
-              style={{ color: "#b91c1c", borderColor: "rgba(0,38,105,0.06)" }}
-            >
-              {payError}
-            </p>
-          )}
-
-          {/* Add player — booker only, upcoming & not full */}
-          {canAddPlayers && (
-            <button
-              type="button"
-              onClick={() =>
-                onAddPlayer({
-                  bookingId: group.primary.id,
-                  courseName,
-                  dateLabel: format(bookingDate, "EEE, MMM d"),
-                  timeLabel: bookingTime,
-                  allowNonMembers: allowsNonMemberGuests(group.primary.course),
-                  excludeMemberIds: [
-                    group.primary.member_id,
-                    ...activePlayers
-                      .map((p) => p.player_member_id)
-                      .filter((mid): mid is string => Boolean(mid)),
-                  ],
-                })
-              }
-              className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-semibold transition-colors border-t hover:bg-green-50"
+      {/* Players — always shown */}
+      <div
+        className="border-t"
+        style={{ borderColor: "rgba(0,38,105,0.06)" }}
+      >
+        {allRows.map((row, idx) => {
+          const canPay = row.canPay;
+          const editablePlayer = row.editablePlayer;
+          return (
+            <div
+              key={row.id}
+              className="flex items-center gap-2.5 px-4 py-2.5"
               style={{
-                borderColor: "rgba(0,38,105,0.06)",
-                color: "var(--color-green-700)",
+                borderTop:
+                  idx === 0 ? "none" : "1px solid rgba(0,38,105,0.04)",
               }}
             >
-              <svg
-                className="w-3.5 h-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12 4.5v15m7.5-7.5h-15"
-                />
-              </svg>
-              Add player
-            </button>
-          )}
-        </div>
-      )}
+              {/* Name + admin note indicator */}
+              <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                <span
+                  className="text-xs font-medium truncate capitalize"
+                  style={{ color: "var(--color-green-900)" }}
+                >
+                  {row.name}
+                </span>
+                {row.tag && (
+                  <span
+                    className="text-[10px] flex-shrink-0 whitespace-nowrap"
+                    style={{ color: "rgba(0,38,105,0.4)" }}
+                  >
+                    {row.tag}
+                  </span>
+                )}
+                {row.adminNotes && (
+                  <div className="relative group flex-shrink-0">
+                    <span
+                      title={row.adminNotes}
+                      className="flex items-center justify-center w-4 h-4 rounded-full text-[10px] leading-none cursor-help flex-shrink-0"
+                      style={{
+                        background: "rgba(234,179,8,0.15)",
+                        color: "#92640a",
+                      }}
+                      aria-label={`Admin note: ${row.adminNotes}`}
+                    >
+                      ⚠
+                    </span>
+                    <div
+                      className="absolute left-0 bottom-full mb-1.5 hidden group-hover:block w-56 max-w-[70vw] rounded-lg px-3 py-2 text-[11px] leading-snug shadow-lg z-20"
+                      style={{
+                        background: "var(--color-green-900)",
+                        color: "white",
+                      }}
+                    >
+                      {row.adminNotes}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Credit, offered on the same row as the Pay link — or the code
+                  already covering it, which is what the member needs by then. */}
+              {canPay && payNow && (() => {
+                const held = wallet?.couponForBooking(row.id) ?? null;
+                // Same rule as the payment banner: credit is only offered when
+                // it covers the row in full.
+                if (!held && !wallet?.coversBill(row.amountDue)) return null;
+                const open = () =>
+                  setCreditTarget({ id: row.id, amountDue: row.amountDue });
+                // A held code reports what it's worth; the offer stays a verb.
+                // Compact here — this row also carries Edit and Cancel.
+                return held ? (
+                  <CreditReadyChip amount={Number(held.amount)} onOpen={open} compact />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={open}
+                    className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
+                    style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+                  >
+                    Use credits
+                  </button>
+                );
+              })()}
+              {/* Pay at club, where the venue takes it. Shortened beside
+                  Pay → — this row also carries Edit and Cancel. */}
+              {canPay && payAtClub && (
+                <button
+                  type="button"
+                  onClick={() => payRowAtClub(row.id)}
+                  disabled={markingId === row.id}
+                  className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0 disabled:opacity-50"
+                  style={
+                    payNow
+                      ? { background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }
+                      : { background: "rgba(146,100,10,0.1)", color: "#92640a" }
+                  }
+                >
+                  {markingId === row.id
+                    ? "Saving…"
+                    : payNow
+                      ? "At club"
+                      : "Pay at club"}
+                </button>
+              )}
+              {canPay && payNow &&
+                (group.primary.course?.payment_url ? (
+                  <a
+                    href={group.primary.course.payment_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-semibold px-2.5 py-1 rounded-lg flex-shrink-0"
+                    style={{
+                      background: "rgba(146,100,10,0.1)",
+                      color: "#92640a",
+                    }}
+                  >
+                    Pay →
+                  </a>
+                ) : (
+                  <span className="text-[11px] text-gray-400 flex-shrink-0">
+                    Payment link pending
+                  </span>
+                ))}
+
+              {/* Edit — booker only, while the guest is still awaiting approval */}
+              {editablePlayer && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onEditGuest({
+                      bookingId: row.id,
+                      player: editablePlayer,
+                    })
+                  }
+                  className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
+                  style={{
+                    color: "rgba(0,38,105,0.55)",
+                    background: "rgba(0,38,105,0.06)",
+                  }}
+                >
+                  Edit
+                </button>
+              )}
+
+              {/* Cancel, then the status pill — what the seat is and the
+                  one way to give it up, read together. */}
+              {(!canPay || row.canCancel) && (
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  {row.canCancel && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onCancel({
+                          bookingId: row.id,
+                          title: row.isYou
+                            ? "Cancel my booking?"
+                            : `Cancel ${row.name}'s booking?`,
+                          playerName: row.name,
+                          isYou: row.isYou,
+                          courseName,
+                          dateLabel: format(bookingDate, "EEE, MMM d"),
+                          timeLabel: bookingTime,
+                        })
+                      }
+                      className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
+                      style={{
+                        color: "rgba(220,38,38,0.65)",
+                        background: "rgba(220,38,38,0.06)",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                  {!canPay && <BookingStatusBadge status={row.status} />}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {payError && (
+          <p
+            className="px-4 py-2 text-xs border-t"
+            style={{ color: "#b91c1c", borderColor: "rgba(0,38,105,0.06)" }}
+          >
+            {payError}
+          </p>
+        )}
+      </div>
 
       {creditTarget && (
         <CreditCouponModal

@@ -13,6 +13,7 @@ export const dynamic = 'force-dynamic'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
+import { refuseGuest } from '@/lib/auth/guest'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { coursesWithAvailabilityOn } from '@/lib/bookings/availability'
 import { canTakePayment } from '@/lib/bookings/payment-options'
@@ -25,6 +26,9 @@ export async function GET(req: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+  // A guest has no booking to make — see refuseGuest.
+  const guestRefusal = await refuseGuest(supabase, user.id)
+  if (guestRefusal) return guestRefusal
 
   const admin = createAdminClient()
 

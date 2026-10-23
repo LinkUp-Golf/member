@@ -66,24 +66,23 @@ describe('validateGHLMembership — authorized path', () => {
 })
 
 describe('validateGHLMembership — denied path', () => {
-  it('denies a member without required tag', async () => {
+  it('keeps a contact without a membership tag signed in, handing back its tags', async () => {
+    // Being in GHL is what lets someone in. With no membership they're a guest,
+    // and withAuth narrows what they can call from the tags returned here.
     mockGetContactById.mockResolvedValue({ ...VALID_CONTACT, tags: ['some-other-tag'] })
     const result = await validateGHLMembership(PARAMS)
-    expect(result.authorized).toBe(false)
-    expect(result.fromCache).toBe(false)
+    expect(result.authorized).toBe(true)
+    expect(result.tags).toEqual(['some-other-tag'])
   })
 
-  it('does NOT cache a negative result (allows quick reinstatement)', async () => {
+  it('caches the tags it read, so a guest stays a guest for the TTL', async () => {
     mockGetContactById.mockResolvedValue({ ...VALID_CONTACT, tags: [] })
     await validateGHLMembership(PARAMS)
 
-    // Simulate tag being reinstated
-    mockGetContactById.mockResolvedValue(VALID_CONTACT)
     const second = await validateGHLMembership(PARAMS)
-
-    // Should not be from cache — negative results aren't cached
-    expect(second.fromCache).toBe(false)
-    expect(second.authorized).toBe(true)
+    expect(second.fromCache).toBe(true)
+    expect(second.tags).toEqual([])
+    expect(mockGetContactById).toHaveBeenCalledTimes(1)
   })
 
   it('denies when GHL contact not found', async () => {

@@ -57,5 +57,5 @@ export const GET = withAuth(
 
     return NextResponse.json({ notifications: items, hasMore, nextCursor, unread_count: unreadCount ?? 0 })
   },
-  { skipGHLCheck: true }
+  { skipGHLCheck: true, allowGuests: true }
 )

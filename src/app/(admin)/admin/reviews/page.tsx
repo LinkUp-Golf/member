@@ -1,7 +1,7 @@
 "use client";
 
 // Member satisfaction reviews — the responses collected by the post-round
-// survey prompt (see src/components/surveys/BookingSurveyPrompt.tsx).
+// survey (BookingSurveySheet, opened from "Rate round" in My bookings).
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Star } from "lucide-react";

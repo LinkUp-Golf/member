@@ -18,6 +18,7 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { sendToUsers } from './push/pushService'
 import type { PushPayload, SendResult } from './push/types'
 import { titleCaseName } from '@/lib/utils'
+import { MY_BOOKINGS_PATH } from '@/lib/constants'
 import type { PayoutMethod } from '@/types'
 
 // ---- sendPushToCourse ---------------------------------------
@@ -401,13 +402,12 @@ export const NotificationTemplates = {
     cta:   'Pay for your round',
   }),
 
-  // Sent once a round has finished, by the booking-surveys cron. Opening the
-  // app is enough — the survey prompt is already due, so it appears on whatever
-  // screen loads without needing a dedicated page.
+  // Sent once a round has finished, by the booking-surveys cron. Opens My
+  // bookings, where the finished round carries its "Rate round" button.
   roundSurvey: (courseName: string, bookingId: string): PushPayload => ({
     title: 'How was your round?',
     body:  `Rate your round at ${courseName} — it only takes a moment.`,
-    url:   '/home',
+    url:   MY_BOOKINGS_PATH,
     tag:   `booking-survey-${bookingId}`,
     subject: `How was your round at ${courseName}?`,
     cta:   'Rate your round',

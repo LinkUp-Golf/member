@@ -100,7 +100,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   rows = await attachCourses(rows)
 
   return NextResponse.json(rows)
-})
+}, { allowGuests: true })
 
 // Batch-fetch the courses referenced by these bookings (admin client, bypasses
 // the belongs-to-only courses RLS) and attach the same limited fields the UI

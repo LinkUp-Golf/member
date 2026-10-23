@@ -15,7 +15,7 @@ import { getContactByEmail } from '@/lib/ghl/client'
 import { authRateLimit } from '@/lib/rateLimit'
 import { validateEmail } from '@/lib/validation'
 import { logger, auditLog } from '@/lib/logger'
-import { hasAnyAccessTag, hasPartnerTag, hasHostTag } from '@/lib/ghl/tags'
+import { hasPartnerTag, hasHostTag } from '@/lib/ghl/tags'
 import { createAdminClient } from '@/lib/supabase-server'
 
 // Intentionally vague — prevents email enumeration
@@ -68,11 +68,13 @@ export async function POST(request: NextRequest) {
       .maybeSingle()
 
     if (existingMember) {
-      // Re-validate GHL tags even for returning members — their membership
-      // may have been revoked since their last login.
+      // Re-check GHL even for returning members. Being in GHL is what lets
+      // someone sign in — any contact, member or not; their tags only decide
+      // what they can reach once inside (isGuestOnly). A contact deleted from
+      // GHL is the one way back out.
       const contact = await getContactByEmail(normalizedEmail)
       const tags = contact?.tags ?? []
-      const hasAccess = hasAnyAccessTag(tags)
+      const hasAccess = !!contact
       // A referral-partner / host role tag grants login independent of golf
       // membership status — so it overrides a 'suspended' membership too.
       const hasRole = hasPartnerTag(tags) || hasHostTag(tags)
@@ -87,7 +89,7 @@ export async function POST(request: NextRequest) {
       }
 
       if (!hasAccess) {
-        auditLog('LOGIN_DENIED', { requestId, metadata: { reason: 'ghl_tag_missing_returning_member' } })
+        auditLog('LOGIN_DENIED', { requestId, metadata: { reason: 'ghl_contact_missing_returning_member' } })
         return NextResponse.json(
           { allowed: false, revoked: true },
           { headers: { 'X-Request-Id': requestId } }
@@ -111,14 +113,16 @@ export async function POST(request: NextRequest) {
       reqLog.warn('generateLink failed for returning member, falling through', { errorMessage: linkError?.message })
     }
 
-    // ---- New user: GHL membership gate -------------------------
+    // ---- New user: GHL contact gate ----------------------------
+    // Anyone GHL knows may sign in. A non-member lands as a guest and is shown
+    // how to become a member (see @/lib/auth/guest-paths).
     const contact = await getContactByEmail(normalizedEmail)
-    const hasAccess = contact ? hasAnyAccessTag(contact.tags ?? []) : false
+    const hasAccess = !!contact
 
     auditLog('LOGIN_ATTEMPT', { requestId, metadata: { hasAccess, hasContact: !!contact } })
 
     if (!hasAccess) {
-      auditLog('LOGIN_DENIED', { requestId, metadata: { reason: 'no_ghl_tag' } })
+      auditLog('LOGIN_DENIED', { requestId, metadata: { reason: 'no_ghl_contact' } })
       return NextResponse.json(GENERIC_DENY, { headers: { 'X-Request-Id': requestId } })
     }
 

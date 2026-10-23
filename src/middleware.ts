@@ -5,6 +5,8 @@
 //   2. Supabase session refresh
 //   3. Redirect unauthenticated users to /login
 //   4. Guard /admin routes with is_admin DB check
+//   5. Send a guest (signed in, no membership) to /become-a-member from
+//      every page that isn't theirs — see @/lib/auth/guest-paths
 //
 // NOTE: GHL tag re-validation is NOT done here (Edge runtime
 // has no persistent cache). It is enforced per-request in
@@ -15,6 +17,8 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { decryptOverrides } from 'flags'
 import { DEFAULT_LANDING_PATH } from '@/lib/constants'
+import { isGuestOnly } from '@/lib/ghl/tags'
+import { BECOME_A_MEMBER_PATH, isOpenToGuests } from '@/lib/auth/guest-paths'
 
 const PUBLIC_ROUTES = [
   '/login',
@@ -42,6 +46,10 @@ const PARTNER_ROUTES = ['/partner']
 // The host workspace. Access is owning a hosts row, created when an admin
 // approves a host application — same row-is-the-role model as /partner.
 const HOST_ROUTES = ['/host']
+
+// Workspaces with gates of their own (above), and the API, which gates guests
+// itself in withAuth. The guest redirect is for the member app's pages.
+const NOT_GUEST_GATED = ['/api', ...ADMIN_ROUTES, ...PARTNER_ROUTES, ...HOST_ROUTES]
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
@@ -116,6 +124,28 @@ export async function middleware(request: NextRequest) {
       const redirectResponse = NextResponse.redirect(loginUrl)
       redirectResponse.headers.set('X-Request-Id', requestId)
       return redirectResponse
+    }
+
+    // ---- Guests: only their own pages ------------------------
+    // Server-side, before the page renders — an overlay drawn over the page
+    // could be deleted in dev tools; a redirect can't. Fails open on a DB
+    // error: locking every member out of the app over a blip is the worse
+    // outcome, and the API still refuses a guest on its own (withAuth).
+    if (
+      !NOT_GUEST_GATED.some(route => pathname.startsWith(route)) &&
+      !isOpenToGuests(pathname, request.nextUrl.searchParams.get('tab'))
+    ) {
+      const { data: member } = await supabase
+        .from('members')
+        .select('is_admin, ghl_tags')
+        .eq('id', user.id)
+        .single()
+
+      if (member && !member.is_admin && isGuestOnly(member.ghl_tags ?? [])) {
+        const redirectResponse = NextResponse.redirect(new URL(BECOME_A_MEMBER_PATH, request.url))
+        redirectResponse.headers.set('X-Request-Id', requestId)
+        return redirectResponse
+      }
     }
 
     // ---- Admin routes: enforce is_admin ----------------------

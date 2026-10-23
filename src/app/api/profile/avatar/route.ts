@@ -76,4 +76,4 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   await getCache(MEMBER_DETAIL_NS).delete(memberDetailKey(ctx.userId)).catch(() => {})
 
   return NextResponse.json({ avatarUrl: publicUrl })
-})
+}, { allowGuests: true })

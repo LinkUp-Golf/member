@@ -64,4 +64,4 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
       status: (s.status ?? 'approved') as 'pending' | 'approved' | 'declined',
     })) ?? [],
   })
-})
+}, { allowGuests: true })
