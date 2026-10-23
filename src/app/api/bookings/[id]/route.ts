@@ -114,4 +114,4 @@ export const DELETE = withAuth(async (
   })
 
   return NextResponse.json({ success: true, ghlDeleted })
-})
+}, { allowGuests: true })

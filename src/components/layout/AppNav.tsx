@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, memo, type ReactNode } from "react";
+import { Suspense, useEffect, useState, useCallback, memo, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -14,6 +14,7 @@ import BookingSurveyPrompt from "@/components/surveys/BookingSurveyPrompt";
 import { getMoreItems } from "@/lib/nav/moreItems";
 import { useMemberRoles } from "@/hooks/useMemberRoles";
 import { hasPartnerTag, hasHostTag } from "@/lib/ghl/tags";
+import GuestRedirect from "@/components/layout/GuestRedirect";
 import SidebarSignOut from "@/components/layout/SidebarSignOut";
 
 // Extracted + memoized so a pathname change (i.e. every navigation) only
@@ -194,6 +195,13 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
           on whichever screen the member is on when a round finishes — it fires
           on the booking's own clock, not on navigation. */}
       <BookingSurveyPrompt />
+
+      {/* A guest (signed in, no membership) is sent to /become-a-member from
+          any page that isn't theirs. Suspense because it reads the query. */}
+      <Suspense fallback={null}>
+        <GuestRedirect />
+      </Suspense>
+
 
       {/* Sidebar — tablet+ */}
       <aside className="app-sidebar">

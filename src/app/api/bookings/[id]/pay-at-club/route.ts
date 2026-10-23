@@ -84,4 +84,4 @@ export const POST = withAuth(async (
   })
 
   return NextResponse.json({ ok: true, payment_method: PAY_AT_CLUB })
-})
+}, { allowGuests: true })

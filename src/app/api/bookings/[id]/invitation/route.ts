@@ -106,7 +106,7 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext, routeCtx
       expiresAt: expires,
     }),
   })
-})
+}, { allowGuests: true })
 
 export const POST = withAuth(async (req: NextRequest, ctx: AuthContext, routeCtx?: RouteCtx) => {
   const body = await req.json().catch(() => null) as { response?: unknown } | null
@@ -178,4 +178,4 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext, routeCtx
   })
 
   return NextResponse.json({ inviteStatus, bookingStatus: response === 'decline' ? 'cancelled' : row.status })
-})
+}, { allowGuests: true })

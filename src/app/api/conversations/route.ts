@@ -125,7 +125,7 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   }
 
   return NextResponse.json(result)
-})
+}, { allowGuests: true })
 
 // POST /api/conversations — create a conversation, preventing duplicate DMs.
 export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {

@@ -11,6 +11,8 @@ import {
   hasHostTag,
   hasMembershipTag,
   hasPartnerTag,
+  isGuestOnly,
+  MEMBER_GUEST_TAG,
   tagsOverlap,
 } from '@/lib/ghl/tags'
 
@@ -132,5 +134,29 @@ describe('derived lists stay consistent', () => {
 
   it('exposes one course slug, deduplicated across the four tags', () => {
     expect(COURSE_SLUGS).toEqual(['aviara'])
+  })
+})
+
+describe('isGuestOnly — who the guest gate refuses', () => {
+  it('is a guest with only the guest tag, and may still sign in', () => {
+    expect(isGuestOnly([MEMBER_GUEST_TAG])).toBe(true)
+    expect(hasAnyAccessTag([MEMBER_GUEST_TAG])).toBe(true)
+  })
+
+  it('never counts the guest tag as a membership', () => {
+    expect(hasMembershipTag([MEMBER_GUEST_TAG])).toBe(false)
+  })
+
+  it('is not a guest once they hold any membership tag', () => {
+    for (const tag of MEMBERSHIP_TAGS) expect(isGuestOnly([MEMBER_GUEST_TAG, tag]), tag).toBe(false)
+  })
+
+  it('is not a guest when they hold a host or partner role', () => {
+    expect(isGuestOnly(['nbd client', 'host'])).toBe(false)
+    expect(isGuestOnly(['referral-partner'])).toBe(false)
+  })
+
+  it('treats access without a membership as a guest', () => {
+    expect(isGuestOnly(['nbd client'])).toBe(true)
   })
 })

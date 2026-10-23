@@ -67,7 +67,7 @@ import type {
   MemberWithProfile,
   Course,
 } from "@/types";
-import { AVIARA_TIMEZONE } from "@/lib/constants";
+import { AVIARA_TIMEZONE, MY_BOOKINGS_TAB } from "@/lib/constants";
 import { validateEmail } from "@/lib/validation";
 
 type PlayerKind = "member" | "non_member";
@@ -127,6 +127,7 @@ async function markPayAtClub(bookingId: string): Promise<string | null> {
 export default function BookPage() {
   const { user } = useProfile();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const inviteMemberId = searchParams?.get("invite") ?? null;
 
 
@@ -171,7 +172,18 @@ export default function BookPage() {
   // it's refreshed from several triggers (mount, tab focus/visibility) that can
   // fire near-simultaneously.
   const myBookingsRefreshInFlight = useRef(false);
-  const [activeTab, setActiveTab] = useState<"book" | "myBookings">("book");
+  // The tab lives in the URL (?tab=my-bookings) rather than in state, so My
+  // bookings can be linked to — the guest overlay sends people there — and so
+  // the shell can tell which tab is open.
+  const activeTab: "book" | "myBookings" =
+    searchParams?.get("tab") === MY_BOOKINGS_TAB ? "myBookings" : "book";
+  const setActiveTab = (tab: "book" | "myBookings") => {
+    const params = new URLSearchParams(searchParams?.toString());
+    if (tab === "myBookings") params.set("tab", MY_BOOKINGS_TAB);
+    else params.delete("tab");
+    const qs = params.toString();
+    router.replace(qs ? `/book?${qs}` : "/book", { scroll: false });
+  };
   // FIFO payment gate — every one of the member's bookings awaiting payment.
   // Starts loading=true (rather than assuming none) so the tee-time slot
   // list doesn't briefly render as bookable before the check resolves.

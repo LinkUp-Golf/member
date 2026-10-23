@@ -23,6 +23,7 @@ import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-serv
 import { getAvailableSlots, createBooking, getContactByEmail, resolveMeetingDurationMins } from '@/lib/ghl/client'
 import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { logActivity } from '@/lib/activity/log'
+import { refuseGuest } from '@/lib/auth/guest'
 import { linkGuestToMember, provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
 import type { ProvisionedGuest } from '@/lib/bookings/non-member-guest'
 import { sendBookingInvitations } from '@/lib/bookings/send-invitations'
@@ -70,6 +71,9 @@ export async function GET(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+  // A guest has no booking to make — see refuseGuest.
+  const guestRefusal = await refuseGuest(supabase, user.id)
+  if (guestRefusal) return guestRefusal
 
   const { searchParams } = new URL(request.url)
   const month = searchParams.get('month')
@@ -161,6 +165,9 @@ export async function POST(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+  // A guest has no booking to make — see refuseGuest.
+  const guestRefusal = await refuseGuest(supabase, user.id)
+  if (guestRefusal) return guestRefusal
 
   let body: unknown
   try {

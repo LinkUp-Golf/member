@@ -78,5 +78,5 @@ export const POST = withAuth(
   // Page views are frequent and low-sensitivity, so no GHL round-trip per
   // navigation. These share the standard per-member API budget (120/min);
   // the tracker's 5-minute dedupe is what keeps them off it.
-  { skipGHLCheck: true }
+  { skipGHLCheck: true, allowGuests: true }
 )

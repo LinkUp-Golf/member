@@ -12,6 +12,8 @@ export const ErrorCode = {
   // Authorization
   UNAUTHORIZED:        'UNAUTHORIZED',
   MEMBERSHIP_REVOKED:  'MEMBERSHIP_REVOKED',
+  // Signed in, but as a guest — the route is for members. Not a sign-out.
+  MEMBERSHIP_REQUIRED: 'MEMBERSHIP_REQUIRED',
   // GHL
   GHL_UNAVAILABLE:     'GHL_UNAVAILABLE',
   GHL_CONTACT_NOT_FOUND: 'GHL_CONTACT_NOT_FOUND',

@@ -99,4 +99,4 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
     .sort((a, b) => a.due_at.localeCompare(b.due_at))
 
   return NextResponse.json({ surveys })
-})
+}, { allowGuests: true })

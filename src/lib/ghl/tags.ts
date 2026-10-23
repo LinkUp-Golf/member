@@ -4,6 +4,20 @@
 // Adding a new course/location only requires adding a row here.
 // ============================================================
 
+// ---- Guest tag ----------------------------------------------
+// Someone a member brought onto a round who wasn't in GHL at all — added by
+// name and email at booking time, then provisioned a contact and a member row
+// so they can be booked, sign in and answer their invitation.
+//
+// It's the only tag such a guest is given. It used to ride alongside every
+// access tag, which made a guest indistinguishable from a paying member: it
+// fired GHL's membership workflow ('avi member - active'), stamped a membership
+// start date, and counted toward referral commission. Now it grants course
+// access on its own — it's in COURSE_TAG_MAP below — and is deliberately NOT in
+// MEMBERSHIP_TAGS, so a guest can play and use the app without ever being
+// treated as someone who bought a membership.
+export const MEMBER_GUEST_TAG = 'member-guest'
+
 // ---- Active member tags per course --------------------------
 // Keys are GHL contact tags; values are Supabase course slugs.
 //
@@ -17,6 +31,9 @@ export const COURSE_TAG_MAP = {
   'avi member - active': 'aviara', // id to trigger ghl workflow
   'member-active-SD':    'aviara',
   'nbd client':          'aviara',
+  // Access only, never a membership — see MEMBER_GUEST_TAG above. Points at the
+  // one community there is; a second would need guests mapped to theirs.
+  [MEMBER_GUEST_TAG]:    'aviara',
 } as const satisfies Record<string, string>
 
 export type CourseTag = keyof typeof COURSE_TAG_MAP
@@ -38,21 +55,6 @@ export const COURSE_SLUGS = [...new Set(Object.values(COURSE_TAG_MAP))] as Cours
 export const PARTNER_ROLE_TAG = 'referral-partner'
 export const HOST_ROLE_TAG = 'host'
 export const ROLE_ACCESS_TAGS = [PARTNER_ROLE_TAG, HOST_ROLE_TAG] as const
-
-// ---- Guest tag ----------------------------------------------
-// Someone a member brought onto a round who wasn't in GHL at all — added by
-// name and email at booking time, then provisioned a contact and a member row
-// so they can be booked and reminded like anyone else.
-//
-// They carry the course access tags (they're playing), which makes them
-// indistinguishable in GHL from someone who bought a membership. This marks
-// how they arrived, so GHL can work them as the leads they are rather than
-// nurture them as members who never paid.
-//
-// Deliberately NOT in ALL_ACCESS_TAGS or ROLE_ACCESS_TAGS: it grants nothing
-// and gates nothing. It's a provenance label, and adding it to the login gate
-// would let a removed membership keep its access.
-export const MEMBER_GUEST_TAG = 'member-guest'
 
 /** Every tag that lets someone into the app — course/membership tags plus roles. */
 export const ALL_LOGIN_TAGS = [...ALL_ACCESS_TAGS, ...ROLE_ACCESS_TAGS] as string[]
@@ -156,4 +158,16 @@ export const MEMBERSHIP_TAGS = [
 /** Returns true if a tag array marks the person as a member. */
 export function hasMembershipTag(tags: string[]): boolean {
   return MEMBERSHIP_TAGS.some(tag => holds(tags, tag))
+}
+
+/**
+ * Whether someone is in the app as a guest: let in by an access tag (a member's
+ * guest, an 'nbd client') but holding no membership, and no host or partner
+ * role either. A guest gets their own bookings and their own account and
+ * nothing else — the API by withAuth (`allowGuests`), the pages by the
+ * middleware redirect (@/lib/auth/guest-paths). Admins are exempt at both;
+ * that's a property of the member row, not of the tags, so callers check it.
+ */
+export function isGuestOnly(tags: string[]): boolean {
+  return !hasMembershipTag(tags) && !hasPartnerTag(tags) && !hasHostTag(tags)
 }

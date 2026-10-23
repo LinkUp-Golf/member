@@ -3,9 +3,13 @@
 //
 // A booker can add someone who isn't a LinkUp member and isn't a
 // GHL contact yet. Everything that person needs in order to be on
-// a round — a GHL contact carrying the access tags plus the
-// member-guest tag that says how they arrived, and a LinkUp member
-// row against it — is created here.
+// a round — a GHL contact carrying the member-guest tag, and a
+// LinkUp member row against it — is created here.
+//
+// member-guest is the only tag they get. It lets them sign in and
+// see their round, and nothing else: none of the membership tags,
+// so no membership workflow in GHL, no membership dates, and no
+// referral commission. See MEMBER_GUEST_TAG.
 //
 // This used to sit behind an admin "Setup" button, with the
 // booking parked in 'awaiting_approval' until someone pressed it.
@@ -18,7 +22,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getContactByEmail, createContact, addTagToContact } from '@/lib/ghl/client'
-import { ALL_ACCESS_TAGS, MEMBER_GUEST_TAG } from '@/lib/ghl/tags'
+import { MEMBER_GUEST_TAG, hasAnyAccessTag } from '@/lib/ghl/tags'
 import { syncMember } from '@/lib/sync'
 import { logger } from '@/lib/logger'
 import type { AdditionalPlayer, GHLContact } from '@/types'
@@ -46,12 +50,9 @@ export interface ProvisionedGuest {
   memberId: string | null
 }
 
-/** What a brought-along guest's contact carries: course access, plus how they
- *  arrived. Written to GHL and mirrored onto the member row below. */
-const GUEST_TAGS: string[] = [...ALL_ACCESS_TAGS, MEMBER_GUEST_TAG]
 
 /**
- * Creates (or finds) the guest's GHL contact, tags it for access, and makes
+ * Creates (or finds) the guest's GHL contact, tags it as a guest, and makes
  * sure a LinkUp member exists for it.
  *
  * Returns the GHL contact id — the caller needs it to book the appointment —
@@ -77,20 +78,18 @@ export async function provisionNonMemberGuest(
       phone: guest.mobile || null,
     }))
 
-  // Tagged before the appointment is made, so the app recognises them and
-  // GHL's membership workflows fire against a contact that already has access.
-  //
-  // MEMBER_GUEST_TAG goes on alongside them: the access tags are what a paying
-  // member carries, so without it this contact is indistinguishable in GHL from
-  // someone who bought a membership. It's how they got here, and it's the tag
-  // GHL segments the follow-up on.
-  for (const tag of GUEST_TAGS) {
-    await addTagToContact(contactId, tag)
-  }
+  // Tagged before the appointment is made, so the app recognises them when they
+  // sign in. A contact that can already get in — a member, a host — is left
+  // exactly as it is: they don't need the guest tag to play, and carrying it
+  // would keep them in the app after a membership was taken away.
+  const existingTags = existing?.tags ?? []
+  const addGuestTag = !hasAnyAccessTag(existingTags)
+  if (addGuestTag) await addTagToContact(contactId, MEMBER_GUEST_TAG)
+  const tags = addGuestTag ? [...existingTags, MEMBER_GUEST_TAG] : existingTags
 
   let memberId: string | null = null
   try {
-    memberId = await ensureMemberForContact({ admin, contactId, guest, email })
+    memberId = await ensureMemberForContact({ admin, contactId, guest, email, tags })
   } catch (err) {
     logger.error('Non-member guest — member sync failed (non-fatal)', {
       action: 'non_member_guest.sync_failed',
@@ -153,11 +152,14 @@ async function ensureMemberForContact({
   contactId,
   guest,
   email,
+  tags,
 }: {
   admin: SupabaseClient
   contactId: string
   guest: NonMemberGuest
   email: string
+  /** Every tag the contact now holds — what the member row is synced from. */
+  tags: string[]
 }): Promise<string> {
   const { data: existingMember } = await admin
     .from('members')
@@ -203,7 +205,9 @@ async function ensureMemberForContact({
     firstName: guest.firstName ?? '',
     lastName: guest.lastName ?? '',
     phone: guest.mobile ?? '',
-    tags: [...GUEST_TAGS],
+    // The contact's whole set, not just what was added here: syncing an
+    // existing member from the guest tag alone would demote them to a guest.
+    tags,
     customFields: [],
   }
 

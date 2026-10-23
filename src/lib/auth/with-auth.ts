@@ -5,6 +5,7 @@
 //   1. Valid Supabase session (JWT not expired)
 //   2. Member row exists in our DB
 //   3. GHL membership tag still active (15-min cache)
+//   4. A guest (isGuestOnly) only reaches routes marked allowGuests
 //
 // Usage:
 //   export const GET = withAuth(async (req, ctx) => {
@@ -34,6 +35,7 @@ import {
 } from '@/lib/errors/app-error'
 import { getCache } from '@/lib/cache'
 import { MEMBER_ROW_NS, MEMBER_ROW_TTL_MS, memberRowKey } from '@/lib/cache/keys'
+import { isGuestOnly } from '@/lib/ghl/tags'
 import type { AuthContext } from './types'
 
 // Shape stored in the member row cache
@@ -41,6 +43,7 @@ interface CachedMemberRow {
   ghl_contact_id: string
   is_admin: boolean
   home_course_id: string | null
+  ghl_tags: string[]
 }
 
 interface WithAuthOptions {
@@ -50,6 +53,14 @@ interface WithAuthOptions {
   skipGHLCheck?: boolean
   /** Override rate limit: requests per minute. Default: 120 */
   rateLimit?: number
+  /**
+   * Let a guest — signed in without a membership, see isGuestOnly — through.
+   * Off by default: a route is members-only unless it says otherwise. Set it
+   * only on what a guest's own screens need (their bookings, their invitation,
+   * their profile and settings) and on what the app shell calls on every page.
+   * The overlay in the member app is presentation; this is the gate.
+   */
+  allowGuests?: boolean
 }
 
 type RouteContext = { params: Record<string, string> }
@@ -104,17 +115,19 @@ export function withAuth(
     // ---- 3. Load member row (cached 5 min) -----------------
     // Also fetches home_course_id so downstream routes don't
     // need a second DB query for the same field.
-    let member: { id: string; ghl_contact_id: string; is_admin: boolean; home_course_id: string | null } | null = null
+    let member: { id: string; ghl_contact_id: string; is_admin: boolean; home_course_id: string | null; ghl_tags: string[] } | null = null
     try {
       const memberCache = getCache(MEMBER_ROW_NS)
       const cached = await memberCache.get<CachedMemberRow>(memberRowKey(userId))
 
-      if (cached) {
+      // An entry cached before ghl_tags was part of it is treated as a miss —
+      // the guest check below can't be made without the tags.
+      if (cached && Array.isArray(cached.ghl_tags)) {
         member = { id: userId, ...cached }
       } else {
         const { data, error } = await supabase
           .from('members')
-          .select('id, ghl_contact_id, is_admin, home_course_id')
+          .select('id, ghl_contact_id, is_admin, home_course_id, ghl_tags')
           .eq('id', userId)
           .single()
 
@@ -124,12 +137,13 @@ export function withAuth(
           throw new AuthError('Member not found', ErrorCode.UNAUTHENTICATED)
         }
 
-        member = data
+        member = { ...data, ghl_tags: data.ghl_tags ?? [] }
         // Cache only the fields we need — not the full row
         const toCache: CachedMemberRow = {
           ghl_contact_id: data.ghl_contact_id,
           is_admin: data.is_admin,
           home_course_id: data.home_course_id,
+          ghl_tags: data.ghl_tags ?? [],
         }
         await memberCache.set(memberRowKey(userId), toCache, MEMBER_ROW_TTL_MS).catch(() => {})
       }
@@ -149,6 +163,9 @@ export function withAuth(
     }
 
     // ---- 5. GHL membership re-validation -------------------
+    // The tags the guest check reads: GHL's own, live, when this route checks
+    // GHL; the member row's mirror of them when it doesn't.
+    let tags = member.ghl_tags
     if (!options.skipGHLCheck) {
       try {
         const ghlResult = await validateGHLMembership({
@@ -168,6 +185,7 @@ export function withAuth(
           })
           return errorResponse(403, ErrorCode.MEMBERSHIP_REVOKED, 'Membership no longer active', requestId)
         }
+        tags = ghlResult.tags
       } catch (err) {
         authLog.error('GHL validation threw unexpectedly', { errorMessage: String(err) })
         // Fail-secure: deny on unexpected errors
@@ -175,7 +193,15 @@ export function withAuth(
       }
     }
 
-    // ---- 6. Build context and execute handler --------------
+    // ---- 6. Guests reach only what's open to them -----------
+    // The member app hides everything else behind an overlay, but an overlay is
+    // a div — remove it and the page underneath works. This is what doesn't.
+    if (!options.allowGuests && !member.is_admin && isGuestOnly(tags)) {
+      authLog.warn('Guest denied a members-only route', { action: 'guest_check' })
+      return errorResponse(403, ErrorCode.MEMBERSHIP_REQUIRED, 'Membership required', requestId)
+    }
+
+    // ---- 7. Build context and execute handler --------------
     const ctx: AuthContext = {
       requestId,
       userId,
