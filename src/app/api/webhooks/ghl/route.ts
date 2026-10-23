@@ -12,9 +12,10 @@ import { NextResponse } from 'next/server'
 import crypto, { randomUUID } from 'crypto'
 import { createAdminClient } from '@/lib/supabase-server'
 import { getContactById } from '@/lib/ghl/client'
-import { hasAnyAccessTag } from '@/lib/ghl/tags'
 import { syncMemberByContactId, type SyncContext } from '@/lib/sync'
-import { deactivateMember } from '@/lib/sync/member.sync'
+import { invalidateMembershipCache } from '@/lib/auth/ghl-validator'
+import { getCache } from '@/lib/cache'
+import { MEMBER_ROW_NS, memberRowKey } from '@/lib/cache/keys'
 import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
@@ -57,19 +58,17 @@ export async function POST(request: NextRequest) {
       const contact = await getContactById(contactId)
       if (!contact) break
 
-      if (hasAnyAccessTag(contact.tags ?? [])) {
-        await syncMemberByContactId({ contact, ctx })
-      } else {
-        // Tag removed — deactivate the member if they exist in Supabase
-        const { data: member } = await ctx.supabase
-          .from('members')
-          .select('id')
-          .eq('ghl_contact_id', contactId)
-          .single()
-
-        if (member) {
-          await deactivateMember(member.id, ctx)
-        }
+      // Tag added or removed, the row follows GHL: an access tag makes them an
+      // active member, none makes them a non-member who can still sign in as a
+      // guest. A removed tag no longer suspends — that's an admin's call.
+      // syncMemberByContactId skips a contact nobody has signed in as yet.
+      const result = await syncMemberByContactId({ contact, ctx })
+      // withAuth reads tags from two caches (GHL's, 15 min; the member row's,
+      // 5 min). Clear both, so a guest who has just become a member isn't kept
+      // to guest pages until they expire — nor a lapsed member kept out of them.
+      if (result.userId) {
+        await invalidateMembershipCache(result.userId)
+        await getCache(MEMBER_ROW_NS).delete(memberRowKey(result.userId)).catch(() => {})
       }
       break
     }

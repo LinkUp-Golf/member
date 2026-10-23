@@ -9,7 +9,7 @@
 // ============================================================
 
 import { logger } from '@/lib/logger'
-import { COURSE_TAG_MAP, courseTagsHeld, hasAnyAccessTag, hasCourseAccessTag, hasHostTag, hasPartnerTag } from '@/lib/ghl/tags'
+import { COURSE_TAG_MAP, courseTagsHeld, hasCourseAccessTag, hasHostTag, hasPartnerTag } from '@/lib/ghl/tags'
 import { getContactByIdStrict } from '@/lib/ghl/client'
 import { upsertMember, deactivateMember, stampMembershipLifecycle } from './member.sync'
 import { syncCourseMemberships } from './membership.sync'
@@ -33,13 +33,10 @@ export async function syncMember(params: {
   const log = logger.child({ requestId: ctx.requestId, userId, action: 'sync_member' })
   const tags = contact.tags ?? []
 
-  if (!hasAnyAccessTag(tags)) {
-    log.warn('Contact has no access tag — sync skipped')
-    return { success: true, userId, action: 'skipped' }
-  }
-
-  // A golf member carries a course tag; a role-only user (referral partner /
-  // host with no membership) does not, and becomes a course-less non-member.
+  // A golf member carries a course tag. Anyone else — a referral partner or
+  // host with no membership, or a contact with no access tag at all — becomes
+  // a course-less non-member. They can still sign in; isGuestOnly decides what
+  // they reach.
   const isMember = hasCourseAccessTag(tags)
   let homeCourseId: string | null = null
 
@@ -117,9 +114,9 @@ export async function syncMemberByContactId(params: {
 // Re-pulls each member's current GHL tags so membership state is up to date.
 // Uses getContactByIdStrict so a genuine 404 (contact deleted in GHL) is told
 // apart from a transient outage:
-//   - contact present, access tag  → full sync (tags + active)
-//   - contact present, no access tag → deactivate + refresh stored tags
-//   - contact deleted (404)        → deactivate + clear tags (no longer a member)
+//   - contact present              → full sync (active member, or non_member
+//                                    with no home course when the tag's gone)
+//   - contact deleted (404)        → deactivate + clear tags (can't sign in)
 //   - outage / network (throws)    → leave tags as-is, count as failed
 // The failed/refreshed split lets the payment flow fail closed on a total
 // outage instead of paying on stale membership tags.
@@ -154,13 +151,11 @@ export async function refreshMembersFromGhl(
         continue
       }
 
-      const tags = contact.tags ?? []
-      if (hasAnyAccessTag(tags)) {
-        const result = await syncMember({ contact, userId: m.id, ctx })
-        if (!result.success) { failed++; continue }
-      } else {
-        await storeTags(m.id, tags)
-      }
+      // Losing a membership tag makes them a non-member, not a suspended
+      // account: they can still sign in, as a guest. 'suspended' is left to
+      // mean what an admin means by it.
+      const result = await syncMember({ contact, userId: m.id, ctx })
+      if (!result.success) { failed++; continue }
       refreshed++
     } catch {
       // Outage / transient — do NOT touch the stored tags; this counts as a

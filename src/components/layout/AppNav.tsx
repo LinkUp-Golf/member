@@ -117,20 +117,18 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
   const moreGroups = getMoreItems(roles);
   const [dismissed, setDismissed] = useState(true); // start hidden, reveal after mount
 
-  // A non-member (a referral partner / host with no golf membership, so no home
-  // course) has no membership features — the member app is hidden from them and
-  // they're sent to their workspace. Enforced app-wide here since AppNav wraps
-  // every member route.
+  // A referral partner / host with no golf membership (so no home course) has
+  // a workspace of their own, and is sent there. Anyone else without a home
+  // course is a guest, and GuestRedirect below keeps them to their own pages.
   const isNonMember = !loading && !!profile && !profile.home_course_id;
+  const roleTags = profile?.ghl_tags ?? [];
+  const workspace = !isNonMember ? null
+    : hasPartnerTag(roleTags) ? "/partner"
+    : hasHostTag(roleTags) ? "/host"
+    : null;
   useEffect(() => {
-    if (!isNonMember) return;
-    const tags = profile?.ghl_tags ?? [];
-    router.replace(
-      hasPartnerTag(tags) ? "/partner"
-      : hasHostTag(tags) ? "/host"
-      : "/membership-required"
-    );
-  }, [isNonMember, profile, router]);
+    if (workspace) router.replace(workspace);
+  }, [workspace, router]);
 
   // Applies the member's saved text-size preference once it loads. The shell
   // (nav/sidebar) renders immediately at the browser default — there's no
@@ -182,9 +180,9 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
     setDismissed(true);
   }, []);
 
-  // Don't paint the member shell/features for a non-member — hold a loader
-  // while the effect above redirects them to their workspace.
-  if (isNonMember) {
+  // Don't paint the member shell for someone on their way to their workspace —
+  // hold a loader while the effect above redirects them.
+  if (workspace) {
     return <FullScreenLoader />;
   }
 

@@ -128,9 +128,13 @@ export function hasMemberGuestTag(tags: string[]): boolean {
 }
 
 /**
- * Returns true if a tag array lets the person into the app at all — a course
- * access tag OR a role tag (referral partner / host). This is the login gate
- * used at magic-link request, callback, and the per-request revalidator.
+ * Returns true if a tag array grants course access or a role — a course access
+ * tag OR a role tag (referral partner / host).
+ *
+ * No longer the login gate: anyone with a GHL contact may sign in, and a
+ * contact without a membership is a guest (isGuestOnly). This now decides
+ * whose GHL contacts the bulk sync imports, and whether a guest being added to
+ * a round needs the member-guest tag to have course access.
  */
 export function hasAnyAccessTag(tags: string[]): boolean {
   return ALL_ACCESS_TAGS.some(tag => holds(tags, tag)) || ROLE_ACCESS_TAGS.some(tag => holds(tags, tag))
