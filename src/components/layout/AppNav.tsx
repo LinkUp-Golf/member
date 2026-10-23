@@ -10,7 +10,6 @@ import Icon, { type IconName } from "@/components/ui/Icon";
 import { FullScreenLoader } from "@/components/ui/Loading";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useProfile } from "@/hooks/useProfile";
-import BookingSurveyPrompt from "@/components/surveys/BookingSurveyPrompt";
 import { getMoreItems } from "@/lib/nav/moreItems";
 import { useMemberRoles } from "@/hooks/useMemberRoles";
 import { hasPartnerTag, hasHostTag } from "@/lib/ghl/tags";
@@ -191,11 +190,6 @@ export default function AppNav({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="app-shell">
-      {/* Post-round satisfaction survey. Lives at the shell so it can surface
-          on whichever screen the member is on when a round finishes — it fires
-          on the booking's own clock, not on navigation. */}
-      <BookingSurveyPrompt />
-
       {/* A guest (signed in, no membership) is sent to /become-a-member from
           any page that isn't theirs. Suspense because it reads the query. */}
       <Suspense fallback={null}>

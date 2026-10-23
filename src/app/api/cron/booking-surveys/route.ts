@@ -5,10 +5,8 @@ export const dynamic = 'force-dynamic'
 // Runs every 15 minutes (vercel.json: "*/15 * * * *"). Sends the "how was your
 // round?" push once a booking's round has finished.
 //
-// This is what makes the survey reach a member whose app is closed. With the
-// app open, useBookingSurvey already opens the prompt on its own timer at the
-// same instant; this covers everyone else, and tapping the notification opens
-// the app onto a prompt that is by then due.
+// This is how a member hears the survey is waiting: tapping the notification
+// opens My bookings, where the finished round has its "Rate round" button.
 //
 // The survey_prompt_sent flag is the idempotency guard, so a re-run or an
 // overlapping invocation can't nudge the same round twice. There's no ±window

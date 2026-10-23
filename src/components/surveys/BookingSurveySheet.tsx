@@ -9,12 +9,11 @@ import { cn, formatTeeTime } from '@/lib/utils'
 // ============================================================
 // The satisfaction survey form itself, as a bottom sheet.
 //
-// Shared by both ways in: BookingSurveyPrompt opens it automatically when a
-// round finishes, and My Bookings opens it on demand for any past round — the
-// route members use to rate rounds that predate the feature.
+// Opened from My Bookings, on demand, for any finished round — the round-survey
+// push sends members there.
 // ============================================================
 
-/** The round being rated. `PendingSurvey` satisfies this shape. */
+/** The round being rated. */
 export interface SurveyTarget {
   booking_id: string
   booking_date: string
