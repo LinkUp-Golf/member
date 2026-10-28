@@ -2979,10 +2979,14 @@ function MyBookingsTab({
                 ) &&
                 isSurveyDue(group.primary, group.primary.course, now);
 
+              // `relative` holds the sr-only "Players:" label inside the row.
+              // Without a positioned ancestor it's placed against the page
+              // rather than the scrolling <main>, and the page grows a second
+              // scrollbar down to wherever the oldest row sits.
               return (
                 <div
                   key={group.primary.id}
-                  className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl"
+                  className="relative flex items-center justify-between gap-3 px-4 py-3 rounded-xl"
                   style={{
                     background: "rgba(0,38,105,0.025)",
                     opacity: isCancelled ? 0.6 : 0.75,
