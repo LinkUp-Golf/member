@@ -11,9 +11,10 @@ import EmptyState from "@/components/ui/EmptyState";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { MessageCircle, Star } from "lucide-react";
+import { MessageCircle, Star, Users } from "lucide-react";
 import { formatTeeTime, cn, bookingToLocalDate } from "@/lib/utils";
 import { createClient } from "@/lib/supabase";
+import { isGuestOnly } from "@/lib/ghl/tags";
 import BookingSurveySheet, {
   type SurveyTarget,
 } from "@/components/surveys/BookingSurveySheet";
@@ -2727,6 +2728,42 @@ function groupBookings(bookings: Booking[]): BookingGroup[] {
   return groups;
 }
 
+// Who was on a past or cancelled round, named the way the upcoming card names
+// them: "You" first, then the booker, then everyone else. A round that went
+// ahead lists only the seats still held when it did; a cancelled one lists
+// everyone, since every seat on it went the same way.
+//
+// `memberId` is whose profile the name opens: null for you, as in the
+// who's-playing sheet, and for a guest no account was ever linked to.
+type RosterEntry = { id: string; name: string; memberId: string | null };
+
+function roundRoster(
+  group: BookingGroup,
+  userId: string | undefined,
+): RosterEntry[] {
+  const keepCancelled = group.primary.status === "cancelled";
+  const rows = [group.primary, ...group.players].filter(
+    (b) => keepCancelled || b.status !== "cancelled",
+  );
+  const others: RosterEntry[] = [];
+  let you: RosterEntry | null = null;
+  for (const b of rows) {
+    // The booker's own row names nobody; every other row names its player.
+    const bookersOwn = !b.guest_name && !b.player_member_id;
+    const memberId = bookersOwn ? b.member_id : b.player_member_id;
+    if (memberId === userId) {
+      you = { id: b.id, name: "You", memberId: null };
+    } else {
+      others.push({
+        id: b.id,
+        name: bookersOwn ? (b.booker_name ?? "Booker") : (b.guest_name ?? "Guest"),
+        memberId,
+      });
+    }
+  }
+  return you ? [you, ...others] : others;
+}
+
 interface CancelTarget {
   bookingId: string;
   title: string;
@@ -2757,7 +2794,11 @@ function MyBookingsTab({
   // credit for the payment banner, and two copies would mean two requests.
   wallet?: ReturnType<typeof useCreditWallet>;
 }) {
-  const { user } = useProfile();
+  const { user, profile } = useProfile();
+  // A guest can't open member profiles (see @/lib/auth/guest-paths), so the
+  // names on their past rounds stay plain. Admins are exempt, as everywhere.
+  const canOpenProfiles =
+    !!profile && (profile.is_admin || !isGuestOnly(profile.ghl_tags ?? []));
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
   const [editTarget, setEditTarget] = useState<EditGuestTarget | null>(null);
   const [addTarget, setAddTarget] = useState<AddPlayerTarget | null>(null);
@@ -2901,6 +2942,7 @@ function MyBookingsTab({
               const displayTime = formatTeeTime(group.primary.tee_time);
               const courseName = group.primary.course?.name ?? "Golf course";
               const isCancelled = group.primary.status === "cancelled";
+              const roster = roundRoster(group, user?.id);
               const rating = ratings.get(group.primary.id);
               // Rateable once the round has actually finished — a cancelled or
               // never-confirmed booking was never a round to rate. The server
@@ -2935,6 +2977,39 @@ function MyBookingsTab({
                     >
                       {format(displayDate, "EEE, MMM d, yyyy")} · {displayTime}
                     </p>
+                    {/* Who was on it — always shown, like the upcoming card.
+                        Each name opens that member's profile. */}
+                    {roster.length > 0 && (
+                      <p
+                        className="text-xs mt-1 flex items-start gap-1.5"
+                        style={{ color: "rgba(0,38,105,0.6)" }}
+                      >
+                        <Users
+                          className="w-3 h-3 mt-0.5 flex-shrink-0"
+                          strokeWidth={2}
+                          aria-hidden
+                        />
+                        <span className="sr-only">Players: </span>
+                        <span className="capitalize break-words min-w-0">
+                          {roster.map((p, idx) => (
+                            <span key={p.id}>
+                              {idx > 0 && ", "}
+                              {p.memberId && canOpenProfiles ? (
+                                <Link
+                                  href={`/members/${p.memberId}`}
+                                  className="font-medium underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                                  style={{ color: "var(--color-green-700)" }}
+                                >
+                                  {p.name}
+                                </Link>
+                              ) : (
+                                p.name
+                              )}
+                            </span>
+                          ))}
+                        </span>
+                      </p>
+                    )}
                   </div>
                   {isCancelled ? (
                     <BookingStatusBadge status="cancelled" />
