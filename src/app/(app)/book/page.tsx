@@ -35,7 +35,11 @@ import type { CalendarPlayer } from "@/lib/bookings/players";
 import type { VenueHost } from "@/lib/bookings/venue-hosts";
 import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
 import { bookingAmountDue } from "@/lib/bookings/price";
-import { allowsNonMemberGuests } from "@/lib/bookings/guest-policy";
+import {
+  allowsNonMemberGuests,
+  NON_MEMBER_GUEST_LIMIT_MESSAGE,
+  withinNonMemberGuestLimit,
+} from "@/lib/bookings/guest-policy";
 import WhatHappensNext from "@/components/booking/WhatHappensNext";
 import {
   PAID_BY_OPTIONS,
@@ -1177,6 +1181,11 @@ function ConfirmScreen({
   // Ids already chosen (to exclude from autocomplete)
   const selectedMemberIds = playerSelections.flatMap((s) => (s ? [s.id] : []));
 
+  // One non-member per booking — once a row is one, the rest can only be
+  // members. The server enforces it too.
+  const nonMemberCount = playerKinds.filter((k) => k === "non_member").length;
+  const nonMemberLimitReached = !withinNonMemberGuestLimit(nonMemberCount, 1);
+
   return (
     <div>
       <div className="top-bar flex items-center justify-between">
@@ -1480,14 +1489,19 @@ function ConfirmScreen({
                               ] as [PlayerKind, string][]
                             ).map(([k, label]) => {
                               const active = kind === k;
+                              const blocked =
+                                k === "non_member" &&
+                                !active &&
+                                nonMemberLimitReached;
                               return (
                                 <button
                                   key={k}
                                   type="button"
+                                  disabled={blocked}
                                   onClick={() => {
                                     if (kind !== k) setPlayerKind(i, k);
                                   }}
-                                  className="flex-1 py-2 text-xs font-semibold rounded-lg transition-all"
+                                  className="flex-1 py-2 text-xs font-semibold rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                                   style={
                                     active
                                       ? {
@@ -1505,6 +1519,16 @@ function ConfirmScreen({
                             })}
                           </div>
                           )}
+                          {allowNonMembers &&
+                            kind === "member" &&
+                            nonMemberLimitReached && (
+                              <p
+                                className="text-[11px] leading-snug"
+                                style={{ color: "rgba(0,38,105,0.5)" }}
+                              >
+                                {NON_MEMBER_GUEST_LIMIT_MESSAGE}
+                              </p>
+                            )}
 
                           {kind === "member" ? (
                             <MemberAutocomplete
@@ -3243,6 +3267,10 @@ function BookingCard({
       dateLabel: format(bookingDate, "EEE, MMM d"),
       timeLabel: bookingTime,
       allowNonMembers: allowsNonMemberGuests(group.primary.course),
+      nonMemberLimitReached: !withinNonMemberGuestLimit(
+        activePlayers.filter((p) => p.non_member_guest).length,
+        1,
+      ),
       excludeMemberIds: [
         group.primary.member_id,
         ...activePlayers
@@ -3574,6 +3602,8 @@ interface AddPlayerTarget {
   excludeMemberIds: string[];
   /** The venue takes non-member guests — see @/lib/bookings/guest-policy. */
   allowNonMembers: boolean;
+  /** The booking already has its one non-member guest. */
+  nonMemberLimitReached: boolean;
 }
 
 type AddPlayerForm = {
@@ -3833,8 +3863,9 @@ function AddPlayerModal({
                 <button
                   key={k}
                   type="button"
+                  disabled={k === "non_member" && target.nonMemberLimitReached}
                   onClick={() => switchKind(k)}
-                  className="flex-1 py-2 text-xs font-semibold rounded-lg transition-all"
+                  className="flex-1 py-2 text-xs font-semibold rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   style={
                     active
                       ? {
@@ -3850,6 +3881,14 @@ function AddPlayerModal({
               );
             })}
           </div>
+          )}
+          {target.allowNonMembers && target.nonMemberLimitReached && (
+            <p
+              className="text-[11px] leading-snug"
+              style={{ color: "rgba(0,38,105,0.5)" }}
+            >
+              {NON_MEMBER_GUEST_LIMIT_MESSAGE}
+            </p>
           )}
 
           {kind === "member" ? (

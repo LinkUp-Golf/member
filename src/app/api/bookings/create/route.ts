@@ -34,7 +34,12 @@ import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPayme
 import { buildCustomSlots, loadForcedOpenDays, NON_HOLDING_STATUSES } from '@/lib/bookings/availability'
 import { isInsideJoinOnlyWindow, joinOnlyWindowMessage, openDayKey } from '@/lib/bookings/lead-time'
 import { bookingAmountDue } from '@/lib/bookings/price'
-import { allowsNonMemberGuests, NON_MEMBER_GUESTS_DISABLED_MESSAGE } from '@/lib/bookings/guest-policy'
+import {
+  allowsNonMemberGuests,
+  NON_MEMBER_GUESTS_DISABLED_MESSAGE,
+  NON_MEMBER_GUEST_LIMIT_MESSAGE,
+  withinNonMemberGuestLimit,
+} from '@/lib/bookings/guest-policy'
 import { isPaidBy, PAID_BY_REQUIRED_MESSAGE } from '@/lib/bookings/invitations'
 import {
   PAY_AT_CLUB,
@@ -228,6 +233,11 @@ export async function POST(request: NextRequest) {
   // for admin approval. Only the booker and existing-member guests are booked.
   const nonMemberPlayers = extraPlayers.filter((p) => p.isNonMember || !p.memberId)
   const memberPlayers = extraPlayers.filter((p) => !(p.isNonMember || !p.memberId))
+
+  // One non-member guest per booking — see guest-policy.
+  if (!withinNonMemberGuestLimit(0, nonMemberPlayers.length)) {
+    return NextResponse.json({ error: NON_MEMBER_GUEST_LIMIT_MESSAGE }, { status: 400 })
+  }
 
   console.log('[booking/create] Request:', {
     userId: user.id,
@@ -721,6 +731,9 @@ export async function POST(request: NextRequest) {
   }
   const created = insertedBookings as InsertedBooking[]
   console.log('[booking/create] Reserved bookings:', created.map(b => b.id))
+  // Read before provisioning links each guest to an account, after which their
+  // row looks like a member's — the client needs it to stop offering a second.
+  const nonMemberSeatIds = new Set(created.filter(b => b.guest_name && !b.player_member_id).map(b => b.id))
 
   // Step 3: Now that the seats are reserved, create GHL appointments and
   // backfill ghl_booking_id. The primary booker's appointment MUST succeed —
@@ -869,7 +882,11 @@ export async function POST(request: NextRequest) {
   // Echo the resolved course onto each row so the client's optimistic prepend
   // renders the real course name (the RPC returns raw rows with no join).
   const bookingsWithCourse = Array.isArray(insertedBookings) && courseForResponse
-    ? insertedBookings.map((b: Record<string, unknown>) => ({ ...b, course: courseForResponse }))
+    ? insertedBookings.map((b: Record<string, unknown>) => ({
+        ...b,
+        course: courseForResponse,
+        non_member_guest: nonMemberSeatIds.has(b.id as string),
+      }))
     : insertedBookings
 
   return NextResponse.json({

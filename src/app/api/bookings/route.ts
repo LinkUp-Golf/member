@@ -6,6 +6,7 @@ import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient, createRouteHandlerClient } from '@/lib/supabase-server'
 import { coursePaymentOptions } from '@/lib/bookings/payment-options'
+import { findNonMemberSeats } from '@/lib/bookings/non-member-guest'
 import { nameOrEmail } from '@/lib/utils'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -92,6 +93,12 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
     rows = [...rows, ...siblingRows]
   }
+
+  // Which seats a non-member guest holds, so the booker's Add player stops
+  // offering a second one — see @/lib/bookings/guest-policy. Through the admin
+  // client: a guest's member row isn't the booker's to read.
+  const nonMemberSeats = await findNonMemberSeats(createAdminClient(), rows)
+  rows = rows.map(b => ({ ...b, non_member_guest: nonMemberSeats.has(b.id as string) }))
 
   // Resolve each booking's course via the admin client. The courses RLS policy
   // only exposes courses a member *belongs to*, so an embedded join returns null

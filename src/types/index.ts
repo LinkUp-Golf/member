@@ -283,6 +283,11 @@ export interface Booking {
   invite_status?: 'pending' | 'accepted' | 'declined' | 'expired' | null
   created_at: string
   booker_name?: string | null
+  /**
+   * The seat is held by a non-member guest. Worked out by the server, not a
+   * column — see @/lib/bookings/guest-policy (isNonMemberSeat).
+   */
+  non_member_guest?: boolean
   course?: {
     name: string
     city: string

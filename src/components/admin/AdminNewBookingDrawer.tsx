@@ -17,7 +17,11 @@ import { createClient } from '@/lib/supabase'
 import Select from '@/components/ui/Select'
 import { formatTeeTime } from '@/lib/utils'
 import { validateEmail } from '@/lib/validation'
-import { allowsNonMemberGuests } from '@/lib/bookings/guest-policy'
+import {
+  allowsNonMemberGuests,
+  NON_MEMBER_GUEST_LIMIT_MESSAGE,
+  withinNonMemberGuestLimit,
+} from '@/lib/bookings/guest-policy'
 import { PAID_BY_OPTIONS, type PaidBy } from '@/lib/bookings/invitations'
 import { slotWallTime, useVenueSlots } from '@/hooks/useVenueSlots'
 import type { AdditionalPlayer } from '@/types'
@@ -140,6 +144,12 @@ export default function AdminNewBookingDrawer({
     if (p.mobile.replace(/\D/g, '').length < 7) return 'Enter a phone number.'
     return null
   }
+
+  // One non-member per booking — once a row is one, the rest can only be members.
+  const nonMemberLimitReached = !withinNonMemberGuestLimit(
+    players.filter(p => p.kind === 'non_member').length,
+    1,
+  )
 
   const pickedTwice = new Set(
     players.filter(p => p.kind === 'member' && p.memberId).map(p => p.memberId),
@@ -327,13 +337,17 @@ export default function AdminNewBookingDrawer({
                           <button
                             key={k}
                             type="button"
+                            disabled={k === 'non_member' && p.kind !== k && nonMemberLimitReached}
                             onClick={() => updatePlayer(p.key, { ...newPlayer(), key: p.key, paidBy: p.paidBy, kind: k })}
-                            className={`flex-1 py-1.5 text-xs font-semibold rounded-md ${p.kind === k ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+                            className={`flex-1 py-1.5 text-xs font-semibold rounded-md disabled:opacity-40 disabled:cursor-not-allowed ${p.kind === k ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
                           >
                             {k === 'member' ? 'Member' : 'Non-member'}
                           </button>
                         ))}
                       </div>
+                    )}
+                    {nonMembersAllowed && p.kind === 'member' && nonMemberLimitReached && (
+                      <p className="text-[11px] text-gray-400">{NON_MEMBER_GUEST_LIMIT_MESSAGE}</p>
                     )}
 
                     {p.kind === 'member' ? (
