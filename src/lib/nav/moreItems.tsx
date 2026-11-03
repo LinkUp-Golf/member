@@ -1,4 +1,4 @@
-import { Gift, Bell, Smartphone, FileText, Settings, BadgeDollarSign, ShieldCheck, Flag } from 'lucide-react'
+import { Gift, Bell, Smartphone, FileText, Settings, BadgeDollarSign, ShieldCheck, Flag, CreditCard } from 'lucide-react'
 import Icon, { type IconName } from '@/components/ui/Icon'
 import { FEATURES } from '@/lib/features'
 import type { MemberRoles } from '@/hooks/useMemberRoles'
@@ -70,6 +70,7 @@ export const MORE_ITEMS: MoreGroup[] = [
       PARTNER_APPLY_ITEM,
       HOST_APPLY_ITEM,
       { href: '/more/guest-access', label: 'Guest Access', icon: svgIcon('visiting-member'), desc: 'Request access to another city' },
+      { href: '/more/payments', label: 'Payments', icon: <CreditCard className="w-5 h-5" strokeWidth={1.9} />, desc: 'Card on file & cancellation fees' },
     ],
   },
   {

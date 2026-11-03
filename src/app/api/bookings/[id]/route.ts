@@ -3,14 +3,79 @@ export const dynamic = 'force-dynamic'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
 import { cancelBooking, updateOpportunityStage } from '@/lib/ghl/client'
 import { logActivity } from '@/lib/activity/log'
 import { deleteBookingEverywhere } from '@/lib/bookings/delete'
+import { stripeEnabled } from '@/lib/stripe/client'
+import { seatCancellationQuote } from '@/lib/cancellation/policy'
+import {
+  collectCancellationFee,
+  discardCancellationFee,
+  recordCancellationFee,
+} from '@/lib/cancellation/fees'
+import { AVIARA_TIMEZONE } from '@/lib/constants'
 import type { AuthContext } from '@/lib/auth/types'
+import type { CancellationFee } from '@/types'
 
 const AVI_PLAY_CANCELLED_STAGE_ID = process.env.GHL_AVI_PLAY_CANCELLED_STAGE_ID ?? ''
+
+// What a seat's cancellation fee is worked out from — see seatCancellationQuote.
+const SEAT_COLUMNS =
+  'course_id, booking_date, tee_time, status, invite_status, amount_charged, cancellation_policy_applies'
+
+interface SeatForFee {
+  id: string
+  course_id: string
+  booking_date: string
+  tee_time: string | null
+  status: string
+  invite_status: string | null
+  amount_charged: number | string | null
+  cancellation_policy_applies: boolean | null
+}
+
+/**
+ * Records what cancelling this seat now costs the member cancelling it, before
+ * the seat is released — see @/lib/cancellation/fees for why that order. A seat
+ * that's free to cancel records nothing and returns `fee: null`.
+ */
+async function recordSeatFee(
+  admin: SupabaseClient,
+  memberId: string,
+  seat: SeatForFee,
+): Promise<{ fee: CancellationFee | null } | { refusal: NextResponse }> {
+  if (!stripeEnabled() || seat.cancellation_policy_applies !== true) return { fee: null }
+
+  const { data: course } = await admin
+    .from('courses')
+    .select('name, timezone, cost_per_player')
+    .eq('id', seat.course_id)
+    .maybeSingle()
+
+  const quote = seatCancellationQuote(seat, course, AVIARA_TIMEZONE)
+  if (quote.amount <= 0) return { fee: null }
+
+  const recorded = await recordCancellationFee(admin, {
+    memberId,
+    source: 'booking',
+    bookingId: seat.id,
+    courseId: seat.course_id,
+    courseName: course?.name ?? null,
+    eventDate: seat.booking_date,
+    teeTime: seat.tee_time,
+    quote,
+  })
+  if ('duplicate' in recorded) {
+    return { refusal: NextResponse.json({ error: 'This booking is already being cancelled.' }, { status: 409 }) }
+  }
+  if ('error' in recorded) {
+    return { refusal: NextResponse.json({ error: "Couldn't cancel this booking. Try again." }, { status: 500 }) }
+  }
+  return { fee: recorded.fee }
+}
 
 export const PATCH = withAuth(async (
   req: NextRequest,
@@ -28,7 +93,7 @@ export const PATCH = withAuth(async (
   // Fetch booking — allow both the booker and the guest member to act on it
   const { data: booking, error: fetchError } = await supabase
     .from('bookings')
-    .select('id, member_id, ghl_booking_id, ghl_opportunity_id, status')
+    .select(`id, member_id, ghl_booking_id, ghl_opportunity_id, ${SEAT_COLUMNS}`)
     .eq('id', id)
     .or(`member_id.eq.${ctx.userId},player_member_id.eq.${ctx.userId}`)
     .single()
@@ -41,14 +106,21 @@ export const PATCH = withAuth(async (
     return NextResponse.json({ error: 'Booking is already cancelled' }, { status: 400 })
   }
 
-  // Mark cancelled in Supabase first
   const adminSupabase = createAdminClient()
+
+  const seatFee = await recordSeatFee(adminSupabase, ctx.memberId, booking)
+  if ('refusal' in seatFee) return seatFee.refusal
+
+  // Mark cancelled in Supabase first
   const { error: updateError } = await adminSupabase
     .from('bookings')
     .update({ status: 'cancelled', cancellation_reason: cancellationReason })
     .eq('id', id)
 
-  if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 })
+  if (updateError) {
+    if (seatFee.fee) await discardCancellationFee(adminSupabase, seatFee.fee.id)
+    return NextResponse.json({ error: updateError.message }, { status: 500 })
+  }
 
   // Resolve GHL contact ID for the booking owner (best-effort)
   const { data: bookingMember } = await adminSupabase
@@ -65,6 +137,8 @@ export const PATCH = withAuth(async (
     await updateOpportunityStage(booking.ghl_opportunity_id, AVI_PLAY_CANCELLED_STAGE_ID, 'lost').catch(() => {})
   }
 
+  const fee = seatFee.fee ? await collectCancellationFee(adminSupabase, seatFee.fee) : null
+
   void logActivity({
     memberId: ctx.memberId,
     action: 'booking_cancelled',
@@ -73,7 +147,7 @@ export const PATCH = withAuth(async (
     path: '/book',
   })
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true, fee })
 })
 
 // DELETE /api/bookings/[id]
@@ -81,6 +155,10 @@ export const PATCH = withAuth(async (
 // Delete — the row goes from LinkUp and its appointment from GHL — rather than
 // the soft cancel above. Who may: the booker, for any seat on their booking
 // (every row carries their member_id), and an invited member for their own.
+//
+// Inside the cancellation window it costs the member cancelling a share of the
+// seat's price, charged to their card on file — the response's `fee` says what
+// and whether it went through (null when it was free).
 export const DELETE = withAuth(async (
   _req: NextRequest,
   ctx: AuthContext,
@@ -93,7 +171,7 @@ export const DELETE = withAuth(async (
 
   const { data: booking, error: fetchError } = await supabase
     .from('bookings')
-    .select('id, ghl_booking_id')
+    .select(`id, ghl_booking_id, ${SEAT_COLUMNS}`)
     .eq('id', id)
     .or(`member_id.eq.${ctx.userId},player_member_id.eq.${ctx.userId}`)
     .single()
@@ -102,8 +180,18 @@ export const DELETE = withAuth(async (
     return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
   }
 
+  const admin = createAdminClient()
+
+  const seatFee = await recordSeatFee(admin, ctx.memberId, booking)
+  if ('refusal' in seatFee) return seatFee.refusal
+
   const { error, ghlDeleted } = await deleteBookingEverywhere(booking)
-  if (error) return NextResponse.json({ error: "Couldn't cancel this booking. Try again." }, { status: 500 })
+  if (error) {
+    if (seatFee.fee) await discardCancellationFee(admin, seatFee.fee.id)
+    return NextResponse.json({ error: "Couldn't cancel this booking. Try again." }, { status: 500 })
+  }
+
+  const fee = seatFee.fee ? await collectCancellationFee(admin, seatFee.fee) : null
 
   void logActivity({
     memberId: ctx.memberId,
@@ -113,5 +201,5 @@ export const DELETE = withAuth(async (
     path: '/book',
   })
 
-  return NextResponse.json({ success: true, ghlDeleted })
+  return NextResponse.json({ success: true, ghlDeleted, fee })
 }, { allowGuests: true })

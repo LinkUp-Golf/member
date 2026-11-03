@@ -281,6 +281,12 @@ export interface Booking {
   paid_by_booker?: boolean
   /** An added player's answer to their invitation; null on the booker's own row. */
   invite_status?: 'pending' | 'accepted' | 'declined' | 'expired' | null
+  /**
+   * Booked under the cancellation policy, so a late cancel costs a share of the
+   * seat's price. False on every seat that predates it — see
+   * @/lib/cancellation/policy (seatCancellationQuote).
+   */
+  cancellation_policy_applies?: boolean
   created_at: string
   booker_name?: string | null
   /**
@@ -1021,4 +1027,39 @@ export interface NotificationLog {
   url: string | null
   read_at: string | null
   created_at: string
+}
+
+// ---- Cancellation fees --------------------------------------
+
+export type CancellationFeeStatus = 'pending' | 'paid' | 'unpaid' | 'waived'
+
+/** One late cancellation and what it cost — see @/lib/cancellation/fees. */
+export interface CancellationFee {
+  id: string
+  member_id: string
+  source: 'booking' | 'hosted_event'
+  booking_id: string | null
+  hosted_event_id: string | null
+  hosted_event_registration_id: string | null
+  course_id: string | null
+  course_name: string | null
+  event_date: string
+  tee_time: string | null
+  price: number
+  percent: number
+  amount: number
+  status: CancellationFeeStatus
+  failure_reason: string | null
+  paid_at: string | null
+  created_at: string
+}
+
+/** What a cancel route tells the member their cancellation cost. */
+export interface CancellationFeeOutcome {
+  id: string
+  amount: number
+  percent: number
+  status: CancellationFeeStatus
+  /** The card it was charged to — set only when the charge went through. */
+  card: { brand: string; last4: string } | null
 }

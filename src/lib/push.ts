@@ -655,4 +655,26 @@ export const NotificationTemplates = {
     subject: `A spot opened up at your ${courseName} event on ${date}`,
     cta:   'View your event',
   }),
+
+  // A late cancellation, charged to the card on file. `amount` arrives
+  // formatted, and `card` as its owner would recognise it ("Visa •••• 4242").
+  cancellationFeeCharged: (amount: string, eventName: string, date: string, card: string): PushPayload => ({
+    title: 'Cancellation fee charged',
+    body:  `We charged ${amount} to your ${card} for cancelling ${eventName} on ${date}.`,
+    url:   '/more/payments',
+    tag:   'cancellation-fee',
+    subject: `Your ${amount} cancellation fee for ${eventName} on ${date}`,
+    cta:   'View payments',
+  }),
+
+  // The same fee when the card couldn't be charged — declined, needed the
+  // member to authenticate, or there was no card to charge.
+  cancellationFeeDue: (amount: string, eventName: string, date: string): PushPayload => ({
+    title: 'Cancellation fee due',
+    body:  `Cancelling ${eventName} on ${date} carries a ${amount} fee, and we couldn't charge your card. You can pay it from Payments.`,
+    url:   '/more/payments',
+    tag:   'cancellation-fee',
+    subject: `${amount} cancellation fee due for ${eventName} on ${date}`,
+    cta:   'Pay now',
+  }),
 }

@@ -6,7 +6,7 @@ import { useForm, useFieldArray } from "react-hook-form";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
 import AppShell from "@/components/layout/AppShell";
-import { Spinner } from "@/components/ui/Loading";
+import { Skeleton, Spinner } from "@/components/ui/Loading";
 import EmptyState from "@/components/ui/EmptyState";
 import Image from "next/image";
 import Link from "next/link";
@@ -34,13 +34,18 @@ import VenueDayDetailSheet, {
 import type { CalendarPlayer } from "@/lib/bookings/players";
 import type { VenueHost } from "@/lib/bookings/venue-hosts";
 import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
-import { bookingAmountDue } from "@/lib/bookings/price";
+import { bookingAmountDue, formatRoundPrice } from "@/lib/bookings/price";
 import {
   allowsNonMemberGuests,
   NON_MEMBER_GUEST_LIMIT_MESSAGE,
   withinNonMemberGuestLimit,
 } from "@/lib/bookings/guest-policy";
 import WhatHappensNext from "@/components/booking/WhatHappensNext";
+import CardOnFile, { CardOnFileSkeleton } from "@/components/payments/CardOnFile";
+import CancellationPolicy from "@/components/payments/CancellationPolicy";
+import { usePaymentCard } from "@/hooks/usePaymentCard";
+import { seatCancellationQuote, seatUnderPolicy } from "@/lib/cancellation/policy";
+import { cardLabel } from "@/lib/stripe/card";
 import {
   PAID_BY_OPTIONS,
   inviteExpiresAt,
@@ -71,6 +76,7 @@ import type {
   AdditionalPlayer,
   MemberWithProfile,
   Course,
+  CancellationFeeOutcome,
 } from "@/types";
 import { AVIARA_TIMEZONE, MY_BOOKINGS_TAB } from "@/lib/constants";
 import { validateEmail } from "@/lib/validation";
@@ -980,6 +986,10 @@ function ConfirmScreen({
   allowNonMembers: boolean;
 }) {
   const maxAdditional = Math.max(0, (slot.spotsOpen ?? 1) - 1);
+  // The card a late cancellation is charged to. While the policy is on, the
+  // booking can't be sent without one — POST /api/bookings/create refuses it.
+  const payment = usePaymentCard();
+  const cardMissing = payment.loading || (payment.enabled && !payment.card);
   const [collapsed, setCollapsed] = useState<boolean[]>([]);
   const [playerSelections, setPlayerSelections] = useState<
     Array<MemberWithProfile | null>
@@ -1676,6 +1686,42 @@ function ConfirmScreen({
             )}
           </div>
 
+          {/* Cancellation policy, and the card it's charged to */}
+          {payment.showPolicy && (
+            <div className="px-1 space-y-3">
+              <p className="section-label">Cancellation policy</p>
+              <CancellationPolicy price={pricePerPlayer} />
+              <p className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>
+                Per player, charged to whoever cancels the spot.
+              </p>
+              <div className="pt-1">
+                {payment.loading ? (
+                  // Not CardOnFile yet: with no card it mounts the entry form,
+                  // which opens a SetupIntent the saved card may make pointless.
+                  <>
+                    <Skeleton className="h-3 w-24 mb-2" />
+                    <CardOnFileSkeleton />
+                  </>
+                ) : (
+                  <>
+                    <p
+                      className="text-xs font-semibold mb-2"
+                      style={{ color: "rgba(0,38,105,0.55)" }}
+                    >
+                      {payment.card ? "Card on file" : "Add a card to hold your spot"}
+                    </p>
+                    <CardOnFile
+                      compact
+                      card={payment.card}
+                      onSaved={payment.setCard}
+                      onRemoved={() => payment.setCard(null)}
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* What happens next */}
           <WhatHappensNext />
 
@@ -1693,7 +1739,7 @@ function ConfirmScreen({
 
           <button
             type="submit"
-            disabled={submitting || !allRowsValid}
+            disabled={submitting || !allRowsValid || cardMissing}
             className="btn btn-gold btn-full disabled:opacity-50"
           >
             {submitting ? (
@@ -1710,6 +1756,7 @@ function ConfirmScreen({
             style={{ color: "rgba(0,38,105,0.28)" }}
           >
             No payment charged now.
+            {payment.showPolicy && " Your card is only charged if you cancel late."}
           </p>
         </div>
       </form>
@@ -2348,6 +2395,10 @@ function BookingStatusBadge({ status }: { status: string }) {
 // Confirms a seat is being given up, then removes it — the row from LinkUp and
 // its appointment from GHL (DELETE /api/bookings/[id]). There is nothing to
 // fill in and no form to send the member off to: the answer is yes or no.
+//
+// Inside the cancellation window it says what the answer costs before it's
+// given, and afterwards whether the fee went through — the only moment the
+// member is looking at it. A cancel that cost nothing closes as it always did.
 function CancelModal({
   target,
   onDismiss,
@@ -2364,11 +2415,18 @@ function CancelModal({
   const [error, setError] = useState("");
   // Held through the closing animation, after the parent has cleared target.
   const [shown, setShown] = useState<CancelTarget | null>(target);
+  // What the cancel cost, once it's happened — the modal stays up to say so.
+  const [outcome, setOutcome] = useState<CancellationFeeOutcome | null>(null);
+  const payment = usePaymentCard();
+  const fee = payment.enabled && shown ? shown.fee : { amount: 0, percent: 0 };
+  const policyPrice =
+    payment.enabled && shown ? shown.cancellationPrice : null;
 
   useEffect(() => {
     if (open) {
       setShown(target);
       setError("");
+      setOutcome(null);
       setMounted(true);
       const ids: number[] = [];
       ids[0] = requestAnimationFrame(() => {
@@ -2390,12 +2448,13 @@ function CancelModal({
       const res = await fetch(`/api/bookings/${shown.bookingId}`, {
         method: "DELETE",
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
         setError(data.error ?? "Couldn't cancel this booking. Try again.");
         return;
       }
-      onCancelled();
+      if (data.fee) setOutcome(data.fee as CancellationFeeOutcome);
+      else onCancelled();
     } catch {
       setError("Network error. Check your connection and try again.");
     } finally {
@@ -2419,7 +2478,7 @@ function CancelModal({
           transition: "opacity 200ms ease-out",
           willChange: "opacity",
         }}
-        onClick={submitting ? undefined : onDismiss}
+        onClick={submitting ? undefined : outcome ? onCancelled : onDismiss}
       />
       <div
         role="alertdialog"
@@ -2437,71 +2496,170 @@ function CancelModal({
           willChange: "transform",
         }}
       >
-        <div>
-          <p
-            id="cancel-booking-title"
-            className="font-sans font-black text-lg"
-            style={{ color: "var(--color-green-900)" }}
-          >
-            {shown.title}
-          </p>
-          <p className="text-sm mt-1.5" style={{ color: "rgba(0,38,105,0.6)" }}>
-            {shown.isYou
-              ? "Your spot on this round will be cancelled."
-              : `${shown.playerName}'s spot on this round will be cancelled.`}{" "}
-            This can&apos;t be undone.
-          </p>
-        </div>
+        {outcome ? (
+          <CancelFeeOutcome outcome={outcome} onDone={onCancelled} />
+        ) : (
+          <>
+            <div>
+              <p
+                id="cancel-booking-title"
+                className="font-sans font-black text-lg"
+                style={{ color: "var(--color-green-900)" }}
+              >
+                {shown.title}
+              </p>
+              <p className="text-sm mt-1.5" style={{ color: "rgba(0,38,105,0.6)" }}>
+                {shown.isYou
+                  ? "Your spot on this round will be cancelled."
+                  : `${shown.playerName}'s spot on this round will be cancelled.`}{" "}
+                This can&apos;t be undone.
+              </p>
+            </div>
 
-        {/* The round being given up */}
-        <div
-          className="rounded-2xl px-4 py-3"
-          style={{
-            background: "rgba(0,38,105,0.03)",
-            border: "1px solid rgba(0,38,105,0.08)",
-          }}
-        >
-          <p
-            className="text-[10px] font-semibold uppercase tracking-wider truncate"
-            style={{ color: "rgba(0,38,105,0.35)" }}
-          >
-            {shown.courseName}
-          </p>
-          <p
-            className="text-sm font-semibold mt-0.5"
-            style={{ color: "var(--color-green-900)" }}
-          >
-            {shown.dateLabel}
-            <span className="font-normal" style={{ color: "rgba(0,38,105,0.45)" }}>
-              {" "}· {shown.timeLabel}
-            </span>
-          </p>
-        </div>
+            {/* The round being given up */}
+            <div
+              className="rounded-2xl px-4 py-3"
+              style={{
+                background: "rgba(0,38,105,0.03)",
+                border: "1px solid rgba(0,38,105,0.08)",
+              }}
+            >
+              <p
+                className="text-[10px] font-semibold uppercase tracking-wider truncate"
+                style={{ color: "rgba(0,38,105,0.35)" }}
+              >
+                {shown.courseName}
+              </p>
+              <p
+                className="text-sm font-semibold mt-0.5"
+                style={{ color: "var(--color-green-900)" }}
+              >
+                {shown.dateLabel}
+                <span className="font-normal" style={{ color: "rgba(0,38,105,0.45)" }}>
+                  {" "}· {shown.timeLabel}
+                </span>
+              </p>
+            </div>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+            {/* The policy, at this seat's price — only where it covers the seat */}
+            {policyPrice !== null && (
+              <div className="space-y-2">
+                <p className="section-label">Cancellation policy</p>
+                <CancellationPolicy price={policyPrice} />
+                {fee.amount === 0 && (
+                  <p className="text-xs font-semibold" style={{ color: "var(--color-green-700)" }}>
+                    Cancelling now is free.
+                  </p>
+                )}
+              </div>
+            )}
 
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={onDismiss}
-            disabled={submitting}
-            className="flex-1 py-3.5 rounded-2xl text-sm font-semibold disabled:opacity-50"
-            style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={confirm}
-            disabled={submitting}
-            className="flex-1 py-3.5 rounded-2xl text-sm font-semibold disabled:opacity-60"
-            style={{ background: "rgba(220,38,38,0.9)", color: "white" }}
-          >
-            {submitting ? "Cancelling…" : "Confirm"}
-          </button>
-        </div>
+            {fee.amount > 0 && (
+              <div
+                className="rounded-2xl px-4 py-3 space-y-1"
+                style={{
+                  background: "rgba(220,38,38,0.05)",
+                  border: "1px solid rgba(220,38,38,0.15)",
+                }}
+              >
+                <p className="text-sm font-semibold" style={{ color: "rgb(185,28,28)" }}>
+                  Cancelling now costs {formatRoundPrice(fee.amount)}
+                </p>
+                <p className="text-xs leading-relaxed" style={{ color: "rgba(0,38,105,0.6)" }}>
+                  {fee.percent === 100
+                    ? "The round is today, so the full price is charged."
+                    : `The round is tomorrow, so ${fee.percent}% of its price is charged.`}{" "}
+                  {payment.card
+                    ? `It goes on your ${cardLabel(payment.card)}.`
+                    : "You'll be asked to pay it from Payments."}
+                </p>
+              </div>
+            )}
+
+            {error && <p className="text-sm text-red-600">{error}</p>}
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onDismiss}
+                disabled={submitting}
+                className="flex-1 py-3.5 rounded-2xl text-sm font-semibold disabled:opacity-50"
+                style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirm}
+                disabled={submitting}
+                className="flex-1 py-3.5 rounded-2xl text-sm font-semibold disabled:opacity-60"
+                style={{ background: "rgba(220,38,38,0.9)", color: "white" }}
+              >
+                {submitting
+                  ? "Cancelling…"
+                  : fee.amount > 0
+                    ? `Confirm · ${formatRoundPrice(fee.amount)}`
+                    : "Confirm"}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+// What a cancellation that carried a fee came to, shown in the cancel modal once
+// the seat is gone. Unpaid means the card on file couldn't be charged (or there
+// wasn't one), and the fee waits on /more/payments.
+function CancelFeeOutcome({
+  outcome,
+  onDone,
+}: {
+  outcome: CancellationFeeOutcome;
+  onDone: () => void;
+}) {
+  const amount = formatRoundPrice(outcome.amount);
+  const detail =
+    outcome.status === "paid"
+      ? `${amount} was charged to your ${outcome.card ? cardLabel(outcome.card) : "card on file"}.`
+      : outcome.status === "pending"
+        ? `Your ${amount} cancellation fee is being processed.`
+        : `We couldn't charge your card for the ${amount} cancellation fee. You can pay it from Payments.`;
+  return (
+    <>
+      <div>
+        <p
+          id="cancel-booking-title"
+          className="font-sans font-black text-lg"
+          style={{ color: "var(--color-green-900)" }}
+        >
+          Booking cancelled
+        </p>
+        <p className="text-sm mt-1.5" style={{ color: "rgba(0,38,105,0.6)" }}>
+          {detail}
+        </p>
+      </div>
+      <div className="flex gap-2">
+        {outcome.status === "unpaid" && (
+          <Link
+            href="/more/payments"
+            className="flex-1 py-3.5 rounded-2xl text-sm font-semibold text-center"
+            style={{ background: "var(--color-green-900)", color: "white" }}
+          >
+            Pay now
+          </Link>
+        )}
+        <button
+          type="button"
+          onClick={onDone}
+          className="flex-1 py-3.5 rounded-2xl text-sm font-semibold"
+          style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+        >
+          Done
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -2797,6 +2955,13 @@ interface CancelTarget {
   courseName: string;
   dateLabel: string;
   timeLabel: string;
+  /**
+   * What giving the seat up now costs whoever cancels it — the same rule the
+   * route charges by (seatCancellationQuote). amount 0 = free.
+   */
+  fee: { amount: number; percent: number };
+  /** The seat's price, for stating the policy — null when the policy doesn't cover it. */
+  cancellationPrice: number | null;
 }
 
 function MyBookingsTab({
@@ -3124,6 +3289,24 @@ function BookingCard({
 
   const iAmBooker = group.primary.member_id === userId;
   const activePlayers = group.players.filter((p) => p.status !== "cancelled");
+  // What cancelling one of these seats costs right now, by the rule DELETE
+  // /api/bookings/[id] charges with, and the price the dialog states the
+  // policy at.
+  const cancelQuoteFor = (
+    rowId: string,
+  ): Pick<CancelTarget, "fee" | "cancellationPrice"> => {
+    const seat = [group.primary, ...group.players].find((b) => b.id === rowId);
+    if (!seat) return { fee: { amount: 0, percent: 0 }, cancellationPrice: null };
+    const { amount, percent, price } = seatCancellationQuote(
+      seat,
+      group.primary.course,
+      AVIARA_TIMEZONE,
+    );
+    return {
+      fee: { amount, percent },
+      cancellationPrice: seatUnderPolicy(seat) ? price : null,
+    };
+  };
   // For invited members the group now includes all sibling rows, so total = 1 (primary) + all players
   const totalPlayers = 1 + activePlayers.length;
   // localDt is a UTC-correct timestamp used ONLY for logic (hours-until, cancel modal).
@@ -3552,6 +3735,7 @@ function BookingCard({
                           courseName,
                           dateLabel: format(bookingDate, "EEE, MMM d"),
                           timeLabel: bookingTime,
+                          ...cancelQuoteFor(row.id),
                         })
                       }
                       className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"

@@ -5,7 +5,11 @@ export const dynamic = 'force-dynamic'
 //
 //   GET  /api/bookings/[id]/invitation
 //        → what the invitation screen shows: the round, who invited them,
-//          who's paying, and whether it can still be answered.
+//          who's paying, whether it can still be answered, and — where the
+//          seat is under the cancellation policy — the price a late cancel
+//          is a share of. Accepting is when the policy starts to apply to the
+//          player (an unanswered seat is free to give up; see
+//          seatCancellationQuote), so it's stated before they answer.
 //
 //   POST /api/bookings/[id]/invitation   body { response: 'accept' | 'decline' }
 //        → records the answer. A decline cancels the row, which frees the
@@ -27,6 +31,8 @@ import { nameOrEmail } from '@/lib/utils'
 import { validateUUID } from '@/lib/validation'
 import { logger } from '@/lib/logger'
 import { AVIARA_TIMEZONE } from '@/lib/constants'
+import { bookingAmountDue } from '@/lib/bookings/price'
+import { stripeEnabled } from '@/lib/stripe/client'
 import {
   canRespondToInvite,
   inviteExpiresAt,
@@ -40,8 +46,9 @@ type RouteCtx = { params: Record<string, string> }
 
 const SELECT =
   'id, member_id, player_member_id, course_id, booking_date, tee_time, status, ghl_booking_id, paid_by_booker, invite_status, ' +
+  'amount_charged, cancellation_policy_applies, ' +
   'booker:members!bookings_member_id_fkey(first_name, last_name, email, ghl_contact_id), ' +
-  'course:courses!bookings_course_id_fkey(name, city, state, address, timezone)'
+  'course:courses!bookings_course_id_fkey(name, city, state, address, timezone, cost_per_player)'
 
 interface InvitationRow {
   id: string
@@ -54,8 +61,10 @@ interface InvitationRow {
   ghl_booking_id: string | null
   paid_by_booker: boolean
   invite_status: InviteStatus | null
+  amount_charged: number | string | null
+  cancellation_policy_applies: boolean | null
   booker: { first_name: string | null; last_name: string | null; email: string | null; ghl_contact_id: string | null } | null
-  course: { name: string; city: string | null; state: string | null; address: string | null; timezone: string | null } | null
+  course: { name: string; city: string | null; state: string | null; address: string | null; timezone: string | null; cost_per_player: number | string | null } | null
 }
 
 async function loadInvitation(id: string | undefined, memberId: string) {
@@ -105,6 +114,10 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext, routeCtx
       bookingStatus: row.status,
       expiresAt: expires,
     }),
+    // null when the seat is outside the policy (booked before it, or Stripe off).
+    cancellationPrice: stripeEnabled() && row.cancellation_policy_applies === true
+      ? bookingAmountDue({ amount_charged: row.amount_charged, cost_per_player: row.course?.cost_per_player })
+      : null,
   })
 }, { allowGuests: true })
 
