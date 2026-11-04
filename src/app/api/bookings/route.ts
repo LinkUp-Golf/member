@@ -7,6 +7,7 @@ import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient, createRouteHandlerClient } from '@/lib/supabase-server'
 import { coursePaymentOptions } from '@/lib/bookings/payment-options'
 import { findNonMemberSeats } from '@/lib/bookings/non-member-guest'
+import { maxNonMemberGuests } from '@/lib/bookings/guest-policy'
 import { nameOrEmail } from '@/lib/utils'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -123,7 +124,7 @@ async function attachCourses(rows: Array<Record<string, unknown>>) {
     // My Bookings uses it to decide when to offer "Rate round". cost_per_player
     // backs the seat's price where a row predates amount_charged, so the fee the
     // cancel dialog quotes is the one the route charges.
-    .select('id, name, city, state, payment_url, payment_options, timezone, meeting_duration_mins, allow_non_member_guests, cost_per_player')
+    .select('id, name, city, state, payment_url, payment_options, timezone, meeting_duration_mins, allow_non_member_guests, max_non_member_guests, cost_per_player')
     .in('id', courseIds)
 
   const byId = new Map((courses ?? []).map(c => [c.id as string, c]))
@@ -141,6 +142,7 @@ async function attachCourses(rows: Array<Record<string, unknown>>) {
             timezone: c.timezone,
             meeting_duration_mins: c.meeting_duration_mins ?? null,
             allow_non_member_guests: c.allow_non_member_guests === true,
+            max_non_member_guests: maxNonMemberGuests(c),
             cost_per_player: c.cost_per_player ?? null,
           }
         : null,

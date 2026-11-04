@@ -37,7 +37,8 @@ import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
 import { bookingAmountDue, formatRoundPrice } from "@/lib/bookings/price";
 import {
   allowsNonMemberGuests,
-  NON_MEMBER_GUEST_LIMIT_MESSAGE,
+  maxNonMemberGuests,
+  nonMemberGuestLimitMessage,
   withinNonMemberGuestLimit,
 } from "@/lib/bookings/guest-policy";
 import WhatHappensNext from "@/components/booking/WhatHappensNext";
@@ -439,6 +440,7 @@ export default function BookPage() {
         bookerEmail={user?.email ?? ""}
         eventName={selectedEvent?.name ?? null}
         allowNonMembers={allowsNonMemberGuests(selectedEvent)}
+        maxNonMembers={maxNonMemberGuests(selectedEvent)}
         // Same rule the row's amount_charged is written with, so the price
         // quoted here and the one on the success screen a tap later agree.
         pricePerPlayer={bookingAmountDue({
@@ -970,6 +972,7 @@ function ConfirmScreen({
   eventName,
   pricePerPlayer,
   allowNonMembers,
+  maxNonMembers,
 }: {
   slot: GHLBookingSlot;
   date: string;
@@ -984,6 +987,8 @@ function ConfirmScreen({
   pricePerPlayer: number;
   /** The venue takes non-member guests — see @/lib/bookings/guest-policy. */
   allowNonMembers: boolean;
+  /** How many of them one booking may bring here. */
+  maxNonMembers: number;
 }) {
   const maxAdditional = Math.max(0, (slot.spotsOpen ?? 1) - 1);
   // The card a late cancellation is charged to. While the policy is on, the
@@ -1191,10 +1196,10 @@ function ConfirmScreen({
   // Ids already chosen (to exclude from autocomplete)
   const selectedMemberIds = playerSelections.flatMap((s) => (s ? [s.id] : []));
 
-  // One non-member per booking — once a row is one, the rest can only be
-  // members. The server enforces it too.
+  // As many non-members as the venue takes per booking — once that many rows
+  // are, the rest can only be members. The server enforces it too.
   const nonMemberCount = playerKinds.filter((k) => k === "non_member").length;
-  const nonMemberLimitReached = !withinNonMemberGuestLimit(nonMemberCount, 1);
+  const nonMemberLimitReached = !withinNonMemberGuestLimit(nonMemberCount, 1, maxNonMembers);
 
   return (
     <div>
@@ -1536,7 +1541,7 @@ function ConfirmScreen({
                                 className="text-[11px] leading-snug"
                                 style={{ color: "rgba(0,38,105,0.5)" }}
                               >
-                                {NON_MEMBER_GUEST_LIMIT_MESSAGE}
+                                {nonMemberGuestLimitMessage(maxNonMembers)}
                               </p>
                             )}
 
@@ -3454,9 +3459,11 @@ function BookingCard({
       dateLabel: format(bookingDate, "EEE, MMM d"),
       timeLabel: bookingTime,
       allowNonMembers: allowsNonMemberGuests(group.primary.course),
+      maxNonMembers: maxNonMemberGuests(group.primary.course),
       nonMemberLimitReached: !withinNonMemberGuestLimit(
         activePlayers.filter((p) => p.non_member_guest).length,
         1,
+        maxNonMemberGuests(group.primary.course),
       ),
       excludeMemberIds: [
         group.primary.member_id,
@@ -3790,7 +3797,9 @@ interface AddPlayerTarget {
   excludeMemberIds: string[];
   /** The venue takes non-member guests — see @/lib/bookings/guest-policy. */
   allowNonMembers: boolean;
-  /** The booking already has its one non-member guest. */
+  /** How many of them one booking may bring here. */
+  maxNonMembers: number;
+  /** The booking already has as many non-member guests as the venue takes. */
   nonMemberLimitReached: boolean;
 }
 
@@ -4075,7 +4084,7 @@ function AddPlayerModal({
               className="text-[11px] leading-snug"
               style={{ color: "rgba(0,38,105,0.5)" }}
             >
-              {NON_MEMBER_GUEST_LIMIT_MESSAGE}
+              {nonMemberGuestLimitMessage(target.maxNonMembers)}
             </p>
           )}
 

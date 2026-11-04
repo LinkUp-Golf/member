@@ -21,26 +21,62 @@ export function allowsNonMemberGuests(
   return course?.allow_non_member_guests === true
 }
 
-// ---- One non-member per booking --------------------------------------------
+// ---- Non-members per booking -----------------------------------------------
 //
-// Where a venue does take them, a booking brings at most one. Everyone else the
-// booker adds has to be a LinkUp member. Counted across the whole booking, not
-// per request — the cap would mean nothing if a second guest could come in
-// through Add player after the round was made.
+// Where a venue does take them, a booking brings at most the venue's number
+// (courses.max_non_member_guests, set by an admin beside the switch; 1 unless
+// changed). Everyone else the booker adds has to be a LinkUp member. Counted
+// across the whole booking, not per request — the cap would mean nothing if
+// another guest could come in through Add player after the round was made.
 
-/** How many non-member guests one booking may bring. */
-export const MAX_NON_MEMBER_GUESTS = 1
+/** A venue's cap when it hasn't set one — the rule every venue had before. */
+export const DEFAULT_MAX_NON_MEMBER_GUESTS = 1
 
-/** What a booker is told when they try to add a second. */
-export const NON_MEMBER_GUEST_LIMIT_MESSAGE =
-  'A booking can include one non-member guest. Anyone else you add needs to be a LinkUp member.'
+/**
+ * The column is a Postgres integer. Not a rule about guests — the venue's
+ * number is whatever the admin sets — only the most the column can store, so an
+ * absurd entry is refused with a message instead of failing the write.
+ */
+const INT4_MAX = 2_147_483_647
+
+/**
+ * How many non-member guests one booking may bring at this venue. Meaningful
+ * only where allowsNonMemberGuests says yes. The tee time's open spots still
+ * bound the booking as a whole.
+ */
+export function maxNonMemberGuests(
+  course: { max_non_member_guests?: number | null } | null | undefined,
+): number {
+  const n = Number(course?.max_non_member_guests)
+  return Number.isInteger(n) && n >= 1 ? n : DEFAULT_MAX_NON_MEMBER_GUESTS
+}
+
+/**
+ * An admin's choice as a cap, or null when it isn't one (not a whole number of
+ * at least 1). The course routes refuse null rather than guess, so what's saved
+ * is what the admin entered.
+ */
+export function parseMaxNonMemberGuests(value: unknown): number | null {
+  const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value
+  if (typeof n !== 'number' || !Number.isInteger(n)) return null
+  return n >= 1 && n <= INT4_MAX ? n : null
+}
+
+export const MAX_NON_MEMBER_GUESTS_INVALID_MESSAGE =
+  'Non-member guests per booking must be a whole number, 1 or more'
+
+/** What a booker is told once the booking holds as many as the venue takes. */
+export function nonMemberGuestLimitMessage(limit: number): string {
+  const allowance = limit === 1 ? 'one non-member guest' : `up to ${limit} non-member guests`
+  return `A booking can include ${allowance}. Anyone else you add needs to be a LinkUp member.`
+}
 
 /**
  * Whether a booking already holding `seated` non-member guests can take
- * `adding` more.
+ * `adding` more, at a venue that takes `limit` (maxNonMemberGuests).
  */
-export function withinNonMemberGuestLimit(seated: number, adding: number): boolean {
-  return seated + adding <= MAX_NON_MEMBER_GUESTS
+export function withinNonMemberGuestLimit(seated: number, adding: number, limit: number): boolean {
+  return seated + adding <= limit
 }
 
 /**

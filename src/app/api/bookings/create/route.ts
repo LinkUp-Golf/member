@@ -38,8 +38,9 @@ import { needsCardOnFile } from '@/lib/stripe/cards'
 import { CARD_REQUIRED_CODE, CARD_REQUIRED_MESSAGE } from '@/lib/stripe/card'
 import {
   allowsNonMemberGuests,
+  maxNonMemberGuests,
   NON_MEMBER_GUESTS_DISABLED_MESSAGE,
-  NON_MEMBER_GUEST_LIMIT_MESSAGE,
+  nonMemberGuestLimitMessage,
   withinNonMemberGuestLimit,
 } from '@/lib/bookings/guest-policy'
 import { isPaidBy, PAID_BY_REQUIRED_MESSAGE } from '@/lib/bookings/invitations'
@@ -236,11 +237,6 @@ export async function POST(request: NextRequest) {
   const nonMemberPlayers = extraPlayers.filter((p) => p.isNonMember || !p.memberId)
   const memberPlayers = extraPlayers.filter((p) => !(p.isNonMember || !p.memberId))
 
-  // One non-member guest per booking — see guest-policy.
-  if (!withinNonMemberGuestLimit(0, nonMemberPlayers.length)) {
-    return NextResponse.json({ error: NON_MEMBER_GUEST_LIMIT_MESSAGE }, { status: 400 })
-  }
-
   console.log('[booking/create] Request:', {
     userId: user.id,
     slotStartTime,
@@ -339,7 +335,7 @@ export async function POST(request: NextRequest) {
 
   const { data: course } = await adminSupabase
     .from('courses')
-    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, cost_per_player, allow_non_member_guests')
+    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, cost_per_player, allow_non_member_guests, max_non_member_guests')
     .eq('id', courseId || resolvedCourseId)
     .eq('approval_status', 'active')
     .single()
@@ -361,6 +357,12 @@ export async function POST(request: NextRequest) {
   // post — refused before any GHL work.
   if (nonMemberPlayers.length > 0 && !allowsNonMemberGuests(course)) {
     return NextResponse.json({ error: NON_MEMBER_GUESTS_DISABLED_MESSAGE }, { status: 400 })
+  }
+
+  // And no more of them than the venue takes per booking — see guest-policy.
+  const nonMemberLimit = maxNonMemberGuests(course)
+  if (!withinNonMemberGuestLimit(0, nonMemberPlayers.length, nonMemberLimit)) {
+    return NextResponse.json({ error: nonMemberGuestLimitMessage(nonMemberLimit) }, { status: 400 })
   }
 
   // The appointment's length is whatever this course's GHL calendar says a round

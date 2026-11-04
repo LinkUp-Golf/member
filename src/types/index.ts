@@ -136,6 +136,8 @@ export interface Course {
   // Members may add non-member guests to a round here. Off by default — see
   // src/lib/bookings/guest-policy.ts.
   allow_non_member_guests: boolean
+  // How many of them one booking may bring (1–3), while the above is on.
+  max_non_member_guests: number
 
   // Optional description shown in the admin and used as the GHL group description
   description: string | null
@@ -307,6 +309,8 @@ export interface Booking {
     cost_per_player?: number | null
     /** Whether players can be added here as non-member guests. */
     allow_non_member_guests?: boolean
+    /** How many non-member guests one booking may bring here. */
+    max_non_member_guests?: number
   } | null
 }
 

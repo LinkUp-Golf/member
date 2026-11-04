@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
 //   • the per-course daily capacity (atomically, via
 //     add_players_to_booking → DAY_FULL)
 //   • the 4-players-per-group cap
-//   • one non-member guest per booking, counting any already on it
+//   • the venue's non-member guests per booking, counting any already on it
 //   • the member-guest FIFO gate (a member who owes on their own
 //     round still can't be pulled into one — same policy as create)
 //
@@ -44,8 +44,9 @@ import type { ProvisionedGuest } from '@/lib/bookings/non-member-guest'
 import { bookingAmountDue } from '@/lib/bookings/price'
 import {
   allowsNonMemberGuests,
+  maxNonMemberGuests,
   NON_MEMBER_GUESTS_DISABLED_MESSAGE,
-  NON_MEMBER_GUEST_LIMIT_MESSAGE,
+  nonMemberGuestLimitMessage,
   withinNonMemberGuestLimit,
 } from '@/lib/bookings/guest-policy'
 import { isPaidBy, PAID_BY_REQUIRED_MESSAGE } from '@/lib/bookings/invitations'
@@ -181,7 +182,7 @@ export const POST = withAuth(async (
   // ---- Resolve course + calendar settings ---------------------------------
   const { data: course } = await admin
     .from('courses')
-    .select('id, ghl_calendar_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, max_players_per_day, cost_per_player, allow_non_member_guests')
+    .select('id, ghl_calendar_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, max_players_per_day, cost_per_player, allow_non_member_guests, max_non_member_guests')
     .eq('id', primary.course_id)
     .single()
 
@@ -194,11 +195,13 @@ export const POST = withAuth(async (
     return NextResponse.json({ error: NON_MEMBER_GUESTS_DISABLED_MESSAGE }, { status: 400 })
   }
 
-  // And one per booking, counting the guest already on it — see guest-policy.
+  // And no more per booking than the venue takes, counting the guests already
+  // on it — see guest-policy.
   if (nonMemberPlayers.length > 0) {
+    const nonMemberLimit = maxNonMemberGuests(course)
     const seatedNonMembers = (await findNonMemberSeats(admin, seatedRows ?? [])).size
-    if (!withinNonMemberGuestLimit(seatedNonMembers, nonMemberPlayers.length)) {
-      return NextResponse.json({ error: NON_MEMBER_GUEST_LIMIT_MESSAGE }, { status: 409 })
+    if (!withinNonMemberGuestLimit(seatedNonMembers, nonMemberPlayers.length, nonMemberLimit)) {
+      return NextResponse.json({ error: nonMemberGuestLimitMessage(nonMemberLimit) }, { status: 409 })
     }
   }
 
