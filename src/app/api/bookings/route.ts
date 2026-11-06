@@ -6,6 +6,8 @@ import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient, createRouteHandlerClient } from '@/lib/supabase-server'
 import { coursePaymentOptions } from '@/lib/bookings/payment-options'
+import { findNonMemberSeats } from '@/lib/bookings/non-member-guest'
+import { maxNonMemberGuests } from '@/lib/bookings/guest-policy'
 import { nameOrEmail } from '@/lib/utils'
 import type { AuthContext } from '@/lib/auth/types'
 
@@ -93,6 +95,12 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
     rows = [...rows, ...siblingRows]
   }
 
+  // Which seats a non-member guest holds, so the booker's Add player stops
+  // offering a second one — see @/lib/bookings/guest-policy. Through the admin
+  // client: a guest's member row isn't the booker's to read.
+  const nonMemberSeats = await findNonMemberSeats(createAdminClient(), rows)
+  rows = rows.map(b => ({ ...b, non_member_guest: nonMemberSeats.has(b.id as string) }))
+
   // Resolve each booking's course via the admin client. The courses RLS policy
   // only exposes courses a member *belongs to*, so an embedded join returns null
   // for guest/away bookings at courses the member isn't a member of. Since these
@@ -113,8 +121,10 @@ async function attachCourses(rows: Array<Record<string, unknown>>) {
   const { data: courses } = await admin
     .from('courses')
     // meeting_duration_mins lets the client work out when a round finished —
-    // My Bookings uses it to decide when to offer "Rate round".
-    .select('id, name, city, state, payment_url, payment_options, timezone, meeting_duration_mins, allow_non_member_guests')
+    // My Bookings uses it to decide when to offer "Rate round". cost_per_player
+    // backs the seat's price where a row predates amount_charged, so the fee the
+    // cancel dialog quotes is the one the route charges.
+    .select('id, name, city, state, payment_url, payment_options, timezone, meeting_duration_mins, allow_non_member_guests, max_non_member_guests, cost_per_player')
     .in('id', courseIds)
 
   const byId = new Map((courses ?? []).map(c => [c.id as string, c]))
@@ -132,6 +142,8 @@ async function attachCourses(rows: Array<Record<string, unknown>>) {
             timezone: c.timezone,
             meeting_duration_mins: c.meeting_duration_mins ?? null,
             allow_non_member_guests: c.allow_non_member_guests === true,
+            max_non_member_guests: maxNonMemberGuests(c),
+            cost_per_player: c.cost_per_player ?? null,
           }
         : null,
     }

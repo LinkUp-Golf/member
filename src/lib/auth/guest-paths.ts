@@ -24,6 +24,7 @@ const OPEN_TO_GUESTS = [
   '/book/invitations', // answering being added to a round
   '/more/profile',
   '/more/settings',
+  '/more/payments', // a seat they cancel late is a fee they pay here
   '/more/install',
 ]
 

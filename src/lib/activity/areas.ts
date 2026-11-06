@@ -88,6 +88,10 @@ export const ACTIVITY_ACTIONS = {
   directory_viewed:         { area: 'directory',     kind: 'view',   label: 'Browsed the member directory',   client: true  },
   member_profile_viewed:    { area: 'directory',     kind: 'action', label: 'Viewed a member profile',        client: true  },
   member_message_started:   { area: 'directory',     kind: 'action', label: 'Messaged a member',              client: false },
+  // Playing partner matching: a recommendation is sent by an admin (never
+  // tracked); these are the member's half of it.
+  recommendation_dismissed: { area: 'directory',     kind: 'action', label: 'Dismissed a recommended partner', client: false },
+  match_survey_completed:   { area: 'profile',       kind: 'action', label: 'Completed the matching survey',  client: false },
 
   // ---- Everything else ------------------------------------
   home_viewed:              { area: 'other',         kind: 'view',   label: 'Opened the home screen',         client: true  },
@@ -159,6 +163,7 @@ export function activityForPath(pathname: string): { action: ActivityAction; tar
       return { action: 'events_viewed' }
     case 'profile':
     case 'settings':
+    case 'match-profile':
       return { action: 'profile_viewed' }
     default:
       return null

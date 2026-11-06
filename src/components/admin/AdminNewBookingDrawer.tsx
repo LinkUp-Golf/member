@@ -7,8 +7,9 @@
 // naming the member. The server holds it to every rule a member's own booking
 // meets, so this form only has to offer what that route will accept:
 //
-//   • non-member guests only where the venue allows them (courses.
-//     allow_non_member_guests — see @/lib/bookings/guest-policy);
+//   • non-member guests only where the venue allows them, and no more per
+//     booking than it takes (courses.allow_non_member_guests and
+//     max_non_member_guests — see @/lib/bookings/guest-policy);
 //   • who pays for each added player, required (@/lib/bookings/invitations).
 
 import { useEffect, useState } from 'react'
@@ -17,7 +18,12 @@ import { createClient } from '@/lib/supabase'
 import Select from '@/components/ui/Select'
 import { formatTeeTime } from '@/lib/utils'
 import { validateEmail } from '@/lib/validation'
-import { allowsNonMemberGuests } from '@/lib/bookings/guest-policy'
+import {
+  allowsNonMemberGuests,
+  maxNonMemberGuests,
+  nonMemberGuestLimitMessage,
+  withinNonMemberGuestLimit,
+} from '@/lib/bookings/guest-policy'
 import { PAID_BY_OPTIONS, type PaidBy } from '@/lib/bookings/invitations'
 import { slotWallTime, useVenueSlots } from '@/hooks/useVenueSlots'
 import type { AdditionalPlayer } from '@/types'
@@ -34,6 +40,7 @@ interface VenueOption {
   name: string
   timezone: string | null
   allow_non_member_guests: boolean
+  max_non_member_guests: number
 }
 
 type PlayerKind = 'member' | 'non_member'
@@ -98,7 +105,7 @@ export default function AdminNewBookingDrawer({
   useEffect(() => {
     createClient()
       .from('courses')
-      .select('id, name, timezone, allow_non_member_guests')
+      .select('id, name, timezone, allow_non_member_guests, max_non_member_guests')
       .eq('active', true)
       .eq('approval_status', 'active')
       .not('ghl_calendar_id', 'is', null)
@@ -108,17 +115,26 @@ export default function AdminNewBookingDrawer({
 
   const venue = venues.find(v => v.id === courseId) ?? null
   const nonMembersAllowed = allowsNonMemberGuests(venue)
+  const nonMemberLimit = maxNonMemberGuests(venue)
 
   // The same tee times a member booking is offered — see useVenueSlots.
   const { openSlots, loading: loadingSlots } = useVenueSlots(courseId, date)
   const slot = openSlots.find(s => s.startTime === slotStart) ?? null
   const maxAdditional = Math.min(MAX_ADDITIONAL, Math.max(0, (slot?.spotsOpen ?? 1) - 1))
 
-  // A venue that stops allowing non-members takes those rows back to members.
+  // A venue that doesn't take non-members takes those rows back to members, and
+  // one that takes fewer than are entered takes back the ones past its number.
+  const nonMembersKept = nonMembersAllowed ? nonMemberLimit : 0
   useEffect(() => {
-    if (nonMembersAllowed) return
-    setPlayers(ps => ps.map(p => (p.kind === 'non_member' ? { ...newPlayer(), key: p.key, paidBy: p.paidBy } : p)))
-  }, [nonMembersAllowed])
+    setPlayers(ps => {
+      let seen = 0
+      return ps.map(p => {
+        if (p.kind !== 'non_member') return p
+        seen += 1
+        return seen <= nonMembersKept ? p : { ...newPlayer(), key: p.key, paidBy: p.paidBy }
+      })
+    })
+  }, [nonMembersKept])
 
   // Fewer seats at the new tee time drops the extra rows.
   useEffect(() => {
@@ -140,6 +156,14 @@ export default function AdminNewBookingDrawer({
     if (p.mobile.replace(/\D/g, '').length < 7) return 'Enter a phone number.'
     return null
   }
+
+  // As many non-members as the venue takes per booking — once that many rows
+  // are, the rest can only be members.
+  const nonMemberLimitReached = !withinNonMemberGuestLimit(
+    players.filter(p => p.kind === 'non_member').length,
+    1,
+    nonMemberLimit,
+  )
 
   const pickedTwice = new Set(
     players.filter(p => p.kind === 'member' && p.memberId).map(p => p.memberId),
@@ -327,13 +351,17 @@ export default function AdminNewBookingDrawer({
                           <button
                             key={k}
                             type="button"
+                            disabled={k === 'non_member' && p.kind !== k && nonMemberLimitReached}
                             onClick={() => updatePlayer(p.key, { ...newPlayer(), key: p.key, paidBy: p.paidBy, kind: k })}
-                            className={`flex-1 py-1.5 text-xs font-semibold rounded-md ${p.kind === k ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+                            className={`flex-1 py-1.5 text-xs font-semibold rounded-md disabled:opacity-40 disabled:cursor-not-allowed ${p.kind === k ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
                           >
                             {k === 'member' ? 'Member' : 'Non-member'}
                           </button>
                         ))}
                       </div>
+                    )}
+                    {nonMembersAllowed && p.kind === 'member' && nonMemberLimitReached && (
+                      <p className="text-[11px] text-gray-400">{nonMemberGuestLimitMessage(nonMemberLimit)}</p>
                     )}
 
                     {p.kind === 'member' ? (

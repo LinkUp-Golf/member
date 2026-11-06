@@ -19,6 +19,8 @@
   },
   "dependencies": {
     "@gohighlevel/api-client": "^3.0.0",
+    "@stripe/react-stripe-js": "^7.0.1",
+    "@stripe/stripe-js": "^10.2.1",
     "@supabase/ssr": "^0.3.0",
     "@supabase/supabase-js": "^2.43.0",
     "@vercel/edge-config": "^1.4.3",
@@ -36,6 +38,7 @@
     "recharts": "^3.10.1",
     "resend": "^6.28.1",
     "sharp": "^0.34.5",
+    "stripe": "^23.1.0",
     "tailwind-merge": "^3.6.0",
     "web-push": "^3.6.7",
     "zustand": "^4.5.2"
