@@ -136,8 +136,6 @@ export interface Course {
   // Members may add non-member guests to a round here. Off by default — see
   // src/lib/bookings/guest-policy.ts.
   allow_non_member_guests: boolean
-  // How many of them one booking may bring (1–3), while the above is on.
-  max_non_member_guests: number
 
   // Optional description shown in the admin and used as the GHL group description
   description: string | null
@@ -283,19 +281,8 @@ export interface Booking {
   paid_by_booker?: boolean
   /** An added player's answer to their invitation; null on the booker's own row. */
   invite_status?: 'pending' | 'accepted' | 'declined' | 'expired' | null
-  /**
-   * Booked under the cancellation policy, so a late cancel costs a share of the
-   * seat's price. False on every seat that predates it — see
-   * @/lib/cancellation/policy (seatCancellationQuote).
-   */
-  cancellation_policy_applies?: boolean
   created_at: string
   booker_name?: string | null
-  /**
-   * The seat is held by a non-member guest. Worked out by the server, not a
-   * column — see @/lib/bookings/guest-policy (isNonMemberSeat).
-   */
-  non_member_guest?: boolean
   course?: {
     name: string
     city: string
@@ -309,8 +296,6 @@ export interface Booking {
     cost_per_player?: number | null
     /** Whether players can be added here as non-member guests. */
     allow_non_member_guests?: boolean
-    /** How many non-member guests one booking may bring here. */
-    max_non_member_guests?: number
   } | null
 }
 
@@ -1031,39 +1016,4 @@ export interface NotificationLog {
   url: string | null
   read_at: string | null
   created_at: string
-}
-
-// ---- Cancellation fees --------------------------------------
-
-export type CancellationFeeStatus = 'pending' | 'paid' | 'unpaid' | 'waived'
-
-/** One late cancellation and what it cost — see @/lib/cancellation/fees. */
-export interface CancellationFee {
-  id: string
-  member_id: string
-  source: 'booking' | 'hosted_event'
-  booking_id: string | null
-  hosted_event_id: string | null
-  hosted_event_registration_id: string | null
-  course_id: string | null
-  course_name: string | null
-  event_date: string
-  tee_time: string | null
-  price: number
-  percent: number
-  amount: number
-  status: CancellationFeeStatus
-  failure_reason: string | null
-  paid_at: string | null
-  created_at: string
-}
-
-/** What a cancel route tells the member their cancellation cost. */
-export interface CancellationFeeOutcome {
-  id: string
-  amount: number
-  percent: number
-  status: CancellationFeeStatus
-  /** The card it was charged to — set only when the charge went through. */
-  card: { brand: string; last4: string } | null
 }

@@ -20,7 +20,6 @@ import { NotificationTemplates } from '@/lib/push'
 import { notifyMember } from '@/lib/notify'
 import { MAX_PINNED_COURSES } from '@/lib/constants'
 import { canTakePayment, coursePaymentOptions, parsePaymentOptions } from '@/lib/bookings/payment-options'
-import { MAX_NON_MEMBER_GUESTS_INVALID_MESSAGE, parseMaxNonMemberGuests } from '@/lib/bookings/guest-policy'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 import type { Course } from '@/types'
@@ -458,7 +457,6 @@ export const PATCH = withAuth(
       // GHL_CALENDAR_RULES, so nothing reads them and no screen sends them.
       'meeting_duration_mins', 'seats_per_class', 'max_players_per_day',
       'custom_slots_enabled', 'pinned', 'payment_options', 'allow_non_member_guests',
-      'max_non_member_guests',
     ]
     const updates: Record<string, unknown> = {}
     for (const key of allowed) {
@@ -468,14 +466,6 @@ export const PATCH = withAuth(
     // string would otherwise switch non-member guests on.
     if ('allow_non_member_guests' in updates) {
       updates.allow_non_member_guests = updates.allow_non_member_guests === true
-    }
-    // Refused rather than clamped, so what's saved is what the admin picked.
-    if ('max_non_member_guests' in updates) {
-      const max = parseMaxNonMemberGuests(updates.max_non_member_guests)
-      if (max === null) {
-        return NextResponse.json({ error: MAX_NON_MEMBER_GUESTS_INVALID_MESSAGE }, { status: 400 })
-      }
-      updates.max_non_member_guests = max
     }
 
     // Cap on pinned venues, the same rule pinned announcements are held to.

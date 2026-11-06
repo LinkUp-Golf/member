@@ -11,11 +11,6 @@ import {
   canTakePayment,
   parsePaymentOptions,
 } from '@/lib/bookings/payment-options'
-import {
-  DEFAULT_MAX_NON_MEMBER_GUESTS,
-  MAX_NON_MEMBER_GUESTS_INVALID_MESSAGE,
-  parseMaxNonMemberGuests,
-} from '@/lib/bookings/guest-policy'
 import { activeCourseIds, postAnnouncementToCourses } from '@/lib/announcements/fan-out'
 import type { AuthContext } from '@/lib/auth/types'
 import type { Course } from '@/types'
@@ -92,14 +87,6 @@ export const POST = withAuth(
       return NextResponse.json({ error: 'Timezone must be a valid IANA timezone (e.g. America/Los_Angeles)' }, { status: 400 })
     }
 
-    // Omitted means the default (one), exactly as the column does.
-    const maxNonMembers = body.max_non_member_guests === undefined
-      ? DEFAULT_MAX_NON_MEMBER_GUESTS
-      : parseMaxNonMemberGuests(body.max_non_member_guests)
-    if (maxNonMembers === null) {
-      return NextResponse.json({ error: MAX_NON_MEMBER_GUESTS_INVALID_MESSAGE }, { status: 400 })
-    }
-
     const admin = createAdminClient()
 
     // Slug uniqueness check
@@ -152,7 +139,6 @@ export const POST = withAuth(
         required_tags: requiredTags,
         max_players_per_day: body.max_players_per_day ?? undefined,
         allow_non_member_guests: body.allow_non_member_guests === true,
-        max_non_member_guests: maxNonMembers,
         approval_status: 'active',
         reviewed_by: ctx.userId,
       })

@@ -138,9 +138,7 @@ export default function BookingSurveySheet({
           booking_id: target.booking_id,
           rating,
           attended,
-          // A comment typed before ticking "I didn't make it" was hidden with
-          // its box — don't send what the member can no longer see.
-          comment: (attended && comment.trim()) || undefined,
+          comment: comment.trim() || undefined,
         }),
       })
       const json = await res.json().catch(() => ({}))
@@ -225,9 +223,7 @@ export default function BookingSurveySheet({
               </span>
             </label>
 
-            {/* Feedback is about the round, so it's asked only of someone who
-                played it. */}
-            {attended && (
+            {didNotAttend && (
               <div className="mt-3">
                 <label htmlFor="survey-comment" className="text-xs text-green-900/50">
                   Anything you&apos;d like us to know? (optional)
@@ -239,7 +235,8 @@ export default function BookingSurveySheet({
                   disabled={submitting}
                   rows={3}
                   maxLength={1000}
-                  className="mt-1.5 w-full rounded-xl border border-green-900/15 px-3 py-2 text-sm text-green-950 focus:outline-none focus:ring-2 focus:ring-green-700/40 resize-none"
+                  placeholder="What got in the way?"
+                  className="mt-1.5 w-full rounded-xl border border-green-900/15 px-3 py-2 text-sm text-green-950 placeholder:text-green-900/30 focus:outline-none focus:ring-2 focus:ring-green-700/40 resize-none"
                 />
               </div>
             )}

@@ -34,15 +34,7 @@ import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPayme
 import { buildCustomSlots, loadForcedOpenDays, NON_HOLDING_STATUSES } from '@/lib/bookings/availability'
 import { isInsideJoinOnlyWindow, joinOnlyWindowMessage, openDayKey } from '@/lib/bookings/lead-time'
 import { bookingAmountDue } from '@/lib/bookings/price'
-import { needsCardOnFile } from '@/lib/stripe/cards'
-import { CARD_REQUIRED_CODE, CARD_REQUIRED_MESSAGE } from '@/lib/stripe/card'
-import {
-  allowsNonMemberGuests,
-  maxNonMemberGuests,
-  NON_MEMBER_GUESTS_DISABLED_MESSAGE,
-  nonMemberGuestLimitMessage,
-  withinNonMemberGuestLimit,
-} from '@/lib/bookings/guest-policy'
+import { allowsNonMemberGuests, NON_MEMBER_GUESTS_DISABLED_MESSAGE } from '@/lib/bookings/guest-policy'
 import { isPaidBy, PAID_BY_REQUIRED_MESSAGE } from '@/lib/bookings/invitations'
 import {
   PAY_AT_CLUB,
@@ -312,15 +304,6 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  // Every seat made here comes under the cancellation policy, so the booker
-  // needs a card on file to charge if they give one up late. Not asked of an
-  // admin booking for a member — the member isn't at the screen to enter one;
-  // a late cancel of that round falls back to asking them to pay (see
-  // @/lib/cancellation/fees). Off entirely while Stripe isn't configured.
-  if (!bookedByAdminId && await needsCardOnFile(adminSupabase, bookerId)) {
-    return NextResponse.json({ error: CARD_REQUIRED_MESSAGE, code: CARD_REQUIRED_CODE }, { status: 409 })
-  }
-
   // Resolve course calendar settings — use the selected course when provided,
   // fall back to the Aviara env-var constants for backward compatibility.
   let eventCalendarId = AVIARA_CALENDAR_ID
@@ -335,7 +318,7 @@ export async function POST(request: NextRequest) {
 
   const { data: course } = await adminSupabase
     .from('courses')
-    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, cost_per_player, allow_non_member_guests, max_non_member_guests')
+    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, cost_per_player, allow_non_member_guests')
     .eq('id', courseId || resolvedCourseId)
     .eq('approval_status', 'active')
     .single()
@@ -357,12 +340,6 @@ export async function POST(request: NextRequest) {
   // post — refused before any GHL work.
   if (nonMemberPlayers.length > 0 && !allowsNonMemberGuests(course)) {
     return NextResponse.json({ error: NON_MEMBER_GUESTS_DISABLED_MESSAGE }, { status: 400 })
-  }
-
-  // And no more of them than the venue takes per booking — see guest-policy.
-  const nonMemberLimit = maxNonMemberGuests(course)
-  if (!withinNonMemberGuestLimit(0, nonMemberPlayers.length, nonMemberLimit)) {
-    return NextResponse.json({ error: nonMemberGuestLimitMessage(nonMemberLimit) }, { status: 400 })
   }
 
   // The appointment's length is whatever this course's GHL calendar says a round
@@ -744,9 +721,6 @@ export async function POST(request: NextRequest) {
   }
   const created = insertedBookings as InsertedBooking[]
   console.log('[booking/create] Reserved bookings:', created.map(b => b.id))
-  // Read before provisioning links each guest to an account, after which their
-  // row looks like a member's — the client needs it to stop offering a second.
-  const nonMemberSeatIds = new Set(created.filter(b => b.guest_name && !b.player_member_id).map(b => b.id))
 
   // Step 3: Now that the seats are reserved, create GHL appointments and
   // backfill ghl_booking_id. The primary booker's appointment MUST succeed —
@@ -895,11 +869,7 @@ export async function POST(request: NextRequest) {
   // Echo the resolved course onto each row so the client's optimistic prepend
   // renders the real course name (the RPC returns raw rows with no join).
   const bookingsWithCourse = Array.isArray(insertedBookings) && courseForResponse
-    ? insertedBookings.map((b: Record<string, unknown>) => ({
-        ...b,
-        course: courseForResponse,
-        non_member_guest: nonMemberSeatIds.has(b.id as string),
-      }))
+    ? insertedBookings.map((b: Record<string, unknown>) => ({ ...b, course: courseForResponse }))
     : insertedBookings
 
   return NextResponse.json({
