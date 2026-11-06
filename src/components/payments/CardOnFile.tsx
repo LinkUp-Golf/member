@@ -22,6 +22,7 @@ import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-
 import type { Appearance } from "@stripe/stripe-js";
 import { Skeleton, Spinner } from "@/components/ui/Loading";
 import { getBrowserStripe } from "@/lib/stripe/browser";
+import { useStripePublishableKey } from "@/components/providers/StripeKeyProvider";
 import { cardExpiry, cardLabel, type SavedCard } from "@/lib/stripe/card";
 
 const APPEARANCE: Appearance = {
@@ -215,6 +216,7 @@ function CardForm({
   onSaved: (card: SavedCard) => void;
   onCancel?: () => void;
 }) {
+  const publishableKey = useStripePublishableKey();
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -243,7 +245,7 @@ function CardForm({
   if (!clientSecret) return <CardFormSkeleton />;
 
   return (
-    <Elements stripe={getBrowserStripe()} options={{ clientSecret, appearance: APPEARANCE }}>
+    <Elements stripe={getBrowserStripe(publishableKey)} options={{ clientSecret, appearance: APPEARANCE }}>
       <CardFormInner compact={compact} onSaved={onSaved} onCancel={onCancel} />
     </Elements>
   );

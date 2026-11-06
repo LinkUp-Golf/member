@@ -1,21 +1,19 @@
 // Stripe — how the cancellation policy collects.
 //
 // Server-only: the secret key never leaves it. The browser side is
-// ./browser (Stripe.js, with the publishable key) and touches nothing here.
+// ./browser (Stripe.js, given the publishable key by the (app) layout) and
+// touches nothing here.
 //
-// No keys, no policy. With STRIPE_SECRET_KEY or the publishable key unset,
-// stripeEnabled() is false, and everything that reads it stands down together:
-// booking asks for no card, cancelling costs nothing, and nothing fails. Both
-// keys are required because the policy needs both halves — a secret key with no
-// publishable one would charge cards nobody could have entered.
+// No keys, no policy. With STRIPE_SECRET_KEY or STRIPE_PUBLISHABLE_KEY unset,
+// stripeEnabled() (./config) is false, and everything that reads it stands down
+// together: booking asks for no card, cancelling costs nothing, and nothing fails.
 
 import Stripe from 'stripe'
+import { stripeEnabled } from './config'
+
+export { stripeEnabled }
 
 let client: Stripe | null = null
-
-export function stripeEnabled(): boolean {
-  return !!process.env.STRIPE_SECRET_KEY && !!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
-}
 
 /** The shared client, or null when Stripe isn't configured. */
 export function getStripe(): Stripe | null {

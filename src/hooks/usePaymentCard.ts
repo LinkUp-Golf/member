@@ -7,14 +7,14 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { SavedCard } from '@/lib/stripe/card'
-import { browserStripeConfigured } from '@/lib/stripe/browser'
+import { useStripePublishableKey } from '@/components/providers/StripeKeyProvider'
 
 export interface PaymentCardState {
   enabled: boolean
   /**
    * Whether to state the policy now. The policy is fixed text, so it doesn't
-   * wait on the request: until that answers, the build's publishable key
-   * stands in for `enabled`. Only the card itself waits.
+   * wait on the request: until that answers, the publishable key the (app)
+   * layout handed down stands in for `enabled`. Only the card itself waits.
    */
   showPolicy: boolean
   card: SavedCard | null
@@ -25,6 +25,7 @@ export interface PaymentCardState {
 }
 
 export function usePaymentCard(active = true): PaymentCardState {
+  const stripeConfigured = Boolean(useStripePublishableKey())
   const [enabled, setEnabled] = useState(false)
   const [card, setCard] = useState<SavedCard | null>(null)
   const [loading, setLoading] = useState(active)
@@ -48,7 +49,7 @@ export function usePaymentCard(active = true): PaymentCardState {
 
   useEffect(() => { refresh() }, [refresh])
 
-  const showPolicy = loading ? browserStripeConfigured : enabled
+  const showPolicy = loading ? stripeConfigured : enabled
 
   return { enabled, showPolicy, card, loading, setCard, refresh }
 }
