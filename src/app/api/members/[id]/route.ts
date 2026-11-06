@@ -2,9 +2,8 @@ export const dynamic = 'force-dynamic'
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
 import { withAuth } from '@/lib/auth/with-auth'
-import { createRouteHandlerClient, createAdminClient } from '@/lib/supabase-server'
+import { createAdminClient } from '@/lib/supabase-server'
 import { getCache, withCache } from '@/lib/cache'
 import {
   MEMBER_DETAIL_NS,
@@ -31,8 +30,6 @@ export const GET = withAuth(async (
   if (!memberId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
   const cache    = getCache(MEMBER_DETAIL_NS)
 
-  const supabase = createRouteHandlerClient(cookies())
-
   const [memberData, playedRes, subsRes] = await Promise.all([
     // Cached: public profile visible to any authenticated member.
     withCache(
@@ -51,13 +48,12 @@ export const GET = withAuth(async (
       MEMBER_DETAIL_TTL_MS
     ),
 
-    // Live: user-specific — never cache.
-    supabase
-      .from('play_history')
-      .select('id')
-      .eq('member_id', ctx.userId)
-      .contains('played_with', [memberId])
-      .limit(1),
+    // Live: user-specific — never cache. From the rounds themselves (bookings
+    // and hosted events, see 20260911000001): play_history was read here but
+    // nothing ever wrote to it, so the badge was always false. Service role,
+    // since the function reads other members' bookings; it only ever answers
+    // about the caller.
+    createAdminClient().rpc('members_played_with', { p_member_id: ctx.userId }),
 
     // Member's focus linkup subscriptions — not user-specific, but not worth caching.
     createAdminClient()
@@ -73,7 +69,9 @@ export const GET = withAuth(async (
 
   return NextResponse.json({
     member: memberData,
-    hasPlayedWith: (playedRes.data?.length ?? 0) > 0,
+    // A round already played: one booked for next week isn't "played together" yet.
+    hasPlayedWith: ((playedRes.data ?? []) as Array<{ member_id: string; rounds: number }>)
+      .some(r => r.member_id === memberId && Number(r.rounds) > 0),
     focusLinkupGroups: subsRes.data?.map(s =>
       s.industry_focus === 'Other' && s.custom_label ? s.custom_label : s.industry_focus
     ) ?? [],

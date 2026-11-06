@@ -66,6 +66,8 @@ import {
 } from "@/lib/bookings/payment-options";
 import CreditCouponModal from "@/components/credits/CreditCouponModal";
 import { useCreditWallet } from "@/hooks/useCreditWallet";
+import { useRecommendations } from "@/hooks/useRecommendations";
+import SuggestedPlayerPicker from "@/components/matching/SuggestedPlayerPicker";
 import {
   format,
   differenceInHours,
@@ -82,7 +84,18 @@ import type {
 import { AVIARA_TIMEZONE, MY_BOOKINGS_TAB } from "@/lib/constants";
 import { validateEmail } from "@/lib/validation";
 
-type PlayerKind = "member" | "non_member";
+// "suggested" is a member too — one the LinkUp team recommended, picked from
+// a short list instead of by name. Everything downstream treats it as a member.
+type PlayerKind = "member" | "non_member" | "suggested";
+
+/** The tabs a player row offers: Member always; the others only where they apply. */
+function playerKindOptions(allowNonMembers: boolean, hasSuggestions: boolean): [PlayerKind, string][] {
+  return [
+    ["member", "Member"],
+    ...(allowNonMembers ? [["non_member", "Non-member"] as [PlayerKind, string]] : []),
+    ...(hasSuggestions ? [["suggested", "Suggested"] as [PlayerKind, string]] : []),
+  ];
+}
 
 // A phone number is required for non-member invites; keep the check lenient
 // (digits/format vary) but reject obviously-too-short values.
@@ -1006,6 +1019,8 @@ function ConfirmScreen({
   // until the booker picks, and submit stays disabled until every row has one.
   const [paidBys, setPaidBys] = useState<Array<PaidBy | null>>([]);
   const [members, setMembers] = useState<MemberWithProfile[]>([]);
+  const { recommendations } = useRecommendations();
+  const kindOptions = playerKindOptions(allowNonMembers, recommendations.length > 0);
   // Member ids flagged as having a payment due on an existing booking. The FIFO
   // rule bars a booker from adding such a member to a group round, so a flagged
   // selection blocks submit until they're removed. Checked on selection via
@@ -1490,19 +1505,16 @@ function ConfirmScreen({
                         </>
                       ) : (
                         <div className="pt-3 space-y-3">
-                          {/* Member / Non-member segmented toggle — only where
-                              the venue takes non-member guests. */}
-                          {allowNonMembers && (
+                          {/* Member / Non-member / Suggested toggle — Non-member
+                              only where the venue takes non-member guests,
+                              Suggested only when the LinkUp team has
+                              recommended someone. */}
+                          {kindOptions.length > 1 && (
                           <div
                             className="flex gap-1 p-1 rounded-xl"
                             style={{ background: "rgba(0,38,105,0.05)" }}
                           >
-                            {(
-                              [
-                                ["member", "Member"],
-                                ["non_member", "Non-member"],
-                              ] as [PlayerKind, string][]
-                            ).map(([k, label]) => {
+                            {kindOptions.map(([k, label]) => {
                               const active = kind === k;
                               const blocked =
                                 k === "non_member" &&
@@ -1535,7 +1547,7 @@ function ConfirmScreen({
                           </div>
                           )}
                           {allowNonMembers &&
-                            kind === "member" &&
+                            kind !== "non_member" &&
                             nonMemberLimitReached && (
                               <p
                                 className="text-[11px] leading-snug"
@@ -1545,7 +1557,13 @@ function ConfirmScreen({
                               </p>
                             )}
 
-                          {kind === "member" ? (
+                          {kind === "suggested" ? (
+                            <SuggestedPlayerPicker
+                              members={members}
+                              excludeIds={selectedMemberIds}
+                              onSelect={(m) => selectMember(i, m)}
+                            />
+                          ) : kind === "member" ? (
                             <MemberAutocomplete
                               members={members}
                               excludeIds={selectedMemberIds}
@@ -3825,6 +3843,7 @@ function AddPlayerModal({
   const [members, setMembers] = useState<MemberWithProfile[]>([]);
   const [kind, setKind] = useState<PlayerKind>("member");
   const [selected, setSelected] = useState<MemberWithProfile | null>(null);
+  const { recommendations } = useRecommendations();
   // Selecting a member isn't a react-hook-form field, so its "required" error
   // is tracked separately; `submitError` holds server/network failures.
   const [memberError, setMemberError] = useState("");
@@ -3910,6 +3929,8 @@ function AddPlayerModal({
   };
   const errFieldStyle = { ...fieldStyle, borderColor: "#dc2626" };
 
+  const modalKindOptions = playerKindOptions(target.allowNonMembers, recommendations.length > 0);
+
   function switchKind(k: PlayerKind) {
     if (k === kind) return;
     setKind(k);
@@ -3926,7 +3947,7 @@ function AddPlayerModal({
       return;
     }
     let player: AdditionalPlayer;
-    if (kind === "member") {
+    if (kind !== "non_member") {
       if (!selected) {
         setMemberError("Select a member to add.");
         return;
@@ -4042,19 +4063,15 @@ function AddPlayerModal({
           noValidate
           className="space-y-4"
         >
-          {/* Member / Non-member toggle — only where the venue takes
-              non-member guests. */}
-          {target.allowNonMembers && (
+          {/* Member / Non-member / Suggested toggle — Non-member only where
+              the venue takes non-member guests, Suggested only when the
+              LinkUp team has recommended someone. */}
+          {modalKindOptions.length > 1 && (
           <div
             className="flex gap-1 p-1 rounded-xl"
             style={{ background: "rgba(0,38,105,0.05)" }}
           >
-            {(
-              [
-                ["member", "Member"],
-                ["non_member", "Non-member"],
-              ] as [PlayerKind, string][]
-            ).map(([k, label]) => {
+            {modalKindOptions.map(([k, label]) => {
               const active = kind === k;
               return (
                 <button
@@ -4088,7 +4105,7 @@ function AddPlayerModal({
             </p>
           )}
 
-          {kind === "member" ? (
+          {kind !== "non_member" ? (
             selected ? (
               <div
                 className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
@@ -4122,6 +4139,16 @@ function AddPlayerModal({
               </div>
             ) : (
               <div>
+                {kind === "suggested" ? (
+                  <SuggestedPlayerPicker
+                    members={members}
+                    excludeIds={target.excludeMemberIds}
+                    onSelect={(m) => {
+                      setSelected(m);
+                      setMemberError("");
+                    }}
+                  />
+                ) : (
                 <MemberAutocomplete
                   members={members}
                   excludeIds={target.excludeMemberIds}
@@ -4130,6 +4157,7 @@ function AddPlayerModal({
                     setMemberError("");
                   }}
                 />
+                )}
                 {memberError && (
                   <p className="text-xs mt-1 text-red-600">{memberError}</p>
                 )}

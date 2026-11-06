@@ -10,6 +10,9 @@ import Avatar from "@/components/ui/Avatar";
 import AppShell from "@/components/layout/AppShell";
 import { MemberRowSkeleton } from "@/components/ui/Loading";
 import EmptyState from "@/components/ui/EmptyState";
+import RecommendedPartners from "@/components/matching/RecommendedPartners";
+import SuggestedTag from "@/components/matching/SuggestedTag";
+import { useRecommendations, type Recommendation } from "@/hooks/useRecommendations";
 import { INDUSTRY_CATEGORIES } from "@/types";
 import type { MemberWithProfile } from "@/types";
 
@@ -24,6 +27,11 @@ export default function MembersPage() {
   const [activeFilter, setActiveFilter] = useState(FILTER_ALL);
 
   const filters = useMemo(() => [FILTER_ALL, ...INDUSTRY_CATEGORIES.map(shortCategory)], []);
+  const { recommendations } = useRecommendations();
+  const suggestedById = useMemo(
+    () => new Map(recommendations.map((r) => [r.member.id, r])),
+    [recommendations],
+  );
 
   const loadMembers = useCallback(async () => {
     const response = await apiClient.get<MemberWithProfile[]>("/api/members");
@@ -76,6 +84,12 @@ export default function MembersPage() {
   return (
     <AppShell title="Members" description={`${members.length} active members`}>
       <div className="max-w-6xl mx-auto w-full">
+      {/* Playing partners an admin picked for this member — nothing when none. */}
+      {/* Hidden, not unmounted, while searching: remounting would re-fetch. */}
+      <div className={`px-5 pt-4 empty:hidden ${search || activeFilter !== FILTER_ALL ? "hidden" : ""}`}>
+        <RecommendedPartners variant="members" />
+      </div>
+
       {/* Search */}
       <div className="px-5 pt-4">
         <div className="flex items-center gap-2.5 bg-white rounded-xl px-4 py-3 border shadow-card transition-shadow focus-within:shadow-raised"
@@ -147,7 +161,7 @@ export default function MembersPage() {
       ) : (
         <div className="mx-5 card mb-6">
           {filtered.map((m) => (
-            <MemberRow key={m.id} member={m} currentUserId={user?.id} />
+            <MemberRow key={m.id} member={m} currentUserId={user?.id} suggestion={suggestedById.get(m.id)} />
           ))}
         </div>
       )}
@@ -161,16 +175,22 @@ export default function MembersPage() {
 const MemberRow = memo(function MemberRow({
   member: m,
   currentUserId,
+  suggestion,
 }: {
   member: MemberWithProfile;
   currentUserId?: string;
+  /** Set when the LinkUp team recommended this member to the viewer. */
+  suggestion?: Recommendation;
 }) {
   const isMe = m.id === currentUserId;
 
+  // The tag is a button, so it sits beside the link rather than inside it;
+  // the wrapper draws the divider .member-row would otherwise lose.
   return (
+    <div className="relative border-b-[0.5px] border-[rgba(0,38,105,0.06)] last:border-b-0">
     <Link
       href={isMe ? "/more/profile" : `/members/${m.id}`}
-      className="member-row focus-ring"
+      className={`member-row focus-ring !border-b-0 ${suggestion ? "pr-32" : ""}`}
     >
       <Avatar
         firstName={m.first_name}
@@ -205,10 +225,16 @@ const MemberRow = memo(function MemberRow({
         </p>
       </div>
       <ChevronRight
-        className="w-4 h-4 flex-shrink-0"
+        className={`w-4 h-4 flex-shrink-0 ${suggestion ? "absolute right-5 top-1/2 -translate-y-1/2" : ""}`}
         style={{ color: "rgba(0,38,105,0.2)" }}
         strokeWidth={1.75}
       />
     </Link>
+    {suggestion && (
+      <div className="absolute right-11 top-1/2 -translate-y-1/2">
+        <SuggestedTag recommendation={suggestion} />
+      </div>
+    )}
+    </div>
   );
 });
