@@ -16,7 +16,6 @@ import Icon, { type IconName } from '@/components/ui/Icon';
 import NotificationBell from '@/components/ui/NotificationBell';
 import MessagesIcon from '@/components/ui/MessagesIcon';
 import { CardSkeleton } from "@/components/ui/Loading";
-import RecommendedPartners from "@/components/matching/RecommendedPartners";
 import type {
   Booking,
   Announcement,
@@ -146,9 +145,6 @@ export default function HomePage() {
 
       {/* Content */}
       <div className="px-5 pt-6 space-y-7 pb-6">
-
-        {/* The newest playing partner an admin picked — nothing when none. */}
-        {!loading && <RecommendedPartners variant="home" />}
 
         {/* Member Offers */}
         {(loading || promotions.length > 0) && (

@@ -47,7 +47,6 @@ export const mockCourse: Course = {
   max_players_per_day: 15,
   custom_slots_enabled: false,
   allow_non_member_guests: false,
-  max_non_member_guests: 1,
   description: null,
   booking_url: null,
   payment_url: 'https://linkupgolf-services.com/aviara-event-booking-checkout-page',

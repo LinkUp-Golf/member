@@ -22,8 +22,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getContactByEmail, createContact, addTagToContact } from '@/lib/ghl/client'
-import { MEMBER_GUEST_TAG, hasAnyAccessTag, isGuestOnly } from '@/lib/ghl/tags'
-import { isNonMemberSeat } from '@/lib/bookings/guest-policy'
+import { MEMBER_GUEST_TAG, hasAnyAccessTag } from '@/lib/ghl/tags'
 import { syncMember } from '@/lib/sync'
 import { logger } from '@/lib/logger'
 import type { AdditionalPlayer, GHLContact } from '@/types'
@@ -146,41 +145,6 @@ export async function linkGuestToMember(
       metadata: { bookingId },
     })
   }
-}
-
-/**
- * The ids of the rows, among these booking seats, held by a non-member guest —
- * what the one-non-member-per-booking rule counts (see isNonMemberSeat).
- *
- * A seat linked to a member is a guest's when that member holds a guest account
- * and no membership. Reading their accounts can fail; that counts the linked
- * seats as members', since the limit is a booking rule, not a gate worth
- * refusing every added player over.
- */
-export async function findNonMemberSeats(
-  admin: SupabaseClient,
-  seats: Array<{ id: string; guest_name: string | null; player_member_id: string | null }>
-): Promise<Set<string>> {
-  const linkedIds = [
-    ...new Set(
-      seats.flatMap((s) => (s.guest_name && s.player_member_id ? [s.player_member_id] : []))
-    ),
-  ]
-
-  const guestAccountIds = new Set<string>()
-  if (linkedIds.length) {
-    const { data } = await admin
-      .from('members')
-      .select('id, is_admin, ghl_tags')
-      .in('id', linkedIds)
-    for (const m of data ?? []) {
-      if (!m.is_admin && isGuestOnly((m.ghl_tags as string[] | null) ?? [])) {
-        guestAccountIds.add(m.id as string)
-      }
-    }
-  }
-
-  return new Set(seats.filter((s) => isNonMemberSeat(s, guestAccountIds)).map((s) => s.id))
 }
 
 async function ensureMemberForContact({

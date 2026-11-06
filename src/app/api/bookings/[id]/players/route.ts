@@ -14,7 +14,6 @@ export const dynamic = 'force-dynamic'
 //   • the per-course daily capacity (atomically, via
 //     add_players_to_booking → DAY_FULL)
 //   • the 4-players-per-group cap
-//   • the venue's non-member guests per booking, counting any already on it
 //   • the member-guest FIFO gate (a member who owes on their own
 //     round still can't be pulled into one — same policy as create)
 //
@@ -35,20 +34,10 @@ import { resolveAppointmentIso } from '@/lib/ghl/booking-time'
 import { sendBookingInvitations } from '@/lib/bookings/send-invitations'
 import { validateEmail, validateString, sanitiseText } from '@/lib/validation'
 import { findMembersWithPendingPayment } from '@/lib/bookings/pending-payment'
-import {
-  findNonMemberSeats,
-  linkGuestToMember,
-  provisionNonMemberGuest,
-} from '@/lib/bookings/non-member-guest'
+import { linkGuestToMember, provisionNonMemberGuest } from '@/lib/bookings/non-member-guest'
 import type { ProvisionedGuest } from '@/lib/bookings/non-member-guest'
 import { bookingAmountDue } from '@/lib/bookings/price'
-import {
-  allowsNonMemberGuests,
-  maxNonMemberGuests,
-  NON_MEMBER_GUESTS_DISABLED_MESSAGE,
-  nonMemberGuestLimitMessage,
-  withinNonMemberGuestLimit,
-} from '@/lib/bookings/guest-policy'
+import { allowsNonMemberGuests, NON_MEMBER_GUESTS_DISABLED_MESSAGE } from '@/lib/bookings/guest-policy'
 import { isPaidBy, PAID_BY_REQUIRED_MESSAGE } from '@/lib/bookings/invitations'
 import {
   PAY_AT_CLUB,
@@ -156,17 +145,17 @@ export const POST = withAuth(async (
   const memberPlayers = extraPlayers.filter((p) => !(p.isNonMember || !p.memberId))
 
   // ---- Enforce the 4-players-per-group cap --------------------------------
-  // The active rows already in this group (same booker, created_at, slot).
-  const { data: seatedRows } = await admin
+  // Count the active rows already in this group (same booker, created_at, slot).
+  const { count: existingCount } = await admin
     .from('bookings')
-    .select('id, guest_name, player_member_id')
+    .select('id', { count: 'exact', head: true })
     .eq('member_id', ctx.userId)
     .eq('created_at', primary.created_at)
     .eq('booking_date', primary.booking_date)
     .eq('tee_time', primary.tee_time)
     .in('status', ACTIVE_STATUSES)
 
-  const currentPlayers = seatedRows?.length ?? 1
+  const currentPlayers = existingCount ?? 1
   if (currentPlayers + extraPlayers.length > MAX_PLAYERS_PER_GROUP) {
     const remaining = Math.max(0, MAX_PLAYERS_PER_GROUP - currentPlayers)
     return NextResponse.json(
@@ -182,7 +171,7 @@ export const POST = withAuth(async (
   // ---- Resolve course + calendar settings ---------------------------------
   const { data: course } = await admin
     .from('courses')
-    .select('id, ghl_calendar_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, max_players_per_day, cost_per_player, allow_non_member_guests, max_non_member_guests')
+    .select('id, ghl_calendar_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, max_players_per_day, cost_per_player, allow_non_member_guests')
     .eq('id', primary.course_id)
     .single()
 
@@ -193,16 +182,6 @@ export const POST = withAuth(async (
   // Non-member guests only where the venue takes them — the same rule as create.
   if (nonMemberPlayers.length > 0 && !allowsNonMemberGuests(course)) {
     return NextResponse.json({ error: NON_MEMBER_GUESTS_DISABLED_MESSAGE }, { status: 400 })
-  }
-
-  // And no more per booking than the venue takes, counting the guests already
-  // on it — see guest-policy.
-  if (nonMemberPlayers.length > 0) {
-    const nonMemberLimit = maxNonMemberGuests(course)
-    const seatedNonMembers = (await findNonMemberSeats(admin, seatedRows ?? [])).size
-    if (!withinNonMemberGuestLimit(seatedNonMembers, nonMemberPlayers.length, nonMemberLimit)) {
-      return NextResponse.json({ error: nonMemberGuestLimitMessage(nonMemberLimit) }, { status: 409 })
-    }
   }
 
   const eventCalendarId = course.ghl_calendar_id
@@ -418,9 +397,6 @@ export const POST = withAuth(async (
     paid_by_booker: boolean | null
   }
   const created = (insertedRows ?? []) as InsertedBooking[]
-  // Read before provisioning links each guest to an account, after which their
-  // row looks like a member's — the client needs it to stop offering a second.
-  const nonMemberSeatIds = new Set(created.filter((b) => !b.player_member_id).map((b) => b.id))
 
   // ---- Create GHL appointments for every added player (non-fatal) ---------
   await Promise.all(
@@ -505,11 +481,7 @@ export const POST = withAuth(async (
     timezone: course.timezone,
     cost_per_player: course.cost_per_player ?? null,
   }
-  const bookingsWithCourse = created.map((b) => ({
-    ...b,
-    course: courseForResponse,
-    non_member_guest: nonMemberSeatIds.has(b.id),
-  }))
+  const bookingsWithCourse = created.map((b) => ({ ...b, course: courseForResponse }))
 
   return NextResponse.json({
     bookings: bookingsWithCourse,

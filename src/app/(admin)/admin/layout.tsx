@@ -25,7 +25,6 @@ const NAV_GROUPS = [
     label: 'Community',
     items: [
       { href: '/admin/members',          label: 'Members',            icon: '▪' },
-      { href: '/admin/matching',         label: 'Matchmaking',        icon: '▪' },
       { href: '/admin/events',           label: 'Member Events',      icon: '▪', badge: true },
       { href: '/admin/guest-access',     label: 'Guest Access',       icon: '▪', badge: true },
       { href: '/admin/referrals',        label: 'Referral Partners',  icon: '▪', badge: true },

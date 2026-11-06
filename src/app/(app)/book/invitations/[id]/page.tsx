@@ -11,7 +11,6 @@ import { format } from "date-fns";
 import AppShell from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/Loading";
 import WhatHappensNext from "@/components/booking/WhatHappensNext";
-import CancellationPolicy from "@/components/payments/CancellationPolicy";
 import { formatTeeTime } from "@/lib/utils";
 import {
   INVITE_RESPONSE_CUTOFF_HOURS,
@@ -32,8 +31,6 @@ interface Invitation {
   /** ISO — when an unanswered invitation stops being answerable. */
   expiresAt: string | null;
   canRespond: boolean;
-  /** The seat's price, when a late cancel of it costs a share; null = free. */
-  cancellationPrice: number | null;
 }
 
 export default function InvitationPage({ params }: { params: { id: string } }) {
@@ -136,16 +133,6 @@ export default function InvitationPage({ params }: { params: { id: string } }) {
             </div>
 
             <WhatHappensNext paidByBooker={invite.paidByBooker} />
-
-            {invite.cancellationPrice !== null && (
-              <div className="px-1 space-y-2.5">
-                <p className="section-label">Cancellation policy</p>
-                <CancellationPolicy price={invite.cancellationPrice} />
-                <p className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>
-                  Once you accept, cancelling your spot late is charged to you.
-                </p>
-              </div>
-            )}
 
             {error && <p className="text-sm text-red-600">{error}</p>}
 
