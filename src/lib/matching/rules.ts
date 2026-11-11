@@ -1,40 +1,46 @@
 // ============================================================
-// Playing partner matching — the rules behind the admin's
-// candidate list. Pure: no I/O, `now` passed in, so every rule is
-// tested directly (src/__tests__/matching-rules.test.ts).
+// Curated Introductions — the rules behind the admin's candidate
+// list. Pure: no I/O, `now` passed in, so every rule is tested
+// directly (src/__tests__/matching-rules.test.ts).
 //
-// Golf preferences are filters, never weights: a candidate a
-// preference rules out is left off the list entirely, so an admin
-// can't send a match the member said they don't want. They're
-// checked both ways — B is listed for A only if B fits A's
-// preferences and A fits B's — and a candidate who hasn't answered
-// the question a preference needs is left out, because the
-// preference can't be checked.
+// Preferred introductions (gender, skill, attitude, smoke / music /
+// booze) are filters, never weights: a candidate a preference rules
+// out is left off the list entirely, so an admin can't send a match
+// the member said they don't want. They're checked both ways — B is
+// listed for A only if B fits A's preferences and A fits B's — and a
+// candidate who hasn't answered the question a preference needs is
+// left out, because the preference can't be checked.
 //
-// Everyone left is scored out of 100. The score only orders the
-// admin's list; the admin decides.
+// Everyone left is scored out of 100, and the Curated Introduction
+// Preferences (objectives, industries, roles, company size) are what
+// the score is mostly made of. The score only orders the admin's
+// list; the admin decides.
 //
 // Nothing here ever puts a preference, a gender or a habit into
-// words: the chips and the note are built from the networking
-// answers alone, so a recommendation can't reveal why someone
+// words: the chips and the note are built from the business and
+// golf answers alone, so a recommendation can't reveal why someone
 // else wasn't suggested.
 // ============================================================
 
-import type { IndustryCategory } from '@/types'
 import {
   HABIT_KEYS,
   PLAY_TIMES,
+  SIZE_BUCKET,
   optionLabel,
   type MatchProfile,
   type PlayTime,
   type PrefSkill,
+  type Role,
+  type Skill,
+  type SurveyIndustry,
 } from './survey'
 
 /** One member as the rules see them. */
 export interface MatchSubject {
   id: string
   firstName: string
-  industry: IndustryCategory | null
+  industry: SurveyIndustry | null
+  role: Role | null
   valueOffered: string | null
   valueSought: string | null
   hobbies: string | null
@@ -44,43 +50,48 @@ export interface MatchSubject {
   match: MatchProfile
 }
 
-// ---- Skill level --------------------------------------------
-
-export type HandicapLevel = 'low' | 'mid' | 'high'
+// ---- Skill --------------------------------------------------
 
 /**
- * Where a handicap index sits: low up to 9, mid 10 to 18, high 19 and up.
- * No handicap reads as a new golfer — the people without one are, nearly
- * always, the people who haven't played enough rounds to have one.
+ * A skill read off a handicap index, for a member who answered the survey
+ * before it asked: low up to 9, mid 10 to 18, high 19 and up. No handicap reads
+ * as a new golfer — the people without one are, nearly always, the people who
+ * haven't played enough rounds to have one.
  */
-export function handicapLevel(handicap: number | null): HandicapLevel {
-  if (handicap === null || !Number.isFinite(handicap)) return 'high'
-  if (handicap < 10) return 'low'
-  if (handicap < 19) return 'mid'
-  return 'high'
+export function skillFromHandicap(handicap: number | null): Skill {
+  if (handicap === null || !Number.isFinite(handicap)) return 'new'
+  if (handicap < 10) return 'excellent'
+  if (handicap < 19) return 'good'
+  return 'new'
 }
 
-const SKILL_LEVELS: Record<Exclude<PrefSkill, 'any'>, readonly HandicapLevel[]> = {
-  excellent: ['low'],
-  good:      ['low', 'mid'],
-  new:       ['high'],
+/** The member's golf skill: what they said, else what their handicap says. */
+export function skillOf(s: MatchSubject): Skill {
+  return s.match.skill ?? skillFromHandicap(s.handicap)
+}
+
+const SKILL_FITS: Record<Exclude<PrefSkill, 'any'>, readonly Skill[]> = {
+  excellent: ['excellent'],
+  good:      ['excellent', 'good'],
+  new:       ['new'],
 }
 
 // ---- Filters ------------------------------------------------
 
 /**
- * Whether `candidate` fits `seeker`'s golf preferences — one direction.
+ * Whether `candidate` fits `seeker`'s preferred introductions — one direction.
  * "No preference" and "No, I don't mind" rule nobody out.
  */
 export function fitsPreferences(seeker: MatchSubject, candidate: MatchSubject): boolean {
   const pref = seeker.match
   const them = candidate.match
 
-  // "Prefer not to say" fits only a member with no gender preference.
+  // Gender is optional: a candidate who left it blank fits only a member with
+  // no gender preference.
   if (pref.pref_gender && pref.pref_gender !== 'any' && them.gender !== pref.pref_gender) return false
 
   if (pref.pref_skill && pref.pref_skill !== 'any'
-      && !SKILL_LEVELS[pref.pref_skill].includes(handicapLevel(candidate.handicap))) return false
+      && !SKILL_FITS[pref.pref_skill].includes(skillOf(candidate))) return false
 
   if (pref.pref_attitude && pref.pref_attitude !== 'any' && them.attitude !== pref.pref_attitude) return false
 
@@ -101,14 +112,11 @@ export function mutualFit(a: MatchSubject, b: MatchSubject): boolean {
 /** Out of 100. Tuned by changing these, nothing else. */
 export const MATCH_WEIGHTS = {
   business: 40,
-  industry: 20,
+  audience: 20,
   play: 20,
   interests: 10,
   active: 10,
 } as const
-
-/** Handicaps further apart than this don't count toward play fit. */
-export const HANDICAP_GAP = 8
 
 const DAY_MS = 86_400_000
 
@@ -131,14 +139,18 @@ function sharedCount(a: Set<string>, b: Set<string>): number {
   return n
 }
 
-/** B is the kind of client A serves (industry, and size where A said one). */
+/** B's organization is a size A serves ("What size of organizations do you serve?"). */
 function servesThem(a: MatchSubject, b: MatchSubject): boolean {
-  if (!b.industry || !a.match.client_industries.includes(b.industry)) return false
   const sizes = a.match.client_company_sizes
-  return sizes.length === 0 || (b.match.company_size !== null && sizes.includes(b.match.company_size))
+  return sizes.length > 0 && b.match.company_size !== null && sizes.includes(b.match.company_size)
 }
 
-/** What A wants from connections, and how well B answers it, 0 to 1. */
+/** B can help A build a team: a recruiter by industry or by role. */
+function canHire(b: MatchSubject): boolean {
+  return b.industry === 'HR & Recruitment' || b.role === 'hr'
+}
+
+/** What A wants from connections (Objectives), and how well B answers it, 0 to 1. */
 function businessFit(a: MatchSubject, b: MatchSubject): number {
   const goals = new Set(a.match.goals)
   if (goals.size === 0) return 0
@@ -154,17 +166,37 @@ function businessFit(a: MatchSubject, b: MatchSubject): number {
   if (goals.has('capital') && b.industry === 'Capital Provider') fit = Math.max(fit, 1)
   if ((goals.has('capital') || goals.has('investment_deals'))
       && (theirs.has('investment_deals') || theirs.has('capital'))) fit = Math.max(fit, 0.7)
-  if (goals.has('hiring') && b.industry === 'HR & Recruitment') fit = Math.max(fit, 0.8)
+  if (goals.has('hiring') && canHire(b)) fit = Math.max(fit, 0.8)
   // What A seeks, in B's own words about what they offer. Three shared terms
   // is as good as a stated goal.
   fit = Math.max(fit, Math.min(1, sharedCount(words(a.valueSought), words(b.valueOffered)) / 3))
   return fit
 }
 
+/** Each of A's audience preferences, read against B. Blank means any. */
+function audienceMatches(a: MatchSubject, b: MatchSubject) {
+  const m = a.match
+  const sizes = m.meet_company_sizes
+  const anySize = sizes.length === 0 || sizes.includes('any')
+  return {
+    industry: m.meet_industries.length === 0 ? null : Boolean(b.industry && m.meet_industries.includes(b.industry)),
+    role: m.meet_roles.length === 0 ? null : Boolean(b.role && m.meet_roles.includes(b.role)),
+    size: anySize
+      ? null
+      : Boolean(b.match.company_size && sizes.includes(SIZE_BUCKET[b.match.company_size])),
+  }
+}
+
+/** Preferred industries, roles and ideal company size, 0 to 1. An open preference fits anyone. */
+function audienceFit(a: MatchSubject, b: MatchSubject): number {
+  const { industry, role, size } = audienceMatches(a, b)
+  return [industry, role, size].reduce((sum, hit) => sum + (hit === false ? 0 : 1), 0) / 3
+}
+
 function playFit(a: MatchSubject, b: MatchSubject): number {
   let fit = 0
   if (a.match.play_times.some(t => b.match.play_times.includes(t))) fit += 0.4
-  if (a.handicap !== null && b.handicap !== null && Math.abs(a.handicap - b.handicap) <= HANDICAP_GAP) fit += 0.3
+  if (skillOf(a) === skillOf(b)) fit += 0.3
   if (a.match.attitude && a.match.attitude === b.match.attitude) fit += 0.3
   return fit
 }
@@ -174,6 +206,7 @@ function sharedNonprofits(a: MatchSubject, b: MatchSubject): string[] {
   return a.nonprofits.filter(n => theirs.has(n.trim().toLowerCase()))
 }
 
+/** Hobbies and causes from the profile page; the survey no longer asks them. */
 function interestsFit(a: MatchSubject, b: MatchSubject): number {
   if (sharedNonprofits(a, b).length > 0) return 1
   return sharedCount(words(a.hobbies), words(b.hobbies)) > 0 ? 0.5 : 0
@@ -191,7 +224,7 @@ function activeFit(b: MatchSubject, now: Date): number {
 export function directionalScore(a: MatchSubject, b: MatchSubject, now: Date): number {
   return (
     MATCH_WEIGHTS.business * businessFit(a, b)
-    + MATCH_WEIGHTS.industry * (b.industry && a.match.meet_industries.includes(b.industry) ? 1 : 0)
+    + MATCH_WEIGHTS.audience * audienceFit(a, b)
     + MATCH_WEIGHTS.play * playFit(a, b)
     + MATCH_WEIGHTS.interests * interestsFit(a, b)
     + MATCH_WEIGHTS.active * activeFit(b, now)
@@ -217,9 +250,8 @@ const PLAY_TIME_PHRASES: Record<PlayTime, string> = {
   weekend_afternoon: 'weekend afternoons',
 }
 
-/** "Dana …" — each industry as it reads in a sentence; Other says nothing. */
-const INDUSTRY_PHRASES: Record<IndustryCategory, string | null> = {
-  'Business Owner / Founder':           'is a founder',
+/** "Dana …" — each industry as it reads in a sentence. */
+const INDUSTRY_PHRASES: Record<SurveyIndustry, string> = {
   'Professional Services (Legal)':      'works in legal',
   'Professional Services (Accounting)': 'works in accounting',
   'Professional Services (Consulting)': 'works in consulting',
@@ -232,7 +264,20 @@ const INDUSTRY_PHRASES: Record<IndustryCategory, string | null> = {
   'Healthcare / Life Sciences':         'works in healthcare and life sciences',
   'Financial Services':                 'works in financial services',
   'Technology':                         'works in technology',
-  'Other':                              null,
+  'Non-profit':                         'works in the non-profit sector',
+}
+
+/** "Dana …" — each role as it reads in a sentence. */
+const ROLE_PHRASES: Record<Role, string> = {
+  founder:     'is a founder',
+  finance:     'works in finance',
+  marketing:   'works in marketing',
+  operations:  'works in operations',
+  development: 'works in development',
+  it:          'works in IT',
+  hr:          'works in HR',
+  sales:       'works in sales',
+  legal:       'works in legal',
 }
 
 function sharedPlayTimes(a: MatchSubject, b: MatchSubject): PlayTime[] {
@@ -247,16 +292,20 @@ export function matchChips(a: MatchSubject, b: MatchSubject): string[] {
   const chips: string[] = []
   const goals = new Set(a.match.goals)
   const theirs = new Set(b.match.goals)
+  const audience = audienceMatches(a, b)
   if (goals.has('new_clients') && servesThem(a, b)) chips.push('Potential client')
   if (goals.has('get_mentorship') && theirs.has('give_mentorship')) chips.push('Can mentor')
   if (goals.has('give_mentorship') && theirs.has('get_mentorship')) chips.push('Wants mentoring')
   if (goals.has('referral_partners') && theirs.has('referral_partners')) chips.push('Both want referral partners')
   if (goals.has('capital') && b.industry === 'Capital Provider') chips.push('Capital provider')
-  if (goals.has('hiring') && b.industry === 'HR & Recruitment') chips.push('Recruiter')
+  if (goals.has('hiring') && canHire(b)) chips.push('Recruiter')
   if (sharedCount(words(a.valueSought), words(b.valueOffered)) > 0) chips.push('Offers what they seek')
-  if (b.industry && a.match.meet_industries.includes(b.industry)) chips.push('Industry they want to meet')
+  if (audience.industry) chips.push('Industry they want to meet')
+  if (audience.role) chips.push('Role they want to meet')
+  if (audience.size) chips.push('Company size they want')
   const time = sharedPlayTimes(a, b)[0]
   if (time) chips.push(`Both ${optionLabel(PLAY_TIMES, time).toLowerCase()}`)
+  if (skillOf(a) === skillOf(b)) chips.push('Same golf skill')
   if (a.match.attitude && a.match.attitude === b.match.attitude) chips.push('Same golf attitude')
   const cause = sharedNonprofits(a, b)[0]
   if (cause) chips.push(`Both support ${cause}`)
@@ -265,7 +314,8 @@ export function matchChips(a: MatchSubject, b: MatchSubject): string[] {
 
 /**
  * What the member sees beside a recommendation: what the two share. Play
- * times and causes only — a handicap is shown only where its owner chose to.
+ * times and causes only — a skill or handicap is shown only where its owner
+ * chose to.
  */
 export function sharedChips(a: MatchSubject, b: MatchSubject): string[] {
   const chips = sharedPlayTimes(a, b).slice(0, 2).map(t => `Both ${optionLabel(PLAY_TIMES, t).toLowerCase()}`)
@@ -284,7 +334,9 @@ export function templatedNote(a: MatchSubject, b: MatchSubject): string {
   const name = b.firstName.trim() || 'They'
   const goals = new Set(a.match.goals)
   const theirs = new Set(b.match.goals)
-  const industry = b.industry ? INDUSTRY_PHRASES[b.industry] : null
+  const audience = audienceMatches(a, b)
+  const rolePhrase = b.role ? ROLE_PHRASES[b.role] : null
+  const industryPhrase = b.industry ? INDUSTRY_PHRASES[b.industry] : null
   const clauses: string[] = []
 
   if (goals.has('get_mentorship') && theirs.has('give_mentorship')) {
@@ -292,10 +344,13 @@ export function templatedNote(a: MatchSubject, b: MatchSubject): string {
   } else if (goals.has('give_mentorship') && theirs.has('get_mentorship')) {
     clauses.push(`${name} is looking for a mentor, and you offer mentorship`)
   }
-  if (goals.has('new_clients') && servesThem(a, b) && industry) {
-    clauses.push(`${name} ${industry}, the kind of client you serve`)
-  } else if (b.industry && a.match.meet_industries.includes(b.industry) && industry) {
-    clauses.push(`${name} ${industry}, the kind of person you want to meet`)
+  if (goals.has('new_clients') && servesThem(a, b)) {
+    const what = industryPhrase ?? rolePhrase
+    clauses.push(what ? `${name} ${what}, the kind of client you serve` : `${name} is the kind of client you serve`)
+  } else if (audience.role && rolePhrase) {
+    clauses.push(`${name} ${rolePhrase}, the kind of person you want to meet`)
+  } else if (audience.industry && industryPhrase) {
+    clauses.push(`${name} ${industryPhrase}, the kind of person you want to meet`)
   }
   if (goals.has('referral_partners') && theirs.has('referral_partners')) {
     clauses.push(`you're both looking for referral partners`)

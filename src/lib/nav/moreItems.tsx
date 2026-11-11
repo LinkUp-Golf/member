@@ -65,7 +65,7 @@ export const MORE_ITEMS: MoreGroup[] = [
     group: 'My account',
     items: [
       { href: '/more/profile', label: 'My Profile', icon: svgIcon('members'), desc: 'Edit your details and golf life' },
-      { href: '/more/match-profile', label: 'Golf Preferences', icon: <SlidersHorizontal className="w-5 h-5" strokeWidth={1.9} />, desc: 'Who the LinkUp team matches you with' },
+      { href: '/more/match-profile', label: 'Curated Introductions', icon: <SlidersHorizontal className="w-5 h-5" strokeWidth={1.9} />, desc: 'Introductions from the LinkUp team' },
       ...(FEATURES.FOCUS_LINKUPS ? [{ href: '/more/focus-linkups', label: 'Focus LinkUps', icon: svgIcon('focus-linkup'), desc: 'Manage your category subscriptions' }] : []),
       { href: '/more/referrals', label: 'Refer a Member', icon: svgIcon('new-member'), desc: 'Invite someone to the community' },
       PARTNER_APPLY_ITEM,

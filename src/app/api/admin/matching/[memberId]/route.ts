@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic'
 
 // GET  /api/admin/matching/[memberId]?offset=&limit= — the member, a page of
 //   the players who fit them (best first, 20 by default), how many fit in all,
-//   how many their golf preferences ruled out, and what admins have already
+//   how many their preferred introductions ruled out, and what admins have already
 //   sent them.
 // POST /api/admin/matching/[memberId] — send recommendations:
 //   { picks: [{ candidateId, note }] }. Both sides hear: the member gets the
@@ -56,9 +56,9 @@ export const GET = withAuth(
       if (!member) return NextResponse.json({ error: 'Member not found' }, { status: 404 })
 
       const summary = summarize(member)
-      // Without the survey there are no preferences to honour, so no list.
+      // Off, or never answered: there is nobody to introduce them to.
       const [list, sent] = await Promise.all([
-        summary.surveyCompleted ? buildCandidateList(admin, member) : Promise.resolve({ candidates: [], ruledOut: 0 }),
+        summary.openToSuggestions ? buildCandidateList(admin, member) : Promise.resolve({ candidates: [], ruledOut: 0 }),
         loadSentRecommendations(admin, memberId),
       ])
       // The whole list is scored either way (ranking needs everyone); only
@@ -117,8 +117,12 @@ export const POST = withAuth(
     const admin = createAdminClient()
     const member = await loadMatchMember(admin, memberId).catch(() => null)
     if (!member) return NextResponse.json({ error: 'Member not found' }, { status: 404 })
-    if (!summarize(member).surveyCompleted) {
-      return NextResponse.json({ error: "This member hasn't completed the matching survey yet." }, { status: 409 })
+    const summary = summarize(member)
+    if (!summary.surveyCompleted) {
+      return NextResponse.json({ error: "This member hasn't turned on Curated Introductions." }, { status: 409 })
+    }
+    if (!summary.openToSuggestions) {
+      return NextResponse.json({ error: 'This member has turned off Curated Introductions.' }, { status: 409 })
     }
 
     let list

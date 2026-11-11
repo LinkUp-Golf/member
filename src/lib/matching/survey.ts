@@ -1,51 +1,104 @@
 // ============================================================
-// The matching survey — every question, its options, and the one
-// validator both the form and PUT /api/match-survey use.
+// Curated Introductions — every question, its options, and the
+// one validator both the form and PUT /api/match-survey use.
 //
-// Mandatory: a member can't use the app until it's submitted
-// (MatchSurveyGate), because the admin's candidate list is built
-// from these answers and a preference nobody stated can't be
-// honoured. Pure, so the form can import it.
+// Optional. A member turns Curated Introductions on from More,
+// answers these, and from then on the LinkUp team can introduce
+// them to other members and other members to them. Off (or never
+// answered) means neither. Pure, so the form can import it.
 //
 // Two kinds of answer live here:
-//   * About the member — goals, industries, play times, attitude,
-//     gender and habits. Other members' preferences are checked
-//     against these.
-//   * Golf preferences — who the member would or would not like to
-//     play with. Filters, never weights (src/lib/matching/rules.ts).
+//   * About the member — their business, their golf, their gender
+//     and habits. Other members' preferences are checked against
+//     these.
+//   * Preferences — who the member would like to be introduced to
+//     (Step 1: objectives, industries, roles, company size; these
+//     rank) and who they would or would not like to play with
+//     (Preferred introductions; these filter — see ./rules.ts).
 //
-// The free-text answers (what they offer and seek, hobbies,
-// non-profits, handicap) are stored on member_profiles, where the
-// profile page already edits them; the survey pre-fills and saves
-// them there.
+// What they offer and seek is stored on member_profiles, where the
+// profile page already edits it; the survey pre-fills and saves it
+// there.
 // ============================================================
-
-import { INDUSTRY_CATEGORIES, type IndustryCategory } from '@/types'
-import { parseNonprofits, MAX_NONPROFITS } from '@/lib/profile/nonprofits'
 
 export interface Option<V extends string = string> {
   value: V
   label: string
 }
 
-// ---- Networking profile -------------------------------------
+// ---- Curated Introduction Preferences -----------------------
 
+/**
+ * What the member wants from connections. The stored values predate the
+ * labels: "Mentors" is the member looking for a mentor (get_mentorship), and
+ * "Mentees" the member looking for someone to mentor (give_mentorship) — so an
+ * answer given under the old wording keeps its meaning.
+ */
 export const MATCH_GOALS = [
   { value: 'new_clients',       label: 'New clients' },
   { value: 'referral_partners', label: 'Referral partners' },
   { value: 'capital',           label: 'Capital' },
   { value: 'investment_deals',  label: 'Investment deals' },
-  { value: 'hiring',            label: 'Hiring' },
+  { value: 'hiring',            label: 'Team Members' },
   { value: 'vendors',           label: 'Vendors' },
-  { value: 'give_mentorship',   label: 'Give mentorship' },
-  { value: 'get_mentorship',    label: 'Get mentorship' },
+  { value: 'get_mentorship',    label: 'Mentors' },
+  { value: 'give_mentorship',   label: 'Mentees' },
   { value: 'just_golf',         label: 'Just golf' },
 ] as const satisfies readonly Option[]
 export type MatchGoal = (typeof MATCH_GOALS)[number]['value']
 export const MAX_GOALS = 3
 
+/**
+ * The survey's industries: the app's list without "Business Owner / Founder"
+ * (a role — see ROLES) and with "Non-profit" in place of "Other". Values are
+ * the labels, as the app's industry list stores them.
+ */
+export const SURVEY_INDUSTRIES = [
+  'Professional Services (Legal)',
+  'Professional Services (Accounting)',
+  'Professional Services (Consulting)',
+  'Capital Provider',
+  'Insurance',
+  'Business Software',
+  'Business Services',
+  'HR & Recruitment',
+  'Real Estate',
+  'Healthcare / Life Sciences',
+  'Financial Services',
+  'Technology',
+  'Non-profit',
+] as const
+export type SurveyIndustry = (typeof SURVEY_INDUSTRIES)[number]
+export const INDUSTRY_OPTIONS: readonly Option<SurveyIndustry>[] = SURVEY_INDUSTRIES.map(i => ({ value: i, label: i }))
+
+export const ROLES = [
+  { value: 'founder',     label: 'Founder / Owner / CEO' },
+  { value: 'finance',     label: 'Finance' },
+  { value: 'marketing',   label: 'Marketing' },
+  { value: 'operations',  label: 'Operations' },
+  { value: 'development', label: 'Development' },
+  { value: 'it',          label: 'IT' },
+  { value: 'hr',          label: 'HR' },
+  { value: 'sales',       label: 'Sales' },
+  { value: 'legal',       label: 'Legal' },
+] as const satisfies readonly Option[]
+export type Role = (typeof ROLES)[number]['value']
+
+/** The company size a member would like to be introduced to. */
+export const PREF_COMPANY_SIZES = [
+  { value: '1_10',     label: '1-10' },
+  { value: '11_50',    label: '11-50' },
+  { value: '51_200',   label: '51-200' },
+  { value: '201_1000', label: '201-1000' },
+  { value: '1000_up',  label: '1000+' },
+  { value: 'any',      label: 'Any size' },
+] as const satisfies readonly Option[]
+export type PrefCompanySize = (typeof PREF_COMPANY_SIZES)[number]['value']
+
+// ---- Describe your business ---------------------------------
+
 export const COMPANY_SIZES = [
-  { value: 'solo',     label: 'Just me' },
+  { value: 'solo',     label: 'Solopreneurs' },
   { value: '2_10',     label: '2–10 people' },
   { value: '11_50',    label: '11–50 people' },
   { value: '51_200',   label: '51–200 people' },
@@ -53,6 +106,18 @@ export const COMPANY_SIZES = [
   { value: '1000_up',  label: 'More than 1,000' },
 ] as const satisfies readonly Option[]
 export type CompanySize = (typeof COMPANY_SIZES)[number]['value']
+
+/** Which ideal-size choice a company of this size falls in. */
+export const SIZE_BUCKET: Record<CompanySize, Exclude<PrefCompanySize, 'any'>> = {
+  solo:     '1_10',
+  '2_10':   '1_10',
+  '11_50':  '11_50',
+  '51_200': '51_200',
+  '201_1000': '201_1000',
+  '1000_up':  '1000_up',
+}
+
+// ---- Describe yourself as a golfer --------------------------
 
 export const PLAY_TIMES = [
   { value: 'weekday_early',     label: 'Weekday early' },
@@ -75,12 +140,23 @@ export const ATTITUDES = [
 ] as const satisfies readonly Option[]
 export type Attitude = (typeof ATTITUDES)[number]['value']
 
-// ---- About the member ---------------------------------------
+/**
+ * The member's own skill, the client's wording. Same values as the skill
+ * preference, so "Good golfers only" reads straight off this answer.
+ */
+export const SKILLS = [
+  { value: 'excellent', label: 'Excellent golfer - Low handicap golfers only' },
+  { value: 'good',      label: 'Good golfer - Mid to low handicap golfers only' },
+  { value: 'new',       label: 'New golfer - Beginners or high handicap golfers only' },
+] as const satisfies readonly Option[]
+export type Skill = (typeof SKILLS)[number]['value']
 
+// ---- About you ----------------------------------------------
+
+/** Optional: not answering is how a member keeps it to themselves. */
 export const GENDERS = [
-  { value: 'male',        label: 'Male' },
-  { value: 'female',      label: 'Female' },
-  { value: 'undisclosed', label: 'Prefer not to say' },
+  { value: 'male',   label: 'Male' },
+  { value: 'female', label: 'Female' },
 ] as const satisfies readonly Option[]
 export type Gender = (typeof GENDERS)[number]['value']
 
@@ -119,7 +195,7 @@ export const HABITS = [
 export type Habit = (typeof HABITS)[number]['key']
 export const HABIT_KEYS: readonly Habit[] = HABITS.map(h => h.key)
 
-// ---- Golf preferences ---------------------------------------
+// ---- Preferred introductions --------------------------------
 
 export const GOLF_PREFERENCES_PROMPT =
   'Describe the profile of person you would or would not like to play golf with'
@@ -150,12 +226,16 @@ export type PrefAttitude = (typeof PREF_ATTITUDES)[number]['value']
 /** A member_match_profiles row, as the app reads and writes it. */
 export interface MatchProfile {
   goals: MatchGoal[]
-  meet_industries: IndustryCategory[]
-  client_industries: IndustryCategory[]
-  client_company_sizes: CompanySize[]
+  meet_industries: SurveyIndustry[]
+  meet_roles: Role[]
+  meet_company_sizes: PrefCompanySize[]
   company_size: CompanySize | null
+  industry: SurveyIndustry | null
+  role: Role | null
+  client_company_sizes: CompanySize[]
   play_times: PlayTime[]
   attitude: Attitude | null
+  skill: Skill | null
   gender: Gender | null
   does_cigars: boolean | null
   does_cigarettes: boolean | null
@@ -170,6 +250,7 @@ export interface MatchProfile {
   minds_marijuana: boolean | null
   minds_alcohol: boolean | null
   minds_music: boolean | null
+  /** Curated Introductions is on. */
   open_to_suggestions: boolean
   completed_at: string | null
 }
@@ -178,9 +259,6 @@ export interface MatchProfile {
 export interface SurveyProfileFields {
   value_offered: string | null
   value_sought: string | null
-  handicap_index: number | null
-  non_golf_hobbies: string | null
-  nonprofits: string[]
 }
 
 /** What the form sends: every answer, the profile half included. */
@@ -189,11 +267,15 @@ export type SurveyAnswers = Omit<MatchProfile, 'completed_at'> & SurveyProfileFi
 export const EMPTY_MATCH_PROFILE: MatchProfile = {
   goals: [],
   meet_industries: [],
-  client_industries: [],
-  client_company_sizes: [],
+  meet_roles: [],
+  meet_company_sizes: [],
   company_size: null,
+  industry: null,
+  role: null,
+  client_company_sizes: [],
   play_times: [],
   attitude: null,
+  skill: null,
   gender: null,
   does_cigars: null,
   does_cigarettes: null,
@@ -208,7 +290,8 @@ export const EMPTY_MATCH_PROFILE: MatchProfile = {
   minds_marijuana: null,
   minds_alcohol: null,
   minds_music: null,
-  open_to_suggestions: true,
+  // Off until the member saves the survey: there's no row before that.
+  open_to_suggestions: false,
   completed_at: null,
 }
 
@@ -217,12 +300,16 @@ export function toMatchProfile(row: Partial<Record<keyof MatchProfile, unknown>>
   if (!row) return { ...EMPTY_MATCH_PROFILE }
   const p = { ...EMPTY_MATCH_PROFILE }
   p.goals = pickMany(row.goals, MATCH_GOALS)
-  p.meet_industries = pickIndustries(row.meet_industries)
-  p.client_industries = pickIndustries(row.client_industries)
-  p.client_company_sizes = pickMany(row.client_company_sizes, COMPANY_SIZES)
+  p.meet_industries = pickMany(row.meet_industries, INDUSTRY_OPTIONS)
+  p.meet_roles = pickMany(row.meet_roles, ROLES)
+  p.meet_company_sizes = normaliseSizes(pickMany(row.meet_company_sizes, PREF_COMPANY_SIZES))
   p.company_size = pickOne(row.company_size, COMPANY_SIZES)
+  p.industry = pickOne(row.industry, INDUSTRY_OPTIONS)
+  p.role = pickOne(row.role, ROLES)
+  p.client_company_sizes = pickMany(row.client_company_sizes, COMPANY_SIZES)
   p.play_times = pickMany(row.play_times, PLAY_TIMES)
   p.attitude = pickOne(row.attitude, ATTITUDES)
+  p.skill = pickOne(row.skill, SKILLS)
   p.gender = pickOne(row.gender, GENDERS)
   p.pref_gender = pickOne(row.pref_gender, PREF_GENDERS)
   p.pref_skill = pickOne(row.pref_skill, PREF_SKILLS)
@@ -231,9 +318,15 @@ export function toMatchProfile(row: Partial<Record<keyof MatchProfile, unknown>>
     p[`does_${h}`] = typeof row[`does_${h}`] === 'boolean' ? (row[`does_${h}`] as boolean) : null
     p[`minds_${h}`] = typeof row[`minds_${h}`] === 'boolean' ? (row[`minds_${h}`] as boolean) : null
   }
+  // A stored row reads as on unless it says otherwise (the column's default).
   p.open_to_suggestions = row.open_to_suggestions !== false
   p.completed_at = typeof row.completed_at === 'string' ? row.completed_at : null
   return p
+}
+
+/** "Any size" stands alone: picked beside a size, it means any. */
+export function normaliseSizes(sizes: PrefCompanySize[]): PrefCompanySize[] {
+  return sizes.includes('any') ? ['any'] : sizes
 }
 
 // ---- Validation ---------------------------------------------
@@ -250,37 +343,44 @@ export interface SurveyValidation {
 }
 
 /**
- * Checks a whole submission. Every pick-list is required; the free text,
- * the handicap and the "who are your best clients" pair are not — a new
- * golfer may have no handicap, and not every member sells to anyone.
+ * Checks a whole submission. Optional: preferred industries and roles (blank
+ * means any), the member's own industry and role, the sizes they serve, their
+ * gender, and the free text. Everything else is required, because a
+ * preference can only be checked against an answer.
  */
 export function validateSurvey(body: unknown): SurveyValidation {
   const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>
   const errors: string[] = []
 
   const goals = strictMany(b.goals, MATCH_GOALS)
-  if (!goals || goals.length === 0) errors.push('Choose what you want from LinkUp connections')
-  else if (goals.length > MAX_GOALS) errors.push(`Choose up to ${MAX_GOALS} things you want from LinkUp connections`)
+  if (!goals || goals.length === 0) errors.push('Choose at least one objective')
+  else if (goals.length > MAX_GOALS) errors.push(`Choose up to ${MAX_GOALS} objectives`)
 
-  const meet = strictIndustries(b.meet_industries)
-  if (!meet || meet.length === 0) errors.push('Choose at least one industry you would like to meet')
-
-  const clientIndustries = strictIndustries(b.client_industries ?? [])
-  if (!clientIndustries) errors.push('Your best clients contain an industry we don\'t recognise')
-  const clientSizes = strictMany(b.client_company_sizes ?? [], COMPANY_SIZES)
-  if (!clientSizes) errors.push('Your best clients contain a company size we don\'t recognise')
+  const meetIndustries = strictMany(b.meet_industries ?? [], INDUSTRY_OPTIONS)
+  if (!meetIndustries) errors.push('Your preferred industries contain one we don\'t recognise')
+  const meetRoles = strictMany(b.meet_roles ?? [], ROLES)
+  if (!meetRoles) errors.push('Your preferred roles contain one we don\'t recognise')
+  const meetSizes = strictMany(b.meet_company_sizes, PREF_COMPANY_SIZES)
+  if (!meetSizes || meetSizes.length === 0) errors.push('Choose an ideal company size, or Any size')
 
   const companySize = pickOne(b.company_size, COMPANY_SIZES)
-  if (!companySize) errors.push('Choose your company size')
+  if (!companySize) errors.push('Choose your organization size')
+  const industry = optionalOne(b.industry, INDUSTRY_OPTIONS)
+  if (industry === undefined) errors.push('Choose your industry from the list')
+  const role = optionalOne(b.role, ROLES)
+  if (role === undefined) errors.push('Choose your role from the list')
+  const clientSizes = strictMany(b.client_company_sizes ?? [], COMPANY_SIZES)
+  if (!clientSizes) errors.push('The organization sizes you serve contain one we don\'t recognise')
 
   const playTimes = strictMany(b.play_times, PLAY_TIMES)
-  if (!playTimes || playTimes.length === 0) errors.push('Choose when you usually play')
-
+  if (!playTimes || playTimes.length === 0) errors.push('Choose when you prefer to play')
   const attitude = pickOne(b.attitude, ATTITUDES)
   if (!attitude) errors.push('Choose your golf attitude')
+  const skill = pickOne(b.skill, SKILLS)
+  if (!skill) errors.push('Choose your golf skill')
 
-  const gender = pickOne(b.gender, GENDERS)
-  if (!gender) errors.push('Choose your gender, or Prefer not to say')
+  const gender = optionalOne(b.gender, GENDERS)
+  if (gender === undefined) errors.push('Choose Male or Female, or leave your gender blank')
 
   const prefGender = pickOne(b.pref_gender, PREF_GENDERS)
   if (!prefGender) errors.push('Answer "Do you have a gender preference"')
@@ -305,16 +405,9 @@ export function validateSurvey(body: unknown): SurveyValidation {
 
   const offered = optionalText(b.value_offered)
   const sought = optionalText(b.value_sought)
-  const hobbies = optionalText(b.non_golf_hobbies)
-  if (offered === undefined || sought === undefined || hobbies === undefined) {
+  if (offered === undefined || sought === undefined) {
     errors.push(`Keep each answer under ${MAX_SURVEY_TEXT} characters`)
   }
-
-  const handicap = parseHandicap(b.handicap_index)
-  if (handicap === undefined) errors.push('Handicap must be a number between -10 and 54')
-
-  const nonprofits = parseNonprofits((b.nonprofits ?? null) as string | string[] | null)
-  if (nonprofits.length > MAX_NONPROFITS) errors.push(`List up to ${MAX_NONPROFITS} non-profits`)
 
   if (errors.length > 0) return { valid: false, errors }
 
@@ -325,38 +418,39 @@ export function validateSurvey(body: unknown): SurveyValidation {
     // returned an error above.
     match: {
       goals: goals ?? [],
-      meet_industries: meet ?? [],
-      client_industries: clientIndustries ?? [],
-      client_company_sizes: clientSizes ?? [],
+      meet_industries: meetIndustries ?? [],
+      meet_roles: meetRoles ?? [],
+      meet_company_sizes: normaliseSizes(meetSizes ?? []),
       company_size: companySize,
+      industry: industry ?? null,
+      role: role ?? null,
+      client_company_sizes: clientSizes ?? [],
       play_times: playTimes ?? [],
       attitude,
-      gender,
+      skill,
+      gender: gender ?? null,
       pref_gender: prefGender,
       pref_skill: prefSkill,
       pref_attitude: prefAttitude,
       ...habits,
-      // Absent means yes: the toggle is shown on, and turning it off is the
-      // deliberate act.
+      // Saving the survey is turning Curated Introductions on, unless the
+      // request says otherwise.
       open_to_suggestions: b.open_to_suggestions !== false,
     },
     profile: {
       value_offered: offered ?? null,
       value_sought: sought ?? null,
-      handicap_index: handicap ?? null,
-      non_golf_hobbies: hobbies ?? null,
-      nonprofits,
     },
   }
 }
 
 /**
- * Who has to complete the survey: a member of a club. A non-member guest, a
+ * Who can use Curated Introductions: a member of a club. A non-member guest, a
  * referral partner or host with no golf membership, and an admin account with
- * no membership of its own are never in the pool, so asking them would be a
- * wall with nothing behind it.
+ * no membership of its own are never in the pool, so offering it to them would
+ * be a switch with nothing behind it.
  */
-export function requiresMatchSurvey(member: {
+export function eligibleForIntroductions(member: {
   home_course_id: string | null
   membership_status: string
   hasMembership: boolean
@@ -376,6 +470,12 @@ function pickOne<O extends readonly Option[]>(value: unknown, options: O): O[num
   return typeof value === 'string' && options.some(o => o.value === value) ? (value as O[number]['value']) : null
 }
 
+/** null when blank, undefined when it's something that isn't an option. */
+function optionalOne<O extends readonly Option[]>(value: unknown, options: O): O[number]['value'] | null | undefined {
+  if (value === null || value === undefined || value === '') return null
+  return pickOne(value, options) ?? undefined
+}
+
 function pickMany<O extends readonly Option[]>(value: unknown, options: O): O[number]['value'][] {
   if (!Array.isArray(value)) return []
   return Array.from(new Set(value.filter((v): v is O[number]['value'] => pickOne(v, options) !== null)))
@@ -388,18 +488,6 @@ function strictMany<O extends readonly Option[]>(value: unknown, options: O): O[
   return Array.from(new Set(value as O[number]['value'][]))
 }
 
-function pickIndustries(value: unknown): IndustryCategory[] {
-  if (!Array.isArray(value)) return []
-  return Array.from(new Set(value.filter((v): v is IndustryCategory =>
-    typeof v === 'string' && (INDUSTRY_CATEGORIES as string[]).includes(v))))
-}
-
-function strictIndustries(value: unknown): IndustryCategory[] | null {
-  if (!Array.isArray(value)) return null
-  if (value.some(v => typeof v !== 'string' || !(INDUSTRY_CATEGORIES as string[]).includes(v))) return null
-  return Array.from(new Set(value as IndustryCategory[]))
-}
-
 /** Trimmed text, null when blank, undefined when too long or not text. */
 function optionalText(value: unknown): string | null | undefined {
   if (value === null || value === undefined) return null
@@ -407,12 +495,4 @@ function optionalText(value: unknown): string | null | undefined {
   const t = value.trim()
   if (t.length > MAX_SURVEY_TEXT) return undefined
   return t || null
-}
-
-/** A handicap index, null when blank, undefined when it isn't one. */
-function parseHandicap(value: unknown): number | null | undefined {
-  if (value === null || value === undefined || value === '') return null
-  const n = typeof value === 'string' ? Number(value) : value
-  if (typeof n !== 'number' || !Number.isFinite(n) || n < -10 || n > 54) return undefined
-  return Math.round(n * 10) / 10
 }

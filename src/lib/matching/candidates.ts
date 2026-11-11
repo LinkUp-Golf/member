@@ -1,5 +1,5 @@
 // ============================================================
-// Playing partner matching — loading. Reads the member, the pool
+// Curated Introductions — loading. Reads the member, the pool
 // they can be matched from, and the history that rules people out,
 // then hands it all to the pure rules (./rules).
 //
@@ -14,17 +14,24 @@ import type { IndustryCategory } from '@/types'
 import { nameOrEmail, titleCaseName } from '@/lib/utils'
 import {
   HABITS,
+  INDUSTRY_OPTIONS,
   MATCH_GOALS,
   PLAY_TIMES,
+  PREF_COMPANY_SIZES,
   PREF_GENDERS,
   COMPANY_SIZES,
+  ROLES,
+  SURVEY_INDUSTRIES,
   optionLabel,
   toMatchProfile,
   type Attitude,
   type MatchProfile,
   type PrefSkill,
+  type Role,
+  type Skill,
+  type SurveyIndustry,
 } from './survey'
-import { matchChips, mutualFit, pairScore, templatedNote, type MatchSubject } from './rules'
+import { matchChips, mutualFit, pairScore, skillOf, templatedNote, type MatchSubject } from './rules'
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -117,23 +124,41 @@ export function matchProfileOf(row: MatchMemberRow): MatchProfile {
   return toMatchProfile(one(row.match) as Partial<Record<keyof MatchProfile, unknown>> | null)
 }
 
+/** The profile's industry, where it's one the survey's list has. */
+function surveyIndustryOf(industry: IndustryCategory | null | undefined): SurveyIndustry | null {
+  return industry && (SURVEY_INDUSTRIES as readonly string[]).includes(industry) ? (industry as SurveyIndustry) : null
+}
+
+/**
+ * The member's own industry and role: what they told the survey, falling back
+ * to their profile for anyone who answered before it asked. A profile reading
+ * "Business Owner / Founder" is a role, so it fills the role.
+ */
+function industryAndRole(match: MatchProfile, profile: ProfileRow | null): { industry: SurveyIndustry | null; role: Role | null } {
+  return {
+    industry: match.industry ?? surveyIndustryOf(profile?.industry_category),
+    role: match.role ?? (profile?.industry_category === 'Business Owner / Founder' ? 'founder' : null),
+  }
+}
+
 export function toSubject(row: MatchMemberRow): MatchSubject {
   const profile = one(row.profile)
+  const match = matchProfileOf(row)
   return {
     id: row.id,
     firstName: titleCaseName((row.first_name ?? '').trim()),
-    industry: profile?.industry_category ?? null,
+    ...industryAndRole(match, profile),
     valueOffered: profile?.value_offered ?? null,
     valueSought: profile?.value_sought ?? null,
     hobbies: profile?.non_golf_hobbies ?? null,
     nonprofits: profile?.nonprofits ?? [],
     handicap: profile?.handicap_index ?? null,
     lastSignIn: row.last_sign_in,
-    match: matchProfileOf(row),
+    match,
   }
 }
 
-/** Whether a member can be matched at all: in the pool and surveyed. */
+/** Whether a member can be matched at all: in the pool, surveyed, and Curated Introductions on. */
 export function isMatchable(row: MatchMemberRow): boolean {
   const match = matchProfileOf(row)
   return row.membership_status === 'active'
@@ -152,6 +177,7 @@ export async function loadMatchMember(admin: AdminClient, memberId: string): Pro
 
 export interface MatchSummary extends MatchPerson {
   surveyCompleted: boolean
+  /** Curated Introductions is on. */
   openToSuggestions: boolean
   handicap: number | null
   offers: string | null
@@ -159,8 +185,14 @@ export interface MatchSummary extends MatchPerson {
   goals: string[]
   playTimes: string[]
   attitude: string
+  skill: string
   companySize: string
-  /** Golf preferences in words — admin screen only, never a member's. */
+  /** Their own role and industry, as the survey has them. */
+  role: string
+  surveyIndustry: string
+  /** Who they'd like to be introduced to: industries, roles, sizes. */
+  wantsToMeet: string[]
+  /** Preferred introductions in words — admin screen only, never a member's. */
   preferences: string[]
 }
 
@@ -175,6 +207,11 @@ const SKILL_SHORT: Record<Exclude<PrefSkill, 'any'>, string> = {
   good:      'Good golfers',
   new:       'New golfers',
 }
+const OWN_SKILL_SHORT: Record<Skill, string> = {
+  excellent: 'Excellent golfer',
+  good:      'Good golfer',
+  new:       'New golfer',
+}
 
 export function summarize(row: MatchMemberRow): MatchSummary {
   const profile = one(row.profile)
@@ -187,17 +224,28 @@ export function summarize(row: MatchMemberRow): MatchSummary {
   if (minds.length > 0) preferences.push(`Minds ${minds.join(', ')}`)
   if (m.completed_at && preferences.length === 0) preferences.push('No preferences')
 
+  const subject = toSubject(row)
+  const wantsToMeet = [
+    ...m.meet_industries.map(i => optionLabel(INDUSTRY_OPTIONS, i)),
+    ...m.meet_roles.map(r => optionLabel(ROLES, r)),
+    ...m.meet_company_sizes.filter(z => z !== 'any').map(z => `${optionLabel(PREF_COMPANY_SIZES, z)} people`),
+  ]
+
   return {
     ...toPerson(row),
     surveyCompleted: Boolean(m.completed_at),
-    openToSuggestions: m.open_to_suggestions,
+    openToSuggestions: Boolean(m.completed_at) && m.open_to_suggestions,
     handicap: profile?.handicap_index ?? null,
     offers: profile?.value_offered ?? null,
     seeks: profile?.value_sought ?? null,
     goals: m.goals.map(g => optionLabel(MATCH_GOALS, g)),
     playTimes: m.play_times.map(t => optionLabel(PLAY_TIMES, t)),
     attitude: m.attitude ? ATTITUDE_SHORT[m.attitude] : '',
+    skill: m.completed_at ? OWN_SKILL_SHORT[skillOf(subject)] : '',
     companySize: optionLabel(COMPANY_SIZES, m.company_size),
+    role: optionLabel(ROLES, subject.role),
+    surveyIndustry: optionLabel(INDUSTRY_OPTIONS, subject.industry),
+    wantsToMeet,
     preferences,
   }
 }
@@ -224,7 +272,7 @@ export interface Candidate extends MatchPerson {
 
 export interface CandidateList {
   candidates: Candidate[]
-  /** Removed by either member's golf preferences. */
+  /** Removed by either member's preferred introductions. */
   ruledOut: number
 }
 
@@ -247,7 +295,7 @@ export async function playedWithIds(admin: AdminClient, memberId: string): Promi
  * Who can be recommended to `member`, best first. Left out before scoring:
  * anyone outside their course, inactive, hidden, opted out, unsurveyed,
  * already played with, a pair either of them dismissed in the last
- * DISMISS_COOLDOWN_DAYS — and anyone either member's golf preferences rule out.
+ * DISMISS_COOLDOWN_DAYS — and anyone either member's preferred introductions rule out.
  * A pair already sent, in either direction, stays listed but locked
  * (recommendedAt / suggestedAt).
  */

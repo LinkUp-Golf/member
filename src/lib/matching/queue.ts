@@ -66,11 +66,10 @@ async function lastRecommendedFor(admin: AdminClient, memberIds: string[], since
 }
 
 /**
- * Members waiting for a match: survey complete and no recommendation in the
- * last RECENT_DAYS. Newest survey first, so the member who just finished it
- * hears back while it's fresh. "Suggest me to other members" isn't asked
- * here — turning it off takes a member out of other people's lists, not out
- * of hearing about their own matches.
+ * Members waiting for a match: Curated Introductions on, survey complete, and
+ * no recommendation in the last RECENT_DAYS. Newest survey first, so the member
+ * who just finished it hears back while it's fresh. A member who switched it
+ * off is out of the queue as well as out of other people's lists.
  *
  * Ordered by a value on the embedded survey row, so the list is sorted here
  * rather than by PostgREST; the page is cut after.
@@ -83,7 +82,8 @@ export async function loadQueue(admin: AdminClient, page: Page, now: Date = new 
       .select(SURVEYED_MEMBER_SELECT)
       .eq('membership_status', 'active')
       .not('home_course_id', 'is', null)
-      .not('match.completed_at', 'is', null),
+      .not('match.completed_at', 'is', null)
+      .eq('match.open_to_suggestions', true),
     lastRecommendedFor(admin, [], since),
   ])
   if (profilesRes.error) throw new Error(profilesRes.error.message)

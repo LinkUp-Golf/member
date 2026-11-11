@@ -1,76 +1,78 @@
 'use client'
 
 // ============================================================
-// The matching survey form (src/lib/matching/survey.ts holds the
-// questions). Two ways in:
+// The Curated Introductions form (src/lib/matching/survey.ts holds
+// the questions), every section on one page, on /more/match-profile.
+// It's shown while Curated Introductions is on; saving it is what
+// turns it on the first time.
 //
-//   gate — the mandatory first run, one step at a time, inside
-//          MatchSurveyGate. No way out but through: the admin's
-//          candidate list is built from these answers.
-//   page — /more/match-profile, every section on one page, for
-//          changing answers later.
-//
-// Every pick-list is required; the free text and the handicap are
-// not. Nothing is sent until the last step, so a member who closes
-// the app halfway meets the gate again with a fresh form.
+// The questions not marked optional are required: a preference can
+// only be checked against an answer. Blank preferred industries and
+// roles mean any.
 // ============================================================
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Check } from 'lucide-react'
 import { Spinner } from '@/components/ui/Loading'
 import { cn } from '@/lib/utils'
-import { INDUSTRY_CATEGORIES } from '@/types'
-import { formatNonprofits, MAX_NONPROFITS, parseNonprofits } from '@/lib/profile/nonprofits'
 import {
   ATTITUDES,
   COMPANY_SIZES,
   GENDERS,
   GOLF_PREFERENCES_PROMPT,
   HABITS,
+  INDUSTRY_OPTIONS,
   MATCH_GOALS,
   MAX_GOALS,
   PLAY_TIMES,
   PREF_ATTITUDES,
+  PREF_COMPANY_SIZES,
   PREF_GENDERS,
   PREF_SKILLS,
+  ROLES,
+  SKILLS,
   type Option,
+  type PrefCompanySize,
   type SurveyAnswers,
 } from '@/lib/matching/survey'
 
-const INDUSTRY_OPTIONS: Option[] = INDUSTRY_CATEGORIES.map(c => ({ value: c, label: c }))
+type SectionKey = 'connect' | 'business' | 'golf' | 'you' | 'prefs'
 
-type StepKey = 'connect' | 'business' | 'golf' | 'you' | 'prefs' | 'consent'
-
-const STEPS: Array<{ key: StepKey; title: string; intro?: string }> = [
-  { key: 'connect',  title: 'What you want from LinkUp' },
-  { key: 'business', title: 'Your business' },
-  { key: 'golf',     title: 'How you play' },
-  {
-    key: 'you',
-    title: 'About you',
-    intro: 'Other members can say who they would rather not play with. These answers are how we respect that. They are never shown on your profile.',
-  },
-  { key: 'prefs',    title: 'Golf preferences', intro: `${GOLF_PREFERENCES_PROMPT}.` },
-  { key: 'consent',  title: 'Last step' },
+const SECTIONS: Array<{ key: SectionKey; title: string; intro?: string }> = [
+  { key: 'connect',  title: 'Curated Introduction Preferences' },
+  { key: 'business', title: 'Describe your business' },
+  { key: 'golf',     title: 'Describe yourself as a golfer' },
+  { key: 'you',      title: 'About you', intro: 'Tell us about yourself.' },
+  { key: 'prefs',    title: 'Preferred introductions', intro: `${GOLF_PREFERENCES_PROMPT}.` },
 ]
 
-/** Whether every required answer on a step is in. */
-function stepComplete(key: StepKey, a: SurveyAnswers): boolean {
+/** Whether every required answer in a section is in. */
+function sectionComplete(key: SectionKey, a: SurveyAnswers): boolean {
   switch (key) {
     case 'connect':
-      return a.goals.length > 0 && a.goals.length <= MAX_GOALS && a.meet_industries.length > 0
+      return a.goals.length > 0 && a.goals.length <= MAX_GOALS && a.meet_company_sizes.length > 0
     case 'business':
       return a.company_size !== null
     case 'golf':
-      return a.play_times.length > 0 && a.attitude !== null
+      return a.play_times.length > 0 && a.attitude !== null && a.skill !== null
     case 'you':
-      return a.gender !== null && HABITS.every(h => a[`does_${h.key}`] !== null)
+      return HABITS.every(h => a[`does_${h.key}`] !== null)
     case 'prefs':
       return a.pref_gender !== null && a.pref_skill !== null && a.pref_attitude !== null
         && HABITS.every(h => a[`minds_${h.key}`] !== null)
-    case 'consent':
-      return true
   }
+}
+
+/** One of a list, as chips; tapping the chosen one clears it. */
+function single<V extends string>(v: V[]): V | null {
+  return v[v.length - 1] ?? null
+}
+
+/** "Any size" stands alone: choosing it clears the sizes, choosing a size clears it. */
+function nextSizes(prev: PrefCompanySize[], next: PrefCompanySize[]): PrefCompanySize[] {
+  const added = next.find(v => !prev.includes(v))
+  if (added === 'any') return ['any']
+  return next.filter(v => v !== 'any')
 }
 
 // ---- Inputs -------------------------------------------------
@@ -229,35 +231,22 @@ const TEXTAREA = 'input resize-none'
 
 interface Props {
   initial: SurveyAnswers
-  mode: 'gate' | 'page'
-  /** The survey was saved. */
+  /** The survey was saved, and Curated Introductions is on. */
   onSaved: () => void
 }
 
-export default function MatchSurveyForm({ initial, mode, onSaved }: Props) {
+export default function MatchSurveyForm({ initial, onSaved }: Props) {
   const [answers, setAnswers] = useState<SurveyAnswers>(initial)
-  const [handicapText, setHandicapText] = useState(initial.handicap_index === null ? '' : String(initial.handicap_index))
-  const [nonprofitsText, setNonprofitsText] = useState(formatNonprofits(initial.nonprofits))
-  const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
-  const root = useRef<HTMLDivElement>(null)
-
-  // Each step opens at its top, and its title is where focus lands.
-  useEffect(() => {
-    if (mode !== 'gate') return
-    root.current?.closest('[data-scroll-root]')?.scrollTo({ top: 0 })
-    root.current?.querySelector<HTMLElement>('#match-survey-title')?.focus()
-  }, [step, mode])
 
   const set = (patch: Partial<SurveyAnswers>) => {
     setAnswers(a => ({ ...a, ...patch }))
     setSaved(false)
   }
 
-  const tooManyNonprofits = parseNonprofits(nonprofitsText).length > MAX_NONPROFITS
-  const allComplete = useMemo(() => STEPS.every(s => stepComplete(s.key, answers)), [answers])
+  const allComplete = useMemo(() => SECTIONS.every(s => sectionComplete(s.key, answers)), [answers])
 
   async function save() {
     setSaving(true)
@@ -266,12 +255,8 @@ export default function MatchSurveyForm({ initial, mode, onSaved }: Props) {
       const res = await fetch('/api/match-survey', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...answers,
-          handicap_index: handicapText.trim() === '' ? null : handicapText.trim(),
-          // Raw text: the server parses it with the profile page's rules.
-          nonprofits: nonprofitsText,
-        }),
+        // The form is only shown while the switch is on.
+        body: JSON.stringify({ ...answers, open_to_suggestions: true }),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -287,38 +272,57 @@ export default function MatchSurveyForm({ initial, mode, onSaved }: Props) {
     }
   }
 
-  function section(key: StepKey) {
+  function section(key: SectionKey) {
     switch (key) {
       case 'connect':
         return (
           <>
-            <Question label="What do you want from LinkUp connections?" hint={`Choose up to ${MAX_GOALS}.`}>
+            <Question label="Objectives" hint={`Choose up to ${MAX_GOALS}.`}>
               <Chips options={MATCH_GOALS} value={answers.goals} max={MAX_GOALS} onChange={goals => set({ goals })} />
             </Question>
-            <Question label="Who would you most like to meet?" hint="Choose any industries.">
-              <Chips options={INDUSTRY_OPTIONS} value={answers.meet_industries} onChange={v => set({ meet_industries: v as SurveyAnswers['meet_industries'] })} />
+            <Question label="Preferred industries" hint="Select specific industries or leave blank for any industry">
+              <Chips options={INDUSTRY_OPTIONS} value={answers.meet_industries} onChange={meet_industries => set({ meet_industries })} />
+            </Question>
+            <Question label="Preferred roles" hint="Select specific roles or leave blank for any role">
+              <Chips options={ROLES} value={answers.meet_roles} onChange={meet_roles => set({ meet_roles })} />
+            </Question>
+            <Question label="Ideal company size" hint="Choose any, or Any size.">
+              <Chips
+                options={PREF_COMPANY_SIZES}
+                value={answers.meet_company_sizes}
+                onChange={v => set({ meet_company_sizes: nextSizes(answers.meet_company_sizes, v) })}
+              />
             </Question>
           </>
         )
       case 'business':
         return (
           <>
-            <Question label="How big is your company?">
+            <Question label="Organization size">
               <Chips
                 options={COMPANY_SIZES}
                 value={answers.company_size ? [answers.company_size] : []}
-                onChange={v => set({ company_size: v[v.length - 1] ?? null })}
+                onChange={v => set({ company_size: single(v) })}
               />
             </Question>
-            {/* Two questions, not one: a single block of industries followed
-                by a row of headcounts read as options unrelated to the ask. */}
-            <Question label="What industries are your best clients in?" hint="Optional. Choose any.">
-              <Chips options={INDUSTRY_OPTIONS} value={answers.client_industries} onChange={v => set({ client_industries: v as SurveyAnswers['client_industries'] })} />
+            <Question label="What industry is your business in?" hint="Optional.">
+              <Chips
+                options={INDUSTRY_OPTIONS}
+                value={answers.industry ? [answers.industry] : []}
+                onChange={v => set({ industry: single(v) })}
+              />
             </Question>
-            <Question label="How big are your best clients' companies?" hint="Optional. Choose any.">
+            <Question label="Your role" hint="Optional.">
+              <Chips
+                options={ROLES}
+                value={answers.role ? [answers.role] : []}
+                onChange={v => set({ role: single(v) })}
+              />
+            </Question>
+            <Question label="What size of organizations do you serve?" hint="Optional. Choose any.">
               <Chips options={COMPANY_SIZES} value={answers.client_company_sizes} onChange={client_company_sizes => set({ client_company_sizes })} />
             </Question>
-            <Question label="What you offer" hint="Optional. Shown on your profile.">
+            <Question label="Describe your offering" hint="Optional. Shown on your profile.">
               <textarea
                 id="survey-value-offered"
                 rows={3}
@@ -328,7 +332,7 @@ export default function MatchSurveyForm({ initial, mode, onSaved }: Props) {
                 className={TEXTAREA}
               />
             </Question>
-            <Question label="What you're looking for" hint="Optional. Shown on your profile.">
+            <Question label="Describe any solutions, services or resources you seek" hint="Optional. Shown on your profile.">
               <textarea
                 id="survey-value-sought"
                 rows={3}
@@ -343,59 +347,25 @@ export default function MatchSurveyForm({ initial, mode, onSaved }: Props) {
       case 'golf':
         return (
           <>
-            <Question label="When do you usually play?" hint="Choose any.">
+            <Question label="When do you prefer to play?" hint="Choose any.">
               <Chips options={PLAY_TIMES} value={answers.play_times} onChange={play_times => set({ play_times })} />
             </Question>
             <Question label="What's your golf attitude?">
               <Choice name="survey-attitude" options={ATTITUDES} value={answers.attitude} onChange={attitude => set({ attitude })} />
             </Question>
-            <Question label="Handicap index" hint="Optional. Leave it blank if you don't have one yet.">
-              <input
-                id="survey-handicap"
-                type="number"
-                inputMode="decimal"
-                step="0.1"
-                min="-10"
-                max="54"
-                value={handicapText}
-                onChange={e => { setHandicapText(e.target.value); setSaved(false) }}
-                className="input max-w-[10rem]"
-              />
-            </Question>
-            <Question label="Outside golf" hint="Optional. Your hobbies, and up to 3 non-profits you support, one per line.">
-              <div className="space-y-2.5">
-                <textarea
-                  id="survey-hobbies"
-                  rows={2}
-                  maxLength={1000}
-                  placeholder="Hobbies"
-                  value={answers.non_golf_hobbies ?? ''}
-                  onChange={e => set({ non_golf_hobbies: e.target.value })}
-                  className={TEXTAREA}
-                />
-                <textarea
-                  id="survey-nonprofits"
-                  rows={3}
-                  placeholder="Non-profits, one per line"
-                  value={nonprofitsText}
-                  onChange={e => { setNonprofitsText(e.target.value); setSaved(false) }}
-                  className={TEXTAREA}
-                />
-                {tooManyNonprofits && (
-                  <p className="text-xs text-red-500">List up to {MAX_NONPROFITS} non-profits.</p>
-                )}
-              </div>
+            <Question label="Golf Skill">
+              <Choice name="survey-skill" options={SKILLS} value={answers.skill} onChange={skill => set({ skill })} />
             </Question>
           </>
         )
       case 'you':
         return (
           <>
-            <Question label="Your gender">
+            <Question label="Your gender" hint="Optional.">
               <Chips
                 options={GENDERS}
                 value={answers.gender ? [answers.gender] : []}
-                onChange={v => set({ gender: v[v.length - 1] ?? null })}
+                onChange={v => set({ gender: single(v) })}
               />
             </Question>
             <Question label="Smoke, music and booze">
@@ -420,103 +390,31 @@ export default function MatchSurveyForm({ initial, mode, onSaved }: Props) {
             </Question>
           </>
         )
-      case 'consent':
-        return (
-          <div className="rounded-xl border border-green-900/10 bg-white px-3.5 py-3.5">
-            <label htmlFor="survey-open-to-suggestions" className="flex items-start gap-3 cursor-pointer">
-              <input
-                id="survey-open-to-suggestions"
-                type="checkbox"
-                checked={answers.open_to_suggestions}
-                onChange={e => set({ open_to_suggestions: e.target.checked })}
-                aria-describedby="survey-open-to-suggestions-help"
-                className="mt-0.5 w-4 h-4 rounded accent-green-800 flex-shrink-0"
-              />
-              <span className="text-sm font-semibold text-green-950">Suggest me to other members</span>
-            </label>
-            <p id="survey-open-to-suggestions-help" className="text-xs text-green-900/55 mt-1 ml-7 leading-relaxed">
-              The LinkUp team reads your answers and recommends people for you to play with. With this on,
-              they can also recommend you to other members. Your golf preferences and the answers about
-              you are never shown to other members.
-            </p>
-          </div>
-        )
     }
   }
 
-  // ---- page: every section, one save ---------------------------
-  if (mode === 'page') {
-    return (
-      <div className="space-y-8">
-        {STEPS.map(s => (
-          <section key={s.key} className="space-y-5">
-            <div>
-              <p className="section-label !mb-1">{s.title}</p>
-              {s.intro && <p className="text-xs text-green-900/55 leading-relaxed">{s.intro}</p>}
-            </div>
-            {section(s.key)}
-          </section>
-        ))}
-        <div className="space-y-2">
-          {error && <p className="text-sm text-red-500">{error}</p>}
-          {!allComplete && <p className="text-xs text-green-900/50">Answer every question that isn&apos;t marked optional to save.</p>}
-          <button
-            type="button"
-            onClick={save}
-            disabled={saving || !allComplete || tooManyNonprofits}
-            className="btn btn-gold btn-full disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {saving ? <Spinner className="w-4 h-4" /> : saved ? 'Saved' : 'Save changes'}
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  // ---- gate: one step at a time --------------------------------
-  const current = STEPS[step]
-  if (!current) return null
-  const last = step === STEPS.length - 1
-  const canContinue = stepComplete(current.key, answers) && !(current.key === 'golf' && tooManyNonprofits)
-
   return (
-    <div ref={root} className="flex flex-col min-h-full">
-      <div className="px-5 pt-6 pb-4">
-        <p className="section-label !mb-1">Your networking profile · Step {step + 1} of {STEPS.length}</p>
-        <div className="flex gap-1 mt-2" aria-hidden>
-          {STEPS.map((s, i) => (
-            <span key={s.key} className={cn('h-1 flex-1 rounded-full', i <= step ? 'bg-green-800' : 'bg-green-900/10')} />
-          ))}
-        </div>
-        <h2 id="match-survey-title" tabIndex={-1} className="text-lg font-bold text-green-950 mt-4 focus:outline-none">{current.title}</h2>
-        {current.intro && <p className="text-sm text-green-900/60 mt-1 leading-relaxed">{current.intro}</p>}
-        {step === 0 && (
-          <p className="text-sm text-green-900/60 mt-1 leading-relaxed">
-            A few questions so the LinkUp team can match you with the right people to play with. It takes
-            about 3 minutes, and you can change your answers any time from More.
-          </p>
-        )}
-      </div>
-
-      <div className="px-5 pb-6 space-y-6 flex-1">{section(current.key)}</div>
-
-      <div className="sticky bottom-0 bg-white border-t border-green-900/[0.07] px-5 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        {error && <p className="text-sm text-red-500 mb-2">{error}</p>}
-        <div className="flex items-center gap-3">
-          {step > 0 && (
-            <button type="button" onClick={() => setStep(step - 1)} disabled={saving} className="btn btn-outline flex-shrink-0">
-              Back
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => (last ? save() : setStep(step + 1))}
-            disabled={!canContinue || saving}
-            className="btn btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {saving ? <Spinner className="w-4 h-4" /> : last ? 'Finish' : 'Continue'}
-          </button>
-        </div>
+    <div className="space-y-8">
+      {SECTIONS.map(s => (
+        <section key={s.key} className="space-y-5">
+          <div>
+            <p className="section-label !mb-1">{s.title}</p>
+            {s.intro && <p className="text-xs text-green-900/55 leading-relaxed">{s.intro}</p>}
+          </div>
+          {section(s.key)}
+        </section>
+      ))}
+      <div className="space-y-2">
+        {error && <p className="text-sm text-red-500">{error}</p>}
+        {!allComplete && <p className="text-xs text-green-900/50">Answer every question that isn&apos;t marked optional to save.</p>}
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving || !allComplete}
+          className="btn btn-gold btn-full disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {saving ? <Spinner className="w-4 h-4" /> : saved ? 'Saved' : 'Save'}
+        </button>
       </div>
     </div>
   )

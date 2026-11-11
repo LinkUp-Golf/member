@@ -1,11 +1,11 @@
-# Playing Partner Matching
+# Curated Introductions (playing partner matching)
 
-Each member is recommended someone new to play with: a person they haven't been out with yet, who fits how they play and has a real reason to talk business on the course. The app finds the candidates. An admin chooses every match and sends it. Nothing is suggested automatically, and no AI is involved.
+Members who turn on Curated Introductions are introduced to someone new to play with: a person they haven't been out with yet, who fits how they play and has a real reason to talk business on the course. The app finds the candidates. An admin chooses every introduction and sends it. Nothing is suggested automatically, and no AI is involved.
 
 | Part | What it is |
 | --- | --- |
-| Survey | A mandatory sheet every member completes before using the app: a networking profile, then golf preferences that rule partners in or out. |
-| Admin matching | **Admin → Matchmaking.** Pick a member, see the players who fit them ranked by the survey answers, choose, add a note on why, send. |
+| Survey | Optional. **More → Curated Introductions** has one switch, *Turn on Curated Introductions*, and the questions under it. Saving them turns it on. |
+| Admin matching | **Admin → Matchmaking.** Pick a member, see the players who fit them ranked by the answers, choose, add a note on why, send. |
 | Member view | A push and an email, then **Recommended for you** at the top of Members and on Home, a **Suggested** tag in the member list, and a **Suggested** tab when adding a player to a round. The recommended player is told too. |
 
 ## Where it lives
@@ -15,94 +15,108 @@ Each member is recommended someone new to play with: a person they haven't been 
 | Questions, options, validation | `src/lib/matching/survey.ts` |
 | Filters, score, chips, note (pure) | `src/lib/matching/rules.ts` |
 | Loading the pool and history | `src/lib/matching/candidates.ts`, `src/lib/matching/queue.ts` |
-| Survey API | `GET` / `PUT /api/match-survey` |
-| Mandatory gate | `src/components/matching/MatchSurveyGate.tsx`, mounted in `src/app/(app)/layout.tsx` |
-| Survey form | `src/components/matching/MatchSurveyForm.tsx` (gate: step by step; `/more/match-profile`: every section on one page) |
+| Survey API | `GET` / `PUT` / `PATCH /api/match-survey` |
+| The switch and the survey | `src/app/(app)/more/match-profile/page.tsx`, `src/components/matching/MatchSurveyForm.tsx` |
 | Admin screen | `src/app/(admin)/admin/matching/page.tsx`, `GET /api/admin/matching`, `GET` / `POST /api/admin/matching/[memberId]` |
 | Member view | `src/hooks/useRecommendations.ts` (one fetch shared by everything below), `src/components/matching/RecommendedPartners.tsx`, `SuggestedTag.tsx`, `SuggestedPlayerPicker.tsx`, `GET /api/recommendations`, `POST /api/recommendations/[id]/dismiss` |
-| Schema | `supabase/migrations/20261104000002_partner_matching.sql` |
+| Schema | `supabase/migrations/20261104000002_partner_matching.sql`, `20261112000002_curated_introductions.sql` |
 | Tests | `src/__tests__/matching-rules.test.ts` |
 
-## 1. Survey
+## 1. The switch and the survey
 
-Mandatory. A member of a club (a home course, active, holding a membership tag) who hasn't submitted it gets the survey over the whole app, with no way to dismiss it, until they finish. Guests, referral partners and hosts without a golf membership, and admin accounts without a membership of their own are never asked. If the status read fails the gate stays open, so a broken endpoint can't lock members out of their bookings.
+Optional. A member of a club (a home course, active, holding a membership tag) finds it under **More → Curated Introductions**. Guests, referral partners and hosts without a golf membership, and admin accounts without a membership of their own, are told it's for members of a LinkUp club.
 
-Every pick-list is required. The free text, the handicap and "Who are your best clients?" are optional. Members change their answers any time from **More → Golf Preferences**.
+- **Never answered:** turning the switch on shows the questions. Saving them turns Curated Introductions on.
+- **Answered:** the switch turns it on and off in place, and the answers are kept.
+- **Off** means off both ways. The member isn't introduced to anyone, isn't suggested to anyone, and isn't in the admin's queue.
 
-### Networking profile
+Questions not marked optional are required, because a preference can only be checked against an answer.
 
-| # | Question | Answers | Why the matcher needs it |
-| --- | --- | --- | --- |
-| 1 | What do you want from LinkUp connections? (up to 3) | New clients, referral partners, capital, investment deals, hiring, vendors, give mentorship, get mentorship, just golf | The intent behind every match |
-| 2 | Who would you most like to meet? | Industries, multi-select | Industry targeting, checked both ways |
-| 3 | What industries are your best clients in? How big are their companies? (both optional) | Industries, multi-select; company sizes, multi-select | "Potential client" |
-| 4 | How big is your company? | Single choice | Peer fit, and the other side of question 3 |
-| 5 | What you offer and what you're looking for (optional) | Free text, pre-filled from the profile | Business fit. Admins read it beside each candidate |
-| 6 | When do you usually play? | Weekday early, midday or twilight; weekend morning or afternoon | Play-time overlap |
-| 7 | Your golf attitude, plus handicap (handicap optional) | The same three attitudes as question 11 | What the attitude preference is checked against; handicap feeds skill level |
-| 8 | Outside golf (optional) | Hobbies and up to 3 non-profits, pre-filled | Shared interests |
+### Curated Introduction Preferences
+
+These decide how high a candidate ranks. They don't rule anyone out.
+
+| Question | Answers | Notes |
+| --- | --- | --- |
+| Objectives (up to 3) | New clients, Referral partners, Capital, Investment deals, Team Members, Vendors, Mentors, Mentees, Just golf | "Mentors" means looking for a mentor, "Mentees" means looking for someone to mentor |
+| Preferred industries | The industry list below | Optional. Blank means any industry |
+| Preferred roles | Founder / Owner / CEO, Finance, Marketing, Operations, Development, IT, HR, Sales, Legal | Optional. Blank means any role |
+| Ideal company size | 1-10, 11-50, 51-200, 201-1000, 1000+, Any size | Any size stands alone |
+
+Industries: Professional Services (Legal), Professional Services (Accounting), Professional Services (Consulting), Capital Provider, Insurance, Business Software, Business Services, HR & Recruitment, Real Estate, Healthcare / Life Sciences, Financial Services, Technology, Non-profit. "Business Owner / Founder" is a role, not an industry, so it's under roles. The industry list on member profiles is unchanged.
+
+### Describe your business
+
+| Question | Answers | Notes |
+| --- | --- | --- |
+| Organization size | Solopreneurs, 2–10, 11–50, 51–200, 201–1,000 people, More than 1,000 | Solopreneurs and 2–10 count as "1-10" for others' ideal size |
+| What industry is your business in? | The industry list | Optional. Pre-filled from the profile where it's on the list |
+| Your role | The role list | Optional. What others' preferred roles are checked against |
+| What size of organizations do you serve? | Organization sizes | Optional. Makes "potential client" possible |
+| Describe your offering | Free text | Optional. Shown on the profile |
+| Describe any solutions, services or resources you seek | Free text | Optional. Shown on the profile |
+
+### Describe yourself as a golfer
+
+| Question | Answers |
+| --- | --- |
+| When do you prefer to play? | Weekday early, midday or twilight; weekend morning or afternoon |
+| What's your golf attitude? | Serious, competitive, strict adherence to rules of golf · Friendly competition · Relaxed, casual, "Not Attached to the Outcome". Score keeping optional |
+| Golf Skill | Excellent golfer - Low handicap golfers only · Good golfer - Mid to low handicap golfers only · New golfer - Beginners or high handicap golfers only |
+
+The survey no longer asks about hobbies, non-profits or handicap. Those stay on the profile page, and the matcher still reads them from there.
 
 ### About you
 
-A preference describes the other person, so it only works when every member also answers for themselves. These answers are never shown on a profile.
+*Tell us about yourself.* Never shown on a profile.
 
 | Question | Answers | Checked by |
 | --- | --- | --- |
-| Your gender | Male, Female, Prefer not to say | Gender preference. Prefer not to say fits only members with no gender preference |
-| Do you smoke cigars on the course? | Yes / No | "Do you mind … cigars?" |
-| Do you smoke cigarettes on the course? | Yes / No | "Do you mind … cigarettes?" |
-| Do you smoke marijuana on the course? | Yes / No | "Do you mind … marijuana?" |
-| Do you drink alcohol on the course? | Yes / No | "Do you mind … alcohol?" |
-| Do you play music from a speaker on the course? | Yes / No | "Do you mind … music?" |
+| Your gender | Male, Female | Optional. A blank gender fits only members with no gender preference |
+| Do you smoke cigars / cigarettes / marijuana on the course? Do you drink alcohol on the course? Do you play music from a speaker on the course? | Yes / No each | The matching "Do you mind …" question |
 
-### Golf preferences
+### Preferred introductions
 
-The section opens with *Describe the profile of person you would or would not like to play golf with*. Each answer is a filter applied before scoring: it decides who can be recommended, not how highly. "No preference" and "No" rule nobody out.
+*Describe the profile of person you would or would not like to play golf with.* Each answer is a filter applied before scoring: it decides who can be recommended, not how highly. "No preference" and "No" rule nobody out.
 
-| # | Question | Answer options | How the matcher uses it |
-| --- | --- | --- | --- |
-| 9 | Do you have a gender preference? | Male · Female · No preference | Leaves out candidates of another gender |
-| 10 | Do you have a skill level preference? | Excellent golfers - Low handicap golfers only · Good golfers - Mid to low handicap golfers only · New golfers - Beginners or high handicap golfers only · No preference | Leaves out candidates outside the level. Low is up to 9, mid 10 to 18, high 19 and up; no handicap counts as a new golfer |
-| 11 | Do you have a golf attitude preference? | Serious, competitive, strict adherence to rules of golf · Friendly competition · Relaxed, casual, "Not Attached to the Outcome". Score keeping optional · No preference | Leaves out candidates whose own attitude (question 7) is different |
-| 12 | Do you mind playing with people who smoke cigars? | Yes / No | Yes leaves out candidates who do it on the course |
-| 13 | Do you mind playing with people who smoke cigarettes? | Yes / No | 〃 |
-| 14 | Do you mind playing with people who smoke marijuana? | Yes / No | 〃 |
-| 15 | Do you mind playing with people who drink alcohol? | Yes / No | 〃 |
-| 16 | Do you mind playing with music playing from speakers? | Yes / No | 〃 |
-
-The sheet ends with one toggle, **Suggest me to other members**, on by default. Turning it off takes a member out of other people's candidate lists. They still receive recommendations of their own.
+| Question | Answer options | How the matcher uses it |
+| --- | --- | --- |
+| Do you have a gender preference? | Male · Female · No preference | Leaves out candidates of another gender, or with none given |
+| Do you have a skill level preference? | Excellent golfers - Low handicap golfers only · Good golfers - Mid to low handicap golfers only · New golfers - Beginners or high handicap golfers only · No preference | Checked against the candidate's Golf Skill. Members who answered before Golf Skill existed are read from their handicap: up to 9 excellent, 10 to 18 good, 19 and up (or none) new |
+| Do you have a golf attitude preference? | The three attitudes · No preference | Leaves out candidates whose own attitude is different |
+| Do you mind playing with people who smoke cigars / cigarettes / marijuana, drink alcohol, or with music playing from speakers? | Yes / No each | Yes leaves out candidates who do it on the course |
 
 ### Storage
 
-Pick-lists go to `member_match_profiles`: RLS on, no policies, read only through the service role. The free text, handicap and non-profits stay on `member_profiles`, where the profile page already edits them. `completed_at` is set on the first full submission and is what the gate and the admin queue read.
+Pick-lists go to `member_match_profiles`: RLS on, no policies, read only through the service role. What a member offers and seeks stays on `member_profiles`, where the profile page already edits it. `completed_at` is set on the first save. `open_to_suggestions` is the switch.
 
 ## 2. Admin matching
 
 **Admin → Matchmaking** has two panes.
 
-**The queue** lists members with a complete survey and no recommendation in the last 30 days, newest survey first. Any member can also be found by name or email. The queue card is sized to the screen and scrolls inside itself; it loads 20 at a time and fetches more as it scrolls, as does the list of players who fit.
+**The queue** lists members with Curated Introductions on and no recommendation in the last 30 days, newest survey first. Any member can also be found by name or email. The queue card is sized to the screen and scrolls inside itself; it loads 20 at a time and fetches more as it scrolls, as does the list of players who fit.
 
-**One member** shows their role, industry, course, handicap, goals, play times, what they offer and seek, and their golf preferences. Preferences are visible to admins only. Below that is the candidate list, best first.
+**One member** shows their role, industry, course, handicap, objectives, company size, play times, golf skill and attitude, who they want to meet, what they offer and seek, and their preferred introductions. The preferred introductions are visible to admins only. Below that is the candidate list, best first. A member who has it off, or never turned it on, shows a line saying so instead of a list.
 
 ### Who's on the candidate list
 
 Left out first:
 
-- anyone outside the member's home course, inactive, hidden, opted out of being suggested, or without a completed survey
+- anyone outside the member's home course, inactive, hidden, with Curated Introductions off, or never answered
 - anyone they've already played with or have a round booked with (`members_played_with`: bookings and hosted events)
 - a pair either of them dismissed with Not now in the last 90 days
-- anyone either member's golf preferences rule out
+- anyone either member's preferred introductions rule out
 
-Golf preferences are checked both ways: B is listed for A only if B fits A's preferences and A fits B's. A candidate who hasn't answered the question a preference needs is left out, because the preference can't be checked. An admin can't override a preference. The list says how many were ruled out.
+Preferred introductions are checked both ways: B is listed for A only if B fits A's and A fits B's. A candidate who hasn't answered the question a preference needs is left out, because the preference can't be checked. An admin can't override a preference. The list says how many were ruled out.
 
 Everyone left is scored out of 100 (`MATCH_WEIGHTS` in `rules.ts`). The score only orders the list.
 
 | Weight | Component | Measures |
 | --- | --- | --- |
-| 40 | Business fit | B answers what A wants: a potential client, mentoring, referral partners, capital, hiring, or what A seeks in B's own words |
-| 20 | Industry targeting | B is in an industry A wants to meet |
-| 20 | Play fit | Shared play time, handicaps within 8, same golf attitude |
-| 10 | Shared interests | A shared non-profit or hobby |
+| 40 | Business fit | B answers A's objectives: a potential client (B's organization is a size A serves), mentors and mentees, referral partners, capital, team members (B is a recruiter by industry or role), or what A seeks in B's own words |
+| 20 | Who they want to meet | B's industry, role and company size against A's preferred industries, roles and ideal size. A blank preference counts as a match |
+| 20 | Play fit | Shared play time, same golf skill, same golf attitude |
+| 10 | Shared interests | A shared non-profit or hobby, from the profile |
 | 10 | Recently active | Signed in within 14 days (half within 30) |
 
 The pair's score is the geometric mean of A→B and B→A, so a match that only works for one person scores low.
@@ -111,15 +125,15 @@ The pair's score is the geometric mean of A→B and B→A, so a match that only 
 
 A pair already sent in either direction stays on the list, ticked and disabled, with when it was sent: "Recommended to Sam" or "Sam was recommended to Dana".
 
-The admin ticks up to 5 players. Each pick carries a note, pre-filled from the rules ("Dana is a founder, the kind of client you serve, and you both play early on weekdays."), which the admin edits or sends as it is. Notes and chips are built from the networking answers only and never mention a preference, a gender or a habit.
+The admin ticks up to 5 players. Each pick carries a note, pre-filled from the rules ("Dana is a founder, the kind of client you serve, and you both play early on weekdays."), which the admin edits or sends as it is. Notes and chips are built from the business and golf answers only and never mention a preference, a gender or a habit.
 
-The server rebuilds the list before saving, so a stale screen can't send a match that no longer fits. Each pick is a `play_suggestions` row with `recommended_by` and `note`; re-sending a pair dismissed long ago reopens its row. The member gets one push and email: "Play with Dana?" with the note for a single pick, "3 playing partners for you" for several. Each recommended player gets their own: "You've been recommended to Sam", linking to Sam's profile. The note isn't in it, since it's written to the member.
+The server rebuilds the list before saving, so a stale screen can't send a match that no longer fits, and it refuses a member who has Curated Introductions off. Each pick is a `play_suggestions` row with `recommended_by` and `note`; re-sending a pair dismissed long ago reopens its row. The member gets one push and email: "Play with Dana?" with the note for a single pick, "3 playing partners for you" for several. Each recommended player gets their own: "You've been recommended to Sam", linking to Sam's profile. The note isn't in it, since it's written to the member.
 
 **Already sent** shows each recommendation's outcome: Sent, Seen, Not now, Messaged, Round booked, Played together.
 
 ## 3. Member view
 
-**Recommended for you** sits at the top of Members (every open recommendation) and on Home (the newest, with a link to the rest). It appears only when there's one to show.
+**Recommended for you** sits at the top of Members (every open recommendation) and on Home (the newest, with a link to the rest). It appears only when there's one to show, and never while the member has Curated Introductions off.
 
 - Photo, name, title, company and industry
 - **Why you two**: the admin's note, marked "Recommended by the LinkUp team"
@@ -132,31 +146,26 @@ Members list: a **Suggested** tag beside each recommended member. Hovering it wi
 
 Add player, both when booking and on an existing booking: a **Suggested** tab beside Member and Non-member, listing the recommended members who can be added to that round, one tap each. It appears only when there's a recommendation.
 
-Opening the list stamps `seen_at`. Not now and completing the survey are recorded as activity (`recommendation_dismissed`, `match_survey_completed`).
+Opening the list stamps `seen_at`. Not now and the first save of the survey are recorded as activity (`recommendation_dismissed`, `match_survey_completed`).
 
 ## Privacy and trust
 
-- Gender, the smoke, music and booze answers, and the preferences appear only on the admin screen. They're never shown on a profile or named in a note, so nobody learns why someone wasn't recommended to them.
-- Hidden profiles and members who turned off **Suggest me to other members** never appear on a candidate list.
+- Gender, the smoke, music and booze answers, and the preferred introductions appear only on the admin screen. They're never shown on a profile or named in a note, so nobody learns why someone wasn't recommended to them.
+- Hidden profiles and members with Curated Introductions off never appear on a candidate list.
 - Only admins send. The send route is behind the admin check, and a member can only read their own `play_suggestions` rows.
-
-## Also fixed
-
-The "played together" badge on member profiles read `play_history`, which nothing writes to, so it was always false. It now reads `members_played_with` and counts rounds already played.
 
 ## Deploying
 
-Apply `20261104000002_partner_matching.sql` before deploying. The gate turns on for every member as soon as it ships, so the first visit after release opens the survey.
+Apply `20261104000002_partner_matching.sql` and `20261112000002_curated_introductions.sql` before deploying. The second adds the new answers, moves "Business Owner / Founder" picks to the Founder role, drops "Other" from preferred industries, and clears "Prefer not to say" genders.
 
 ## Decisions taken
 
-These were open questions in the proposal. Each went with the recommended default and can be revisited.
-
 | Question | Decision |
 | --- | --- |
+| Mandatory or optional? | Optional, switched on from More (client, 2026-11-12) |
 | Home course only, or all of LinkUp? | Home course only |
-| Opt in or opt out of being suggested? | Opt out: the toggle is on by default |
+| What does off mean? | Neither introduced to anyone nor sent introductions; answers kept |
 | Tell both members, or only one? | Both: the member gets the recommendation, and each recommended player is told who they were recommended to |
 | Include hosts as candidates? | A host who is a member is in the pool like anyone else |
-| Skill level lines | Low up to 9, mid 10 to 18, high 19 and up; no handicap counts as new |
-| Ask the "about you" questions? | Yes, in their own step before the preferences |
+| Do Step 1 preferences filter? | No, they rank. Only the preferred introductions filter |
+| Ask the member's own role? | Yes, so preferred roles have something to be checked against. Optional |

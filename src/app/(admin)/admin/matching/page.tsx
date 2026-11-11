@@ -1,7 +1,7 @@
 'use client'
 
 // Matchmaking — an admin picks a member, the app lists the players who fit
-// them (golf preferences applied both ways, then ranked by score), and the
+// them (preferred introductions applied both ways, then ranked by score), and the
 // admin chooses who to recommend, with a note on why. Nothing is suggested to
 // a member without an admin sending it. See docs/playing-partner-matching.md.
 //
@@ -275,10 +275,17 @@ function MemberSummaryCard({ member }: { member: MatchSummary }) {
           <>
             <div className="flex flex-wrap gap-1.5">
               {member.goals.map(g => <Chip key={g}>{g}</Chip>)}
-              {member.playTimes.map(t => <Chip key={t}>{t}</Chip>)}
-              {member.attitude && <Chip>{member.attitude}</Chip>}
+              {member.role && <Chip>{member.role}</Chip>}
+              {member.surveyIndustry && <Chip>{member.surveyIndustry}</Chip>}
               {member.companySize && <Chip>{member.companySize}</Chip>}
+              {member.playTimes.map(t => <Chip key={t}>{t}</Chip>)}
+              {member.skill && <Chip>{member.skill}</Chip>}
+              {member.attitude && <Chip>{member.attitude}</Chip>}
             </div>
+            <p className="text-sm text-gray-600">
+              <span className="text-xs text-gray-400">Wants to meet</span>{' '}
+              {member.wantsToMeet.length > 0 ? member.wantsToMeet.join(' · ') : 'Anyone'}
+            </p>
             {(member.offers || member.seeks) && (
               <dl className="grid gap-2 sm:grid-cols-2 text-sm">
                 {member.offers && <div><dt className="text-xs text-gray-400">Offers</dt><dd className="text-gray-700">{member.offers}</dd></div>}
@@ -286,12 +293,9 @@ function MemberSummaryCard({ member }: { member: MatchSummary }) {
               </dl>
             )}
             <p className="text-xs text-gray-500 rounded-lg bg-gray-50 px-3 py-2">
-              <span className="font-medium text-gray-600">Golf preferences:</span> {member.preferences.join(' · ')}
+              <span className="font-medium text-gray-600">Preferred introductions:</span> {member.preferences.join(' · ')}
               <span className="block text-gray-400 mt-0.5">Admins only. Never shown to members or named in a note.</span>
             </p>
-            {!member.openToSuggestions && (
-              <p className="text-xs text-yellow-700">Has turned off being suggested to other members.</p>
-            )}
           </>
         )}
       </div>
@@ -486,11 +490,12 @@ function MemberMatching({ memberId, onSent }: { memberId: string; onSent: () => 
     <div className="space-y-4">
       <MemberSummaryCard member={member} />
 
-      {!member.surveyCompleted ? (
+      {!member.openToSuggestions ? (
         <AdminCard>
           <p className="text-sm text-gray-500 py-4 text-center">
-            {memberFirstName} hasn&apos;t completed the matching survey yet. They&apos;ll be asked to the next time
-            they open the app.
+            {member.surveyCompleted
+              ? `${memberFirstName} has turned off Curated Introductions. Their answers are kept, but nobody can be recommended to them and they aren't suggested to other members.`
+              : `${memberFirstName} hasn't turned on Curated Introductions. They can, from More → Curated Introductions.`}
           </p>
         </AdminCard>
       ) : (
@@ -500,7 +505,7 @@ function MemberMatching({ memberId, onSent }: { memberId: string; onSent: () => 
               Players who fit <span className="font-normal text-gray-400 tabular-nums">· {total}</span>
             </h2>
             <span className="text-xs text-gray-400">
-              {ruledOut} ruled out by golf preferences
+              {ruledOut} ruled out by preferred introductions
             </span>
           </div>
           {candidates.length === 0 ? (
