@@ -12,8 +12,8 @@ import { deleteBookingEverywhere } from '@/lib/bookings/delete'
 import { stripeEnabled } from '@/lib/stripe/client'
 import { seatCancellationQuote } from '@/lib/cancellation/policy'
 import {
-  collectCancellationFee,
   discardCancellationFee,
+  invoiceCancellationFee,
   recordCancellationFee,
 } from '@/lib/cancellation/fees'
 import { AVIARA_TIMEZONE } from '@/lib/constants'
@@ -137,7 +137,7 @@ export const PATCH = withAuth(async (
     await updateOpportunityStage(booking.ghl_opportunity_id, AVI_PLAY_CANCELLED_STAGE_ID, 'lost').catch(() => {})
   }
 
-  const fee = seatFee.fee ? await collectCancellationFee(adminSupabase, seatFee.fee) : null
+  const fee = seatFee.fee ? await invoiceCancellationFee(adminSupabase, seatFee.fee) : null
 
   void logActivity({
     memberId: ctx.memberId,
@@ -157,8 +157,8 @@ export const PATCH = withAuth(async (
 // (every row carries their member_id), and an invited member for their own.
 //
 // Inside the cancellation window it costs the member cancelling a share of the
-// seat's price, charged to their card on file — the response's `fee` says what
-// and whether it went through (null when it was free).
+// seat's price, invoiced to them — the response's `fee` says what, with the
+// invoice's link (null when it was free).
 export const DELETE = withAuth(async (
   _req: NextRequest,
   ctx: AuthContext,
@@ -191,7 +191,7 @@ export const DELETE = withAuth(async (
     return NextResponse.json({ error: "Couldn't cancel this booking. Try again." }, { status: 500 })
   }
 
-  const fee = seatFee.fee ? await collectCancellationFee(admin, seatFee.fee) : null
+  const fee = seatFee.fee ? await invoiceCancellationFee(admin, seatFee.fee) : null
 
   void logActivity({
     memberId: ctx.memberId,

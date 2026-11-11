@@ -1,11 +1,10 @@
 export const dynamic = 'force-dynamic'
 
 // POST   /api/hosted-events/[id]/register — reserve a spot (race-safe via the
-//          reserve_hosted_event_spot RPC). Needs a card on file while the
-//          cancellation policy is on, like booking a venue does.
+//          reserve_hosted_event_spot RPC).
 // DELETE  /api/hosted-events/[id]/register — cancel the caller's own spot. Inside
 //          the cancellation window that costs a share of the round's member
-//          price, charged to the card on file (`fee` in the response).
+//          price, invoiced to the member (`fee` in the response).
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
@@ -15,13 +14,11 @@ import { NotificationTemplates } from '@/lib/push'
 import { notifyMember } from '@/lib/notify'
 import { logger } from '@/lib/logger'
 import { logActivity } from '@/lib/activity/log'
-import { needsCardOnFile } from '@/lib/stripe/cards'
 import { stripeEnabled } from '@/lib/stripe/client'
-import { CARD_REQUIRED_CODE, CARD_REQUIRED_MESSAGE } from '@/lib/stripe/card'
 import { cancellationQuote, todayAtVenue } from '@/lib/cancellation/policy'
 import {
-  collectCancellationFee,
   discardCancellationFee,
+  invoiceCancellationFee,
   recordCancellationFee,
 } from '@/lib/cancellation/fees'
 import { memberPrice } from '@/lib/hosts/events'
@@ -47,12 +44,6 @@ export const POST = withAuth(
     const hostRow = Array.isArray(eventHost?.host) ? eventHost?.host[0] : eventHost?.host
     if (hostRow && hostRow.status !== 'active') {
       return NextResponse.json({ error: 'This event isn\'t open for reservations.' }, { status: 409 })
-    }
-
-    // The seat comes under the cancellation policy, so it needs a card to
-    // charge if it's given up late — the same gate POST /api/bookings/create has.
-    if (await needsCardOnFile(admin, ctx.memberId)) {
-      return NextResponse.json({ error: CARD_REQUIRED_MESSAGE, code: CARD_REQUIRED_CODE }, { status: 409 })
     }
 
     const { error } = await admin.rpc('reserve_hosted_event_spot', {
@@ -190,7 +181,7 @@ export const DELETE = withAuth(
       return NextResponse.json({ error: 'You don\'t have a spot to cancel.' }, { status: 404 })
     }
 
-    const feeOutcome = fee ? await collectCancellationFee(admin, fee) : null
+    const feeOutcome = fee ? await invoiceCancellationFee(admin, fee) : null
 
     // Let the host know a spot opened back up (best-effort), mirroring the
     // notification they get when someone reserves.

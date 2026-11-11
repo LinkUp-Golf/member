@@ -1,24 +1,13 @@
-// Which Stripe keys this deployment has. Server-side: both are plain env vars,
-// neither carries the NEXT_PUBLIC_ prefix, so neither is compiled into the
-// browser bundle.
+// Whether Stripe is set up for this deployment. Server-side only.
 //
-// Kept apart from ./client so the (app) layout can read the publishable key
-// without loading the Stripe SDK on every page render.
+// Kept apart from ./client so a layout can ask without loading the Stripe SDK
+// on every page render.
 
 /**
- * The publishable key Stripe.js needs, or null. Stripe.js runs in the browser,
- * so the key still reaches it: the (app) layout hands it down through
- * StripeKeyProvider, which only signed-in members are served.
- */
-export function stripePublishableKey(): string | null {
-  return process.env.STRIPE_PUBLISHABLE_KEY || null
-}
-
-/**
- * No keys, no policy. Both are required because the policy needs both halves —
- * a secret key with no publishable one would charge cards nobody could have
- * entered.
+ * No key, no policy. Late-cancellation fees are invoiced, so the secret key is
+ * all the app needs: nothing runs Stripe in the browser any more, and Stripe's
+ * own invoice page is where a member pays.
  */
 export function stripeEnabled(): boolean {
-  return !!process.env.STRIPE_SECRET_KEY && !!stripePublishableKey()
+  return !!process.env.STRIPE_SECRET_KEY
 }

@@ -15,8 +15,8 @@
 // a new price needs nothing from here.
 //
 // Pure and dependency-free beyond its siblings, like ../bookings/price: the
-// confirm screen, the cancel dialog and the routes that charge the fee all read
-// it, so the figure a member is shown and the figure they're charged are one
+// confirm screen, the cancel dialog and the routes that invoice the fee all read
+// it, so the figure a member is shown and the figure they're invoiced are one
 // rule.
 
 import { bookingAmountDue, formatRoundPrice } from '@/lib/bookings/price'
@@ -53,7 +53,7 @@ const FREE: Omit<CancellationQuote, 'price'> = { percent: 0, amount: 0 }
 /** Round to whole cents, guarding against float drift. */
 const round2 = (n: number) => Math.round(n * 100) / 100
 
-/** Dollars to the integer cents Stripe charges in. */
+/** Dollars to the integer cents Stripe invoices in. */
 export function toCents(amount: number): number {
   return Math.round(amount * 100)
 }
@@ -84,7 +84,7 @@ export function tierFor(days: number): CancellationTier | null {
  * What cancelling a seat at this price costs today.
  *
  * An unreadable date is free. The booking window treats one as closed, because
- * refusing a booking is cheap to correct; charging a card is not.
+ * refusing a booking is cheap to correct; invoicing a member is not.
  */
 export function cancellationQuote(input: {
   price: number
@@ -122,7 +122,7 @@ export const FEE_BEARING_STATUSES = [
  *     a fee for being early.
  *
  * The cancel dialog asks this before stating the policy, so a seat it can't
- * charge is never shown the tiers as if they applied.
+ * invoice is never shown the tiers as if they applied.
  */
 export function seatUnderPolicy(seat: {
   cancellation_policy_applies?: boolean | null
@@ -187,4 +187,40 @@ export function policyLines(price?: number): string[] {
     lines.push(`Cancelling ${when} costs ${share(tier.percent)}.`)
   }
   return lines
+}
+
+// ---- The invoice --------------------------------------------
+
+/** How long a member has to pay a late-cancellation invoice. */
+export const INVOICE_DAYS_UNTIL_DUE = 7
+
+/** "Sat, Nov 14, 2026" — a round's date as an invoice names it. */
+export function invoiceDate(date: string): string {
+  const d = new Date(`${date}T12:00:00Z`)
+  if (Number.isNaN(d.getTime())) return date
+  return d.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+}
+
+/**
+ * The invoice's one line: which round, when, and what share of its price.
+ * "Late cancellation · Aviara Golf Club · Sat, Nov 14, 2026 · 50% of $150"
+ */
+export function feeInvoiceLine(fee: {
+  course_name: string | null
+  event_date: string
+  percent: number
+  price: number
+}): string {
+  return [
+    'Late cancellation',
+    fee.course_name || 'LinkUp round',
+    invoiceDate(fee.event_date),
+    `${fee.percent}% of ${formatRoundPrice(fee.price)}`,
+  ].join(' · ')
 }

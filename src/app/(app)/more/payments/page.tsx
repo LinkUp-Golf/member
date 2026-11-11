@@ -1,39 +1,37 @@
 'use client'
 
-// /more/payments — the card a late cancellation is charged to, the policy that
-// decides when, and what the member's late cancellations have cost.
+// /more/payments — the cancellation policy, and what the member's late
+// cancellations have cost.
 //
-// The page every fee notification links to. A fee the card on file couldn't
-// cover is paid from here through Stripe Checkout; Stripe sends the member back
-// with ?paid=<id>, and the webhook is what actually marks it paid — so the
-// banner says it's received rather than waiting on that to land.
+// Each fee is a Stripe invoice. "Pay invoice" opens Stripe's invoice page in a
+// new tab (issuing the invoice first if Stripe couldn't be reached when they
+// cancelled); "Invoice" downloads it as a PDF. The webhook is what marks a fee
+// paid, so the list is re-read when the member comes back to this tab.
 
 import { useCallback, useEffect, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
 import { format } from 'date-fns'
 import AppShell from '@/components/layout/AppShell'
 import { Spinner } from '@/components/ui/Loading'
-import CardOnFile, { CardOnFileSkeleton } from '@/components/payments/CardOnFile'
 import CancellationPolicy from '@/components/payments/CancellationPolicy'
-import { usePaymentCard } from '@/hooks/usePaymentCard'
+import { useCancellationPolicyOn } from '@/components/providers/CancellationPolicyProvider'
 import { formatRoundPrice } from '@/lib/bookings/price'
 import type { CancellationFee, CancellationFeeStatus } from '@/types'
 
 const STATUS_META: Record<CancellationFeeStatus, { label: string; color: string; bg: string }> = {
-  paid:    { label: 'Paid',       color: '#15803d', bg: 'rgba(21,128,61,0.08)' },
-  pending: { label: 'Processing', color: '#b45309', bg: 'rgba(180,83,9,0.08)' },
-  unpaid:  { label: 'Due',        color: '#b91c1c', bg: 'rgba(185,28,28,0.08)' },
-  waived:  { label: 'Waived',     color: '#6b7280', bg: 'rgba(107,114,128,0.08)' },
+  paid:    { label: 'Paid',    color: '#15803d', bg: 'rgba(21,128,61,0.08)' },
+  pending: { label: 'Due',     color: '#b91c1c', bg: 'rgba(185,28,28,0.08)' },
+  unpaid:  { label: 'Due',     color: '#b91c1c', bg: 'rgba(185,28,28,0.08)' },
+  waived:  { label: 'Waived',  color: '#6b7280', bg: 'rgba(107,114,128,0.08)' },
 }
 
+const owed = (fee: CancellationFee) => fee.status === 'unpaid' || fee.status === 'pending'
+
 export default function PaymentsPage() {
-  const searchParams = useSearchParams()
-  const justPaid = searchParams?.get('paid') ?? null
-  const payment = usePaymentCard()
+  const policyOn = useCancellationPolicyOn()
 
   const [fees, setFees] = useState<CancellationFee[]>([])
   const [loadingFees, setLoadingFees] = useState(true)
-  const [payingId, setPayingId] = useState<string | null>(null)
+  const [openingId, setOpeningId] = useState<string | null>(null)
   const [payError, setPayError] = useState('')
 
   const loadFees = useCallback(async () => {
@@ -50,70 +48,66 @@ export default function PaymentsPage() {
 
   useEffect(() => { loadFees() }, [loadFees])
 
-  async function pay(feeId: string) {
-    setPayingId(feeId)
+  // Back from paying on Stripe's page in another tab: show what's settled.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') loadFees() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [loadFees])
+
+  async function openInvoice(fee: CancellationFee) {
     setPayError('')
+    // Opened in the click itself, so a popup blocker lets it through; pointed
+    // at the invoice once there is one.
+    const tab = window.open(fee.invoice_url ?? 'about:blank', '_blank', 'noopener')
+    if (fee.invoice_url) return
+
+    setOpeningId(fee.id)
     try {
-      const res = await fetch(`/api/cancellation-fees/${feeId}/checkout`, { method: 'POST' })
+      const res = await fetch(`/api/cancellation-fees/${fee.id}/invoice`, { method: 'POST' })
       const json = await res.json().catch(() => ({}))
       if (res.ok && typeof json.url === 'string') {
-        window.location.href = json.url
+        if (tab) tab.location.href = json.url
+        else window.location.href = json.url
+        loadFees()
         return
       }
-      setPayError(json.error ?? 'We couldn’t open the payment page. Try again.')
+      tab?.close()
+      setPayError(json.error ?? 'We couldn’t open the invoice. Try again.')
       // A 409 means it's no longer due — paid in another tab, say.
       if (res.status === 409) loadFees()
     } catch {
+      tab?.close()
       setPayError('Network error. Check your connection and try again.')
+    } finally {
+      setOpeningId(null)
     }
-    setPayingId(null)
   }
 
   return (
-    <AppShell title="Payments" description="Card on file &amp; cancellation fees">
+    <AppShell title="Payments" description="Cancellation fees">
       <div className="px-5 py-5 pb-8 space-y-6 md:max-w-2xl md:mx-auto">
 
-        {justPaid && (
-          <div
-            className="rounded-2xl px-4 py-3 text-sm"
-            style={{ background: 'rgba(21,128,61,0.06)', border: '1px solid rgba(21,128,61,0.18)', color: '#15803d' }}
-          >
-            Payment received, thank you. It can take a moment to show as paid below.
-          </div>
-        )}
-
-        {!payment.showPolicy ? (
-          <p className="text-sm" style={{ color: 'rgba(0,38,105,0.5)' }}>
-            Card payments aren’t set up yet, so there’s nothing to manage here.
-          </p>
+        {policyOn ? (
+          <section>
+            <p className="section-label mb-3">Cancellation policy</p>
+            <div className="card px-4 py-4 space-y-2">
+              <CancellationPolicy />
+              <p className="text-xs" style={{ color: 'rgba(0,38,105,0.4)' }}>
+                Days are counted at the course. A late cancellation is invoiced to whoever cancels the spot,
+                and the invoice is due within 7 days.
+              </p>
+            </div>
+          </section>
         ) : (
-          <>
-            <section>
-              <p className="section-label mb-3">Card on file</p>
-              {payment.loading ? (
-                <CardOnFileSkeleton />
-              ) : (
-                <CardOnFile
-                  card={payment.card}
-                  onSaved={payment.setCard}
-                  onRemoved={() => payment.setCard(null)}
-                />
-              )}
-            </section>
-
-            <section>
-              <p className="section-label mb-3">Cancellation policy</p>
-              <div className="card px-4 py-4 space-y-2">
-                <CancellationPolicy />
-                <p className="text-xs" style={{ color: 'rgba(0,38,105,0.4)' }}>
-                  Days are counted at the course, and each spot is charged to whoever cancels it.
-                </p>
-              </div>
-            </section>
-          </>
+          fees.length === 0 && !loadingFees && (
+            <p className="text-sm" style={{ color: 'rgba(0,38,105,0.5)' }}>
+              There are no cancellation fees to show.
+            </p>
+          )
         )}
 
-        {/* Shown whatever the policy's state — a fee charged while it was on
+        {/* Shown whatever the policy's state — a fee invoiced while it was on
             is still owed, or still a receipt, if it's switched off later. */}
         {(loadingFees || fees.length > 0) && (
           <section>
@@ -123,7 +117,7 @@ export default function PaymentsPage() {
             ) : (
               <div className="card">
                 {fees.map((fee, i) => {
-                  const meta = STATUS_META[fee.status] ?? STATUS_META.pending
+                  const meta = STATUS_META[fee.status] ?? STATUS_META.unpaid
                   return (
                     <div
                       key={fee.id}
@@ -138,19 +132,30 @@ export default function PaymentsPage() {
                           {format(new Date(`${fee.event_date}T12:00:00`), 'EEE, MMM d, yyyy')}
                           {' · '}{fee.percent}% of {formatRoundPrice(fee.price)}
                         </p>
+                        {fee.invoice_pdf && (
+                          <a
+                            href={fee.invoice_pdf}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-block text-xs font-medium underline underline-offset-2 mt-1"
+                            style={{ color: 'var(--color-green-700)' }}
+                          >
+                            Invoice {fee.invoice_number ?? ''} (PDF)
+                          </a>
+                        )}
                       </div>
                       <div className="flex flex-col items-end gap-1 flex-shrink-0">
                         <span className="text-sm font-semibold" style={{ color: 'var(--color-green-900)' }}>
                           {formatRoundPrice(fee.amount)}
                         </span>
-                        {fee.status === 'unpaid' && payment.enabled ? (
+                        {owed(fee) && (policyOn || fee.invoice_url) ? (
                           <button
                             type="button"
-                            onClick={() => pay(fee.id)}
-                            disabled={payingId !== null}
+                            onClick={() => openInvoice(fee)}
+                            disabled={openingId !== null}
                             className="btn btn-primary btn-sm disabled:opacity-50"
                           >
-                            {payingId === fee.id ? <Spinner className="w-3.5 h-3.5" /> : 'Pay now'}
+                            {openingId === fee.id ? <Spinner className="w-3.5 h-3.5" /> : 'Pay invoice'}
                           </button>
                         ) : (
                           <span

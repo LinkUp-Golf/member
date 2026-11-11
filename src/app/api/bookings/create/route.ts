@@ -34,8 +34,6 @@ import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPayme
 import { buildCustomSlots, loadForcedOpenDays, NON_HOLDING_STATUSES } from '@/lib/bookings/availability'
 import { isInsideJoinOnlyWindow, joinOnlyWindowMessage, openDayKey } from '@/lib/bookings/lead-time'
 import { bookingAmountDue } from '@/lib/bookings/price'
-import { needsCardOnFile } from '@/lib/stripe/cards'
-import { CARD_REQUIRED_CODE, CARD_REQUIRED_MESSAGE } from '@/lib/stripe/card'
 import {
   allowsNonMemberGuests,
   maxNonMemberGuests,
@@ -310,15 +308,6 @@ export async function POST(request: NextRequest) {
       { error: pendingPaymentBlockMessage(pendingBookings), pendingBookings },
       { status: 409 },
     )
-  }
-
-  // Every seat made here comes under the cancellation policy, so the booker
-  // needs a card on file to charge if they give one up late. Not asked of an
-  // admin booking for a member — the member isn't at the screen to enter one;
-  // a late cancel of that round falls back to asking them to pay (see
-  // @/lib/cancellation/fees). Off entirely while Stripe isn't configured.
-  if (!bookedByAdminId && await needsCardOnFile(adminSupabase, bookerId)) {
-    return NextResponse.json({ error: CARD_REQUIRED_MESSAGE, code: CARD_REQUIRED_CODE }, { status: 409 })
   }
 
   // Resolve course calendar settings — use the selected course when provided,

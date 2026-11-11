@@ -685,25 +685,27 @@ export const NotificationTemplates = {
     cta:   'View your event',
   }),
 
-  // A late cancellation, charged to the card on file. `amount` arrives
-  // formatted, and `card` as its owner would recognise it ("Visa •••• 4242").
-  cancellationFeeCharged: (amount: string, eventName: string, date: string, card: string): PushPayload => ({
-    title: 'Cancellation fee charged',
-    body:  `We charged ${amount} to your ${card} for cancelling ${eventName} on ${date}.`,
-    url:   '/more/payments',
+  // A late cancellation's invoice. `amount` arrives formatted. The link is
+  // Stripe's invoice page, where the member pays and can download the PDF;
+  // without one (Stripe couldn't be reached), Payments issues it on demand.
+  cancellationFeeInvoice: (amount: string, eventName: string, date: string, invoiceUrl: string | null): PushPayload => ({
+    title: 'Cancellation fee invoice',
+    body:  invoiceUrl
+      ? `Cancelling ${eventName} on ${date} carries a ${amount} fee. Your invoice is ready to pay.`
+      : `Cancelling ${eventName} on ${date} carries a ${amount} fee. You can pay the invoice from Payments.`,
+    url:   invoiceUrl ?? '/more/payments',
     tag:   'cancellation-fee',
-    subject: `Your ${amount} cancellation fee for ${eventName} on ${date}`,
-    cta:   'View payments',
+    subject: `Invoice: ${amount} cancellation fee for ${eventName} on ${date}`,
+    cta:   'View invoice',
   }),
 
-  // The same fee when the card couldn't be charged — declined, needed the
-  // member to authenticate, or there was no card to charge.
-  cancellationFeeDue: (amount: string, eventName: string, date: string): PushPayload => ({
-    title: 'Cancellation fee due',
-    body:  `Cancelling ${eventName} on ${date} carries a ${amount} fee, and we couldn't charge your card. You can pay it from Payments.`,
+  // The receipt, once Stripe says the invoice was paid.
+  cancellationFeePaid: (amount: string, eventName: string, date: string): PushPayload => ({
+    title: 'Payment received',
+    body:  `Thank you. We received your ${amount} payment for cancelling ${eventName} on ${date}.`,
     url:   '/more/payments',
     tag:   'cancellation-fee',
-    subject: `${amount} cancellation fee due for ${eventName} on ${date}`,
-    cta:   'Pay now',
+    subject: `Payment received: ${amount} cancellation fee for ${eventName} on ${date}`,
+    cta:   'View payments',
   }),
 }

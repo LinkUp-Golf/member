@@ -71,7 +71,7 @@ export const MORE_ITEMS: MoreGroup[] = [
       PARTNER_APPLY_ITEM,
       HOST_APPLY_ITEM,
       { href: '/more/guest-access', label: 'Guest Access', icon: svgIcon('visiting-member'), desc: 'Request access to another city' },
-      { href: '/more/payments', label: 'Payments', icon: <CreditCard className="w-5 h-5" strokeWidth={1.9} />, desc: 'Card on file & cancellation fees' },
+      { href: '/more/payments', label: 'Payments', icon: <CreditCard className="w-5 h-5" strokeWidth={1.9} />, desc: 'Cancellation fees and invoices' },
     ],
   },
   {

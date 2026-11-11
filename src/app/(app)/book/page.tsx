@@ -6,7 +6,7 @@ import { useForm, useFieldArray } from "react-hook-form";
 import { useProfile } from "@/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
 import AppShell from "@/components/layout/AppShell";
-import { Skeleton, Spinner } from "@/components/ui/Loading";
+import { Spinner } from "@/components/ui/Loading";
 import EmptyState from "@/components/ui/EmptyState";
 import Image from "next/image";
 import Link from "next/link";
@@ -42,11 +42,9 @@ import {
   withinNonMemberGuestLimit,
 } from "@/lib/bookings/guest-policy";
 import WhatHappensNext from "@/components/booking/WhatHappensNext";
-import CardOnFile, { CardOnFileSkeleton } from "@/components/payments/CardOnFile";
 import CancellationPolicy from "@/components/payments/CancellationPolicy";
-import { usePaymentCard } from "@/hooks/usePaymentCard";
+import { useCancellationPolicyOn } from "@/components/providers/CancellationPolicyProvider";
 import { seatCancellationQuote, seatUnderPolicy } from "@/lib/cancellation/policy";
-import { cardLabel } from "@/lib/stripe/card";
 import {
   PAID_BY_OPTIONS,
   inviteExpiresAt,
@@ -1004,10 +1002,8 @@ function ConfirmScreen({
   maxNonMembers: number;
 }) {
   const maxAdditional = Math.max(0, (slot.spotsOpen ?? 1) - 1);
-  // The card a late cancellation is charged to. While the policy is on, the
-  // booking can't be sent without one — POST /api/bookings/create refuses it.
-  const payment = usePaymentCard();
-  const cardMissing = payment.loading || (payment.enabled && !payment.card);
+  // Whether a late cancellation is invoiced, so the policy is stated here.
+  const policyOn = useCancellationPolicyOn();
   const [collapsed, setCollapsed] = useState<boolean[]>([]);
   const [playerSelections, setPlayerSelections] = useState<
     Array<MemberWithProfile | null>
@@ -1709,39 +1705,14 @@ function ConfirmScreen({
             )}
           </div>
 
-          {/* Cancellation policy, and the card it's charged to */}
-          {payment.showPolicy && (
+          {/* Cancellation policy */}
+          {policyOn && (
             <div className="px-1 space-y-3">
               <p className="section-label">Cancellation policy</p>
               <CancellationPolicy price={pricePerPlayer} />
               <p className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>
-                Per player, charged to whoever cancels the spot.
+                Per player, invoiced to whoever cancels the spot.
               </p>
-              <div className="pt-1">
-                {payment.loading ? (
-                  // Not CardOnFile yet: with no card it mounts the entry form,
-                  // which opens a SetupIntent the saved card may make pointless.
-                  <>
-                    <Skeleton className="h-3 w-24 mb-2" />
-                    <CardOnFileSkeleton />
-                  </>
-                ) : (
-                  <>
-                    <p
-                      className="text-xs font-semibold mb-2"
-                      style={{ color: "rgba(0,38,105,0.55)" }}
-                    >
-                      {payment.card ? "Card on file" : "Add a card to hold your spot"}
-                    </p>
-                    <CardOnFile
-                      compact
-                      card={payment.card}
-                      onSaved={payment.setCard}
-                      onRemoved={() => payment.setCard(null)}
-                    />
-                  </>
-                )}
-              </div>
             </div>
           )}
 
@@ -1762,7 +1733,7 @@ function ConfirmScreen({
 
           <button
             type="submit"
-            disabled={submitting || !allRowsValid || cardMissing}
+            disabled={submitting || !allRowsValid}
             className="btn btn-gold btn-full disabled:opacity-50"
           >
             {submitting ? (
@@ -1779,7 +1750,7 @@ function ConfirmScreen({
             style={{ color: "rgba(0,38,105,0.28)" }}
           >
             No payment charged now.
-            {payment.showPolicy && " Your card is only charged if you cancel late."}
+            {policyOn && " If you cancel late, we'll email you an invoice for the fee."}
           </p>
         </div>
       </form>
@@ -2440,10 +2411,10 @@ function CancelModal({
   const [shown, setShown] = useState<CancelTarget | null>(target);
   // What the cancel cost, once it's happened — the modal stays up to say so.
   const [outcome, setOutcome] = useState<CancellationFeeOutcome | null>(null);
-  const payment = usePaymentCard();
-  const fee = payment.enabled && shown ? shown.fee : { amount: 0, percent: 0 };
+  const policyOn = useCancellationPolicyOn();
+  const fee = policyOn && shown ? shown.fee : { amount: 0, percent: 0 };
   const policyPrice =
-    payment.enabled && shown ? shown.cancellationPrice : null;
+    policyOn && shown ? shown.cancellationPrice : null;
 
   useEffect(() => {
     if (open) {
@@ -2592,9 +2563,7 @@ function CancelModal({
                   {fee.percent === 100
                     ? "The round is today, so the full price is charged."
                     : `The round is tomorrow, so ${fee.percent}% of its price is charged.`}{" "}
-                  {payment.card
-                    ? `It goes on your ${cardLabel(payment.card)}.`
-                    : "You'll be asked to pay it from Payments."}
+                  We&apos;ll email you an invoice for it.
                 </p>
               </div>
             )}
@@ -2633,8 +2602,8 @@ function CancelModal({
 }
 
 // What a cancellation that carried a fee came to, shown in the cancel modal once
-// the seat is gone. Unpaid means the card on file couldn't be charged (or there
-// wasn't one), and the fee waits on /more/payments.
+// the seat is gone: the fee has been invoiced, and the invoice emailed. Pay
+// invoice opens Stripe's invoice page, or Payments where it couldn't be issued.
 function CancelFeeOutcome({
   outcome,
   onDone,
@@ -2643,12 +2612,6 @@ function CancelFeeOutcome({
   onDone: () => void;
 }) {
   const amount = formatRoundPrice(outcome.amount);
-  const detail =
-    outcome.status === "paid"
-      ? `${amount} was charged to your ${outcome.card ? cardLabel(outcome.card) : "card on file"}.`
-      : outcome.status === "pending"
-        ? `Your ${amount} cancellation fee is being processed.`
-        : `We couldn't charge your card for the ${amount} cancellation fee. You can pay it from Payments.`;
   return (
     <>
       <div>
@@ -2660,17 +2623,29 @@ function CancelFeeOutcome({
           Booking cancelled
         </p>
         <p className="text-sm mt-1.5" style={{ color: "rgba(0,38,105,0.6)" }}>
-          {detail}
+          {outcome.invoiceUrl
+            ? `We've emailed you an invoice for the ${amount} cancellation fee. You can also pay it now.`
+            : `There's a ${amount} cancellation fee. You can pay the invoice from Payments.`}
         </p>
       </div>
       <div className="flex gap-2">
-        {outcome.status === "unpaid" && (
+        {outcome.invoiceUrl ? (
+          <a
+            href={outcome.invoiceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 py-3.5 rounded-2xl text-sm font-semibold text-center"
+            style={{ background: "var(--color-green-900)", color: "white" }}
+          >
+            Pay invoice
+          </a>
+        ) : (
           <Link
             href="/more/payments"
             className="flex-1 py-3.5 rounded-2xl text-sm font-semibold text-center"
             style={{ background: "var(--color-green-900)", color: "white" }}
           >
-            Pay now
+            Go to Payments
           </Link>
         )}
         <button

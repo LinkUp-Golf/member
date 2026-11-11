@@ -1,19 +1,20 @@
 import { describe, it, expect } from 'vitest'
 import {
   cancellationQuote,
+  feeInvoiceLine,
   FREE_CANCELLATION_DAYS,
+  invoiceDate,
   policyLines,
   seatCancellationQuote,
   seatUnderPolicy,
   toCents,
   todayAtVenue,
 } from '@/lib/cancellation/policy'
-import { cardExpiry, cardFromRow, cardInUseMessage, cardLabel } from '@/lib/stripe/card'
 
 // Giving up a seat late costs a share of its own price: half the day before,
 // all of it on the day. The confirm screen quotes it, the cancel dialog quotes
-// it again, and the cancel route charges it — three readers of one rule, so a
-// member is never charged a figure they weren't shown.
+// it again, and the cancel route invoices it — three readers of one rule, so a
+// member is never invoiced a figure they weren't shown.
 
 describe('cancellationQuote', () => {
   const quote = (eventDate: string, today: string, price = 150) =>
@@ -142,30 +143,16 @@ describe('policyLines', () => {
   })
 })
 
-describe('card on file', () => {
-  it('names a card the way its owner would', () => {
-    expect(cardLabel({ brand: 'visa', last4: '4242' })).toBe('Visa •••• 4242')
-    expect(cardLabel({ brand: 'link', last4: '0005' })).toBe('Link •••• 0005')
-    expect(cardExpiry({ expMonth: 4, expYear: 2029 })).toBe('Expires 04/29')
-    expect(cardExpiry({ expMonth: null, expYear: null })).toBe('')
+describe('the invoice', () => {
+  it('names the round, its date and the share of its price on one line', () => {
+    expect(feeInvoiceLine({ course_name: 'Aviara Golf Club', event_date: '2026-11-14', percent: 50, price: 150 }))
+      .toBe('Late cancellation · Aviara Golf Club · Sat, Nov 14, 2026 · 50% of $150')
+    expect(feeInvoiceLine({ course_name: null, event_date: '2026-11-15', percent: 100, price: 87.5 }))
+      .toBe('Late cancellation · LinkUp round · Sun, Nov 15, 2026 · 100% of $87.50')
   })
 
-  it('reads a row with no card saved on it as no card', () => {
-    expect(cardFromRow(null)).toBeNull()
-    expect(cardFromRow({ stripe_payment_method_id: null, card_last4: null })).toBeNull()
-    expect(cardFromRow({
-      stripe_payment_method_id: 'pm_1', card_brand: 'visa', card_last4: '4242', card_exp_month: 1, card_exp_year: 2030,
-    })).toEqual({ brand: 'visa', last4: '4242', expMonth: 1, expYear: 2030 })
-  })
-})
-
-describe('removing a card', () => {
-  it('says why a card holding rounds stays, and what to do instead', () => {
-    expect(cardInUseMessage(1)).toBe(
-      'This card is holding your spot on an upcoming round. Edit it to use a different card, or remove it once that round has been played.',
-    )
-    expect(cardInUseMessage(3)).toBe(
-      'This card is holding your spot on 3 upcoming rounds. Edit it to use a different card, or remove it once they’ve been played.',
-    )
+  it('reads the date as the venue wrote it, whatever the server clock', () => {
+    expect(invoiceDate('2026-01-01')).toBe('Thu, Jan 1, 2026')
+    expect(invoiceDate('not a date')).toBe('not a date')
   })
 })

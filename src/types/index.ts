@@ -1055,6 +1055,11 @@ export interface CancellationFee {
   status: CancellationFeeStatus
   failure_reason: string | null
   paid_at: string | null
+  /** Stripe's invoice page, where the member pays. Null until it's issued. */
+  invoice_url: string | null
+  /** The same invoice as a PDF to download. */
+  invoice_pdf: string | null
+  invoice_number: string | null
   created_at: string
 }
 
@@ -1064,6 +1069,6 @@ export interface CancellationFeeOutcome {
   amount: number
   percent: number
   status: CancellationFeeStatus
-  /** The card it was charged to — set only when the charge went through. */
-  card: { brand: string; last4: string } | null
+  /** Stripe's invoice page, or null when the invoice couldn't be issued yet. */
+  invoiceUrl: string | null
 }

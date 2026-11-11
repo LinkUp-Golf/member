@@ -1,4 +1,4 @@
-// Charging a late cancellation.
+// Invoicing a late cancellation.
 //
 // Three steps, in an order that matters:
 //
@@ -8,51 +8,71 @@
 //      on the seat makes a double tap on Cancel record one fee, not two.
 //   2. the route releases the seat; if that fails, discardCancellationFee takes
 //      the record back out, since nothing was cancelled.
-//   3. collectCancellationFee — charges the card on file, off-session. Stripe
-//      decides there and then for almost every card. When it can't — a decline,
-//      a bank that wants its customer to authenticate, no card at all — the fee
-//      is left `unpaid` and the member is told, with a way to pay it from
-//      /more/payments (feeCheckoutUrl). Stripe still processing is left
-//      `pending` for the webhook to settle.
+//   3. invoiceCancellationFee — issues the fee as a Stripe invoice (pay within
+//      INVOICE_DAYS_UNTIL_DUE days) and tells the member, push and email, with a
+//      link to Stripe's invoice page: they pay there by card and can download
+//      the invoice as a PDF. If Stripe can't be reached the fee is still owed
+//      and the member still told; the "Pay invoice" button on /more/payments
+//      issues it then (feeInvoiceUrl).
 //
-// Collection never fails the cancel. The seat is already given up by then, and
-// a member must never be left looking at a round they cancelled because a card
-// network was slow.
+// The invoice email is ours, not Stripe's (no sendInvoice): it's one message
+// in the app's own template, and it arrives in test mode too, where Stripe
+// mails nobody. Stripe's page is where the money moves.
+//
+// Payment is learned from the Stripe webhook (invoice.paid → settleFeePaid),
+// which marks the fee paid and sends the member a receipt. Voiding the invoice
+// in the Stripe dashboard waives the fee (settleFeeWaived) — that's the admin's
+// way to let one go until the app has a screen for it.
+//
+// Invoicing never fails the cancel. The seat is already given up by then.
 //
 // Who pays is whoever cancelled: they're the one who decided, and the one who
-// was shown the fee before confirming. An invited player isn't billed for their
-// booker dropping them, nor a booker for an invitee walking away.
+// was shown the fee before confirming.
 //
 // Service-role throughout: cancellation_fees has no write policy.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type Stripe from 'stripe'
-import { format } from 'date-fns'
-import { getStripe, appUrl } from '@/lib/stripe/client'
-import { ensureCustomer, loadPaymentMethod } from '@/lib/stripe/cards'
-import { cardLabel } from '@/lib/stripe/card'
+import { getStripe } from '@/lib/stripe/client'
+import { ensureCustomer } from '@/lib/stripe/customers'
 import { formatRoundPrice } from '@/lib/bookings/price'
 import { NotificationTemplates } from '@/lib/push'
 import { notifyMember } from '@/lib/notify'
 import { logger } from '@/lib/logger'
-import { toCents, type CancellationQuote } from './policy'
+import {
+  INVOICE_DAYS_UNTIL_DUE,
+  feeInvoiceLine,
+  invoiceDate,
+  toCents,
+  type CancellationQuote,
+} from './policy'
 import type { CancellationFee, CancellationFeeOutcome } from '@/types'
 
 const FEE_COLUMNS =
-  'id, member_id, source, booking_id, hosted_event_id, hosted_event_registration_id, course_id, course_name, event_date, tee_time, price, percent, amount, status, failure_reason, paid_at, created_at'
+  'id, member_id, source, booking_id, hosted_event_id, hosted_event_registration_id, course_id, course_name, ' +
+  'event_date, tee_time, price, percent, amount, status, failure_reason, paid_at, ' +
+  'stripe_invoice_id, invoice_url, invoice_pdf, invoice_number, created_at'
 
 /** The metadata key every Stripe object made for a fee carries. */
 export const FEE_METADATA_KEY = 'cancellation_fee_id'
 
-const asFee = (row: Record<string, unknown>): CancellationFee => ({
-  ...(row as unknown as CancellationFee),
+/** A fee as stored, with the invoice id the member-facing type leaves out. */
+type FeeRow = CancellationFee & { stripe_invoice_id: string | null }
+
+const asFee = (row: Record<string, unknown>): FeeRow => ({
+  ...(row as unknown as FeeRow),
   price: Number(row.price),
   amount: Number(row.amount),
   percent: Number(row.percent),
 })
 
-/** "Sat, Nov 8" — how a fee names its round's day. */
-const feeDate = (date: string) => format(new Date(`${date}T12:00:00`), 'EEE, MMM d')
+/** Drops the Stripe id before a fee goes to the member's screen. */
+function forMember(fee: FeeRow): CancellationFee {
+  const { stripe_invoice_id: _id, ...rest } = fee
+  return rest
+}
+
+const roundName = (fee: { course_name: string | null }) => fee.course_name ?? 'your round'
 
 export type RecordResult =
   | { fee: CancellationFee }
@@ -102,7 +122,7 @@ export async function recordCancellationFee(
     })
     return { error: error.message }
   }
-  return { fee: asFee(data) }
+  return { fee: forMember(asFee(data as unknown as Record<string, unknown>)) }
 }
 
 /** Takes back a fee whose cancellation didn't go through. */
@@ -110,164 +130,157 @@ export async function discardCancellationFee(admin: SupabaseClient, feeId: strin
   await admin.from('cancellation_fees').delete().eq('id', feeId).eq('status', 'pending')
 }
 
-async function markUnpaid(
-  admin: SupabaseClient,
-  fee: CancellationFee,
-  reason: string,
-  paymentIntentId?: string | null,
-): Promise<CancellationFeeOutcome> {
+async function loadFee(admin: SupabaseClient, feeId: string): Promise<FeeRow | null> {
+  const { data } = await admin.from('cancellation_fees').select(FEE_COLUMNS).eq('id', feeId).maybeSingle()
+  return data ? asFee(data as unknown as Record<string, unknown>) : null
+}
+
+/**
+ * The fee's Stripe invoice, finalized: created on first call, picked up again
+ * on any call after. The invoice id is written to the fee as soon as it exists,
+ * and both creates are idempotency-keyed on the fee, so a retry can't issue a
+ * second invoice for one cancellation.
+ */
+async function issueInvoice(stripe: Stripe, admin: SupabaseClient, fee: FeeRow): Promise<Stripe.Invoice> {
+  const metadata = { [FEE_METADATA_KEY]: fee.id, member_id: fee.member_id }
+  const customer = await ensureCustomer(stripe, admin, fee.member_id)
+
+  const addLine = (invoiceId: string) =>
+    stripe.invoiceItems.create(
+      {
+        customer,
+        invoice: invoiceId,
+        amount: toCents(fee.amount),
+        currency: 'usd',
+        description: feeInvoiceLine(fee),
+        metadata,
+      },
+      { idempotencyKey: `linkup-fee-invoice-item-${fee.id}` },
+    )
+
+  let invoice: Stripe.Invoice
+  if (fee.stripe_invoice_id) {
+    invoice = await stripe.invoices.retrieve(fee.stripe_invoice_id)
+    // A draft left empty by a request that died between the two creates.
+    if (invoice.status === 'draft' && invoice.total === 0) {
+      await addLine(invoice.id as string)
+    }
+  } else {
+    invoice = await stripe.invoices.create(
+      {
+        customer,
+        collection_method: 'send_invoice',
+        days_until_due: INVOICE_DAYS_UNTIL_DUE,
+        currency: 'usd',
+        // We finalize it ourselves, and our email is the one that goes out.
+        auto_advance: false,
+        pending_invoice_items_behavior: 'exclude',
+        description: 'Late cancellation fee under the LinkUp Golf cancellation policy.',
+        metadata,
+      },
+      { idempotencyKey: `linkup-fee-invoice-${fee.id}` },
+    )
+    await admin.from('cancellation_fees').update({ stripe_invoice_id: invoice.id }).eq('id', fee.id)
+    await addLine(invoice.id as string)
+  }
+
+  if (invoice.status === 'draft') {
+    invoice = await stripe.invoices.finalizeInvoice(invoice.id as string, { auto_advance: false })
+  }
+  return invoice
+}
+
+/** Writes what Stripe issued onto the fee; returns the invoice page. */
+async function storeInvoice(admin: SupabaseClient, fee: FeeRow, invoice: Stripe.Invoice): Promise<string | null> {
+  const url = invoice.hosted_invoice_url ?? null
   await admin
     .from('cancellation_fees')
     .update({
-      status: 'unpaid',
-      failure_reason: reason,
-      ...(paymentIntentId ? { stripe_payment_intent_id: paymentIntentId } : {}),
+      stripe_invoice_id: invoice.id,
+      invoice_url: url,
+      invoice_pdf: invoice.invoice_pdf ?? null,
+      invoice_number: invoice.number ?? null,
+      invoiced_at: new Date().toISOString(),
+      failure_reason: null,
+      // Owed from here. A fee already paid or waived (a late webhook racing a
+      // retry) keeps its status.
+      ...(fee.status === 'pending' ? { status: 'unpaid' } : {}),
     })
     .eq('id', fee.id)
-    .eq('status', 'pending')
+  return url
+}
+
+/**
+ * Issues a recorded fee as an invoice and tells the member. Never throws.
+ */
+export async function invoiceCancellationFee(
+  admin: SupabaseClient,
+  recorded: CancellationFee,
+): Promise<CancellationFeeOutcome> {
+  const fee = (await loadFee(admin, recorded.id)) ?? { ...recorded, stripe_invoice_id: null }
+  let invoiceUrl: string | null = null
+
+  const stripe = getStripe()
+  try {
+    // Recorded only while Stripe is on; the guard is for a key removed in between.
+    if (!stripe) throw new Error('stripe_unavailable')
+    invoiceUrl = await storeInvoice(admin, fee, await issueInvoice(stripe, admin, fee))
+  } catch (err) {
+    const message = (err as Error).message
+    logger.warn('Cancellation fee invoice not issued', {
+      action: 'cancellation_fee.invoice_failed',
+      metadata: { fee_id: fee.id, error: message },
+    })
+    // Still owed. The member's "Pay invoice" button issues it later.
+    await admin
+      .from('cancellation_fees')
+      .update({ status: 'unpaid', failure_reason: message === 'stripe_unavailable' ? message : 'invoice_failed' })
+      .eq('id', fee.id)
+      .eq('status', 'pending')
+  }
 
   void notifyMember(
     fee.member_id,
-    NotificationTemplates.cancellationFeeDue(
+    NotificationTemplates.cancellationFeeInvoice(
       formatRoundPrice(fee.amount),
-      fee.course_name ?? 'your round',
-      feeDate(fee.event_date),
+      roundName(fee),
+      invoiceDate(fee.event_date),
+      invoiceUrl,
     ),
   ).catch(() => {})
 
-  return { id: fee.id, amount: fee.amount, percent: fee.percent, status: 'unpaid', card: null }
+  return { id: fee.id, amount: fee.amount, percent: fee.percent, status: 'unpaid', invoiceUrl }
 }
 
 /**
- * Charges a recorded fee to the member's card on file. Never throws.
+ * Where a member pays one of their fees: its invoice page, issued now if it
+ * never was. Null when there's nothing to pay — not this member's fee, already
+ * paid or waived, or Stripe is off.
  */
-export async function collectCancellationFee(
-  admin: SupabaseClient,
-  fee: CancellationFee,
-): Promise<CancellationFeeOutcome> {
-  const stripe = getStripe()
-  // Recorded only while Stripe is on; the guard is for a key removed in between.
-  if (!stripe) return markUnpaid(admin, fee, 'stripe_unavailable')
-
-  const pm = await loadPaymentMethod(admin, fee.member_id)
-  if (!pm?.stripe_payment_method_id) return markUnpaid(admin, fee, 'no_card')
-
-  try {
-    const intent = await stripe.paymentIntents.create(
-      {
-        amount: toCents(fee.amount),
-        currency: 'usd',
-        customer: pm.stripe_customer_id,
-        payment_method: pm.stripe_payment_method_id,
-        off_session: true,
-        confirm: true,
-        description: `Cancellation fee: ${fee.course_name ?? 'LinkUp round'} on ${fee.event_date}`,
-        metadata: { [FEE_METADATA_KEY]: fee.id, member_id: fee.member_id },
-      },
-      // Keyed on the fee, so a retried request can't charge the same fee twice.
-      { idempotencyKey: `linkup-cancellation-fee-${fee.id}` },
-    )
-
-    if (intent.status === 'succeeded') {
-      await admin
-        .from('cancellation_fees')
-        .update({ status: 'paid', paid_at: new Date().toISOString(), stripe_payment_intent_id: intent.id })
-        .eq('id', fee.id)
-
-      const card = pm.card_last4 ? { brand: pm.card_brand ?? '', last4: pm.card_last4 } : null
-      void notifyMember(
-        fee.member_id,
-        NotificationTemplates.cancellationFeeCharged(
-          formatRoundPrice(fee.amount),
-          fee.course_name ?? 'your round',
-          feeDate(fee.event_date),
-          card ? cardLabel(card) : 'card on file',
-        ),
-      ).catch(() => {})
-
-      return { id: fee.id, amount: fee.amount, percent: fee.percent, status: 'paid', card }
-    }
-
-    if (intent.status === 'processing') {
-      await admin.from('cancellation_fees').update({ stripe_payment_intent_id: intent.id }).eq('id', fee.id)
-      return { id: fee.id, amount: fee.amount, percent: fee.percent, status: 'pending', card: null }
-    }
-
-    return markUnpaid(admin, fee, intent.status, intent.id)
-  } catch (err) {
-    // A decline or an authentication_required arrives as a thrown card error,
-    // carrying the PaymentIntent it failed on.
-    const e = err as Stripe.errors.StripeError & { payment_intent?: { id?: string } }
-    logger.warn('Cancellation fee charge failed', {
-      action: 'cancellation_fee.charge_failed',
-      metadata: { fee_id: fee.id, code: e.code, decline_code: e.decline_code, type: e.type },
-    })
-    return markUnpaid(admin, fee, e.decline_code ?? e.code ?? e.type ?? 'charge_failed', e.payment_intent?.id ?? null)
-  }
-}
-
-/**
- * A Stripe Checkout page for paying an unpaid fee, or null when it can't be
- * paid (not this member's, not unpaid, or Stripe is off).
- *
- * Made fresh on every request rather than stored: a Checkout Session expires
- * within a day, and the link in a fee-due email has to work next week.
- */
-export async function feeCheckoutUrl(
+export async function feeInvoiceUrl(
   admin: SupabaseClient,
   memberId: string,
   feeId: string,
 ): Promise<string | null> {
+  const fee = await loadFee(admin, feeId)
+  if (!fee || fee.member_id !== memberId) return null
+  if (fee.status !== 'unpaid' && fee.status !== 'pending') return null
+  if (fee.invoice_url) return fee.invoice_url
+
   const stripe = getStripe()
   if (!stripe) return null
-
-  const { data } = await admin
-    .from('cancellation_fees')
-    .select(FEE_COLUMNS)
-    .eq('id', feeId)
-    .eq('member_id', memberId)
-    .maybeSingle()
-  if (!data) return null
-  const fee = asFee(data)
-  if (fee.status !== 'unpaid') return null
-
-  const customer = await ensureCustomer(stripe, admin, memberId)
-  const metadata = { [FEE_METADATA_KEY]: fee.id, member_id: memberId }
-  const session = await stripe.checkout.sessions.create({
-    mode: 'payment',
-    customer,
-    line_items: [
-      {
-        quantity: 1,
-        price_data: {
-          currency: 'usd',
-          unit_amount: toCents(fee.amount),
-          product_data: {
-            name: 'Cancellation fee',
-            description: `${fee.course_name ?? 'LinkUp round'} · ${feeDate(fee.event_date)} · ${fee.percent}% of ${formatRoundPrice(fee.price)}`,
-          },
-        },
-      },
-    ],
-    metadata,
-    payment_intent_data: { metadata },
-    success_url: appUrl(`/more/payments?paid=${fee.id}`),
-    cancel_url: appUrl('/more/payments'),
-  })
-
-  await admin.from('cancellation_fees').update({ stripe_checkout_session_id: session.id }).eq('id', fee.id)
-  return session.url
+  return storeInvoice(admin, fee, await issueInvoice(stripe, admin, fee))
 }
 
 /**
  * The webhook's answer to "this fee's money arrived". Idempotent — Stripe
- * delivers at least once, and a fee can be settled by both its PaymentIntent and
- * the Checkout Session that wrapped it.
+ * delivers at least once — and the member's receipt goes out only on the
+ * delivery that actually moved the fee.
  */
 export async function settleFeePaid(
   admin: SupabaseClient,
   feeId: string,
-  paymentIntentId: string | null,
+  paymentIntentId: string | null = null,
 ): Promise<boolean> {
   const { data } = await admin
     .from('cancellation_fees')
@@ -279,26 +292,29 @@ export async function settleFeePaid(
     })
     .eq('id', feeId)
     .in('status', ['pending', 'unpaid'])
-    .select('id')
-  return (data?.length ?? 0) > 0
+    .select(FEE_COLUMNS)
+
+  const settled = data?.[0] ? asFee(data[0] as unknown as Record<string, unknown>) : null
+  if (!settled) return false
+
+  void notifyMember(
+    settled.member_id,
+    NotificationTemplates.cancellationFeePaid(
+      formatRoundPrice(settled.amount),
+      roundName(settled),
+      invoiceDate(settled.event_date),
+    ),
+  ).catch(() => {})
+  return true
 }
 
-/**
- * The webhook's answer to a charge Stripe was still processing that then
- * failed. Only a `pending` fee moves — one already `unpaid` was told already.
- */
-export async function settleFeeFailed(
-  admin: SupabaseClient,
-  feeId: string,
-  reason: string,
-): Promise<void> {
-  const { data } = await admin
+/** The webhook's answer to an invoice voided in the Stripe dashboard. */
+export async function settleFeeWaived(admin: SupabaseClient, feeId: string): Promise<void> {
+  await admin
     .from('cancellation_fees')
-    .select(FEE_COLUMNS)
+    .update({ status: 'waived' })
     .eq('id', feeId)
-    .eq('status', 'pending')
-    .maybeSingle()
-  if (data) await markUnpaid(admin, asFee(data), reason)
+    .in('status', ['pending', 'unpaid'])
 }
 
 /** A member's fees, newest first, for /more/payments. */
@@ -309,5 +325,5 @@ export async function loadMemberFees(admin: SupabaseClient, memberId: string): P
     .eq('member_id', memberId)
     .order('created_at', { ascending: false })
     .limit(50)
-  return (data ?? []).map(asFee)
+  return (data ?? []).map(r => forMember(asFee(r as unknown as Record<string, unknown>)))
 }
