@@ -15,7 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "analyze": "ANALYZE=true next build"
+    "analyze": "ANALYZE=true next build",
+    "docs:map": "node scripts/generate-code-map.mjs"
   },
   "dependencies": {
     "@gohighlevel/api-client": "^3.0.0",
