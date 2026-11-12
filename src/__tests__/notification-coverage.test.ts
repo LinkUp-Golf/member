@@ -41,7 +41,6 @@ const KNOWN_UNSENT: Record<string, string> = {
   // Their cron routes were deliberately deleted; CLAUDE.md says to reintroduce
   // the functionality fresh rather than resurrect them.
   focusLinkup: 'cron/daily was removed',
-  playSuggestion: 'cron/play-suggestions was removed',
   // No approval flow exists — the admin route only revokes, expires, extends.
   guestAccessApproved: 'no guest-access approval endpoint',
   // Community broadcasts: written, but nobody decided who receives them.

@@ -11,9 +11,10 @@ import EmptyState from "@/components/ui/EmptyState";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { MessageCircle, Star } from "lucide-react";
+import { MessageCircle, Star, Users } from "lucide-react";
 import { formatTeeTime, cn, bookingToLocalDate } from "@/lib/utils";
 import { createClient } from "@/lib/supabase";
+import { isGuestOnly } from "@/lib/ghl/tags";
 import BookingSurveySheet, {
   type SurveyTarget,
 } from "@/components/surveys/BookingSurveySheet";
@@ -33,9 +34,17 @@ import VenueDayDetailSheet, {
 import type { CalendarPlayer } from "@/lib/bookings/players";
 import type { VenueHost } from "@/lib/bookings/venue-hosts";
 import { isSurveyDue, SURVEYABLE_BOOKING_STATUSES } from "@/lib/surveys/due";
-import { bookingAmountDue } from "@/lib/bookings/price";
-import { allowsNonMemberGuests } from "@/lib/bookings/guest-policy";
+import { bookingAmountDue, formatRoundPrice } from "@/lib/bookings/price";
+import {
+  allowsNonMemberGuests,
+  maxNonMemberGuests,
+  nonMemberGuestLimitMessage,
+  withinNonMemberGuestLimit,
+} from "@/lib/bookings/guest-policy";
 import WhatHappensNext from "@/components/booking/WhatHappensNext";
+import CancellationPolicy from "@/components/payments/CancellationPolicy";
+import { useCancellationPolicyOn } from "@/components/providers/CancellationPolicyProvider";
+import { seatCancellationQuote, seatUnderPolicy } from "@/lib/cancellation/policy";
 import {
   PAID_BY_OPTIONS,
   inviteExpiresAt,
@@ -55,6 +64,8 @@ import {
 } from "@/lib/bookings/payment-options";
 import CreditCouponModal from "@/components/credits/CreditCouponModal";
 import { useCreditWallet } from "@/hooks/useCreditWallet";
+import { useRecommendations } from "@/hooks/useRecommendations";
+import SuggestedPlayerPicker from "@/components/matching/SuggestedPlayerPicker";
 import {
   format,
   differenceInHours,
@@ -66,11 +77,23 @@ import type {
   AdditionalPlayer,
   MemberWithProfile,
   Course,
+  CancellationFeeOutcome,
 } from "@/types";
 import { AVIARA_TIMEZONE, MY_BOOKINGS_TAB } from "@/lib/constants";
 import { validateEmail } from "@/lib/validation";
 
-type PlayerKind = "member" | "non_member";
+// "suggested" is a member too — one the LinkUp team recommended, picked from
+// a short list instead of by name. Everything downstream treats it as a member.
+type PlayerKind = "member" | "non_member" | "suggested";
+
+/** The tabs a player row offers: Member always; the others only where they apply. */
+function playerKindOptions(allowNonMembers: boolean, hasSuggestions: boolean): [PlayerKind, string][] {
+  return [
+    ["member", "Member"],
+    ...(allowNonMembers ? [["non_member", "Non-member"] as [PlayerKind, string]] : []),
+    ...(hasSuggestions ? [["suggested", "Suggested"] as [PlayerKind, string]] : []),
+  ];
+}
 
 // A phone number is required for non-member invites; keep the check lenient
 // (digits/format vary) but reject obviously-too-short values.
@@ -428,6 +451,7 @@ export default function BookPage() {
         bookerEmail={user?.email ?? ""}
         eventName={selectedEvent?.name ?? null}
         allowNonMembers={allowsNonMemberGuests(selectedEvent)}
+        maxNonMembers={maxNonMemberGuests(selectedEvent)}
         // Same rule the row's amount_charged is written with, so the price
         // quoted here and the one on the success screen a tap later agree.
         pricePerPlayer={bookingAmountDue({
@@ -959,6 +983,7 @@ function ConfirmScreen({
   eventName,
   pricePerPlayer,
   allowNonMembers,
+  maxNonMembers,
 }: {
   slot: GHLBookingSlot;
   date: string;
@@ -973,8 +998,12 @@ function ConfirmScreen({
   pricePerPlayer: number;
   /** The venue takes non-member guests — see @/lib/bookings/guest-policy. */
   allowNonMembers: boolean;
+  /** How many of them one booking may bring here. */
+  maxNonMembers: number;
 }) {
   const maxAdditional = Math.max(0, (slot.spotsOpen ?? 1) - 1);
+  // Whether a late cancellation is invoiced, so the policy is stated here.
+  const policyOn = useCancellationPolicyOn();
   const [collapsed, setCollapsed] = useState<boolean[]>([]);
   const [playerSelections, setPlayerSelections] = useState<
     Array<MemberWithProfile | null>
@@ -986,6 +1015,8 @@ function ConfirmScreen({
   // until the booker picks, and submit stays disabled until every row has one.
   const [paidBys, setPaidBys] = useState<Array<PaidBy | null>>([]);
   const [members, setMembers] = useState<MemberWithProfile[]>([]);
+  const { recommendations } = useRecommendations();
+  const kindOptions = playerKindOptions(allowNonMembers, recommendations.length > 0);
   // Member ids flagged as having a payment due on an existing booking. The FIFO
   // rule bars a booker from adding such a member to a group round, so a flagged
   // selection blocks submit until they're removed. Checked on selection via
@@ -1175,6 +1206,11 @@ function ConfirmScreen({
 
   // Ids already chosen (to exclude from autocomplete)
   const selectedMemberIds = playerSelections.flatMap((s) => (s ? [s.id] : []));
+
+  // As many non-members as the venue takes per booking — once that many rows
+  // are, the rest can only be members. The server enforces it too.
+  const nonMemberCount = playerKinds.filter((k) => k === "non_member").length;
+  const nonMemberLimitReached = !withinNonMemberGuestLimit(nonMemberCount, 1, maxNonMembers);
 
   return (
     <div>
@@ -1465,28 +1501,30 @@ function ConfirmScreen({
                         </>
                       ) : (
                         <div className="pt-3 space-y-3">
-                          {/* Member / Non-member segmented toggle — only where
-                              the venue takes non-member guests. */}
-                          {allowNonMembers && (
+                          {/* Member / Non-member / Suggested toggle — Non-member
+                              only where the venue takes non-member guests,
+                              Suggested only when the LinkUp team has
+                              recommended someone. */}
+                          {kindOptions.length > 1 && (
                           <div
                             className="flex gap-1 p-1 rounded-xl"
                             style={{ background: "rgba(0,38,105,0.05)" }}
                           >
-                            {(
-                              [
-                                ["member", "Member"],
-                                ["non_member", "Non-member"],
-                              ] as [PlayerKind, string][]
-                            ).map(([k, label]) => {
+                            {kindOptions.map(([k, label]) => {
                               const active = kind === k;
+                              const blocked =
+                                k === "non_member" &&
+                                !active &&
+                                nonMemberLimitReached;
                               return (
                                 <button
                                   key={k}
                                   type="button"
+                                  disabled={blocked}
                                   onClick={() => {
                                     if (kind !== k) setPlayerKind(i, k);
                                   }}
-                                  className="flex-1 py-2 text-xs font-semibold rounded-lg transition-all"
+                                  className="flex-1 py-2 text-xs font-semibold rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                                   style={
                                     active
                                       ? {
@@ -1504,8 +1542,24 @@ function ConfirmScreen({
                             })}
                           </div>
                           )}
+                          {allowNonMembers &&
+                            kind !== "non_member" &&
+                            nonMemberLimitReached && (
+                              <p
+                                className="text-[11px] leading-snug"
+                                style={{ color: "rgba(0,38,105,0.5)" }}
+                              >
+                                {nonMemberGuestLimitMessage(maxNonMembers)}
+                              </p>
+                            )}
 
-                          {kind === "member" ? (
+                          {kind === "suggested" ? (
+                            <SuggestedPlayerPicker
+                              members={members}
+                              excludeIds={selectedMemberIds}
+                              onSelect={(m) => selectMember(i, m)}
+                            />
+                          ) : kind === "member" ? (
                             <MemberAutocomplete
                               members={members}
                               excludeIds={selectedMemberIds}
@@ -1651,6 +1705,17 @@ function ConfirmScreen({
             )}
           </div>
 
+          {/* Cancellation policy */}
+          {policyOn && (
+            <div className="px-1 space-y-3">
+              <p className="section-label">Cancellation policy</p>
+              <CancellationPolicy price={pricePerPlayer} />
+              <p className="text-xs" style={{ color: "rgba(0,38,105,0.4)" }}>
+                Per player, invoiced to whoever cancels the spot.
+              </p>
+            </div>
+          )}
+
           {/* What happens next */}
           <WhatHappensNext />
 
@@ -1685,6 +1750,7 @@ function ConfirmScreen({
             style={{ color: "rgba(0,38,105,0.28)" }}
           >
             No payment charged now.
+            {policyOn && " If you cancel late, we'll email you an invoice for the fee."}
           </p>
         </div>
       </form>
@@ -2323,6 +2389,10 @@ function BookingStatusBadge({ status }: { status: string }) {
 // Confirms a seat is being given up, then removes it — the row from LinkUp and
 // its appointment from GHL (DELETE /api/bookings/[id]). There is nothing to
 // fill in and no form to send the member off to: the answer is yes or no.
+//
+// Inside the cancellation window it says what the answer costs before it's
+// given, and afterwards whether the fee went through — the only moment the
+// member is looking at it. A cancel that cost nothing closes as it always did.
 function CancelModal({
   target,
   onDismiss,
@@ -2339,11 +2409,18 @@ function CancelModal({
   const [error, setError] = useState("");
   // Held through the closing animation, after the parent has cleared target.
   const [shown, setShown] = useState<CancelTarget | null>(target);
+  // What the cancel cost, once it's happened — the modal stays up to say so.
+  const [outcome, setOutcome] = useState<CancellationFeeOutcome | null>(null);
+  const policyOn = useCancellationPolicyOn();
+  const fee = policyOn && shown ? shown.fee : { amount: 0, percent: 0 };
+  const policyPrice =
+    policyOn && shown ? shown.cancellationPrice : null;
 
   useEffect(() => {
     if (open) {
       setShown(target);
       setError("");
+      setOutcome(null);
       setMounted(true);
       const ids: number[] = [];
       ids[0] = requestAnimationFrame(() => {
@@ -2365,12 +2442,13 @@ function CancelModal({
       const res = await fetch(`/api/bookings/${shown.bookingId}`, {
         method: "DELETE",
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
         setError(data.error ?? "Couldn't cancel this booking. Try again.");
         return;
       }
-      onCancelled();
+      if (data.fee) setOutcome(data.fee as CancellationFeeOutcome);
+      else onCancelled();
     } catch {
       setError("Network error. Check your connection and try again.");
     } finally {
@@ -2394,7 +2472,7 @@ function CancelModal({
           transition: "opacity 200ms ease-out",
           willChange: "opacity",
         }}
-        onClick={submitting ? undefined : onDismiss}
+        onClick={submitting ? undefined : outcome ? onCancelled : onDismiss}
       />
       <div
         role="alertdialog"
@@ -2412,71 +2490,174 @@ function CancelModal({
           willChange: "transform",
         }}
       >
-        <div>
-          <p
-            id="cancel-booking-title"
-            className="font-sans font-black text-lg"
-            style={{ color: "var(--color-green-900)" }}
-          >
-            {shown.title}
-          </p>
-          <p className="text-sm mt-1.5" style={{ color: "rgba(0,38,105,0.6)" }}>
-            {shown.isYou
-              ? "Your spot on this round will be cancelled."
-              : `${shown.playerName}'s spot on this round will be cancelled.`}{" "}
-            This can&apos;t be undone.
-          </p>
-        </div>
+        {outcome ? (
+          <CancelFeeOutcome outcome={outcome} onDone={onCancelled} />
+        ) : (
+          <>
+            <div>
+              <p
+                id="cancel-booking-title"
+                className="font-sans font-black text-lg"
+                style={{ color: "var(--color-green-900)" }}
+              >
+                {shown.title}
+              </p>
+              <p className="text-sm mt-1.5" style={{ color: "rgba(0,38,105,0.6)" }}>
+                {shown.isYou
+                  ? "Your spot on this round will be cancelled."
+                  : `${shown.playerName}'s spot on this round will be cancelled.`}{" "}
+                This can&apos;t be undone.
+              </p>
+            </div>
 
-        {/* The round being given up */}
-        <div
-          className="rounded-2xl px-4 py-3"
-          style={{
-            background: "rgba(0,38,105,0.03)",
-            border: "1px solid rgba(0,38,105,0.08)",
-          }}
-        >
-          <p
-            className="text-[10px] font-semibold uppercase tracking-wider truncate"
-            style={{ color: "rgba(0,38,105,0.35)" }}
-          >
-            {shown.courseName}
-          </p>
-          <p
-            className="text-sm font-semibold mt-0.5"
-            style={{ color: "var(--color-green-900)" }}
-          >
-            {shown.dateLabel}
-            <span className="font-normal" style={{ color: "rgba(0,38,105,0.45)" }}>
-              {" "}· {shown.timeLabel}
-            </span>
-          </p>
-        </div>
+            {/* The round being given up */}
+            <div
+              className="rounded-2xl px-4 py-3"
+              style={{
+                background: "rgba(0,38,105,0.03)",
+                border: "1px solid rgba(0,38,105,0.08)",
+              }}
+            >
+              <p
+                className="text-[10px] font-semibold uppercase tracking-wider truncate"
+                style={{ color: "rgba(0,38,105,0.35)" }}
+              >
+                {shown.courseName}
+              </p>
+              <p
+                className="text-sm font-semibold mt-0.5"
+                style={{ color: "var(--color-green-900)" }}
+              >
+                {shown.dateLabel}
+                <span className="font-normal" style={{ color: "rgba(0,38,105,0.45)" }}>
+                  {" "}· {shown.timeLabel}
+                </span>
+              </p>
+            </div>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+            {/* The policy, at this seat's price — only where it covers the seat */}
+            {policyPrice !== null && (
+              <div className="space-y-2">
+                <p className="section-label">Cancellation policy</p>
+                <CancellationPolicy price={policyPrice} />
+                {fee.amount === 0 && (
+                  <p className="text-xs font-semibold" style={{ color: "var(--color-green-700)" }}>
+                    Cancelling now is free.
+                  </p>
+                )}
+              </div>
+            )}
 
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={onDismiss}
-            disabled={submitting}
-            className="flex-1 py-3.5 rounded-2xl text-sm font-semibold disabled:opacity-50"
-            style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={confirm}
-            disabled={submitting}
-            className="flex-1 py-3.5 rounded-2xl text-sm font-semibold disabled:opacity-60"
-            style={{ background: "rgba(220,38,38,0.9)", color: "white" }}
-          >
-            {submitting ? "Cancelling…" : "Confirm"}
-          </button>
-        </div>
+            {fee.amount > 0 && (
+              <div
+                className="rounded-2xl px-4 py-3 space-y-1"
+                style={{
+                  background: "rgba(220,38,38,0.05)",
+                  border: "1px solid rgba(220,38,38,0.15)",
+                }}
+              >
+                <p className="text-sm font-semibold" style={{ color: "rgb(185,28,28)" }}>
+                  Cancelling now costs {formatRoundPrice(fee.amount)}
+                </p>
+                <p className="text-xs leading-relaxed" style={{ color: "rgba(0,38,105,0.6)" }}>
+                  {fee.percent === 100
+                    ? "The round is today, so the full price is charged."
+                    : `The round is tomorrow, so ${fee.percent}% of its price is charged.`}{" "}
+                  We&apos;ll email you an invoice for it.
+                </p>
+              </div>
+            )}
+
+            {error && <p className="text-sm text-red-600">{error}</p>}
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onDismiss}
+                disabled={submitting}
+                className="flex-1 py-3.5 rounded-2xl text-sm font-semibold disabled:opacity-50"
+                style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirm}
+                disabled={submitting}
+                className="flex-1 py-3.5 rounded-2xl text-sm font-semibold disabled:opacity-60"
+                style={{ background: "rgba(220,38,38,0.9)", color: "white" }}
+              >
+                {submitting
+                  ? "Cancelling…"
+                  : fee.amount > 0
+                    ? `Confirm · ${formatRoundPrice(fee.amount)}`
+                    : "Confirm"}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+// What a cancellation that carried a fee came to, shown in the cancel modal once
+// the seat is gone: the fee has been invoiced, and the invoice emailed. Pay
+// invoice opens Stripe's invoice page, or Payments where it couldn't be issued.
+function CancelFeeOutcome({
+  outcome,
+  onDone,
+}: {
+  outcome: CancellationFeeOutcome;
+  onDone: () => void;
+}) {
+  const amount = formatRoundPrice(outcome.amount);
+  return (
+    <>
+      <div>
+        <p
+          id="cancel-booking-title"
+          className="font-sans font-black text-lg"
+          style={{ color: "var(--color-green-900)" }}
+        >
+          Booking cancelled
+        </p>
+        <p className="text-sm mt-1.5" style={{ color: "rgba(0,38,105,0.6)" }}>
+          {outcome.invoiceUrl
+            ? `We've emailed you an invoice for the ${amount} cancellation fee. You can also pay it now.`
+            : `There's a ${amount} cancellation fee. You can pay the invoice from Payments.`}
+        </p>
+      </div>
+      <div className="flex gap-2">
+        {outcome.invoiceUrl ? (
+          <a
+            href={outcome.invoiceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 py-3.5 rounded-2xl text-sm font-semibold text-center"
+            style={{ background: "var(--color-green-900)", color: "white" }}
+          >
+            Pay invoice
+          </a>
+        ) : (
+          <Link
+            href="/more/payments"
+            className="flex-1 py-3.5 rounded-2xl text-sm font-semibold text-center"
+            style={{ background: "var(--color-green-900)", color: "white" }}
+          >
+            Go to Payments
+          </Link>
+        )}
+        <button
+          type="button"
+          onClick={onDone}
+          className="flex-1 py-3.5 rounded-2xl text-sm font-semibold"
+          style={{ background: "rgba(0,38,105,0.06)", color: "var(--color-green-900)" }}
+        >
+          Done
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -2727,6 +2908,42 @@ function groupBookings(bookings: Booking[]): BookingGroup[] {
   return groups;
 }
 
+// Who was on a past or cancelled round, named the way the upcoming card names
+// them: "You" first, then the booker, then everyone else. A round that went
+// ahead lists only the seats still held when it did; a cancelled one lists
+// everyone, since every seat on it went the same way.
+//
+// `memberId` is whose profile the name opens: null for you, as in the
+// who's-playing sheet, and for a guest no account was ever linked to.
+type RosterEntry = { id: string; name: string; memberId: string | null };
+
+function roundRoster(
+  group: BookingGroup,
+  userId: string | undefined,
+): RosterEntry[] {
+  const keepCancelled = group.primary.status === "cancelled";
+  const rows = [group.primary, ...group.players].filter(
+    (b) => keepCancelled || b.status !== "cancelled",
+  );
+  const others: RosterEntry[] = [];
+  let you: RosterEntry | null = null;
+  for (const b of rows) {
+    // The booker's own row names nobody; every other row names its player.
+    const bookersOwn = !b.guest_name && !b.player_member_id;
+    const memberId = bookersOwn ? b.member_id : b.player_member_id;
+    if (memberId === userId) {
+      you = { id: b.id, name: "You", memberId: null };
+    } else {
+      others.push({
+        id: b.id,
+        name: bookersOwn ? (b.booker_name ?? "Booker") : (b.guest_name ?? "Guest"),
+        memberId,
+      });
+    }
+  }
+  return you ? [you, ...others] : others;
+}
+
 interface CancelTarget {
   bookingId: string;
   title: string;
@@ -2736,6 +2953,13 @@ interface CancelTarget {
   courseName: string;
   dateLabel: string;
   timeLabel: string;
+  /**
+   * What giving the seat up now costs whoever cancels it — the same rule the
+   * route charges by (seatCancellationQuote). amount 0 = free.
+   */
+  fee: { amount: number; percent: number };
+  /** The seat's price, for stating the policy — null when the policy doesn't cover it. */
+  cancellationPrice: number | null;
 }
 
 function MyBookingsTab({
@@ -2757,7 +2981,11 @@ function MyBookingsTab({
   // credit for the payment banner, and two copies would mean two requests.
   wallet?: ReturnType<typeof useCreditWallet>;
 }) {
-  const { user } = useProfile();
+  const { user, profile } = useProfile();
+  // A guest can't open member profiles (see @/lib/auth/guest-paths), so the
+  // names on their past rounds stay plain. Admins are exempt, as everywhere.
+  const canOpenProfiles =
+    !!profile && (profile.is_admin || !isGuestOnly(profile.ghl_tags ?? []));
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
   const [editTarget, setEditTarget] = useState<EditGuestTarget | null>(null);
   const [addTarget, setAddTarget] = useState<AddPlayerTarget | null>(null);
@@ -2901,6 +3129,7 @@ function MyBookingsTab({
               const displayTime = formatTeeTime(group.primary.tee_time);
               const courseName = group.primary.course?.name ?? "Golf course";
               const isCancelled = group.primary.status === "cancelled";
+              const roster = roundRoster(group, user?.id);
               const rating = ratings.get(group.primary.id);
               // Rateable once the round has actually finished — a cancelled or
               // never-confirmed booking was never a round to rate. The server
@@ -2913,10 +3142,14 @@ function MyBookingsTab({
                 ) &&
                 isSurveyDue(group.primary, group.primary.course, now);
 
+              // `relative` holds the sr-only "Players:" label inside the row.
+              // Without a positioned ancestor it's placed against the page
+              // rather than the scrolling <main>, and the page grows a second
+              // scrollbar down to wherever the oldest row sits.
               return (
                 <div
                   key={group.primary.id}
-                  className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl"
+                  className="relative flex items-center justify-between gap-3 px-4 py-3 rounded-xl"
                   style={{
                     background: "rgba(0,38,105,0.025)",
                     opacity: isCancelled ? 0.6 : 0.75,
@@ -2935,6 +3168,39 @@ function MyBookingsTab({
                     >
                       {format(displayDate, "EEE, MMM d, yyyy")} · {displayTime}
                     </p>
+                    {/* Who was on it — always shown, like the upcoming card.
+                        Each name opens that member's profile. */}
+                    {roster.length > 0 && (
+                      <p
+                        className="text-xs mt-1 flex items-start gap-1.5"
+                        style={{ color: "rgba(0,38,105,0.6)" }}
+                      >
+                        <Users
+                          className="w-3 h-3 mt-0.5 flex-shrink-0"
+                          strokeWidth={2}
+                          aria-hidden
+                        />
+                        <span className="sr-only">Players: </span>
+                        <span className="capitalize break-words min-w-0">
+                          {roster.map((p, idx) => (
+                            <span key={p.id}>
+                              {idx > 0 && ", "}
+                              {p.memberId && canOpenProfiles ? (
+                                <Link
+                                  href={`/members/${p.memberId}`}
+                                  className="font-medium underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                                  style={{ color: "var(--color-green-700)" }}
+                                >
+                                  {p.name}
+                                </Link>
+                              ) : (
+                                p.name
+                              )}
+                            </span>
+                          ))}
+                        </span>
+                      </p>
+                    )}
                   </div>
                   {isCancelled ? (
                     <BookingStatusBadge status="cancelled" />
@@ -3021,6 +3287,24 @@ function BookingCard({
 
   const iAmBooker = group.primary.member_id === userId;
   const activePlayers = group.players.filter((p) => p.status !== "cancelled");
+  // What cancelling one of these seats costs right now, by the rule DELETE
+  // /api/bookings/[id] charges with, and the price the dialog states the
+  // policy at.
+  const cancelQuoteFor = (
+    rowId: string,
+  ): Pick<CancelTarget, "fee" | "cancellationPrice"> => {
+    const seat = [group.primary, ...group.players].find((b) => b.id === rowId);
+    if (!seat) return { fee: { amount: 0, percent: 0 }, cancellationPrice: null };
+    const { amount, percent, price } = seatCancellationQuote(
+      seat,
+      group.primary.course,
+      AVIARA_TIMEZONE,
+    );
+    return {
+      fee: { amount, percent },
+      cancellationPrice: seatUnderPolicy(seat) ? price : null,
+    };
+  };
   // For invited members the group now includes all sibling rows, so total = 1 (primary) + all players
   const totalPlayers = 1 + activePlayers.length;
   // localDt is a UTC-correct timestamp used ONLY for logic (hours-until, cancel modal).
@@ -3168,6 +3452,12 @@ function BookingCard({
       dateLabel: format(bookingDate, "EEE, MMM d"),
       timeLabel: bookingTime,
       allowNonMembers: allowsNonMemberGuests(group.primary.course),
+      maxNonMembers: maxNonMemberGuests(group.primary.course),
+      nonMemberLimitReached: !withinNonMemberGuestLimit(
+        activePlayers.filter((p) => p.non_member_guest).length,
+        1,
+        maxNonMemberGuests(group.primary.course),
+      ),
       excludeMemberIds: [
         group.primary.member_id,
         ...activePlayers
@@ -3445,6 +3735,7 @@ function BookingCard({
                           courseName,
                           dateLabel: format(bookingDate, "EEE, MMM d"),
                           timeLabel: bookingTime,
+                          ...cancelQuoteFor(row.id),
                         })
                       }
                       className="text-[11px] font-medium px-2 py-1 rounded-lg flex-shrink-0"
@@ -3499,6 +3790,10 @@ interface AddPlayerTarget {
   excludeMemberIds: string[];
   /** The venue takes non-member guests — see @/lib/bookings/guest-policy. */
   allowNonMembers: boolean;
+  /** How many of them one booking may bring here. */
+  maxNonMembers: number;
+  /** The booking already has as many non-member guests as the venue takes. */
+  nonMemberLimitReached: boolean;
 }
 
 type AddPlayerForm = {
@@ -3523,6 +3818,7 @@ function AddPlayerModal({
   const [members, setMembers] = useState<MemberWithProfile[]>([]);
   const [kind, setKind] = useState<PlayerKind>("member");
   const [selected, setSelected] = useState<MemberWithProfile | null>(null);
+  const { recommendations } = useRecommendations();
   // Selecting a member isn't a react-hook-form field, so its "required" error
   // is tracked separately; `submitError` holds server/network failures.
   const [memberError, setMemberError] = useState("");
@@ -3608,6 +3904,8 @@ function AddPlayerModal({
   };
   const errFieldStyle = { ...fieldStyle, borderColor: "#dc2626" };
 
+  const modalKindOptions = playerKindOptions(target.allowNonMembers, recommendations.length > 0);
+
   function switchKind(k: PlayerKind) {
     if (k === kind) return;
     setKind(k);
@@ -3624,7 +3922,7 @@ function AddPlayerModal({
       return;
     }
     let player: AdditionalPlayer;
-    if (kind === "member") {
+    if (kind !== "non_member") {
       if (!selected) {
         setMemberError("Select a member to add.");
         return;
@@ -3740,26 +4038,23 @@ function AddPlayerModal({
           noValidate
           className="space-y-4"
         >
-          {/* Member / Non-member toggle — only where the venue takes
-              non-member guests. */}
-          {target.allowNonMembers && (
+          {/* Member / Non-member / Suggested toggle — Non-member only where
+              the venue takes non-member guests, Suggested only when the
+              LinkUp team has recommended someone. */}
+          {modalKindOptions.length > 1 && (
           <div
             className="flex gap-1 p-1 rounded-xl"
             style={{ background: "rgba(0,38,105,0.05)" }}
           >
-            {(
-              [
-                ["member", "Member"],
-                ["non_member", "Non-member"],
-              ] as [PlayerKind, string][]
-            ).map(([k, label]) => {
+            {modalKindOptions.map(([k, label]) => {
               const active = kind === k;
               return (
                 <button
                   key={k}
                   type="button"
+                  disabled={k === "non_member" && target.nonMemberLimitReached}
                   onClick={() => switchKind(k)}
-                  className="flex-1 py-2 text-xs font-semibold rounded-lg transition-all"
+                  className="flex-1 py-2 text-xs font-semibold rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   style={
                     active
                       ? {
@@ -3776,8 +4071,16 @@ function AddPlayerModal({
             })}
           </div>
           )}
+          {target.allowNonMembers && target.nonMemberLimitReached && (
+            <p
+              className="text-[11px] leading-snug"
+              style={{ color: "rgba(0,38,105,0.5)" }}
+            >
+              {nonMemberGuestLimitMessage(target.maxNonMembers)}
+            </p>
+          )}
 
-          {kind === "member" ? (
+          {kind !== "non_member" ? (
             selected ? (
               <div
                 className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
@@ -3811,6 +4114,16 @@ function AddPlayerModal({
               </div>
             ) : (
               <div>
+                {kind === "suggested" ? (
+                  <SuggestedPlayerPicker
+                    members={members}
+                    excludeIds={target.excludeMemberIds}
+                    onSelect={(m) => {
+                      setSelected(m);
+                      setMemberError("");
+                    }}
+                  />
+                ) : (
                 <MemberAutocomplete
                   members={members}
                   excludeIds={target.excludeMemberIds}
@@ -3819,6 +4132,7 @@ function AddPlayerModal({
                     setMemberError("");
                   }}
                 />
+                )}
                 {memberError && (
                   <p className="text-xs mt-1 text-red-600">{memberError}</p>
                 )}

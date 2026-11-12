@@ -16,6 +16,7 @@ import {
   requiresPaymentUrl,
   type PaymentOption,
 } from '@/lib/bookings/payment-options'
+import { maxNonMemberGuests } from '@/lib/bookings/guest-policy'
 import { daysUntil } from '@/lib/bookings/lead-time'
 import { MAX_PINNED_COURSES } from '@/lib/constants'
 import type { Course, CourseApprovalStatus } from '@/types'
@@ -1177,6 +1178,7 @@ type CourseFormValues = {
   required_tags: string[]
   custom_slots_enabled: boolean
   allow_non_member_guests: boolean
+  max_non_member_guests: number
 }
 
 function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onManageSlots }: {
@@ -1219,12 +1221,14 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
       custom_slots_enabled: editingCourse?.custom_slots_enabled ?? false,
       // Off unless an admin turns it on — see src/lib/bookings/guest-policy.ts.
       allow_non_member_guests: editingCourse?.allow_non_member_guests ?? false,
+      max_non_member_guests: maxNonMemberGuests(editingCourse),
     },
   })
 
   const watchedName = watch('name')
   const watchedCalendarId = watch('ghl_calendar_id')
   const watchCustomSlots = watch('custom_slots_enabled')
+  const watchAllowNonMembers = watch('allow_non_member_guests')
   // Whether the payment link is required — it is only the Pay on App checkout
   // that needs one. Watched rather than read at submit so the label, the hint
   // and the rule all change the moment the option is ticked.
@@ -1277,6 +1281,11 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
           ...data,
           cost_per_player: data.cost_per_player === '' ? null : Number(data.cost_per_player),
           max_players_per_day: data.max_players_per_day === '' ? undefined : Number(data.max_players_per_day),
+          // Hidden while non-members are off, when an emptied field isn't an
+          // answer: left out, so the venue keeps (or starts on) its number.
+          max_non_member_guests: Number.isInteger(data.max_non_member_guests)
+            ? data.max_non_member_guests
+            : undefined,
           createCalendar: false,
         }),
       })
@@ -1705,6 +1714,39 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
                 </span>
               </span>
             </label>
+
+            {/* How many per booking — only while they're allowed at all. Kept
+                when the switch goes off, for when it comes back on. */}
+            {watchAllowNonMembers && (
+              <div className="mt-2 rounded-xl border border-gray-100 px-4 py-3">
+                <label htmlFor="course-max-non-member-guests" className="block text-sm font-medium text-gray-700">
+                  Non-member guests per booking
+                </label>
+                <div className="mt-2 w-32">
+                  <input
+                    id="course-max-non-member-guests"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputMode="numeric"
+                    className={field(!!errors.max_non_member_guests)}
+                    placeholder="1"
+                    {...register('max_non_member_guests', {
+                      valueAsNumber: true,
+                      // Asked only while the field is showing.
+                      validate: v =>
+                        !getValues('allow_non_member_guests') ||
+                        (Number.isInteger(v) && v >= 1) ||
+                        'Must be a whole number, 1 or more',
+                    })}
+                  />
+                </div>
+                {errors.max_non_member_guests && <p className={errMsg}>{errors.max_non_member_guests.message}</p>}
+                <p className={infoText}>
+                  The most one booking can bring. Everyone else added has to be a LinkUp member.
+                </p>
+              </div>
+            )}
 
             {/* Custom (admin-curated) tee times. When on, members see only the
                 slots the admin curates per date (in the "Manage dates & slots"

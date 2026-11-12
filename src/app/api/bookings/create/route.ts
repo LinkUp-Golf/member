@@ -34,7 +34,13 @@ import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPayme
 import { buildCustomSlots, loadForcedOpenDays, NON_HOLDING_STATUSES } from '@/lib/bookings/availability'
 import { isInsideJoinOnlyWindow, joinOnlyWindowMessage, openDayKey } from '@/lib/bookings/lead-time'
 import { bookingAmountDue } from '@/lib/bookings/price'
-import { allowsNonMemberGuests, NON_MEMBER_GUESTS_DISABLED_MESSAGE } from '@/lib/bookings/guest-policy'
+import {
+  allowsNonMemberGuests,
+  maxNonMemberGuests,
+  NON_MEMBER_GUESTS_DISABLED_MESSAGE,
+  nonMemberGuestLimitMessage,
+  withinNonMemberGuestLimit,
+} from '@/lib/bookings/guest-policy'
 import { isPaidBy, PAID_BY_REQUIRED_MESSAGE } from '@/lib/bookings/invitations'
 import {
   PAY_AT_CLUB,
@@ -318,7 +324,7 @@ export async function POST(request: NextRequest) {
 
   const { data: course } = await adminSupabase
     .from('courses')
-    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, cost_per_player, allow_non_member_guests')
+    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, cost_per_player, allow_non_member_guests, max_non_member_guests')
     .eq('id', courseId || resolvedCourseId)
     .eq('approval_status', 'active')
     .single()
@@ -340,6 +346,12 @@ export async function POST(request: NextRequest) {
   // post — refused before any GHL work.
   if (nonMemberPlayers.length > 0 && !allowsNonMemberGuests(course)) {
     return NextResponse.json({ error: NON_MEMBER_GUESTS_DISABLED_MESSAGE }, { status: 400 })
+  }
+
+  // And no more of them than the venue takes per booking — see guest-policy.
+  const nonMemberLimit = maxNonMemberGuests(course)
+  if (!withinNonMemberGuestLimit(0, nonMemberPlayers.length, nonMemberLimit)) {
+    return NextResponse.json({ error: nonMemberGuestLimitMessage(nonMemberLimit) }, { status: 400 })
   }
 
   // The appointment's length is whatever this course's GHL calendar says a round
@@ -721,6 +733,9 @@ export async function POST(request: NextRequest) {
   }
   const created = insertedBookings as InsertedBooking[]
   console.log('[booking/create] Reserved bookings:', created.map(b => b.id))
+  // Read before provisioning links each guest to an account, after which their
+  // row looks like a member's — the client needs it to stop offering a second.
+  const nonMemberSeatIds = new Set(created.filter(b => b.guest_name && !b.player_member_id).map(b => b.id))
 
   // Step 3: Now that the seats are reserved, create GHL appointments and
   // backfill ghl_booking_id. The primary booker's appointment MUST succeed —
@@ -869,7 +884,11 @@ export async function POST(request: NextRequest) {
   // Echo the resolved course onto each row so the client's optimistic prepend
   // renders the real course name (the RPC returns raw rows with no join).
   const bookingsWithCourse = Array.isArray(insertedBookings) && courseForResponse
-    ? insertedBookings.map((b: Record<string, unknown>) => ({ ...b, course: courseForResponse }))
+    ? insertedBookings.map((b: Record<string, unknown>) => ({
+        ...b,
+        course: courseForResponse,
+        non_member_guest: nonMemberSeatIds.has(b.id as string),
+      }))
     : insertedBookings
 
   return NextResponse.json({

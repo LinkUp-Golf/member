@@ -43,8 +43,7 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   }
   const bookingId = body.booking_id as string
 
-  // The rating is the one required answer — a comment is optional, including
-  // for a member who didn't make it.
+  // The rating is the one required answer — a comment is optional.
   const rating = body.rating
   if (typeof rating !== 'number' || !Number.isInteger(rating) || rating < 1 || rating > 5) {
     return NextResponse.json({ error: 'Choose a rating from 1 to 5 stars.' }, { status: 400 })

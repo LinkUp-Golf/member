@@ -1,4 +1,4 @@
-import { Gift, Bell, Smartphone, FileText, Settings, BadgeDollarSign, ShieldCheck, Flag } from 'lucide-react'
+import { Gift, Bell, Smartphone, FileText, Settings, BadgeDollarSign, ShieldCheck, Flag, CreditCard, SlidersHorizontal } from 'lucide-react'
 import Icon, { type IconName } from '@/components/ui/Icon'
 import { FEATURES } from '@/lib/features'
 import type { MemberRoles } from '@/hooks/useMemberRoles'
@@ -65,11 +65,13 @@ export const MORE_ITEMS: MoreGroup[] = [
     group: 'My account',
     items: [
       { href: '/more/profile', label: 'My Profile', icon: svgIcon('members'), desc: 'Edit your details and golf life' },
+      { href: '/more/match-profile', label: 'Curated Introductions', icon: <SlidersHorizontal className="w-5 h-5" strokeWidth={1.9} />, desc: 'Introductions from the LinkUp team' },
       ...(FEATURES.FOCUS_LINKUPS ? [{ href: '/more/focus-linkups', label: 'Focus LinkUps', icon: svgIcon('focus-linkup'), desc: 'Manage your category subscriptions' }] : []),
       { href: '/more/referrals', label: 'Refer a Member', icon: svgIcon('new-member'), desc: 'Invite someone to the community' },
       PARTNER_APPLY_ITEM,
       HOST_APPLY_ITEM,
       { href: '/more/guest-access', label: 'Guest Access', icon: svgIcon('visiting-member'), desc: 'Request access to another city' },
+      { href: '/more/payments', label: 'Payments', icon: <CreditCard className="w-5 h-5" strokeWidth={1.9} />, desc: 'Cancellation fees and invoices' },
     ],
   },
   {
