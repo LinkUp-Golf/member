@@ -17,6 +17,18 @@ Each entry gives the date, who decided (**client** means the LinkUp Golf owner; 
 
 ## Curated Introductions (matching)
 
+- **2026-11-20 · client. Two steps.** "Describe Yourself" (your business, your golf, about you), then "Describe Your Ideal Match" (what you're looking for, who you'd like to meet, who you'd like to play with), with step indicators, Back and Continue, and Submit at the end.
+  - Default: "Describe any solutions, services or resources you seek" moved to step 2, since it says what the member wants. "Describe your offering" stays in step 1.
+  - Default: where the profile already says something, the survey starts from it. Industry, role (from a job title that says one role plainly, such as "CFO"), golf skill (from the handicap), offering and seeking are pre-selected, and the member can change them.
+- **2026-11-20 · client. No limit on objectives.** Members choose as many as they like.
+- **2026-11-20 · default. Which questions became multi-select.** The request named "Preferred Roles" and organization size "based on their preferences". The two preference questions (Preferred roles, Preferred company size) already took several answers, and still do. The member's own role and organization size are still one answer each. Making those multi-select would need new array columns and a database update, so it wasn't done without asking.
+- **2026-11-20 · client. Afternoons only.** Play times are Weekday afternoons and Weekend afternoons. Default: earlier answers (weekday early, midday or twilight; weekend morning) are read as the afternoon of the same kind of day, in code, so no stored answer was rewritten and old and new answers compare.
+- **2026-11-20 · client. "Other" on preferred industries, with a name.**
+  - Default: offered on the member's own industry too, so a named preference has something to match.
+  - Default: a named industry is stored as itself beside the listed ones (the columns already hold labels), so no column was added.
+  - Default: for ranking, it counts as met by the same words or a shared non-generic word.
+- **2026-11-20 · client. Golf skill wording.** "I'm an excellent golfer", "I'm a good golfer", "I'm a new golfer"; no hyphens and no handicap talk. Default: the preference reads "Excellent golfers", "Good golfers", "New golfers", and "Good golfers" still lets in excellent golfers, as it did when it read "Mid to low handicap golfers only". If the client wants it to mean good golfers only, that's a change to `SKILL_FITS`.
+- **2026-11-20 · default. The layout bug.** The walkthrough's layout issue wasn't described. The one found: the survey's hidden radio buttons were positioned against the page instead of their option, so they sat outside the app's scrolling area and stretched the page to about 5,000px on a phone. The page could be dragged past the app into blank space, and tapping an answer could make it jump. Each option now contains its radio.
 - **2026-11-04 · client. Admin-led, no AI.** An admin picks every introduction; the app only lists and ranks candidates. Asked whether AI would help, the answer given was: the rules are enough for now, and AI would only add something for the free-text "what you offer / seek" fit.
 - **2026-11-12 · client. Optional, switched on from More.** The survey had been mandatory, a full-screen gate. It's now "Curated Introductions" under More, with a switch. Off means out both ways (default): the member isn't introduced to anyone and isn't suggested to anyone.
 - **2026-11-12 · client. The wording is the client's.** Section titles, "Objectives", "Team Members", "Preferred industries", "Organization size", "Solopreneurs", "Golf Skill", "Tell us about yourself", "Preferred introductions", "Turn on Curated Introductions". Keep it exact.
@@ -24,8 +36,7 @@ Each entry gives the date, who decided (**client** means the LinkUp Golf owner; 
 - **2026-11-12 · client. "Business Owner / Founder" is a role, not an industry.** It's gone from the survey's industry list and is now "Founder / Owner / CEO" in a new role list. The database update moved existing picks across. The app-wide industry list on profiles is unchanged (default), so it may still need cleaning up.
 - **2026-11-12 · default. "Other" became a "Non-profit" industry.** This was the reading of the client's note "Preferred industries ['Other'] → Add non-profits".
 - **2026-11-12 · default. An optional "Your role" question was added**, so that "Preferred roles" has something to be checked against.
-- **2026-11-12 · default. Golf Skill keeps "…golfers only".** The client's options ("Excellent golfer - Low handicap golfers only") describe the member, so "only" reads oddly. They were kept verbatim and the oddity was flagged.
-- **2026-11-12 · default. Step 1 preferences rank; preferred introductions filter.** Preferred industries, roles and ideal company size only order the list. Gender, skill, attitude and the smoke / music / booze answers rule people out, checked both ways.
+- **2026-11-12 · default. "Who you'd like to meet" ranks; "who you'd like to play with" filters.** Preferred industries, roles and company size only order the list. Gender, skill, attitude and the smoke / music / booze answers rule people out, checked both ways.
 - **2026-11-04 · default.** Matching stays within the member's home club. Both sides are told about an introduction. A pair either side dismissed with Not now stays off the list for 90 days.
 - **Privacy, by design.** Gender, habits and preferences are readable only through the service role and shown only to admins, never in a note or a chip. A test enforces this.
 

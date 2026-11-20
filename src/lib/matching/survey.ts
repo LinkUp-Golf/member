@@ -7,14 +7,15 @@
 // them to other members and other members to them. Off (or never
 // answered) means neither. Pure, so the form can import it.
 //
-// Two kinds of answer live here:
-//   * About the member — their business, their golf, their gender
+// The form is two steps, and so are the answers:
+//   * Describe Yourself — their business, their golf, their gender
 //     and habits. Other members' preferences are checked against
 //     these.
-//   * Preferences — who the member would like to be introduced to
-//     (Step 1: objectives, industries, roles, company size; these
-//     rank) and who they would or would not like to play with
-//     (Preferred introductions; these filter — see ./rules.ts).
+//   * Describe Your Ideal Match — what they want from connections
+//     and who they would like to meet (objectives, industries, roles,
+//     company size; these rank), and who they would or would not like
+//     to play with (gender, skill, attitude, habits; these filter —
+//     see ./rules.ts).
 //
 // What they offer and seek is stored on member_profiles, where the
 // profile page already edits it; the survey pre-fills and saves it
@@ -26,13 +27,14 @@ export interface Option<V extends string = string> {
   label: string
 }
 
-// ---- Curated Introduction Preferences -----------------------
+// ---- Describe Your Ideal Match ------------------------------
 
 /**
- * What the member wants from connections. The stored values predate the
- * labels: "Mentors" is the member looking for a mentor (get_mentorship), and
- * "Mentees" the member looking for someone to mentor (give_mentorship) — so an
- * answer given under the old wording keeps its meaning.
+ * What the member wants from connections, as many as they like (the limit of
+ * three was lifted on 2026-11-20). The stored values predate the labels:
+ * "Mentors" is the member looking for a mentor (get_mentorship), and "Mentees"
+ * the member looking for someone to mentor (give_mentorship) — so an answer
+ * given under the old wording keeps its meaning.
  */
 export const MATCH_GOALS = [
   { value: 'new_clients',       label: 'New clients' },
@@ -46,12 +48,14 @@ export const MATCH_GOALS = [
   { value: 'just_golf',         label: 'Just golf' },
 ] as const satisfies readonly Option[]
 export type MatchGoal = (typeof MATCH_GOALS)[number]['value']
-export const MAX_GOALS = 3
 
 /**
  * The survey's industries: the app's list without "Business Owner / Founder"
- * (a role — see ROLES) and with "Non-profit" in place of "Other". Values are
- * the labels, as the app's industry list stores them.
+ * (a role — see ROLES) and with "Non-profit" in place of the bare "Other".
+ * Values are the labels, as the app's industry list stores them.
+ *
+ * Both industry questions also offer "Other", where the member names an
+ * industry in their own words (see OTHER_INDUSTRY below).
  */
 export const SURVEY_INDUSTRIES = [
   'Professional Services (Legal)',
@@ -71,6 +75,23 @@ export const SURVEY_INDUSTRIES = [
 export type SurveyIndustry = (typeof SURVEY_INDUSTRIES)[number]
 export const INDUSTRY_OPTIONS: readonly Option<SurveyIndustry>[] = SURVEY_INDUSTRIES.map(i => ({ value: i, label: i }))
 
+/**
+ * An industry the list doesn't have, in the member's own words. The form shows
+ * it as an "Other" chip with a text box; the app's shape keeps it apart from
+ * the listed industries (industry_other, meet_industry_other), and the stored
+ * row keeps it beside them as itself — the industry columns already store
+ * labels, so a named industry is one more label and needs no column of its
+ * own (toMatchRow / toMatchProfile).
+ */
+export const OTHER_INDUSTRY = { label: 'Other', maxLength: 60 } as const
+
+/**
+ * Labels that were once on the list and say nothing on their own now: the bare
+ * "Other", and "Business Owner / Founder", which is a role. Never read back as
+ * a named industry.
+ */
+const RETIRED_INDUSTRIES = ['other', 'business owner / founder']
+
 export const ROLES = [
   { value: 'founder',     label: 'Founder / Owner / CEO' },
   { value: 'finance',     label: 'Finance' },
@@ -84,7 +105,7 @@ export const ROLES = [
 ] as const satisfies readonly Option[]
 export type Role = (typeof ROLES)[number]['value']
 
-/** The company size a member would like to be introduced to. */
+/** The company sizes a member would like to be introduced to, as many as they like. */
 export const PREF_COMPANY_SIZES = [
   { value: '1_10',     label: '1-10' },
   { value: '11_50',    label: '11-50' },
@@ -95,7 +116,7 @@ export const PREF_COMPANY_SIZES = [
 ] as const satisfies readonly Option[]
 export type PrefCompanySize = (typeof PREF_COMPANY_SIZES)[number]['value']
 
-// ---- Describe your business ---------------------------------
+// ---- Describe Yourself: your business -----------------------
 
 export const COMPANY_SIZES = [
   { value: 'solo',     label: 'Solopreneurs' },
@@ -117,16 +138,58 @@ export const SIZE_BUCKET: Record<CompanySize, Exclude<PrefCompanySize, 'any'>> =
   '1000_up':  '1000_up',
 }
 
-// ---- Describe yourself as a golfer --------------------------
+/**
+ * A member's own role, read off the job title on their profile, so the survey
+ * can start from it rather than ask again. Deliberately narrow: only titles
+ * that say one role plainly, and nothing for "Development", which could be
+ * software or business. The member sees the guess selected and can change it.
+ */
+export function roleFromTitle(title: string | null | undefined): Role | null {
+  if (!title) return null
+  const t = ` ${title.toLowerCase().replace(/[^a-z]+/g, ' ')} `
+  const has = (...words: string[]) => words.some(w => t.includes(` ${w} `))
+  // Not "president" (a vice president isn't one) or a software team's product owner.
+  if (has('founder', 'cofounder', 'co founder', 'ceo', 'chief executive')
+      || (has('owner') && !has('product owner'))) return 'founder'
+  if (has('cfo', 'finance', 'controller', 'treasurer')) return 'finance'
+  if (has('cmo', 'marketing')) return 'marketing'
+  if (has('coo', 'operations')) return 'operations'
+  if (has('cio', 'it')) return 'it'
+  if (has('hr', 'human resources', 'recruiter', 'recruiting', 'talent')) return 'hr'
+  if (has('sales', 'account executive')) return 'sales'
+  if (has('attorney', 'lawyer', 'counsel', 'legal')) return 'legal'
+  return null
+}
 
+// ---- Describe Yourself: your golf ---------------------------
+
+/**
+ * Members play in the afternoon, so the only choice left is which days
+ * (2026-11-20). weekend_afternoon kept its value; weekday_afternoon is new.
+ */
 export const PLAY_TIMES = [
-  { value: 'weekday_early',     label: 'Weekday early' },
-  { value: 'weekday_midday',    label: 'Weekday midday' },
-  { value: 'weekday_twilight',  label: 'Weekday twilight' },
-  { value: 'weekend_morning',   label: 'Weekend morning' },
-  { value: 'weekend_afternoon', label: 'Weekend afternoon' },
+  { value: 'weekday_afternoon', label: 'Weekday afternoons' },
+  { value: 'weekend_afternoon', label: 'Weekend afternoons' },
 ] as const satisfies readonly Option[]
 export type PlayTime = (typeof PLAY_TIMES)[number]['value']
+
+/**
+ * The times the survey used to offer, read as the afternoon of the same kind
+ * of day — the one part of the old answer that still means something. Applied
+ * wherever answers are read or received, so stored rows need no rewrite.
+ */
+const RETIRED_PLAY_TIMES: Record<string, PlayTime> = {
+  weekday_early:    'weekday_afternoon',
+  weekday_midday:   'weekday_afternoon',
+  weekday_twilight: 'weekday_afternoon',
+  weekend_morning:  'weekend_afternoon',
+}
+
+/** Play times with retired values moved onto today's, each once. Anything else passes through. */
+export function normalisePlayTimes(value: unknown): unknown {
+  if (!Array.isArray(value)) return value
+  return Array.from(new Set(value.map(v => (typeof v === 'string' && RETIRED_PLAY_TIMES[v]) || v)))
+}
 
 /**
  * The member's own attitude. Worded exactly as the preference's options, so
@@ -141,17 +204,17 @@ export const ATTITUDES = [
 export type Attitude = (typeof ATTITUDES)[number]['value']
 
 /**
- * The member's own skill, the client's wording. Same values as the skill
- * preference, so "Good golfers only" reads straight off this answer.
+ * The member's own skill, in the client's words (2026-11-20). Same values as
+ * the skill preference, so a preference reads straight off this answer.
  */
 export const SKILLS = [
-  { value: 'excellent', label: 'Excellent golfer - Low handicap golfers only' },
-  { value: 'good',      label: 'Good golfer - Mid to low handicap golfers only' },
-  { value: 'new',       label: 'New golfer - Beginners or high handicap golfers only' },
+  { value: 'excellent', label: "I'm an excellent golfer" },
+  { value: 'good',      label: "I'm a good golfer" },
+  { value: 'new',       label: "I'm a new golfer" },
 ] as const satisfies readonly Option[]
 export type Skill = (typeof SKILLS)[number]['value']
 
-// ---- About you ----------------------------------------------
+// ---- Describe Yourself: about you ---------------------------
 
 /** Optional: not answering is how a member keeps it to themselves. */
 export const GENDERS = [
@@ -195,7 +258,7 @@ export const HABITS = [
 export type Habit = (typeof HABITS)[number]['key']
 export const HABIT_KEYS: readonly Habit[] = HABITS.map(h => h.key)
 
-// ---- Preferred introductions --------------------------------
+// ---- Describe Your Ideal Match: on the course ---------------
 
 export const GOLF_PREFERENCES_PROMPT =
   'Describe the profile of person you would or would not like to play golf with'
@@ -207,10 +270,14 @@ export const PREF_GENDERS = [
 ] as const satisfies readonly Option[]
 export type PrefGender = (typeof PREF_GENDERS)[number]['value']
 
+/**
+ * What "Good golfers" lets through is unchanged from when it read "Mid to low
+ * handicap golfers only": good and excellent golfers (SKILL_FITS in ./rules).
+ */
 export const PREF_SKILLS = [
-  { value: 'excellent', label: 'Excellent golfers - Low handicap golfers only' },
-  { value: 'good',      label: 'Good golfers - Mid to low handicap golfers only' },
-  { value: 'new',       label: 'New golfers - Beginners or high handicap golfers only' },
+  { value: 'excellent', label: 'Excellent golfers' },
+  { value: 'good',      label: 'Good golfers' },
+  { value: 'new',       label: 'New golfers' },
   { value: 'any',       label: 'No preference' },
 ] as const satisfies readonly Option[]
 export type PrefSkill = (typeof PREF_SKILLS)[number]['value']
@@ -223,14 +290,23 @@ export type PrefAttitude = (typeof PREF_ATTITUDES)[number]['value']
 
 // ---- The stored shape ---------------------------------------
 
-/** A member_match_profiles row, as the app reads and writes it. */
+/**
+ * A member's answers, as the app reads and writes them. The same as the
+ * member_match_profiles row, except that an industry named under "Other" is
+ * held apart here (the *_other fields) and beside the listed ones there — see
+ * toMatchRow.
+ */
 export interface MatchProfile {
   goals: MatchGoal[]
   meet_industries: SurveyIndustry[]
+  /** A preferred industry the list doesn't have, in the member's words. */
+  meet_industry_other: string | null
   meet_roles: Role[]
   meet_company_sizes: PrefCompanySize[]
   company_size: CompanySize | null
   industry: SurveyIndustry | null
+  /** The member's own industry, where the list doesn't have it. Never set beside `industry`. */
+  industry_other: string | null
   role: Role | null
   client_company_sizes: CompanySize[]
   play_times: PlayTime[]
@@ -267,10 +343,12 @@ export type SurveyAnswers = Omit<MatchProfile, 'completed_at'> & SurveyProfileFi
 export const EMPTY_MATCH_PROFILE: MatchProfile = {
   goals: [],
   meet_industries: [],
+  meet_industry_other: null,
   meet_roles: [],
   meet_company_sizes: [],
   company_size: null,
   industry: null,
+  industry_other: null,
   role: null,
   client_company_sizes: [],
   play_times: [],
@@ -295,19 +373,42 @@ export const EMPTY_MATCH_PROFILE: MatchProfile = {
   completed_at: null,
 }
 
+/** The member_match_profiles columns the survey writes. */
+export type MatchRow = Omit<MatchProfile, 'completed_at' | 'industry' | 'industry_other' | 'meet_industries' | 'meet_industry_other'> & {
+  /** A listed industry, or the one the member named. */
+  industry: string | null
+  /** Listed industries, then the one the member named, if any. */
+  meet_industries: string[]
+}
+
+/** The row to write for a set of answers: a named industry is stored as itself. */
+export function toMatchRow(answers: Omit<MatchProfile, 'completed_at'>): MatchRow {
+  const { industry, industry_other, meet_industries, meet_industry_other, ...rest } = answers
+  return {
+    ...rest,
+    industry: industry ?? industry_other,
+    meet_industries: meet_industry_other ? [...meet_industries, meet_industry_other] : [...meet_industries],
+  }
+}
+
 /** Reads a stored row into the app's shape; unknown values fall away. */
 export function toMatchProfile(row: Partial<Record<keyof MatchProfile, unknown>> | null | undefined): MatchProfile {
   if (!row) return { ...EMPTY_MATCH_PROFILE }
   const p = { ...EMPTY_MATCH_PROFILE }
   p.goals = pickMany(row.goals, MATCH_GOALS)
   p.meet_industries = pickMany(row.meet_industries, INDUSTRY_OPTIONS)
+  // Whatever is left in the list that isn't a listed or retired label is the
+  // one the member named.
+  p.meet_industry_other = (Array.isArray(row.meet_industries) ? row.meet_industries : [])
+    .map(namedIndustry).find((v): v is string => typeof v === 'string') ?? null
   p.meet_roles = pickMany(row.meet_roles, ROLES)
   p.meet_company_sizes = normaliseSizes(pickMany(row.meet_company_sizes, PREF_COMPANY_SIZES))
   p.company_size = pickOne(row.company_size, COMPANY_SIZES)
   p.industry = pickOne(row.industry, INDUSTRY_OPTIONS)
+  p.industry_other = p.industry ? null : (namedIndustry(row.industry) ?? null)
   p.role = pickOne(row.role, ROLES)
   p.client_company_sizes = pickMany(row.client_company_sizes, COMPANY_SIZES)
-  p.play_times = pickMany(row.play_times, PLAY_TIMES)
+  p.play_times = pickMany(normalisePlayTimes(row.play_times), PLAY_TIMES)
   p.attitude = pickOne(row.attitude, ATTITUDES)
   p.skill = pickOne(row.skill, SKILLS)
   p.gender = pickOne(row.gender, GENDERS)
@@ -347,32 +448,53 @@ export interface SurveyValidation {
  * means any), the member's own industry and role, the sizes they serve, their
  * gender, and the free text. Everything else is required, because a
  * preference can only be checked against an answer.
+ *
+ * An industry named under "Other" that turns out to be on the list is taken as
+ * the listed one, so the same industry can't be held two ways.
  */
 export function validateSurvey(body: unknown): SurveyValidation {
   const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>
   const errors: string[] = []
+  const otherTooLong = `Keep the industry you name under ${OTHER_INDUSTRY.maxLength} characters`
 
   const goals = strictMany(b.goals, MATCH_GOALS)
   if (!goals || goals.length === 0) errors.push('Choose at least one objective')
-  else if (goals.length > MAX_GOALS) errors.push(`Choose up to ${MAX_GOALS} objectives`)
 
   const meetIndustries = strictMany(b.meet_industries ?? [], INDUSTRY_OPTIONS)
   if (!meetIndustries) errors.push('Your preferred industries contain one we don\'t recognise')
+  const meetOtherText = otherIndustryText(b.meet_industry_other)
+  if (meetOtherText === undefined) errors.push(otherTooLong)
+  let meetOther: string | null = null
+  if (meetOtherText && meetIndustries) {
+    const listed = listedIndustry(meetOtherText)
+    if (listed) {
+      if (!meetIndustries.includes(listed)) meetIndustries.push(listed)
+    } else {
+      meetOther = namedIndustry(meetOtherText)
+    }
+  }
   const meetRoles = strictMany(b.meet_roles ?? [], ROLES)
   if (!meetRoles) errors.push('Your preferred roles contain one we don\'t recognise')
   const meetSizes = strictMany(b.meet_company_sizes, PREF_COMPANY_SIZES)
-  if (!meetSizes || meetSizes.length === 0) errors.push('Choose an ideal company size, or Any size')
+  if (!meetSizes || meetSizes.length === 0) errors.push('Choose a preferred company size, or Any size')
 
   const companySize = pickOne(b.company_size, COMPANY_SIZES)
   if (!companySize) errors.push('Choose your organization size')
-  const industry = optionalOne(b.industry, INDUSTRY_OPTIONS)
-  if (industry === undefined) errors.push('Choose your industry from the list')
+  let industry = optionalOne(b.industry, INDUSTRY_OPTIONS)
+  if (industry === undefined) errors.push('Choose your industry from the list, or name it under Other')
+  const industryOtherText = otherIndustryText(b.industry_other)
+  if (industryOtherText === undefined) errors.push(otherTooLong)
+  let industryOther: string | null = null
+  if (!industry && industry !== undefined && industryOtherText) {
+    industry = listedIndustry(industryOtherText)
+    if (!industry) industryOther = namedIndustry(industryOtherText)
+  }
   const role = optionalOne(b.role, ROLES)
   if (role === undefined) errors.push('Choose your role from the list')
   const clientSizes = strictMany(b.client_company_sizes ?? [], COMPANY_SIZES)
   if (!clientSizes) errors.push('The organization sizes you serve contain one we don\'t recognise')
 
-  const playTimes = strictMany(b.play_times, PLAY_TIMES)
+  const playTimes = strictMany(normalisePlayTimes(b.play_times), PLAY_TIMES)
   if (!playTimes || playTimes.length === 0) errors.push('Choose when you prefer to play')
   const attitude = pickOne(b.attitude, ATTITUDES)
   if (!attitude) errors.push('Choose your golf attitude')
@@ -419,10 +541,12 @@ export function validateSurvey(body: unknown): SurveyValidation {
     match: {
       goals: goals ?? [],
       meet_industries: meetIndustries ?? [],
+      meet_industry_other: meetOther,
       meet_roles: meetRoles ?? [],
       meet_company_sizes: normaliseSizes(meetSizes ?? []),
       company_size: companySize,
       industry: industry ?? null,
+      industry_other: industryOther,
       role: role ?? null,
       client_company_sizes: clientSizes ?? [],
       play_times: playTimes ?? [],
@@ -486,6 +610,28 @@ function strictMany<O extends readonly Option[]>(value: unknown, options: O): O[
   if (!Array.isArray(value)) return null
   if (value.some(v => pickOne(v, options) === null)) return null
   return Array.from(new Set(value as O[number]['value'][]))
+}
+
+/** An industry named under Other: spaces collapsed, null when blank, undefined when too long or not text. */
+function otherIndustryText(value: unknown): string | null | undefined {
+  if (value === null || value === undefined) return null
+  if (typeof value !== 'string') return undefined
+  const t = value.replace(/\s+/g, ' ').trim()
+  if (t.length > OTHER_INDUSTRY.maxLength) return undefined
+  return t || null
+}
+
+/** The listed industry some text names, ignoring case. */
+function listedIndustry(text: string): SurveyIndustry | null {
+  const key = text.toLowerCase()
+  return SURVEY_INDUSTRIES.find(i => i.toLowerCase() === key) ?? null
+}
+
+/** Text that names an industry of the member's own: not on the list, and not a retired label. */
+function namedIndustry(value: unknown): string | null {
+  const t = otherIndustryText(value)
+  if (!t || RETIRED_INDUSTRIES.includes(t.toLowerCase()) || listedIndustry(t)) return null
+  return t
 }
 
 /** Trimmed text, null when blank, undefined when too long or not text. */

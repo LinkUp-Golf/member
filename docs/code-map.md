@@ -52,7 +52,7 @@ Route groups: `(app)` signed-in members and guests, `(admin)` admins, `(host)` h
 | `/more/guest-access` | `src/app/(app)/more/guest-access/page.tsx` |  |
 | `/more/host` | `src/app/(app)/more/host/page.tsx` |  |
 | `/more/install` | `src/app/(app)/more/install/page.tsx` | Install App — Add to your home screen |
-| `/more/match-profile` | `src/app/(app)/more/match-profile/page.tsx` | Curated Introductions — optional. One switch, and below it, while it's on, the questions the LinkUp team introduces members from. A member who has answered before turns it on and off in place (PATCH): off takes them out … |
+| `/more/match-profile` | `src/app/(app)/more/match-profile/page.tsx` | Curated Introductions — optional. One switch, and below it, while it's on, the questions the LinkUp team introduces members from, in two steps (Describe Yourself, Describe Your Ideal Match — see MatchSurveyForm). A … |
 | `/more/notifications` | `src/app/(app)/more/notifications/page.tsx` |  |
 | `/more` | `src/app/(app)/more/page.tsx` | More — Settings & account |
 | `/more/payments` | `src/app/(app)/more/payments/page.tsx` | /more/payments — the cancellation policy, and what the member's late cancellations have cost. Each fee is a Stripe invoice. "Pay invoice" opens Stripe's invoice page in a new tab (issuing the invoice first if Stripe … |

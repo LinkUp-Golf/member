@@ -130,13 +130,14 @@ function surveyIndustryOf(industry: IndustryCategory | null | undefined): Survey
 }
 
 /**
- * The member's own industry and role: what they told the survey, falling back
- * to their profile for anyone who answered before it asked. A profile reading
- * "Business Owner / Founder" is a role, so it fills the role.
+ * The member's own industry and role: what they told the survey (a listed
+ * industry, or one they named under Other), falling back to their profile for
+ * anyone who answered before it asked. A profile reading "Business Owner /
+ * Founder" is a role, so it fills the role.
  */
-function industryAndRole(match: MatchProfile, profile: ProfileRow | null): { industry: SurveyIndustry | null; role: Role | null } {
+function industryAndRole(match: MatchProfile, profile: ProfileRow | null): { industry: string | null; role: Role | null } {
   return {
-    industry: match.industry ?? surveyIndustryOf(profile?.industry_category),
+    industry: match.industry ?? match.industry_other ?? surveyIndustryOf(profile?.industry_category),
     role: match.role ?? (profile?.industry_category === 'Business Owner / Founder' ? 'founder' : null),
   }
 }
@@ -227,6 +228,7 @@ export function summarize(row: MatchMemberRow): MatchSummary {
   const subject = toSubject(row)
   const wantsToMeet = [
     ...m.meet_industries.map(i => optionLabel(INDUSTRY_OPTIONS, i)),
+    ...(m.meet_industry_other ? [m.meet_industry_other] : []),
     ...m.meet_roles.map(r => optionLabel(ROLES, r)),
     ...m.meet_company_sizes.filter(z => z !== 'any').map(z => `${optionLabel(PREF_COMPANY_SIZES, z)} people`),
   ]

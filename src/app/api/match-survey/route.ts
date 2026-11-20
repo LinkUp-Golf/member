@@ -23,7 +23,8 @@ import { MEMBER_DETAIL_NS, memberDetailKey } from '@/lib/cache/keys'
 import { hasMembershipTag } from '@/lib/ghl/tags'
 import { logActivity } from '@/lib/activity/log'
 import { logger } from '@/lib/logger'
-import { eligibleForIntroductions, toMatchProfile, validateSurvey } from '@/lib/matching/survey'
+import { eligibleForIntroductions, roleFromTitle, toMatchProfile, toMatchRow, validateSurvey } from '@/lib/matching/survey'
+import { skillFromHandicap } from '@/lib/matching/rules'
 import type { AuthContext } from '@/lib/auth/types'
 
 // Guests are let through so the page gets an answer ("not eligible") rather
@@ -34,7 +35,7 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
     admin.from('members').select('home_course_id, membership_status, ghl_tags').eq('id', ctx.userId).maybeSingle(),
     admin
       .from('member_profiles')
-      .select('value_offered, value_sought, industry_category')
+      .select('value_offered, value_sought, industry_category, role_title, handicap_index')
       .eq('id', ctx.userId)
       .maybeSingle(),
     admin.from('member_match_profiles').select('*').eq('member_id', ctx.userId).maybeSingle(),
@@ -59,14 +60,22 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
     : false
   const completed = Boolean(match.completed_at)
 
-  // Pre-filled from the profile until the survey has its own answer.
-  const profileIndustry = profileRes.data?.industry_category ?? null
+  // Pre-filled from the profile until the survey has its own answer, so a
+  // member isn't asked again for what they've already told us. Each guess is
+  // shown selected and can be changed.
+  const profile = profileRes.data
+  const profileIndustry = profile?.industry_category ?? null
+  const hasIndustry = Boolean(match.industry || match.industry_other)
+  const handicap = typeof profile?.handicap_index === 'number' ? profile.handicap_index : null
   const answers = {
     ...match,
-    industry: match.industry ?? (toMatchProfile({ industry: profileIndustry }).industry),
-    role: match.role ?? (profileIndustry === 'Business Owner / Founder' ? 'founder' : null),
-    value_offered: profileRes.data?.value_offered ?? null,
-    value_sought: profileRes.data?.value_sought ?? null,
+    industry: hasIndustry ? match.industry : toMatchProfile({ industry: profileIndustry }).industry,
+    role: match.role
+      ?? (profileIndustry === 'Business Owner / Founder' ? 'founder' : roleFromTitle(profile?.role_title)),
+    // What the matching already reads for a member with no answer (skillOf).
+    skill: match.skill ?? (handicap !== null ? skillFromHandicap(handicap) : null),
+    value_offered: profile?.value_offered ?? null,
+    value_sought: profile?.value_sought ?? null,
   }
 
   return NextResponse.json({
@@ -101,7 +110,7 @@ export const PUT = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
   const { error: matchError } = await admin.from('member_match_profiles').upsert({
     member_id: ctx.userId,
-    ...result.match,
+    ...toMatchRow(result.match),
     completed_at: completedAt,
     updated_at: now,
   }, { onConflict: 'member_id' })

@@ -386,8 +386,13 @@ fit a member, and the admin chooses who to recommend, with a note.
 
 - **Optional, switched on from More** (`/more/match-profile`, "Curated
   Introductions"): one switch, **Turn on Curated Introductions**, and the
-  survey under it while it's on. Saving the survey is what turns it on the
-  first time (`PUT /api/match-survey`); after that the switch is
+  survey under it while it's on, in two steps (`MatchSurveyForm`: **Describe
+  Yourself**, then **Describe Your Ideal Match**, with step indicators, Back /
+  Continue, and Submit on the last; one answers state, so nothing is lost
+  between steps; Continue / Submit flag the step's missing required answers).
+  Submitting is what turns it on the first time (`PUT /api/match-survey`),
+  and GET pre-fills from the profile (industry, role from `roleFromTitle`,
+  skill from the handicap); after that the switch is
   `PATCH /api/match-survey { enabled }`, which keeps the answers.
   `open_to_suggestions` now means "on", **both ways**: off takes a member out of
   other people's candidate lists, out of the admin queue, and
@@ -397,18 +402,31 @@ fit a member, and the admin chooses who to recommend, with a note.
   is offered it. Questions and validation are one module,
   `src/lib/matching/survey.ts`; what they offer and seek is saved back onto
   `member_profiles`.
-- **Wording is the client's** (2026-11-12): sections "Curated Introduction
-  Preferences", "Describe your business", "Describe yourself as a golfer",
-  "About you", "Preferred introductions". Objectives relabel old values:
+- **Wording is the client's** (2026-11-12, revised 2026-11-20): step 1
+  "Describe Yourself" (Your business, Your golf, About you), step 2 "Describe
+  Your Ideal Match" (What you're looking for, Who you'd like to meet, Who
+  you'd like to play with). Objectives have no limit (`MAX_GOALS` is gone).
+  Golf skill reads "I'm an excellent / a good / a new golfer"; the skill
+  preference "Excellent / Good / New golfers" (Good still lets in excellent,
+  `SKILL_FITS`). Play times are `weekday_afternoon` / `weekend_afternoon`
+  only; the retired values are read as the afternoon of the same kind of day
+  by `normalisePlayTimes`, in `toMatchProfile` and `validateSurvey`, so stored
+  rows weren't rewritten. Both industry questions offer **Other** with a name
+  (60 chars): stored as itself beside the listed labels (`industry`,
+  `meet_industries` are text), held apart in the app shape as
+  `industry_other` / `meet_industry_other` (`toMatchRow` writes,
+  `toMatchProfile` reads), and matched by `sameIndustry` (same words, or a
+  shared non-generic word). No migration. Objectives relabel old values:
   `hiring` = "Team Members", `get_mentorship` = "Mentors" (looking for one),
   `give_mentorship` = "Mentees" — mapped by meaning, so old answers keep theirs.
   The survey's industries (`SURVEY_INDUSTRIES`) drop "Business Owner / Founder"
   (a role — `ROLES`, "Founder / Owner / CEO") and replace "Other" with
   "Non-profit"; the app-wide `INDUSTRY_CATEGORIES` is unchanged.
   `20261112000002` moved founder picks to `meet_roles` / `role`.
-- **Step 1 preferences rank, step 5 preferences filter.** Preferred industries
-  and roles (blank = any) and ideal company size (`any`, or `SIZE_BUCKET` maps
-  Solopreneurs and 2–10 to "1-10") are the `audience` weight. Gender, skill,
+- **"Who you'd like to meet" ranks, "who you'd like to play with" filters.**
+  Preferred industries (incl. a named one) and roles (blank = any) and
+  preferred company size (`any`, or `SIZE_BUCKET` maps Solopreneurs and 2–10
+  to "1-10") are the `audience` weight. Gender, skill,
   attitude and the five habits are filters, checked both ways (`mutualFit`),
   and an unanswered counterpart question fails the filter. Gender is optional
   (no "Prefer not to say"), so a blank gender fits only "No preference". Skill

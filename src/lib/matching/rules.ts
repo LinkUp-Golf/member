@@ -11,10 +11,10 @@
 // candidate who hasn't answered the question a preference needs is
 // left out, because the preference can't be checked.
 //
-// Everyone left is scored out of 100, and the Curated Introduction
-// Preferences (objectives, industries, roles, company size) are what
-// the score is mostly made of. The score only orders the admin's
-// list; the admin decides.
+// Everyone left is scored out of 100, and who the member wants to
+// meet (objectives, industries, roles, company size) is what the
+// score is mostly made of. The score only orders the admin's list;
+// the admin decides.
 //
 // Nothing here ever puts a preference, a gender or a habit into
 // words: the chips and the note are built from the business and
@@ -39,7 +39,8 @@ import {
 export interface MatchSubject {
   id: string
   firstName: string
-  industry: SurveyIndustry | null
+  /** A listed industry, or one the member named under Other. */
+  industry: string | null
   role: Role | null
   valueOffered: string | null
   valueSought: string | null
@@ -173,13 +174,40 @@ function businessFit(a: MatchSubject, b: MatchSubject): number {
   return fit
 }
 
+/** Words too general to say two industries are the same one. */
+const INDUSTRY_STOP_WORDS = new Set([
+  'services', 'service', 'professional', 'provider', 'providers', 'industry', 'industries',
+  'solutions', 'company', 'companies', 'other', 'sector',
+])
+
+/**
+ * Whether an industry a member named under Other is `industry`: the same words,
+ * or a shared one that isn't generic. "Construction" is "Construction &
+ * Engineering", and "Legal tech" reaches "Professional Services (Legal)"; two
+ * industries sharing only "services" are not the same.
+ */
+export function sameIndustry(named: string, industry: string): boolean {
+  if (named.trim().toLowerCase() === industry.trim().toLowerCase()) return true
+  const theirs = words(industry)
+  for (const w of words(named)) if (!INDUSTRY_STOP_WORDS.has(w) && theirs.has(w)) return true
+  return false
+}
+
+/** Whether B's industry is one A asked to meet, from the list or named under Other. */
+function industryWanted(m: MatchProfile, industry: string | null): boolean {
+  if (!industry) return false
+  if ((m.meet_industries as readonly string[]).includes(industry)) return true
+  return Boolean(m.meet_industry_other && sameIndustry(m.meet_industry_other, industry))
+}
+
 /** Each of A's audience preferences, read against B. Blank means any. */
 function audienceMatches(a: MatchSubject, b: MatchSubject) {
   const m = a.match
   const sizes = m.meet_company_sizes
   const anySize = sizes.length === 0 || sizes.includes('any')
+  const anyIndustry = m.meet_industries.length === 0 && !m.meet_industry_other
   return {
-    industry: m.meet_industries.length === 0 ? null : Boolean(b.industry && m.meet_industries.includes(b.industry)),
+    industry: anyIndustry ? null : industryWanted(m, b.industry),
     role: m.meet_roles.length === 0 ? null : Boolean(b.role && m.meet_roles.includes(b.role)),
     size: anySize
       ? null
@@ -243,11 +271,8 @@ export function pairScore(a: MatchSubject, b: MatchSubject, now: Date): number {
 
 /** "you both play …" — each play time as it reads in a sentence. */
 const PLAY_TIME_PHRASES: Record<PlayTime, string> = {
-  weekday_early:     'early on weekdays',
-  weekday_midday:    'midday on weekdays',
-  weekday_twilight:  'twilight on weekdays',
-  weekend_morning:   'weekend mornings',
-  weekend_afternoon: 'weekend afternoons',
+  weekday_afternoon: 'on weekday afternoons',
+  weekend_afternoon: 'on weekend afternoons',
 }
 
 /** "Dana …" — each industry as it reads in a sentence. */
@@ -265,6 +290,12 @@ const INDUSTRY_PHRASES: Record<SurveyIndustry, string> = {
   'Financial Services':                 'works in financial services',
   'Technology':                         'works in technology',
   'Non-profit':                         'works in the non-profit sector',
+}
+
+/** An industry as it reads in a sentence; one the member named reads as they wrote it. */
+function industryPhrase(industry: string | null): string | null {
+  if (!industry) return null
+  return INDUSTRY_PHRASES[industry as SurveyIndustry] ?? `works in ${industry}`
 }
 
 /** "Dana …" — each role as it reads in a sentence. */
@@ -336,7 +367,7 @@ export function templatedNote(a: MatchSubject, b: MatchSubject): string {
   const theirs = new Set(b.match.goals)
   const audience = audienceMatches(a, b)
   const rolePhrase = b.role ? ROLE_PHRASES[b.role] : null
-  const industryPhrase = b.industry ? INDUSTRY_PHRASES[b.industry] : null
+  const bIndustry = industryPhrase(b.industry)
   const clauses: string[] = []
 
   if (goals.has('get_mentorship') && theirs.has('give_mentorship')) {
@@ -345,12 +376,12 @@ export function templatedNote(a: MatchSubject, b: MatchSubject): string {
     clauses.push(`${name} is looking for a mentor, and you offer mentorship`)
   }
   if (goals.has('new_clients') && servesThem(a, b)) {
-    const what = industryPhrase ?? rolePhrase
+    const what = bIndustry ?? rolePhrase
     clauses.push(what ? `${name} ${what}, the kind of client you serve` : `${name} is the kind of client you serve`)
   } else if (audience.role && rolePhrase) {
     clauses.push(`${name} ${rolePhrase}, the kind of person you want to meet`)
-  } else if (audience.industry && industryPhrase) {
-    clauses.push(`${name} ${industryPhrase}, the kind of person you want to meet`)
+  } else if (audience.industry && bIndustry) {
+    clauses.push(`${name} ${bIndustry}, the kind of person you want to meet`)
   }
   if (goals.has('referral_partners') && theirs.has('referral_partners')) {
     clauses.push(`you're both looking for referral partners`)
