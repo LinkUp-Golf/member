@@ -1,0 +1,12 @@
+{
+  "name": "intro-tagging-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node check.mjs",
+    "run-test": "node run.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest"
+  }
+}
