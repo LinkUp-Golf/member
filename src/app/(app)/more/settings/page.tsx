@@ -276,7 +276,7 @@ export default function SettingsPage() {
           onClick={signOut}
           className="w-full text-center text-sm text-red-400 py-2"
         >
-          Sign out of this device
+          Sign out
         </button>
 
         <p className="text-center text-xs text-green-900/20 pb-2">
