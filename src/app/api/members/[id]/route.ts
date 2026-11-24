@@ -11,11 +11,14 @@ import {
   memberDetailKey,
 } from '@/lib/cache/keys'
 import type { AuthContext } from '@/lib/auth/types'
+import { PUBLIC_MEMBER_SELECT, publicMember, type PublicProfileRow } from '@/lib/members/public-profile'
 
 // GET /api/members/[id]
 //
 // Cache strategy (split):
-//   member profile — cached by memberId (30 min). Public data, same for every viewer.
+//   member profile — cached by memberId (30 min). Only the listed public columns
+//   (PUBLIC_MEMBER_SELECT) are read, and publicMember() applies the member's
+//   hide-profile and hide-handicap switches per viewer after the cache.
 //   hasPlayedWith  — never cached. Caller-specific; depends on ctx.userId.
 //
 // Safety: hasPlayedWith is re-queried live on every request so user A never
@@ -39,11 +42,11 @@ export const GET = withAuth(async (
         const admin = createAdminClient()
         const { data, error } = await admin
           .from('members')
-          .select('*, profile:member_profiles(*), home_course:courses!members_home_course_id_fkey(*)')
+          .select(PUBLIC_MEMBER_SELECT)
           .eq('id', memberId)
           .single()
         if (error || !data) throw new Error('Member not found')
-        return data
+        return data as unknown as PublicProfileRow
       },
       MEMBER_DETAIL_TTL_MS
     ),
@@ -68,7 +71,7 @@ export const GET = withAuth(async (
   }
 
   return NextResponse.json({
-    member: memberData,
+    member: publicMember(memberData, { isSelf: memberId === ctx.userId, isAdmin: ctx.isAdmin }),
     // A round already played: one booked for next week isn't "played together" yet.
     hasPlayedWith: ((playedRes.data ?? []) as Array<{ member_id: string; rounds: number }>)
       .some(r => r.member_id === memberId && Number(r.rounds) > 0),
