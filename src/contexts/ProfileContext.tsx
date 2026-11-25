@@ -1,7 +1,6 @@
 'use client'
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { createClient } from '@/lib/supabase'
 import { useUser } from './AuthContext'
 import type { MemberWithProfile } from '@/types'
 
@@ -25,56 +24,56 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [profileLoading, setProfileLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Tracks the most recently requested user id so a slow/retrying fetch for a
-  // user who has since signed out (or been replaced by a different signed-in
-  // user) can't clobber state with stale data once it finally resolves.
-  const currentUserIdRef = useRef<string | undefined>(user?.id)
-  useEffect(() => {
-    currentUserIdRef.current = user?.id
-  }, [user?.id])
+  // Each fetch takes a ticket; only the newest may write state, so a slow or
+  // retrying fetch for a user who has since signed out (or been replaced by a
+  // different signed-in user) can't clobber it with stale data.
+  const requestSeqRef = useRef(0)
 
+  // Read through the server, not the browser Supabase client. The server reads
+  // the session from the cookie — the same one the middleware and every API
+  // route use — so a stalled or stale browser session can no longer leave the
+  // app working but the profile empty (a blank Profile screen and no Admin
+  // entry in the menu). See src/app/api/members/me/route.ts.
+  //
+  // It runs whether or not the browser client reports a user: that report is
+  // exactly what goes missing when the browser session is stuck, and the
+  // cookie is the authority. With no session the route answers 401 and the
+  // profile is null, as before.
   const doFetch = useCallback(async () => {
-    const fetchUserId = user?.id
-    if (!fetchUserId) {
-      setProfile(null)
-      return
-    }
-
+    const seq = ++requestSeqRef.current
     setError(null)
 
-    // Mirror the original 3-attempt retry with exponential back-off so
-    // transient Supabase cold-start / network hiccups don't permanently fail.
+    // 3 attempts with back-off, so a cold start or network blip doesn't stick.
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const supabase = createClient()
-        const { data, error: dbError } = await supabase
-          .from('members')
-          .select('*, profile:member_profiles(*), home_course:courses!members_home_course_id_fkey(*)')
-          .eq('id', fetchUserId)
-          .single()
+        const res = await fetch('/api/members/me', {
+          cache: 'no-store',
+          credentials: 'same-origin',
+        })
+        if (seq !== requestSeqRef.current) return // stale — a newer fetch owns state now
 
-        if (currentUserIdRef.current !== fetchUserId) return // stale — a newer fetch owns state now
-
-        if (!dbError && data) {
-          setProfile(data as MemberWithProfile)
+        if (res.ok) {
+          setProfile((await res.json()) as MemberWithProfile)
           return
         }
 
-        if (attempt < 3) {
-          await new Promise(r => setTimeout(r, 500 * attempt))
-        } else {
-          setError('Failed to load profile')
+        // Signed out, or no member row: retrying won't change the answer.
+        if (res.status === 401 || res.status === 403) {
           setProfile(null)
+          return
         }
       } catch {
-        if (currentUserIdRef.current !== fetchUserId) return
-        if (attempt < 3) {
-          await new Promise(r => setTimeout(r, 500 * attempt))
-        } else {
-          setError('Failed to load profile')
-        }
+        if (seq !== requestSeqRef.current) return
+      }
+
+      if (attempt < 3) {
+        await new Promise(r => setTimeout(r, 500 * attempt))
+        if (seq !== requestSeqRef.current) return
+      } else {
+        setError('Failed to load profile')
       }
     }
+  // Keyed on the user id so signing in or out re-reads the profile.
   }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {

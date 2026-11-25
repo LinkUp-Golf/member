@@ -15,6 +15,10 @@ import {
 import { formatRelativeTime, formatTeeTime } from "@/lib/utils";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 
+// Long enough for a slow connection; short enough that a stuck query reads as
+// a failure rather than a page that never finishes.
+const DASHBOARD_TIMEOUT_MS = 15_000;
+
 interface DashboardData {
   totalMembers: number;
   activeMembers: number;
@@ -47,21 +51,49 @@ export default function AdminDashboard() {
   const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadDashboard();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Every way this can fail ends on a message and a retry. It used to end on
+  // the loading skeleton forever: a query that threw, or never answered (the
+  // browser Supabase client stuck on its session), never reached
+  // setLoading(false), and an empty course list returned without setting any
+  // data, which the skeleton also read as "still loading".
   async function loadDashboard() {
+    setLoading(true);
+    setError(null);
+    try {
+      await Promise.race([
+        fetchDashboard(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), DASHBOARD_TIMEOUT_MS),
+        ),
+      ]);
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message === "timeout"
+          ? "The dashboard took too long to load."
+          : "The dashboard couldn't be loaded.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchDashboard() {
     const supabase = createClient();
 
-    const { data: courses } = await supabase
+    const { data: courses, error: coursesError } = await supabase
       .from("courses")
       .select("id, max_members, max_rounds_per_month, reserved_rounds")
       .in("slug", COURSE_SLUGS);
 
+    if (coursesError) throw new Error(coursesError.message);
     if (!courses?.length) {
-      setLoading(false);
+      setError("No LinkUp courses were found to report on.");
       return;
     }
 
@@ -146,7 +178,22 @@ export default function AdminDashboard() {
       // don't let the first one quietly render as "no bookings yet".
       recentBookingsError: recentBookingsRes.error?.message ?? null,
     });
-    setLoading(false);
+  }
+
+  if (!loading && (error || !data)) {
+    return (
+      <div className="p-8">
+        <div className="bg-white border border-gray-200 rounded-xl px-5 py-6 max-w-md">
+          <p className="text-sm text-gray-800">{error ?? "The dashboard couldn't be loaded."}</p>
+          <p className="text-xs text-gray-500 mt-1">
+            If this keeps happening, sign out and back in.
+          </p>
+          <div className="mt-4">
+            <AdminButton label="Try again" onClick={() => loadDashboard()} />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (loading || !data) {

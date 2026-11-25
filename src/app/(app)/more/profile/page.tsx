@@ -14,7 +14,7 @@ import { parseNonprofits, formatNonprofits, MAX_NONPROFITS } from '@/lib/profile
 import type { MemberProfile } from '@/types'
 
 export default function MyProfilePage() {
-  const { user, profile, refetch } = useProfile()
+  const { profile, refetch } = useProfile()
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState<Partial<MemberProfile>>({})
@@ -90,7 +90,7 @@ export default function MyProfilePage() {
   }
 
   async function save() {
-    if (!user) return
+    if (!profile) return
     setSaving(true)
     setSaveError('')
 
@@ -119,7 +119,9 @@ export default function MyProfilePage() {
     setSaving(false)
   }
 
-  if (!user || !profile) return null
+  // Keyed on the profile alone: it comes from the server session, and the
+  // browser client's `user` can be missing while that session is fine.
+  if (!profile) return null
   const m = profile
 
   // Counted from the parsed result, not the line count — blank lines and

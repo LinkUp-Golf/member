@@ -235,7 +235,7 @@ function NavContent({
 }
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { user, profile, loading, isAdmin } = useProfile()
+  const { user, profile, loading, isAdmin, refetch } = useProfile()
   const router = useRouter()
   const pathname = usePathname()
   const [guestCount, setGuestCount] = useState(0)
@@ -248,15 +248,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [drawerMounted, setDrawerMounted] = useState(false)
   const [drawerVisible, setDrawerVisible] = useState(false)
 
+  // Who may be here is decided by the server, not this effect: the middleware
+  // reads the cookie session and the member row's is_admin before /admin is
+  // served, and the profile below comes from the same cookie session
+  // (GET /api/members/me). This used to also bounce anyone the *browser*
+  // Supabase client didn't report as signed in — and that client can be
+  // stale or stuck while the cookie session is fine (an admin who'd opened a
+  // member's generated login link on their own phone was sent back to the
+  // member app on every tap). So only a profile that loaded and isn't an
+  // admin's is sent away; a profile that didn't load shows an error and a
+  // retry rather than a redirect, so a transient failure can't kick a valid
+  // admin out.
   useEffect(() => {
     if (loading) return
-    // Not authenticated → always redirect
-    if (!user) { router.push(DEFAULT_LANDING_PATH); return }
-    // Profile loaded and confirmed not admin → redirect.
-    // If profile is null (fetch error) we stay put — don't kick valid admins
-    // because of a transient DB error.
     if (profile !== null && !isAdmin) { router.push(DEFAULT_LANDING_PATH) }
-  }, [user, profile, loading, isAdmin, router])
+  }, [profile, loading, isAdmin, router])
 
   const fetchCounts = useCallback(async () => {
     const supabase = createClient()
@@ -331,7 +337,31 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     setDrawerOpen(false)
   }, [pathname])
 
-  if (loading || !user) return <FullScreenLoader />
+  if (loading) return <FullScreenLoader />
+
+  if (!profile) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen gap-4 px-6 text-center bg-gray-50">
+        <p className="text-sm text-gray-700">We couldn&apos;t load your account.</p>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => { void refetch() }}
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-green-950 text-white"
+          >
+            Try again
+          </button>
+          <Link href={DEFAULT_LANDING_PATH} className="px-4 py-2 rounded-lg text-sm text-gray-600 border border-gray-200">
+            Back to member app
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  // The footer's address: the profile's (server session), falling back to the
+  // browser client's only if the row somehow has none.
+  const email = profile.email || user?.email || ''
 
   return (
     <div className="flex h-screen bg-gray-50 font-sans">
@@ -345,7 +375,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           partnerApplicationsCount={partnerApplicationsCount}
                   hostsCount={hostsCount}
           activeCourses={activeCourses}
-          user={{ email: user.email ?? '' }}
+          user={{ email }}
         />
       </aside>
 
@@ -393,7 +423,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               partnerApplicationsCount={partnerApplicationsCount}
                   hostsCount={hostsCount}
               activeCourses={activeCourses}
-              user={{ email: user.email ?? '' }}
+              user={{ email }}
               onNavigate={() => setDrawerOpen(false)}
             />
           </aside>
