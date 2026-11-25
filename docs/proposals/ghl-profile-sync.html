@@ -1,0 +1,144 @@
+<title>GoHighLevel Profile Sync</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one reading column; field mapping as the central table; app ⇄ GoHighLevel direction shown as arrows. LinkUp brand blue and grass green. */
+:root {
+  --bg: #F8F8FC; --surface: #FFFFFF; --fg: #11203F; --muted: #55607A; --line: #DDE2EE;
+  --brand: #002669; --accent: #639948; --accent-soft: #EAF3E3; --brand-soft: #EEF2FA;
+  --warn: #9A5B00; --warn-soft: #FFF4E0;
+  --font: "Lexend Deca", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0B1226; --surface: #121B33; --fg: #E6EBF6; --muted: #9AA6C2; --line: #26324F;
+    --brand: #BBCCEE; --accent: #A0CC85; --accent-soft: #1B2C1A; --brand-soft: #18244A;
+    --warn: #F2B868; --warn-soft: #2E2312; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0B1226; --surface: #121B33; --fg: #E6EBF6; --muted: #9AA6C2; --line: #26324F;
+  --brand: #BBCCEE; --accent: #A0CC85; --accent-soft: #1B2C1A; --brand-soft: #18244A;
+  --warn: #F2B868; --warn-soft: #2E2312; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 16px; line-height: 1.65; }
+.page { max-width: 48rem; margin: 0 auto; padding-block: 3rem 5rem; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header { display: grid; gap: .75rem; margin-bottom: 2.5rem; }
+.eyebrow { font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+h1 { font-size: clamp(1.9rem, 5vw, 2.6rem); line-height: 1.15; font-weight: 700; color: var(--brand); margin: 0; text-wrap: balance; }
+.lede { font-size: 1.1rem; color: var(--muted); margin: 0; max-width: 40rem; }
+.meta { display: flex; flex-wrap: wrap; gap: .5rem; }
+.chip { font-size: .75rem; padding: .25rem .65rem; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-weight: 500; }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+section { margin-top: 3rem; }
+h2 { font-size: 1.35rem; color: var(--brand); margin: 0 0 .75rem; font-weight: 600; text-wrap: balance; }
+p, li { max-width: 42rem; }
+p { margin: 0 0 1rem; }
+ul, ol { padding-left: 1.25rem; margin: 0 0 1rem; display: grid; gap: .4rem; }
+strong { font-weight: 600; }
+code { font-size: .85em; background: var(--brand-soft); color: var(--brand); padding: .05rem .35rem; border-radius: 4px; }
+.table-wrap { overflow-x: auto; margin: 1rem 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; min-width: 36rem; }
+th, td { text-align: left; padding: .65rem .85rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+.dir { white-space: nowrap; font-weight: 600; color: var(--accent); }
+.new { font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); background: var(--accent-soft); padding: .1rem .4rem; border-radius: 4px; margin-left: .3rem; font-weight: 600; }
+.callout { background: var(--warn-soft); border-radius: 10px; padding: 1rem 1.1rem; margin: 1rem 0; }
+.callout strong { color: var(--warn); }
+.q { display: grid; gap: .75rem; list-style: none; padding: 0; counter-reset: q; }
+.q li { counter-increment: q; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: .9rem 1rem .9rem 3rem; position: relative; max-width: none; }
+.q li::before { content: counter(q); position: absolute; left: 1rem; top: .9rem; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: var(--brand-soft); color: var(--brand); font-size: .8rem; font-weight: 600; display: grid; place-items: center; }
+.q .rec { display: block; color: var(--muted); font-size: .9rem; margin-top: .3rem; }
+footer { margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line); font-size: .85rem; color: var(--muted); }
+</style>
+
+<div class="page">
+  <header>
+    <span class="eyebrow">LinkUp Golf · Design proposal</span>
+    <h1>GoHighLevel Profile Sync</h1>
+    <p class="lede">Keep member profiles in the app and contacts in GoHighLevel in step, in both directions, and add the details Curated Introductions needs. This comes before Curated Introductions is built.</p>
+    <div class="meta">
+      <span class="chip">Draft for review · 24 Nov 2026</span>
+      <span class="chip warn">Not built yet</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>Where things stand</h2>
+    <p>The app already copies contact details from GoHighLevel into member profiles: on every sign-in, whenever a contact changes in GoHighLevel, every night at 06:00 UTC, and when an admin presses <strong>Sync from GHL</strong>. Nothing flows back. A member who changes their title in the app leaves GoHighLevel out of date.</p>
+    <p>This proposal makes the sync two-way, adds four details, and limits it to the members it should cover.</p>
+  </section>
+
+  <section>
+    <h2>Who is covered</h2>
+    <ul>
+      <li>Members tagged <code>member-active-SD</code>, the San Diego community. Tags are matched regardless of capitals.</li>
+      <li>A new community gets its own tag, such as <code>member-active-OC</code> for Orange County, added to the app's tag list when it launches.</li>
+      <li>Sign-in and access for other contacts (guests, hosts, referral partners) stay as they are.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>The fields</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>In the app</th><th>In GoHighLevel</th><th>Direction</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>First name, last name</td><td>Standard fields</td><td class="dir">⇄ both</td><td></td></tr>
+          <tr><td>Email</td><td>Standard field</td><td class="dir">⇄ both</td><td>Email is how members sign in, so a change made in the app is confirmed from the new address first. See question 1.</td></tr>
+          <tr><td>Phone</td><td>Standard field</td><td class="dir">⇄ both</td><td></td></tr>
+          <tr><td>Organization</td><td>Both "Business Name" fields: the standard one under Contact info and the custom one under General</td><td class="dir">⇄ both</td><td>Read from whichever is filled, standard first. A change in the app is written to both, so the two never disagree again.</td></tr>
+          <tr><td>Title</td><td>Custom field <code>title</code></td><td class="dir">⇄ both</td><td></td></tr>
+          <tr><td>LinkedIn profile URL</td><td>Custom field <code>linkedin</code></td><td class="dir">⇄ both</td><td></td></tr>
+          <tr><td>Non-profits</td><td>Custom field <code>nonprofits</code></td><td class="dir">⇄ both</td><td>One per line in GoHighLevel.</td></tr>
+          <tr><td>Community<span class="new">New</span></td><td>The membership tag: <code>member-active-SD</code> is San Diego, <code>member-active-OC</code> would be Orange County</td><td class="dir">GoHighLevel → app</td><td>Set by an admin in GoHighLevel. Members see it but can't change it. One tag now decides both membership and community, so the two can't disagree.</td></tr>
+          <tr><td>Date of birth<span class="new">New</span></td><td>Standard Date of Birth field</td><td class="dir">⇄ both</td><td>Blank for everyone today, so the app collects it. Private: used only for matching. "Prefer not to say" is kept in the app only, because a date field can't hold it, and GoHighLevel stays blank.</td></tr>
+          <tr><td>Gender<span class="new">New</span></td><td>Tags <code>gender-male</code>, <code>gender-female</code>, <code>gender-pns</code> (prefer not to say)</td><td class="dir">⇄ both</td><td>Private: used only for matching. When a member answers in the app, the app adds that tag in GoHighLevel and removes the other two. The app's existing gender answers from the Curated Introductions survey become tags too.</td></tr>
+          <tr><td>Picture</td><td>None</td><td class="dir">App only</td><td>Optional later: copy new pictures into the GoHighLevel media library for marketing content.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>How the two-way sync works</h2>
+    <ol>
+      <li><strong>The latest change wins,</strong> wherever it was made. An admin's correction in GoHighLevel reaches the app, and a member's edit in the app reaches GoHighLevel.</li>
+      <li><strong>A member's edit is saved to GoHighLevel first, then to the app.</strong> If GoHighLevel can't be reached, the member is told to try again and nothing is saved. Otherwise the nightly sync would put GoHighLevel's old value back over the member's change.</li>
+      <li><strong>A blank in GoHighLevel never wipes a value in the app.</strong> GoHighLevel sends an empty field and a missing field the same way, so a blank can't be read as "delete this". This is how it works today.</li>
+      <li><strong>No loops.</strong> When the app writes to GoHighLevel, GoHighLevel tells the app the contact changed, and the app finds nothing new to copy.</li>
+      <li><strong>Gender tags are one at a time.</strong> If a contact has more than one in GoHighLevel, the app treats gender as unanswered until an admin fixes it, and tells the admin.</li>
+      <li><strong>Gender tags stay private in the app.</strong> The app keeps a copy of each member's tags, and today other members' devices can receive that copy along with a profile. Gender tags are therefore taken out of that copy and stored only in the private Curated Introductions record, which only admins and the matching can read.</li>
+    </ol>
+    <div class="callout"><strong>Found while checking this:</strong> the endpoint that loads another member's profile returns their whole member record, including email, phone and tags, even though the profile page shows only some of it. It should return only what the page shows. This is worth fixing with the sync, whatever happens with gender.</div>
+  </section>
+
+  <section>
+    <h2>Setup in GoHighLevel</h2>
+    <ol>
+      <li>Create the tags <code>gender-male</code>, <code>gender-female</code> and <code>gender-pns</code>.</li>
+      <li>Before deleting the <strong>Community</strong> and <strong>Gender</strong> fields, check that no workflow, smart list, form or template uses them. The app doesn't read either field.</li>
+      <li>Keep using the standard <strong>Date of Birth</strong> field.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>To confirm</h2>
+    <ol class="q">
+      <li>How should an email change work?<span class="rec">Suggested: the member enters the new address, receives a confirmation link there, and the change reaches GoHighLevel and sign-in only after they click it. Without that, one typo locks a member out.</span></li>
+      <li>Should the app say "Organization" instead of "Business name"?<span class="rec">Suggested: yes. It covers non-profits, government, religious organizations and the self-employed. GoHighLevel keeps its own label.</span></li>
+      <li>If a member already has a gender answer in the app, should it be added to GoHighLevel as a tag?<span class="rec">Suggested: yes, once, so GoHighLevel starts complete.</span></li>
+      <li>Should pictures go to the GoHighLevel media library?<span class="rec">Suggested: later, as a small separate task, since it isn't essential.</span></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Then</h2>
+    <p>Once this is in place, the Curated Introductions work can rely on every San Diego member's profile having the details it needs, or on prompting them for what's missing.</p>
+  </section>
+
+  <footer>Prepared with Claude Code from the LinkUp Golf codebase. The current one-way sync is in <code>src/lib/sync/</code>.</footer>
+</div>

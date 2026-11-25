@@ -187,6 +187,9 @@ export default function BookPage() {
     // What the member themselves owes. In a group booking each other player
     // holds a payment-due row of their own, so this is one share, not the bill.
     amountDue: number;
+    // More than one foursome that day — the only days the group table after
+    // golf is reserved, so the only days the dinner question is asked.
+    groupTable: boolean;
   } | null>(null);
 
   // My bookings tab
@@ -373,6 +376,9 @@ export default function BookPage() {
           eventName: selectedEvent?.name ?? "Park Hyatt Aviara",
           paymentUrl:
             ownRow?.course?.payment_url ?? selectedEvent?.payment_url ?? null,
+          // Only a day with more than one foursome reserves the group table.
+          // Anything but an explicit false asks, as it did before.
+          groupTable: data.groupTable !== false,
           paymentOptions: coursePaymentOptions(ownRow?.course ?? selectedEvent),
           // The venue's green fee. amount_charged is written from it at
           // booking time, so it answers first; the course row behind it covers
@@ -2004,7 +2010,9 @@ function MemberAutocomplete({
 // ---- Success screen -----------------------------------------
 
 // The post-golf group dinner is an Aviara-only offering, so the RSVP prompt is
-// shown only when the booking is for the Aviara course/event.
+// shown only when the booking is for the Aviara course/event — and only on a
+// day with more than one foursome (`groupTable`, from the create route): the
+// restaurant can seat a single four without a reservation.
 const isAviaraEvent = (name?: string | null) => !!name && /aviara/i.test(name);
 
 function SuccessScreen({
@@ -2023,6 +2031,8 @@ function SuccessScreen({
     paymentUrl: string | null;
     paymentOptions: PaymentOption[];
     amountDue: number;
+    /** More than one foursome that day, so the group table is reserved. */
+    groupTable: boolean;
   };
   onDone: () => void;
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
@@ -2034,7 +2044,8 @@ function SuccessScreen({
   const [dinnerRsvp, setDinnerRsvp] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [payingWithCredit, setPayingWithCredit] = useState(false);
-  const showDinner = !!booking.bookingId && isAviaraEvent(booking.eventName);
+  const showDinner =
+    !!booking.bookingId && isAviaraEvent(booking.eventName) && booking.groupTable;
 
   // Which ways this venue takes payment. Pay on App is the checkout link (and
   // the only place credit can be spent); Pay at club marks the round and is done.

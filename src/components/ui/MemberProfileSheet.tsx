@@ -9,7 +9,6 @@ export interface MemberDetail {
   id: string
   first_name: string
   last_name: string
-  email: string
   profile: {
     display_name: string
     avatar_url: string | null

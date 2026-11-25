@@ -1,0 +1,274 @@
+<title>Open-Ended Curated Introductions</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one reading column, a status strip up top, the match flow drawn as a day-by-day timeline. LinkUp brand blue and grass green. */
+:root {
+  --bg: #F8F8FC;
+  --surface: #FFFFFF;
+  --fg: #11203F;
+  --muted: #55607A;
+  --line: #DDE2EE;
+  --brand: #002669;
+  --accent: #639948;
+  --accent-soft: #EAF3E3;
+  --brand-soft: #EEF2FA;
+  --warn: #9A5B00;
+  --warn-soft: #FFF4E0;
+  --display: "Lexend Deca", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --body: "Lexend Deca", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0B1226; --surface: #121B33; --fg: #E6EBF6; --muted: #9AA6C2; --line: #26324F;
+    --brand: #BBCCEE; --accent: #A0CC85; --accent-soft: #1B2C1A; --brand-soft: #18244A;
+    --warn: #F2B868; --warn-soft: #2E2312; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0B1226; --surface: #121B33; --fg: #E6EBF6; --muted: #9AA6C2; --line: #26324F;
+  --brand: #BBCCEE; --accent: #A0CC85; --accent-soft: #1B2C1A; --brand-soft: #18244A;
+  --warn: #F2B868; --warn-soft: #2E2312; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 16px; line-height: 1.65; font-weight: 400; }
+.page { max-width: 46rem; margin: 0 auto; padding-block: 3rem 5rem; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header { display: grid; gap: .75rem; margin-bottom: 2.5rem; }
+.eyebrow { font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+h1 { font-family: var(--display); font-size: clamp(1.9rem, 5vw, 2.6rem); line-height: 1.15; font-weight: 700; color: var(--brand); margin: 0; text-wrap: balance; }
+.lede { font-size: 1.1rem; color: var(--muted); margin: 0; max-width: 38rem; }
+.meta { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
+.chip { font-size: .75rem; padding: .25rem .65rem; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-weight: 500; }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+section { margin-top: 3rem; }
+h2 { font-family: var(--display); font-size: 1.35rem; color: var(--brand); margin: 0 0 .75rem; font-weight: 600; text-wrap: balance; }
+h3 { font-size: 1rem; margin: 1.5rem 0 .4rem; font-weight: 600; }
+p, li { max-width: 40rem; }
+p { margin: 0 0 1rem; }
+ul, ol { padding-left: 1.25rem; margin: 0 0 1rem; display: grid; gap: .4rem; }
+strong { font-weight: 600; }
+.table-wrap { overflow-x: auto; margin: 1rem 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: .92rem; min-width: 32rem; }
+th, td { text-align: left; padding: .65rem .85rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+.ok { color: var(--accent); font-weight: 600; }
+.no { color: var(--warn); font-weight: 600; }
+.timeline { list-style: none; padding: 0; margin: 1.25rem 0; display: grid; gap: 0; }
+.timeline li { display: grid; grid-template-columns: 5.5rem 1fr; gap: 1rem; padding: 1rem 0; border-top: 1px solid var(--line); max-width: none; }
+.timeline li:last-child { border-bottom: 1px solid var(--line); }
+.when { font-weight: 600; color: var(--brand); font-variant-numeric: tabular-nums; }
+.timeline .body { min-width: 0; }
+.timeline p { margin: 0 0 .5rem; }
+.message { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: .75rem 1rem; font-size: .95rem; margin: .5rem 0; }
+.message .label { display: block; font-size: .7rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: .25rem; }
+.buttons { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .5rem; }
+.buttons span { font-size: .8rem; padding: .3rem .7rem; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); }
+.callout { background: var(--warn-soft); color: var(--fg); border-radius: 10px; padding: 1rem 1.1rem; margin: 1rem 0; }
+.callout strong { color: var(--warn); }
+.steps { counter-reset: s; list-style: none; padding: 0; display: grid; gap: .75rem; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 2rem 1fr; gap: .75rem; max-width: none; }
+.steps li::before { content: counter(s); width: 1.75rem; height: 1.75rem; border-radius: 50%; background: var(--brand-soft); color: var(--brand); font-weight: 600; font-size: .85rem; display: grid; place-items: center; }
+.steps li > div { min-width: 0; }
+.prompts { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .75rem; margin: 1rem 0; }
+.prompt { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: .9rem 1rem; min-width: 0; }
+.prompt b { display: block; font-size: .8rem; color: var(--accent); text-transform: uppercase; letter-spacing: .06em; margin-bottom: .3rem; }
+.prompt p { font-size: .9rem; margin: 0; color: var(--muted); }
+footer { margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line); font-size: .85rem; color: var(--muted); }
+@media (max-width: 30rem) { .timeline li { grid-template-columns: 1fr; gap: .25rem; } }
+</style>
+
+<div class="page">
+  <header>
+    <span class="eyebrow">LinkUp Golf · Design proposal</span>
+    <h1>Open-Ended Curated Introductions</h1>
+    <p class="lede">Replace the Curated Introductions checklists with written descriptions. AI reads them and suggests matches, and an admin approves every introduction before it is sent.</p>
+    <div class="meta">
+      <span class="chip">Draft for review · 24 Nov 2026</span>
+      <span class="chip warn">Not built yet</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>Why change it</h2>
+    <p>The survey asks members to pick an industry and a role from fixed lists. No list short enough to use can cover every business: an HVAC company owner, a family office or an orthodontist has no accurate choice today. The current matcher also can't tell that "CPA" and "accountant" mean the same thing.</p>
+    <p>Members would instead describe themselves, and the people they'd like to meet, in their own words. Anything a member writes can count toward a match. Anything nobody mentions is left out.</p>
+  </section>
+
+  <section>
+    <h2>Decisions made</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Question</th><th>Decision</th></tr></thead>
+        <tbody>
+          <tr><td>Can AI take part?</td><td>Yes. AI suggests matches, and a human admin vets each one before it is approved.</td></tr>
+          <tr><td>Can gender, habits and private preferences be used?</td><td>Yes. They're part of the matching, and admins see them when vetting.</td></tr>
+          <tr><td>Do members see why they were matched?</td><td>No. They get a notification and a name, and judge for themselves from the profile, including LinkedIn.</td></tr>
+          <tr><td>Checkboxes or free text?</td><td>Free text. Members describe themselves and the people they'd like to meet at three levels: personal, business and golf.</td></tr>
+          <tr><td>What if a topic is never mentioned?</td><td>If neither member mentions it, it isn't part of the decision.</td></tr>
+          <tr><td>What if one member's dealbreaker can't be checked?</td><td>The other member is asked one question before the match goes ahead. See the cigar example below.</td></tr>
+          <tr><td>Ask before or after admin review?</td><td>Before. Admins only review matches that can actually happen.</td></tr>
+          <tr><td>Who can be matched?</td><td>Version 1: members only, and only within the member's own community (all San Diego today).</td></tr>
+          <tr><td>Which preferences are used?</td><td>Golf-relevant ones, including gender: men and women play from different tees and at different paces, and some members prefer same-gender rounds. Nationality, religion and ethnicity are never asked and never used. No member's answers are ever shown to another member.</td></tr>
+          <tr><td>Should members confirm what the AI understood?</td><td>Yes. A short summary after saving that they can correct.</td></tr>
+          <tr><td>Who owns the Anthropic account?</td><td>LinkUp Golf.</td></tr>
+          <tr><td>Privacy policy</td><td>Add a line saying members' Curated Introductions answers are processed by an AI service for matching.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Scope</h2>
+    <p><strong>Version 1</strong> introduces members to other members of LinkUp Golf, only within their own community. Today every member is in San Diego.</p>
+    <p><strong>Future paid versions</strong> may add either or both of these:</p>
+    <ul>
+      <li>Connecting to an outbound outreach service, so introductions can reach people outside the membership.</li>
+      <li>Introductions across communities.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Required profile details</h2>
+    <p>Curated Introductions needs each of these on the member's profile. A member can turn it on with details missing; they're prompted afterwards to fill in whatever is blank.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Detail</th><th>Shown to other members?</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>First name, last name</td><td>Yes</td><td></td></tr>
+          <tr><td>Title</td><td>Yes</td><td></td></tr>
+          <tr><td>Business name</td><td>Yes</td><td></td></tr>
+          <tr><td>Picture</td><td>Yes</td><td></td></tr>
+          <tr><td>Community</td><td>Yes</td><td>Comes from a new "community" field on the GoHighLevel contact. San Diego for every current member.</td></tr>
+          <tr><td>Age</td><td>No</td><td>Asked as date of birth. "Prefer not to say" is allowed.</td></tr>
+          <tr><td>Gender</td><td>No</td><td>"Prefer not to say" is allowed.</td></tr>
+          <tr><td>LinkedIn profile URL</td><td>Yes</td><td>Usually already on the profile from GoHighLevel. If missing, the member is asked, and can say they don't have one.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>"Prefer not to say" works like a dealbreaker answer: a member who prefers not to give their gender or age isn't matched with anyone who has a dealbreaker about it.</p>
+  </section>
+
+  <section>
+    <h2>What members write</h2>
+    <p class="chip" style="display:inline-block">The wording of these prompts will be revised later</p>
+    <p>The survey becomes six prompts. Each one suggests what to include, but the member decides what to say.</p>
+    <div class="prompts">
+      <div class="prompt"><b>Me · personal</b><p>Who you are off the course, and what matters to you.</p></div>
+      <div class="prompt"><b>Me · business</b><p>Your industry, your role, the size of your company, and what you offer.</p></div>
+      <div class="prompt"><b>Me · golf</b><p>Your skill, pace and attitude, when you like to play, and your habits on the course.</p></div>
+      <div class="prompt"><b>Who I'd like to meet · personal</b><p>The kind of person you'd enjoy spending four hours with.</p></div>
+      <div class="prompt"><b>Who I'd like to meet · business</b><p>The industries, roles or companies you'd like to be introduced to.</p></div>
+      <div class="prompt"><b>Who I'd like to meet · golf</b><p>The kind of golfer you'd like to play with, and anything that's a dealbreaker.</p></div>
+    </div>
+    <p>Members who already answered the current survey keep their answers as known facts, so nobody has to start over.</p>
+  </section>
+
+  <section>
+    <h2>How a match is found</h2>
+    <ol class="steps">
+      <li><div><strong>AI reads the answers when they're saved.</strong> Each answer becomes a private profile: facts about the member, plus what they must have, won't accept or merely prefer. "I'd rather avoid cigars" lowers a match's ranking; "absolutely no cigars" rules it out.</div></li>
+      <li><div><strong>Rules remove conflicts in both directions.</strong> A match must suit both people. A member who has turned Curated Introductions off, or who has already played with the other person, is left out as today.</div></li>
+      <li><div><strong>The rest are ranked.</strong> Business fit, golf fit and personal fit, plus how recently each person used the app.</div></li>
+      <li><div><strong>Open questions are asked.</strong> If a strong match depends on something one member hasn't said, that member is asked first.</div></li>
+      <li><div><strong>An admin decides.</strong> The admin sees each suggestion with both members' own words quoted, including gender, habits and preferences, and approves or rejects it.</div></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>When a dealbreaker can't be checked</h2>
+    <p><strong>Example:</strong> Joe's description fits what Bob is looking for. Bob has said he won't play with cigar smokers, and Joe hasn't said whether he smokes.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Bob says</th><th>Joe says</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td>Nothing about cigars</td><td>Anything</td><td class="ok">Can match</td></tr>
+          <tr><td>No cigar smokers</td><td>"I don't smoke"</td><td class="ok">Can match</td></tr>
+          <tr><td>No cigar smokers</td><td>"Love a cigar on the back nine"</td><td class="no">No match</td></tr>
+          <tr><td>No cigar smokers</td><td>Nothing about cigars</td><td>Ask Joe, as below</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <ol class="timeline">
+      <li>
+        <span class="when">Day 0</span>
+        <div class="body">
+          <p>Joe gets a push and an email. Neither mentions Bob.</p>
+          <div class="message"><span class="label">Message</span>You have a potential Curated Introduction match, but we need you to answer one quick question about cigars on the course.</div>
+          <p>Tapping it opens a screen with three choices. The answer is saved privately to his Curated Introductions profile.</p>
+          <div class="buttons"><span>Yes</span><span>No</span><span>Prefer not to say</span></div>
+        </div>
+      </li>
+      <li>
+        <span class="when">Day 2</span>
+        <div class="body">
+          <p>If Joe hasn't answered, he gets one reminder.</p>
+          <div class="message"><span class="label">Reminder</span>If we don't hear from you by [date], we'll record your answer as "Prefer not to say" and use it for future matches too. You can change it any time in Curated Introductions.</div>
+        </div>
+      </li>
+      <li>
+        <span class="when">Day 4</span>
+        <div class="body">
+          <p>If Joe still hasn't answered, "Prefer not to say" is recorded.</p>
+        </div>
+      </li>
+      <li>
+        <span class="when">After</span>
+        <div class="body">
+          <p><strong>No:</strong> the match goes to an admin for review.</p>
+          <p><strong>Yes or Prefer not to say:</strong> Joe is not a match for Bob, or for anyone else who rules out cigar smokers.</p>
+          <p>Joe's answer applies to every future match, so he's never asked about cigars again. He can change it under Curated Introductions.</p>
+        </div>
+      </li>
+    </ol>
+
+    <h3>Rules for these questions</h3>
+    <ul>
+      <li>Only dealbreakers trigger a question. A soft preference just affects the ranking.</li>
+      <li>Only strong matches trigger a question, so members aren't asked about every candidate.</li>
+      <li>Questions are batched: if a match depends on two answers, one message asks both ("…two quick questions about cigars and music on the course").</li>
+      <li>The same mechanism covers any dealbreaker that can be answered with a few choices, such as music, alcohol or gender.</li>
+      <li>If an answer contradicts what the member later writes, an admin sees the conflict and the most recent statement wins.</li>
+      <li>The choices appear on a screen in the app rather than as buttons on the notification, because iPhones can't show buttons on web push notifications.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>After an admin approves</h2>
+    <ul>
+      <li><strong>Both</strong> members get a push and an email saying there's a new match in their Curated Introductions queue. Today only one side gets the match in their list.</li>
+      <li>The queue is under <strong>More</strong> on a phone, and is its own item in the <strong>left navigation</strong> on a computer.</li>
+      <li>No reasons are shown. The "Why you two" note, the shared-interest chips and the reason in the notification are removed.</li>
+      <li>Tapping the name opens the member's profile, including their LinkedIn link.</li>
+      <li>From there either member can message the other or invite them to a round. "Not now" still hides the match and keeps the pair apart for 90 days.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Privacy and safety</h2>
+    <ul>
+      <li>Members' private answers are shown only to admins, never on a profile or to the other member.</li>
+      <li>Only the text members write for Curated Introductions is sent to the AI service. Names, emails and phone numbers are not.</li>
+      <li>The AI's output is checked against a fixed list of categories, so text a member writes can't instruct it to do anything else.</li>
+      <li>Age and gender are private and used only for matching.</li>
+      <li>Nationality, religion and ethnicity are not golf-relevant, so the survey doesn't ask about them and they are never factors in matching. If a member mentions them in their own words, the AI ignores them, and the admin is told so they can follow up if needed.</li>
+    </ul>
+    <div class="callout"><strong>Before launch:</strong> it's worth a lawyer briefly confirming the use of gender and age in matching, given the golf reasons above, since both are protected traits in some contexts.</div>
+  </section>
+
+  <section>
+    <h2>Cost and next steps</h2>
+    <p>Reading one member's answers costs about 2 cents with Claude Opus 5.5. Answers are only read when they change, so the running cost is small.</p>
+    <ol>
+      <li><strong>Import member data from GoHighLevel</strong> into member profiles, so the required details and LinkedIn URLs are filled in wherever GoHighLevel has them. This comes first.</li>
+      <li><strong>Test the reading.</strong> A prototype is ready with 54 invented answers from 12 fictional members. It needs an API key to run, and a run costs about $1. It currently tests industry and role, and would be extended to whole descriptions and dealbreakers.</li>
+      <li><strong>Ship the simpler member flow.</strong> Two-sided matches, no reasons shown, the new queue, the required profile details, and matching across the community. This doesn't depend on AI.</li>
+      <li><strong>Build open-ended matching</strong> once the test results are good, with the dealbreaker questions.</li>
+      <li><strong>Move existing members across</strong> using their current answers.</li>
+    </ol>
+  </section>
+
+  <footer>Prepared with Claude Code from the LinkUp Golf codebase and the decisions in this conversation. Replaces the "Admin-led, no AI" entry of 4 Nov 2026 in docs/decisions.md once approved.</footer>
+</div>

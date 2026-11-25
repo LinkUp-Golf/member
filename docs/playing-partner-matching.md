@@ -26,63 +26,69 @@ Members who turn on Curated Introductions are introduced to someone new to play 
 
 Optional. A member of a club (a home course, active, holding a membership tag) finds it under **More → Curated Introductions**. Guests, referral partners and hosts without a golf membership, and admin accounts without a membership of their own, are told it's for members of a LinkUp club.
 
-- **Never answered:** turning the switch on shows the questions. Saving them turns Curated Introductions on.
+- **Never answered:** turning the switch on shows the questions. Submitting them turns Curated Introductions on.
 - **Answered:** the switch turns it on and off in place, and the answers are kept.
 - **Off** means off both ways. The member isn't introduced to anyone, isn't suggested to anyone, and isn't in the admin's queue.
 
-Questions not marked optional are required, because a preference can only be checked against an answer.
+The questions come in **two steps** (since 2026-11-20): **Describe Yourself**, then **Describe Your Ideal Match**. Step indicators sit above the form, and Back / Continue move between the steps. The final step has Submit, or Save changes for a member editing earlier answers. Both steps share one set of answers, so moving between them loses nothing. Questions not marked optional are required, because a preference can only be checked against an answer. Continue and Submit point out what's missing on that step and scroll to the first one.
 
-### Curated Introduction Preferences
+Where the profile already says something, the survey starts from it: industry (where it's on the list), role (from "Business Owner / Founder", or a job title that says one role plainly, such as "CFO" → Finance), golf skill (from the handicap), and what they offer and seek. Each guess is shown selected, and the member can change it.
 
-These decide how high a candidate ranks. They don't rule anyone out.
+### Step 1: Describe Yourself
 
-| Question | Answers | Notes |
-| --- | --- | --- |
-| Objectives (up to 3) | New clients, Referral partners, Capital, Investment deals, Team Members, Vendors, Mentors, Mentees, Just golf | "Mentors" means looking for a mentor, "Mentees" means looking for someone to mentor |
-| Preferred industries | The industry list below | Optional. Blank means any industry |
-| Preferred roles | Founder / Owner / CEO, Finance, Marketing, Operations, Development, IT, HR, Sales, Legal | Optional. Blank means any role |
-| Ideal company size | 1-10, 11-50, 51-200, 201-1000, 1000+, Any size | Any size stands alone |
+About the member. Other members' preferences are checked against these answers.
 
-Industries: Professional Services (Legal), Professional Services (Accounting), Professional Services (Consulting), Capital Provider, Insurance, Business Software, Business Services, HR & Recruitment, Real Estate, Healthcare / Life Sciences, Financial Services, Technology, Non-profit. "Business Owner / Founder" is a role, not an industry, so it's under roles. The industry list on member profiles is unchanged.
-
-### Describe your business
+**Your business**
 
 | Question | Answers | Notes |
 | --- | --- | --- |
-| Organization size | Solopreneurs, 2–10, 11–50, 51–200, 201–1,000 people, More than 1,000 | Solopreneurs and 2–10 count as "1-10" for others' ideal size |
-| What industry is your business in? | The industry list | Optional. Pre-filled from the profile where it's on the list |
-| Your role | The role list | Optional. What others' preferred roles are checked against |
-| What size of organizations do you serve? | Organization sizes | Optional. Makes "potential client" possible |
+| Your role | Founder / Owner / CEO, Finance, Marketing, Operations, Development, IT, HR, Sales, Legal | Optional, one. What others' preferred roles are checked against |
+| Organization size | Solopreneurs, 2–10, 11–50, 51–200, 201–1,000 people, More than 1,000 | One. Solopreneurs and 2–10 count as "1-10" for others' preferred size |
+| What industry is your business in? | The industry list, or Other with a name | Optional, one. Other opens a box for an industry the list doesn't have |
+| What size of organizations do you serve? | Organization sizes | Optional, as many as they like. Makes "potential client" possible |
 | Describe your offering | Free text | Optional. Shown on the profile |
-| Describe any solutions, services or resources you seek | Free text | Optional. Shown on the profile |
 
-### Describe yourself as a golfer
+**Your golf**
 
 | Question | Answers |
 | --- | --- |
-| When do you prefer to play? | Weekday early, midday or twilight; weekend morning or afternoon |
+| When do you prefer to play? | Weekday afternoons · Weekend afternoons (either or both) |
 | What's your golf attitude? | Serious, competitive, strict adherence to rules of golf · Friendly competition · Relaxed, casual, "Not Attached to the Outcome". Score keeping optional |
-| Golf Skill | Excellent golfer - Low handicap golfers only · Good golfer - Mid to low handicap golfers only · New golfer - Beginners or high handicap golfers only |
+| Golf skill | I'm an excellent golfer · I'm a good golfer · I'm a new golfer |
+
+Members play in the afternoon, so the play times are afternoons only. The old answers (weekday early, midday or twilight; weekend morning) are read as the afternoon of the same kind of day wherever answers are read, so no stored row needed rewriting (`normalisePlayTimes`).
 
 The survey no longer asks about hobbies, non-profits or handicap. Those stay on the profile page, and the matcher still reads them from there.
 
-### About you
-
-*Tell us about yourself.* Never shown on a profile.
+**About you.** Never shown on a profile.
 
 | Question | Answers | Checked by |
 | --- | --- | --- |
 | Your gender | Male, Female | Optional. A blank gender fits only members with no gender preference |
 | Do you smoke cigars / cigarettes / marijuana on the course? Do you drink alcohol on the course? Do you play music from a speaker on the course? | Yes / No each | The matching "Do you mind …" question |
 
-### Preferred introductions
+### Step 2: Describe Your Ideal Match
 
-*Describe the profile of person you would or would not like to play golf with.* Each answer is a filter applied before scoring: it decides who can be recommended, not how highly. "No preference" and "No" rule nobody out.
+**What you're looking for** and **Who you'd like to meet** decide how high a candidate ranks. They don't rule anyone out.
+
+| Question | Answers | Notes |
+| --- | --- | --- |
+| Objectives | New clients, Referral partners, Capital, Investment deals, Team Members, Vendors, Mentors, Mentees, Just golf | As many as they like (the limit of 3 was lifted on 2026-11-20). "Mentors" means looking for a mentor, "Mentees" means looking for someone to mentor |
+| Describe any solutions, services or resources you seek | Free text | Optional. Shown on the profile |
+| Preferred industries | The industry list, plus Other with a name | Optional, as many as they like. Blank means any industry |
+| Preferred roles | The role list | Optional, as many as they like. Blank means any role |
+| Preferred company size | 1-10, 11-50, 51-200, 201-1000, 1000+, Any size | As many as they like. Any size stands alone |
+
+Industries: Professional Services (Legal), Professional Services (Accounting), Professional Services (Consulting), Capital Provider, Insurance, Business Software, Business Services, HR & Recruitment, Real Estate, Healthcare / Life Sciences, Financial Services, Technology, Non-profit, and **Other**, where the member names one (up to 60 characters). "Business Owner / Founder" is a role, not an industry, so it's under roles. The industry list on member profiles is unchanged.
+
+**An industry named under Other** is stored as itself, beside the listed ones: `industry` holds a listed industry or the named one, and the named one is the entry in `meet_industries` that isn't on the list. No column was added. The app's shape keeps them apart (`industry_other`, `meet_industry_other`; `toMatchRow` and `toMatchProfile` convert). A name that turns out to be a listed industry ("real estate") is taken as the listed one. For ranking, a named preference counts as met when the candidate's industry has the same words, or shares one that isn't generic like "services" (`sameIndustry`): "Construction" meets "Construction & Engineering", and "Legal tech" meets "Professional Services (Legal)".
+
+**Who you'd like to play with.** *Describe the profile of person you would or would not like to play golf with.* Each answer is a filter applied before scoring: it decides who can be recommended, not how highly. "No preference" and "No" rule nobody out.
 
 | Question | Answer options | How the matcher uses it |
 | --- | --- | --- |
 | Do you have a gender preference? | Male · Female · No preference | Leaves out candidates of another gender, or with none given |
-| Do you have a skill level preference? | Excellent golfers - Low handicap golfers only · Good golfers - Mid to low handicap golfers only · New golfers - Beginners or high handicap golfers only · No preference | Checked against the candidate's Golf Skill. Members who answered before Golf Skill existed are read from their handicap: up to 9 excellent, 10 to 18 good, 19 and up (or none) new |
+| Do you have a skill level preference? | Excellent golfers · Good golfers · New golfers · No preference | Checked against the candidate's golf skill. "Good golfers" lets in good and excellent golfers, as it did when it read "Mid to low handicap golfers only". Members who answered before golf skill existed are read from their handicap: up to 9 excellent, 10 to 18 good, 19 and up (or none) new |
 | Do you have a golf attitude preference? | The three attitudes · No preference | Leaves out candidates whose own attitude is different |
 | Do you mind playing with people who smoke cigars / cigarettes / marijuana, drink alcohol, or with music playing from speakers? | Yes / No each | Yes leaves out candidates who do it on the course |
 
@@ -107,7 +113,7 @@ Left out first:
 - a pair either of them dismissed with Not now in the last 90 days
 - anyone either member's preferred introductions rule out
 
-Preferred introductions are checked both ways: B is listed for A only if B fits A's and A fits B's. A candidate who hasn't answered the question a preference needs is left out, because the preference can't be checked. An admin can't override a preference. The list says how many were ruled out.
+The "who you'd like to play with" answers are checked both ways: B is listed for A only if B fits A's and A fits B's. A candidate who hasn't answered the question a preference needs is left out, because the preference can't be checked. An admin can't override a preference. The list says how many were ruled out.
 
 Everyone left is scored out of 100 (`MATCH_WEIGHTS` in `rules.ts`). The score only orders the list.
 
@@ -125,7 +131,7 @@ The pair's score is the geometric mean of A→B and B→A, so a match that only 
 
 A pair already sent in either direction stays on the list, ticked and disabled, with when it was sent: "Recommended to Sam" or "Sam was recommended to Dana".
 
-The admin ticks up to 5 players. Each pick carries a note, pre-filled from the rules ("Dana is a founder, the kind of client you serve, and you both play early on weekdays."), which the admin edits or sends as it is. Notes and chips are built from the business and golf answers only and never mention a preference, a gender or a habit.
+The admin ticks up to 5 players. Each pick carries a note, pre-filled from the rules ("Dana is a founder, the kind of client you serve, and you both play on weekday afternoons."), which the admin edits or sends as it is. Notes and chips are built from the business and golf answers only and never mention a preference, a gender or a habit.
 
 The server rebuilds the list before saving, so a stale screen can't send a match that no longer fits, and it refuses a member who has Curated Introductions off. Each pick is a `play_suggestions` row with `recommended_by` and `note`; re-sending a pair dismissed long ago reopens its row. The member gets one push and email: "Play with Dana?" with the note for a single pick, "3 playing partners for you" for several. Each recommended player gets their own: "You've been recommended to Sam", linking to Sam's profile. The note isn't in it, since it's written to the member.
 
@@ -156,7 +162,7 @@ Opening the list stamps `seen_at`. Not now and the first save of the survey are 
 
 ## Deploying
 
-Apply `20261104000002_partner_matching.sql` and `20261112000002_curated_introductions.sql` before deploying. The second adds the new answers, moves "Business Owner / Founder" picks to the Founder role, drops "Other" from preferred industries, and clears "Prefer not to say" genders.
+Apply `20261104000002_partner_matching.sql` and `20261112000002_curated_introductions.sql` before deploying. The two-step survey of 2026-11-20 needs no database update of its own. The second adds the new answers, moves "Business Owner / Founder" picks to the Founder role, drops "Other" from preferred industries, and clears "Prefer not to say" genders.
 
 ## Decisions taken
 
@@ -167,5 +173,5 @@ Apply `20261104000002_partner_matching.sql` and `20261112000002_curated_introduc
 | What does off mean? | Neither introduced to anyone nor sent introductions; answers kept |
 | Tell both members, or only one? | Both: the member gets the recommendation, and each recommended player is told who they were recommended to |
 | Include hosts as candidates? | A host who is a member is in the pool like anyone else |
-| Do Step 1 preferences filter? | No, they rank. Only the preferred introductions filter |
+| Do the "who you'd like to meet" preferences filter? | No, they rank. Only the "who you'd like to play with" answers filter |
 | Ask the member's own role? | Yes, so preferred roles have something to be checked against. Optional |

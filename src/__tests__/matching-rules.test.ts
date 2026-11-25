@@ -4,6 +4,7 @@ import {
   matchChips,
   mutualFit,
   pairScore,
+  sameIndustry,
   sharedChips,
   skillFromHandicap,
   skillOf,
@@ -14,9 +15,15 @@ import {
   EMPTY_MATCH_PROFILE,
   HABITS,
   MATCH_GOALS,
+  PLAY_TIMES,
+  PREF_SKILLS,
+  SKILLS,
   eligibleForIntroductions,
+  normalisePlayTimes,
   optionLabel,
+  roleFromTitle,
   toMatchProfile,
+  toMatchRow,
   validateSurvey,
   type MatchProfile,
 } from '@/lib/matching/survey'
@@ -44,7 +51,7 @@ function subject(id: string, overrides: Partial<Omit<MatchSubject, 'match'>> = {
       meet_roles: [],
       meet_company_sizes: ['any'],
       company_size: '2_10',
-      play_times: ['weekday_early'],
+      play_times: ['weekday_afternoon'],
       attitude: 'friendly',
       skill: 'good',
       gender: 'female',
@@ -135,6 +142,15 @@ describe('fitsPreferences', () => {
   })
 })
 
+describe('sameIndustry', () => {
+  it('matches the same words, or a shared word that is not generic', () => {
+    expect(sameIndustry('construction', 'Construction')).toBe(true)
+    expect(sameIndustry('Legal tech', 'Professional Services (Legal)')).toBe(true)
+    expect(sameIndustry('Marketing services', 'Business Services')).toBe(false)
+    expect(sameIndustry('Aviation', 'Technology')).toBe(false)
+  })
+})
+
 describe('mutualFit', () => {
   it('needs each to fit the other', () => {
     const sam = subject('sam', {}, { does_cigars: true })
@@ -171,6 +187,24 @@ describe('pairScore', () => {
     expect(pairScore(wantsFounders, founder, NOW)).toBeGreaterThan(pairScore(wantsFounders, other, NOW))
   })
 
+  it('counts an industry named under Other toward the industries a member wants to meet', () => {
+    const wantsBuilders = subject('sam', {}, { meet_industry_other: 'Construction' })
+    const builder = subject('dana', { industry: 'Construction & Engineering' })
+    const lawyer = subject('lee', { industry: 'Professional Services (Legal)' })
+    expect(matchChips(wantsBuilders, builder)).toContain('Industry they want to meet')
+    expect(matchChips(wantsBuilders, lawyer)).not.toContain('Industry they want to meet')
+    expect(pairScore(wantsBuilders, builder, NOW)).toBeGreaterThan(pairScore(wantsBuilders, lawyer, NOW))
+    expect(templatedNote(wantsBuilders, builder)).toContain('Dana works in Construction & Engineering, the kind of person you want to meet')
+  })
+
+  it('treats blank industries, roles and Any size as anyone, as before', () => {
+    const open = subject('sam')
+    const a = subject('dana', { industry: 'Insurance', role: 'sales' }, { company_size: '1000_up' })
+    const b = subject('lee', { industry: 'Technology', role: 'founder' }, { company_size: 'solo' })
+    expect(pairScore(open, a, NOW)).toBe(pairScore(open, b, NOW))
+    expect(matchChips(open, a).some(c => /want to meet|size they want/.test(c))).toBe(false)
+  })
+
   it('counts a Solopreneur and a 2–10 company as 1-10', () => {
     const wantsSmall = subject('sam', {}, { meet_company_sizes: ['1_10'] })
     const solo = subject('dana', {}, { company_size: 'solo' })
@@ -198,11 +232,11 @@ describe('chips and notes', () => {
   const dana = subject('dana', { industry: null, role: 'founder', nonprofits: ['st. jude'] }, { gender: 'female' })
 
   it('writes the note from the business and golf answers', () => {
-    expect(templatedNote(sam, dana)).toBe('Dana is a founder, the kind of client you serve, and you both play early on weekdays.')
+    expect(templatedNote(sam, dana)).toBe('Dana is a founder, the kind of client you serve, and you both play on weekday afternoons.')
   })
 
   it('names the role a member asked to meet', () => {
-    const wantsFounders = subject('sam', {}, { meet_roles: ['founder'], play_times: ['weekend_morning'] })
+    const wantsFounders = subject('sam', {}, { meet_roles: ['founder'], play_times: ['weekend_afternoon'] })
     expect(templatedNote(wantsFounders, dana)).toBe('Dana is a founder, the kind of person you want to meet.')
   })
 
@@ -214,12 +248,12 @@ describe('chips and notes', () => {
   })
 
   it('shows the member what the two share', () => {
-    expect(sharedChips(sam, dana)).toEqual(['Both weekday early', 'Both support St. Jude'])
+    expect(sharedChips(sam, dana)).toEqual(['Both weekday afternoons', 'Both support St. Jude'])
   })
 
   it('falls back to a plain sentence when nothing lines up', () => {
-    const a = subject('a', {}, { play_times: ['weekend_morning'] })
-    const b = subject('b', {}, { play_times: ['weekday_twilight'] })
+    const a = subject('a', {}, { play_times: ['weekend_afternoon'] })
+    const b = subject('b', {}, { play_times: ['weekday_afternoon'] })
     expect(templatedNote(a, b)).toBe('We think you and B would enjoy a round together.')
   })
 })
@@ -229,7 +263,7 @@ describe('validateSurvey', () => {
     goals: ['new_clients'],
     meet_company_sizes: ['any'],
     company_size: '11_50',
-    play_times: ['weekend_morning'],
+    play_times: ['weekend_afternoon'],
     attitude: 'relaxed',
     skill: 'good',
     pref_gender: 'any',
@@ -262,15 +296,14 @@ describe('validateSurvey', () => {
     expect(r.errors).toEqual(expect.arrayContaining([
       'Choose when you prefer to play',
       'Choose your golf skill',
-      'Choose an ideal company size, or Any size',
+      'Choose a preferred company size, or Any size',
       'Answer "Do you have a gender preference"',
       'Answer "Do you drink alcohol on the course?"',
     ]))
   })
 
-  it('refuses unknown options, the old industries, a fourth objective and Prefer not to say', () => {
+  it('refuses unknown options, the old industries and Prefer not to say', () => {
     expect(validateSurvey({ ...complete, pref_skill: 'pro' }).valid).toBe(false)
-    expect(validateSurvey({ ...complete, goals: ['new_clients', 'capital', 'hiring', 'vendors'] }).valid).toBe(false)
     expect(validateSurvey({ ...complete, meet_industries: ['Business Owner / Founder'] }).valid).toBe(false)
     expect(validateSurvey({ ...complete, industry: 'Other' }).valid).toBe(false)
     expect(validateSurvey({ ...complete, gender: 'undisclosed' }).valid).toBe(false)
@@ -278,6 +311,94 @@ describe('validateSurvey', () => {
 
   it('lets Any size stand alone', () => {
     expect(validateSurvey({ ...complete, meet_company_sizes: ['1_10', 'any'] }).match?.meet_company_sizes).toEqual(['any'])
+  })
+
+  it('takes as many objectives as the member likes, every one included', () => {
+    const all = MATCH_GOALS.map(g => g.value)
+    const r = validateSurvey({ ...complete, goals: all })
+    expect(r.valid).toBe(true)
+    expect(r.match?.goals).toEqual(all)
+  })
+
+  it('takes several preferred roles and company sizes', () => {
+    const r = validateSurvey({ ...complete, meet_roles: ['founder', 'finance', 'marketing'], meet_company_sizes: ['1_10', '11_50', '1000_up'] })
+    expect(r.match?.meet_roles).toEqual(['founder', 'finance', 'marketing'])
+    expect(r.match?.meet_company_sizes).toEqual(['1_10', '11_50', '1000_up'])
+  })
+
+  it('keeps an industry named under Other, and stores it beside the listed ones', () => {
+    const r = validateSurvey({ ...complete, meet_industries: ['Technology'], meet_industry_other: '  Construction   & Engineering ', industry_other: 'Hospitality' })
+    expect(r.valid).toBe(true)
+    expect(r.match?.meet_industries).toEqual(['Technology'])
+    expect(r.match?.meet_industry_other).toBe('Construction & Engineering')
+    expect(r.match?.industry).toBeNull()
+    expect(r.match?.industry_other).toBe('Hospitality')
+    if (!r.match) throw new Error('expected answers')
+    const row = toMatchRow(r.match)
+    expect(row.meet_industries).toEqual(['Technology', 'Construction & Engineering'])
+    expect(row.industry).toBe('Hospitality')
+    expect(row).not.toHaveProperty('meet_industry_other')
+    expect(row).not.toHaveProperty('industry_other')
+  })
+
+  it('reads an Other industry that is on the list as the listed one', () => {
+    const r = validateSurvey({ ...complete, meet_industries: [], meet_industry_other: 'real estate', industry_other: 'technology' })
+    expect(r.match?.meet_industries).toEqual(['Real Estate'])
+    expect(r.match?.meet_industry_other).toBeNull()
+    expect(r.match?.industry).toBe('Technology')
+    expect(r.match?.industry_other).toBeNull()
+  })
+
+  it('refuses an Other industry that is too long, and drops a bare "Other"', () => {
+    expect(validateSurvey({ ...complete, meet_industry_other: 'x'.repeat(61) }).valid).toBe(false)
+    expect(validateSurvey({ ...complete, meet_industry_other: 'Other' }).match?.meet_industry_other).toBeNull()
+  })
+
+  it('accepts the play times the survey used to offer, as afternoons', () => {
+    const r = validateSurvey({ ...complete, play_times: ['weekday_early', 'weekday_twilight', 'weekend_morning'] })
+    expect(r.valid).toBe(true)
+    expect(r.match?.play_times).toEqual(['weekday_afternoon', 'weekend_afternoon'])
+  })
+})
+
+describe('wording', () => {
+  it('offers afternoons only', () => {
+    expect(PLAY_TIMES.map(t => t.label)).toEqual(['Weekday afternoons', 'Weekend afternoons'])
+  })
+
+  it('words golf skill as the client asked, with no handicap talk', () => {
+    expect(SKILLS.map(s => s.label)).toEqual(["I'm an excellent golfer", "I'm a good golfer", "I'm a new golfer"])
+    for (const o of [...SKILLS, ...PREF_SKILLS]) {
+      expect(o.label.toLowerCase()).not.toContain('handicap')
+      expect(o.label).not.toContain(' - ')
+    }
+  })
+})
+
+describe('normalisePlayTimes', () => {
+  it('moves each retired time onto the afternoon of the same kind of day, once', () => {
+    expect(normalisePlayTimes(['weekday_early', 'weekday_midday', 'weekday_twilight'])).toEqual(['weekday_afternoon'])
+    expect(normalisePlayTimes(['weekend_morning', 'weekend_afternoon'])).toEqual(['weekend_afternoon'])
+    expect(normalisePlayTimes(null)).toBeNull()
+  })
+})
+
+describe('roleFromTitle', () => {
+  it('reads a role from a job title that says it plainly', () => {
+    expect(roleFromTitle('Founder & CEO')).toBe('founder')
+    expect(roleFromTitle('Owner')).toBe('founder')
+    expect(roleFromTitle('CFO')).toBe('finance')
+    expect(roleFromTitle('VP of Marketing')).toBe('marketing')
+    expect(roleFromTitle('Head of Sales')).toBe('sales')
+    expect(roleFromTitle('General Counsel')).toBe('legal')
+  })
+
+  it('guesses nothing when the title is unclear', () => {
+    expect(roleFromTitle('Vice President')).toBeNull()
+    expect(roleFromTitle('Product Owner')).toBeNull()
+    expect(roleFromTitle('Business Development Manager')).toBeNull()
+    expect(roleFromTitle('')).toBeNull()
+    expect(roleFromTitle(null)).toBeNull()
   })
 })
 
@@ -299,6 +420,28 @@ describe('toMatchProfile', () => {
 
   it('reads no row as off', () => {
     expect(toMatchProfile(null).open_to_suggestions).toBe(false)
+  })
+
+  it('reads a stored industry that is not on the list as one the member named', () => {
+    const p = toMatchProfile({ meet_industries: ['Technology', 'Construction', 'Business Owner / Founder'], industry: 'Hospitality' })
+    expect(p.meet_industries).toEqual(['Technology'])
+    expect(p.meet_industry_other).toBe('Construction')
+    expect(p.industry).toBeNull()
+    expect(p.industry_other).toBe('Hospitality')
+    expect(toMatchProfile({ industry: 'Other' }).industry_other).toBeNull()
+    expect(toMatchProfile({ industry: 'Technology' }).industry_other).toBeNull()
+  })
+
+  it('reads the old play times as afternoons, so earlier answers still match', () => {
+    expect(toMatchProfile({ play_times: ['weekday_early', 'weekend_morning'] }).play_times).toEqual(['weekday_afternoon', 'weekend_afternoon'])
+  })
+
+  it('reads back what toMatchRow wrote', () => {
+    const answers = { ...EMPTY_MATCH_PROFILE, meet_industries: ['Insurance' as const], meet_industry_other: 'Aviation', industry_other: 'Hospitality', completed_at: null }
+    const back = toMatchProfile(toMatchRow(answers) as Record<string, unknown>)
+    expect(back.meet_industries).toEqual(['Insurance'])
+    expect(back.meet_industry_other).toBe('Aviation')
+    expect(back.industry_other).toBe('Hospitality')
   })
 })
 

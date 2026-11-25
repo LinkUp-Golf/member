@@ -232,14 +232,31 @@ Then do any dashboard steps the commit messages list (webhook events, env vars).
 
 ## 6. State at handover (2026-11-12)
 
-**On `develop`, not yet on `main`:**
-- `bf72529` invoices late-cancellation fees instead of charging a card on file.
-- `8c3bbc0` makes the survey the optional Curated Introductions, with the client's new wording.
+**On `develop`, not yet live.** PR #47 shipped `develop` to `main` on 2026-11-06, and PR #48 reverted it the same day, so production runs the app as it was before #47. PR #49 (`develop` → `main`) brings back everything #47 had, plus what came after:
+- From #47:
+  - Past and cancelled bookings list their players.
+  - The post-round survey asks only those who played for a comment.
+  - Each venue sets its own limit on non-member guests.
+  - Late-cancellation fees.
+  - Admin-led matchmaking.
+  - The scrollbar fix on /book.
+- `bf72529`: late-cancellation fees are invoiced instead of charged to a card on file.
+- `8c3bbc0`: the survey becomes the optional Curated Introductions, with the client's new wording.
+- `8fa63c0`: these docs.
 
-Before that release goes live:
-- Apply `20261112000001_cancellation_invoices.sql` and `20261112000002_curated_introductions.sql`, on dev and on production.
-- Add `invoice.paid` and `invoice.voided` to the Stripe webhook.
+`develop` records `main` as merged without taking the revert (`16cf247`), so PR #49 merges cleanly.
+
+**Before #49 goes live:**
+- Apply these database updates to production, in order. The first three were in #47; the reverted code never used them, but production may or may not already have them:
+  1. `20261103000001_cancellation_policy.sql`
+  2. `20261104000001_course_max_non_member_guests.sql`
+  3. `20261104000002_partner_matching.sql`
+  4. `20261112000001_cancellation_invoices.sql`
+  5. `20261112000002_curated_introductions.sql`
+- Set up the Stripe webhook and `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` in Vercel (section 3.2).
 - Delete `STRIPE_PUBLISHABLE_KEY` from Vercel.
+
+Why #47 was reverted isn't recorded here. If the reason still holds, #49 brings it back.
 
 **Not yet checked in a browser:** the invoice flow end to end (cancel → email → pay on Stripe → marked paid) and the Curated Introductions page. Both pass type-checks and the unit tests, and the Stripe invoice calls were exercised against Stripe's test mode.
 

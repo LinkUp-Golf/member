@@ -1,7 +1,8 @@
 'use client'
 
 // Curated Introductions — optional. One switch, and below it, while it's on,
-// the questions the LinkUp team introduces members from.
+// the questions the LinkUp team introduces members from, in two steps
+// (Describe Yourself, Describe Your Ideal Match — see MatchSurveyForm).
 //
 // A member who has answered before turns it on and off in place (PATCH): off
 // takes them out of introductions both ways, and keeps their answers for when
@@ -110,7 +111,7 @@ export default function CuratedIntroductionsPage() {
                 </button>
               </div>
               {on && !state.completed && (
-                <p className="text-xs text-green-900/55 mt-2">Answer the questions below and save to turn it on.</p>
+                <p className="text-xs text-green-900/55 mt-2">Answer both steps below and submit to turn it on.</p>
               )}
               {switchError && <p className="text-xs text-red-500 mt-2">{switchError}</p>}
             </div>
@@ -120,6 +121,7 @@ export default function CuratedIntroductionsPage() {
             <div hidden={!on}>
               <MatchSurveyForm
                 initial={state.answers}
+                completed={state.completed}
                 onSaved={() => setState(s => (s ? { ...s, completed: true, enabled: true } : s))}
               />
             </div>
