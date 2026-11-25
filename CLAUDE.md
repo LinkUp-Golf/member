@@ -139,7 +139,7 @@ Auth/session state is managed with **React Context** (not Zustand):
 
 - **`SessionProvider`** (`src/components/providers/SessionProvider.tsx`): provides the session + realtime subscription
 - **`AuthContext`** (`src/contexts/AuthContext.tsx`): session/user state
-- **`ProfileContext`** (`src/contexts/ProfileContext.tsx`): loads member + home course (with exponential-backoff retry)
+- **`ProfileContext`** (`src/contexts/ProfileContext.tsx`): loads member + profile + home course from `GET /api/members/me` (with exponential-backoff retry) — through the server's cookie session, not the browser Supabase client, and whether or not the browser client reports a user. `is_admin` (the More menu's Admin entry) and the Profile screen both read it, so a stalled browser session used to blank the one and hide the other
 - Client components consume these via hooks (e.g. `useProfile()`); data is fetched through the `apiClient` singleton (`src/lib/api-client.ts`), not direct Supabase calls.
 
 ### Supabase Integration
