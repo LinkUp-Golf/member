@@ -111,6 +111,9 @@ src/app/
   - Checks `is_admin` flag for `/admin/*` routes (retries once on DB error)
   - Skips public routes (`PUBLIC_ROUTES`): `/login`, `/install`, `/auth/*`, `/api/webhooks`, `/api/auth/*`
 - **RLS enforcement**: Supabase Row-Level Security protects data at the database level
+- **Admin-generated login links** (`/auth/confirm`): opened on a device that's already signed in, the link is **not** verified straight away — `/auth/switch-account` asks first (copy it for an Incognito tab or the member, or sign out and continue, which returns with `switch=1`). The single-use token is spent only after that. Opening a member's link on an admin's own phone used to replace the admin's session silently and leave the browser client disagreeing with the server
+- **Admin layout gates on the server's word**: `src/app/(admin)/admin/layout.tsx` redirects only a loaded profile that isn't an admin's (the middleware already checked `is_admin` from the cookie session); it no longer bounces anyone the browser Supabase client doesn't report as signed in, and a profile that fails to load shows a retry rather than a redirect
+- **Stale tabs reload themselves**: `UpdateWatcher` (root layout) compares the build a page was loaded with (`NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA`) with `GET /api/version` on focus and every 15 minutes, and reloads at the next screen change once per deployed build. Without it, a tab or installed app left open across a deploy kept running the old code until a hard refresh
 
 ### Database Models
 

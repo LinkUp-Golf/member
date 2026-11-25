@@ -26,10 +26,12 @@ const PUBLIC_ROUTES = [
   '/install',
   '/auth/error',
   '/auth/confirm',                // admin-generated copy-paste magic links (token_hash verify)
+  '/auth/switch-account',         // shown by /auth/confirm when the device is already signed in
   '/membership-required',
   '/api/auth/magic-link',         // unauthenticated users request magic links
   '/api/auth/callback',           // Supabase redirects here after magic link click
   '/api/auth/signout',            // clears session cookie server-side
+  '/api/version',                 // which build is deployed (UpdateWatcher); a commit hash, nothing more
   '/api/webhooks',                // GHL and Resend webhooks: secured by signature, not session
   '/api/email/unsubscribe',       // reached from an inbox; the signed token is the only credential
   '/api/.well-known/vercel/flags', // Vercel toolbar flag discovery (public by design)
