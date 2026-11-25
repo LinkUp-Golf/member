@@ -31,7 +31,9 @@ import { NotificationTemplates } from '@/lib/push'
 import { notifyMember } from '@/lib/notify'
 import { validateEmail, validateString, sanitiseText, validateUUID } from '@/lib/validation'
 import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
-import { buildCustomSlots, loadForcedOpenDays, NON_HOLDING_STATUSES } from '@/lib/bookings/availability'
+import { buildCustomSlots, loadForcedOpenDays, NON_HOLDING_STATUSES, slotsForDate } from '@/lib/bookings/availability'
+import { offersGroupTable, teeTimesOnDay } from '@/lib/bookings/group-table'
+import { formatInTimeZone } from 'date-fns-tz'
 import { isInsideJoinOnlyWindow, joinOnlyWindowMessage, openDayKey } from '@/lib/bookings/lead-time'
 import { bookingAmountDue } from '@/lib/bookings/price'
 import {
@@ -50,7 +52,7 @@ import {
 } from '@/lib/bookings/payment-options'
 import { format } from 'date-fns'
 import { formatTeeTime, titleCaseName } from '@/lib/utils'
-import type { AdditionalPlayer } from '@/types'
+import type { AdditionalPlayer, Course } from '@/types'
 
 // Total players per booking is capped at 4 (mirrors validateBookingPayload),
 // so at most 3 additional players may accompany the primary booker.
@@ -324,7 +326,7 @@ export async function POST(request: NextRequest) {
 
   const { data: course } = await adminSupabase
     .from('courses')
-    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, cost_per_player, allow_non_member_guests, max_non_member_guests')
+    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, cost_per_player, allow_non_member_guests, max_non_member_guests, custom_slots_enabled')
     .eq('id', courseId || resolvedCourseId)
     .eq('approval_status', 'active')
     .single()
@@ -891,9 +893,50 @@ export async function POST(request: NextRequest) {
       }))
     : insertedBookings
 
+  // Whether the confirmation asks about the group table after golf — only on a
+  // day with more than one foursome. Read after the insert, so this booking's
+  // own tee time is among those counted. See @/lib/bookings/group-table.
+  const groupTable = await dayHasGroupTable(adminSupabase, course as Course | null, bookingDate, eventTimezone)
+
   return NextResponse.json({
     bookingId: primaryBookingId,
     bookings: bookingsWithCourse,
     message,
+    groupTable,
   })
+}
+
+/**
+ * Tee times on the venue's day — booked ones from our rows (a full tee time is
+ * gone from GHL's free slots), open ones from the calendar — and whether that
+ * makes it a group-table day.
+ *
+ * Fails open: if either read fails the question is asked. Asking on a day that
+ * didn't need it costs a checkbox; not asking on one that did loses the RSVP.
+ */
+async function dayHasGroupTable(
+  admin: ReturnType<typeof createAdminClient>,
+  course: Course | null,
+  date: string,
+  timezone: string,
+): Promise<boolean> {
+  if (!course) return true
+  try {
+    const [{ data: booked, error }, open] = await Promise.all([
+      admin
+        .from('bookings')
+        .select('tee_time')
+        .eq('course_id', course.id)
+        .eq('booking_date', date)
+        .not('status', 'in', NON_HOLDING_STATUSES),
+      slotsForDate(admin, course, date),
+    ])
+    if (error) return true
+    const bookedTimes = (booked ?? []).map(r => String(r.tee_time ?? ''))
+    const openTimes = open.map(s => formatInTimeZone(new Date(s.startTime), timezone, 'HH:mm:ss'))
+    return offersGroupTable(teeTimesOnDay(bookedTimes, openTimes))
+  } catch (err) {
+    console.error('[booking/create] Could not count the day\'s tee times:', String(err))
+    return true
+  }
 }

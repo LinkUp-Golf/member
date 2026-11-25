@@ -42,6 +42,7 @@ Each entry gives the date, who decided (**client** means the LinkUp Golf owner; 
 
 ## Booking
 
+- **2026-11-25 · client. The group-table question is asked only on days with more than one foursome.** "We don't need a reservation if there's just 4 players because the restaurant can almost always seat a group of 4." Default: a foursome is a tee time on the venue's calendar that day, booked or still open, counted once (`src/lib/bookings/group-table.ts`). Booked tee times come from our rows, because a full one drops out of GHL's free slots. The count is taken when the booking is made, so a member who booked before a second tee time was added was never asked, and nothing asks them later. If the count can't be read, the question is asked.
 - **2026-09-30 · client, interpreted. The 3-day "join-only" window.** The request: "a 3-day window for upcoming events. A day will be unavailable if there are no bookings for that event date." It was read as days on the /book venue calendar, not hosted events. Inside today, +1 and +2, a venue-day nobody has booked is closed, and one booking opens it to everyone.
   - The boundary is `< 3` days. Nobody has said whether `<= 3` was meant.
   - Hosted rounds are exempt: their seats live in a different table, so the rule could never be satisfied there.
