@@ -51,6 +51,26 @@ export async function GET(request: NextRequest) {
   const cookieStore = cookies()
   const supabase = createRouteHandlerClient(cookieStore)
 
+  // ---- Phase 0: already signed in on this device? -------------
+  // Verifying would quietly replace whoever is signed in here with whoever
+  // the link is for. An admin opening a member's generated link on their own
+  // phone did exactly that, couldn't sign out of the member's account, and
+  // was left with the server and the browser client disagreeing about who
+  // was signed in — the Admin entry vanished and /admin bounced them back to
+  // the member app. So a signed-in device is asked first, before the
+  // single-use token is spent: /auth/switch-account offers to copy the link
+  // (for an Incognito tab or the member) or to sign out and continue, which
+  // comes back here with switch=1.
+  if (url.searchParams.get('switch') !== '1') {
+    const { data: { user: current } } = await supabase.auth.getUser()
+    if (current) {
+      reqLog.info('Login link opened on a signed-in device — asking first', { userId: current.id })
+      const ask = new URL('/auth/switch-account', request.url)
+      ask.search = url.search
+      return NextResponse.redirect(ask)
+    }
+  }
+
   // ---- Phase 1: verify token_hash → Supabase session ----------
   const { data: { user }, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
 

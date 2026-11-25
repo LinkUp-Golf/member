@@ -356,7 +356,9 @@ export default function AdminMembersPage() {
               </button>
             </div>
             <p className="text-xs text-gray-400 mt-1">
-              Single-use link — share it directly with the member.
+              Single-use link — share it directly with the member. To see the
+              app as them yourself, open it in an Incognito tab: opening it
+              here would sign you out of your own account.
             </p>
           </div>
         )}

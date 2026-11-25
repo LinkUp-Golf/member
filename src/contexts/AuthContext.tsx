@@ -38,7 +38,7 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T | undefined> {
 // out: it expires the sb- cookies the middleware reads. The browser client's
 // sign-out is then local-only (no network call) and best-effort, to drop the
 // in-memory session and stop its refresh timer before we leave the page.
-async function endSession() {
+export async function endSession() {
   const controller = new AbortController()
   const abort = setTimeout(() => controller.abort(), SIGN_OUT_STEP_TIMEOUT_MS)
   try {

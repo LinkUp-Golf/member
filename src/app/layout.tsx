@@ -3,6 +3,7 @@ import localFont from 'next/font/local'
 import dynamic from 'next/dynamic'
 import SessionProvider from '@/components/providers/SessionProvider'
 import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration'
+import UpdateWatcher from '@/components/UpdateWatcher'
 import './globals.css'
 
 // process.env.NODE_ENV is a compile-time constant — webpack replaces it with
@@ -75,6 +76,7 @@ export default function RootLayout({
       </head>
       <body className="font-sans bg-cream antialiased">
         <ServiceWorkerRegistration />
+        <UpdateWatcher />
         <MockProvider>
           <SessionProvider>
             {children}
