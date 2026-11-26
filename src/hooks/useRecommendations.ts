@@ -14,9 +14,9 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { useProfile } from '@/hooks/useProfile'
 import type { IndustryCategory } from '@/types'
 
+/** A Curated Introduction: who, and when. Never why — see GET /api/recommendations. */
 export interface Recommendation {
   id: string
-  note: string | null
   sentAt: string
   member: {
     id: string
@@ -28,7 +28,6 @@ export interface Recommendation {
     businessName: string | null
     industry: IndustryCategory | null
   }
-  shared: string[]
 }
 
 interface State {

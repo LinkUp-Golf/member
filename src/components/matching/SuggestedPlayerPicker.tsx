@@ -59,9 +59,9 @@ export default function SuggestedPlayerPicker({
               <span className="block text-sm font-medium" style={{ color: 'var(--color-green-900)' }}>
                 {rec.member.name}
               </span>
-              {rec.note && (
-                <span className="block text-xs leading-snug mt-0.5 line-clamp-2" style={{ color: 'rgba(0,38,105,0.5)' }}>
-                  {rec.note}
+              {(rec.member.roleTitle || rec.member.businessName) && (
+                <span className="block text-xs leading-snug mt-0.5 truncate" style={{ color: 'rgba(0,38,105,0.5)' }}>
+                  {[rec.member.roleTitle, rec.member.businessName].filter(Boolean).join(', ')}
                 </span>
               )}
             </span>

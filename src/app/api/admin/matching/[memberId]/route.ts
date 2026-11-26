@@ -4,10 +4,13 @@ export const dynamic = 'force-dynamic'
 //   the players who fit them (best first, 20 by default), how many fit in all,
 //   how many their preferred introductions ruled out, and what admins have already
 //   sent them.
-// POST /api/admin/matching/[memberId] — send recommendations:
-//   { picks: [{ candidateId, note }] }. Both sides hear: the member gets the
-//   recommendation, and each recommended player is told who they were
-//   recommended to, by push and email.
+// POST /api/admin/matching/[memberId] — send introductions:
+//   { picks: [{ candidateId, note? }] }. Every match is two-sided (client,
+//   2026-11-24): a play_suggestions row is written for the member AND one for
+//   each recommended player, so both have the other in their Curated
+//   Introductions queue, and both get the same "new match" push and email —
+//   no name, no reason. The note is optional and internal: an admin's record
+//   of why, never sent to or shown to a member.
 //
 // The list is rebuilt for a POST rather than trusted from the request: the
 // admin's screen isn't the authority on who fits. A pick that isn't on the
@@ -28,7 +31,6 @@ import {
   loadMatchMember,
   loadSentRecommendations,
   summarize,
-  toPerson,
 } from '@/lib/matching/candidates'
 import { parsePage } from '@/lib/matching/queue'
 import { MAX_NOTE_LENGTH } from '@/lib/matching/rules'
@@ -84,7 +86,7 @@ export const GET = withAuth(
 
 interface Pick {
   candidateId: string
-  note: string
+  note: string | null
 }
 
 function parsePicks(body: unknown): Pick[] | string {
@@ -98,10 +100,11 @@ function parsePicks(body: unknown): Pick[] | string {
     if (typeof candidateId !== 'string' || !validateUUID(candidateId, 'candidateId').valid) {
       return 'One of the players is not recognised.'
     }
-    if (typeof note !== 'string' || !note.trim()) return 'Every recommendation needs a note on why.'
-    if (note.trim().length > MAX_NOTE_LENGTH) return `Keep each note under ${MAX_NOTE_LENGTH} characters.`
+    if (note != null && typeof note !== 'string') return 'A note must be text.'
+    const text = typeof note === 'string' ? note.trim() : ''
+    if (text.length > MAX_NOTE_LENGTH) return `Keep each note under ${MAX_NOTE_LENGTH} characters.`
     if (parsed.some(x => x.candidateId === candidateId)) continue
-    parsed.push({ candidateId, note: note.trim() })
+    parsed.push({ candidateId, note: text || null })
   }
   return parsed
 }
@@ -140,19 +143,21 @@ export const POST = withAuth(
       )
     }
 
-    // One row per pair: re-sending a pair dismissed long ago reopens its row.
+    // Two rows per match, one for each side, so both have it in their queue.
+    // One row per ordered pair: re-sending a pair dismissed long ago reopens it.
     const now = new Date().toISOString()
+    const row = (owner: string, other: string, note: string | null) => ({
+      member_id: owner,
+      suggested_id: other,
+      recommended_by: ctx.userId,
+      note,
+      dismissed: false,
+      dismissed_at: null,
+      seen_at: null,
+      created_at: now,
+    })
     const { error } = await admin.from('play_suggestions').upsert(
-      picks.map(p => ({
-        member_id: memberId,
-        suggested_id: p.candidateId,
-        recommended_by: ctx.userId,
-        note: p.note,
-        dismissed: false,
-        dismissed_at: null,
-        seen_at: null,
-        created_at: now,
-      })),
+      picks.flatMap(p => [row(memberId, p.candidateId, p.note), row(p.candidateId, memberId, p.note)]),
       { onConflict: 'member_id,suggested_id' },
     )
     if (error) {
@@ -160,20 +165,9 @@ export const POST = withAuth(
       return NextResponse.json({ error: 'Could not send. Please try again.' }, { status: 500 })
     }
 
-    const [only] = picks
-    const onlyCandidate = chosen[0]
-    void notifyMember(
-      memberId,
-      picks.length === 1 && only && onlyCandidate
-        ? NotificationTemplates.playSuggestion(onlyCandidate.firstName || onlyCandidate.name, only.note)
-        : NotificationTemplates.playSuggestions(picks.length),
-    )
-    // The other side of each match. Not the note: it's written to the member
-    // ("you're looking for…"), and would read wrong addressed to them.
-    const recipient = toPerson(member)
-    for (const p of picks) {
-      void notifyMember(p.candidateId, NotificationTemplates.recommendedToMember(recipient.firstName || recipient.name, memberId))
-    }
+    // Same message to both sides: no name, no reason.
+    void notifyMember(memberId, NotificationTemplates.curatedIntroduction(picks.length))
+    for (const p of picks) void notifyMember(p.candidateId, NotificationTemplates.curatedIntroduction())
 
     return NextResponse.json({ sent: picks.length })
   },

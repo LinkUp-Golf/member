@@ -20,17 +20,14 @@ import {
   loadMatchMember,
   matchProfileOf,
   toPerson,
-  toSubject,
   type MatchMemberRow,
 } from '@/lib/matching/candidates'
-import { sharedChips } from '@/lib/matching/rules'
 import type { AuthContext } from '@/lib/auth/types'
 
 const MAX_SHOWN = 10
 
 interface Row {
   id: string
-  note: string | null
   created_at: string
   seen_at: string | null
   suggested: MatchMemberRow | null
@@ -41,7 +38,7 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
   const [rowsRes, me] = await Promise.all([
     admin
       .from('play_suggestions')
-      .select(`id, note, created_at, seen_at, suggested:members!play_suggestions_suggested_id_fkey(${MATCH_MEMBER_SELECT})`)
+      .select(`id, created_at, seen_at, suggested:members!play_suggestions_suggested_id_fkey(${MATCH_MEMBER_SELECT})`)
       .eq('member_id', ctx.userId)
       .eq('dismissed', false)
       .not('recommended_by', 'is', null)
@@ -68,12 +65,12 @@ export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
     await admin.from('play_suggestions').update({ seen_at: new Date().toISOString() }).in('id', unseen)
   }
 
-  const mine = me ? toSubject(me) : null
+  // No reason travels with a match (client, 2026-11-24): not the admin's note
+  // and not what the two have in common. Members judge each other from the
+  // profile, so the response carries the person and nothing about why.
   return NextResponse.json(rows.map(r => ({
     id: r.id,
-    note: r.note,
     sentAt: r.created_at,
     member: toPerson(r.suggested),
-    shared: mine ? sharedChips(mine, toSubject(r.suggested)) : [],
   })))
 })

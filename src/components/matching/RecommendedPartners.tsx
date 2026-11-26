@@ -1,12 +1,14 @@
 'use client'
 
 // ============================================================
-// "Recommended for you" — the playing partners an admin has sent
-// this member (GET /api/recommendations). On Members, every open
-// one; on Home, the newest, with a link to the rest.
+// A member's Curated Introductions (GET /api/recommendations): photo,
+// name, title and company, and Message / Invite to a round / Not now.
+// No reason is shown — members judge each other from the profile,
+// which the card links to (client, 2026-11-24). The queue on More →
+// Curated Introductions lists them all; Members shows them all too,
+// and Home the newest, with a link to the queue.
 //
-// Renders nothing until there's something to show: a member with
-// no recommendations sees Members and Home as they always were.
+// Members and Home render nothing until there's something to show.
 // ============================================================
 
 import { useState } from 'react'
@@ -53,21 +55,6 @@ function RecommendationCard({
         <ChevronRight className="w-4 h-4 flex-shrink-0 text-green-900/20" strokeWidth={1.75} />
       </Link>
 
-      {rec.note && (
-        <div>
-          <p className="font-display text-lg leading-none" style={{ color: 'var(--color-green-700)' }}>Why you two</p>
-          <p className="text-sm text-green-900/75 leading-relaxed mt-1.5">{rec.note}</p>
-          <p className="text-[11px] text-green-900/40 mt-1.5">Recommended by the LinkUp team</p>
-        </div>
-      )}
-
-      {rec.shared.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {rec.shared.map(s => (
-            <span key={s} className="text-[11px] px-2.5 py-1 rounded-full bg-green-50 text-green-900/70">{s}</span>
-          ))}
-        </div>
-      )}
 
       <div className="grid grid-cols-2 gap-2">
         <Link href={`/messages/new?with=${m.id}`} className="btn btn-primary btn-sm justify-center">
@@ -90,26 +77,40 @@ function RecommendationCard({
   )
 }
 
-export default function RecommendedPartners({ variant }: { variant: 'members' | 'home' }) {
-  const { recommendations: recs, remove } = useRecommendations()
+// `queue` is the home of a member's introductions: the top of More → Curated
+// Introductions, where the "new match" notification opens. Members and Home
+// show the same cards as shortcuts; Home links to the queue for the rest.
+export default function RecommendedPartners({ variant }: { variant: 'members' | 'home' | 'queue' }) {
+  const { recommendations: recs, loaded, remove } = useRecommendations()
 
-  if (recs.length === 0) return null
+  if (recs.length === 0) {
+    if (variant !== 'queue' || !loaded) return null
+    return (
+      <section aria-labelledby="recommended-queue" className="card card-pad">
+        <p id="recommended-queue" className="section-label">Your introductions</p>
+        <p className="text-sm text-green-900/60">
+          No introductions right now. When the LinkUp team matches you with someone, they&apos;ll appear here and we&apos;ll let you know.
+        </p>
+      </section>
+    )
+  }
 
   const shown = variant === 'home' ? recs.slice(0, 1) : recs
-  const dismissed = remove
 
   return (
     <section aria-labelledby={`recommended-${variant}`}>
       <div className="flex items-center justify-between mb-3.5">
-        <p id={`recommended-${variant}`} className="section-label !mb-0">Recommended for you</p>
+        <p id={`recommended-${variant}`} className="section-label !mb-0">
+          {variant === 'queue' ? 'Your introductions' : 'Your Curated Introductions'}
+        </p>
         {variant === 'home' && recs.length > 1 && (
-          <Link href="/members" className="focus-ring text-xs font-semibold rounded-lg" style={{ color: 'var(--color-green-600)' }}>
+          <Link href="/more/match-profile" className="focus-ring text-xs font-semibold rounded-lg" style={{ color: 'var(--color-green-600)' }}>
             See all {recs.length} →
           </Link>
         )}
       </div>
-      <div className={variant === 'members' ? 'grid gap-3 md:grid-cols-2' : 'space-y-2.5'}>
-        {shown.map(rec => <RecommendationCard key={rec.id} rec={rec} onDismissed={dismissed} />)}
+      <div className={variant === 'home' ? 'space-y-2.5' : 'grid gap-3 md:grid-cols-2'}>
+        {shown.map(rec => <RecommendationCard key={rec.id} rec={rec} onDismissed={remove} />)}
       </div>
     </section>
   )

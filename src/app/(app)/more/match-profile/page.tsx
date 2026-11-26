@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react'
 import AppShell from '@/components/layout/AppShell'
 import { ContentLoader } from '@/components/ui/Loading'
 import MatchSurveyForm from '@/components/matching/MatchSurveyForm'
+import RecommendedPartners from '@/components/matching/RecommendedPartners'
 import type { SurveyAnswers } from '@/lib/matching/survey'
 
 interface SurveyState {
@@ -89,6 +90,10 @@ export default function CuratedIntroductionsPage() {
           </div>
         ) : (
           <>
+            {/* The queue: where the "new match" notification lands. Shown
+                while it's on — off means no introductions either way. */}
+            {state.enabled && <RecommendedPartners variant="queue" />}
+
             <div className="card px-4 py-3.5">
               <div className="flex items-center justify-between gap-4">
                 <label htmlFor="curated-introductions-switch" className="text-sm font-semibold text-green-950 cursor-pointer">
