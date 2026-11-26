@@ -79,11 +79,16 @@ describe('contactUpdateBody', () => {
     ['contact.nonprofits', 'cf-np'],
   ])
 
-  it('writes organization to both Business Name fields', () => {
-    const { body, missing } = contactUpdateBody({ business_name: ' Reyes Dental ' }, ids)
+  it('writes organization to the built-in Business Name only', () => {
+    const { body, missing } = contactUpdateBody({ business_name: ' Reyes Dental ' }, new Map())
     expect(missing).toEqual([])
     expect(body.companyName).toBe('Reyes Dental')
-    expect(body.customFields).toEqual([{ id: 'cf-company', field_value: 'Reyes Dental' }])
+    expect(body.customFields).toBeUndefined()
+  })
+
+  it('writes the title to contact.title', () => {
+    const { body } = contactUpdateBody({ role_title: 'Founder & Chief Architect' }, ids)
+    expect(body.customFields).toEqual([{ id: 'cf-title', field_value: 'Founder & Chief Architect' }])
   })
 
   it('writes non-profits one per line and clears with empty values', () => {

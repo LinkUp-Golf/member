@@ -121,9 +121,10 @@ export async function syncProfileFromGhl(params: {
     const rawNonprofits =
       values[NONPROFITS_FIELD_KEY] || getContactCustomFieldValueById(contact, GHL_CONTACT_FIELDS.NONPROFITS)
 
-    // Organization lives in two GHL fields named "Business Name": the standard
-    // one (Contact info) and the custom one (General). The standard one wins;
-    // the app writes both, so they only disagree when edited in GHL by hand.
+    // Organization is GHL's built-in Business Name (companyName). Its merge key
+    // reads contact.company_name, but it isn't a custom field, so the lookup
+    // above never finds it — it's slotted in under that key here. The custom
+    // duplicates ("Business Name", "Company") were cleaned up 2026-11-26.
     const standardCompany = typeof contact.companyName === 'string' ? contact.companyName.trim() : ''
     if (standardCompany) values['contact.company_name'] = standardCompany
 

@@ -5,10 +5,12 @@
 // src/lib/sync/profile.sync.ts (GHL → app).
 //
 // What travels both ways (decided 2026-11-26, docs/proposals/ghl-profile-sync.html):
-//   Organization  ⇄  both of GHL's "Business Name" fields: the standard
-//                    contact field (companyName) and the custom field
-//                    contact.company_name. Read standard first; written to both
-//                    so they can't disagree again.
+//   Organization  ⇄  GHL's built-in Business Name (companyName; GHL shows its
+//                    merge key as contact.company_name, but it is NOT a custom
+//                    field). The duplicates — "Business Name"
+//                    (contact.contacttitle_ld2_copy) and "Company"
+//                    (contact.company) — were cleaned up on 2026-11-26 and are
+//                    neither read nor written.
 //   Title         ⇄  custom field contact.title
 //   LinkedIn URL  ⇄  custom field contact.linkedin
 //   Non-profits   ⇄  custom field contact.nonprofits, one per line
@@ -132,15 +134,19 @@ export function dobFromGhl(value: unknown): string | null {
 
 // ---- The GHL contact update ---------------------------------
 
-/** Custom-field object keys, as GHL names them. */
+/**
+ * Custom-field object keys, as GHL names them. Title is the single-line
+ * contact.title — not the multi-line "Title" duplicate
+ * (contact.contactcompany_qy9_copy). Organization isn't here: it's a built-in
+ * field (companyName), written directly.
+ */
 export const PROFILE_CUSTOM_FIELD_KEYS = {
-  business_name: 'contact.company_name',
   role_title: 'contact.title',
   linkedin_url: 'contact.linkedin',
   nonprofits: 'contact.nonprofits',
 } as const
 
-export type SyncedProfileField = keyof typeof PROFILE_CUSTOM_FIELD_KEYS
+export type SyncedProfileField = 'business_name' | keyof typeof PROFILE_CUSTOM_FIELD_KEYS
 
 export interface ProfileChanges {
   business_name?: string | null
@@ -171,18 +177,14 @@ export function contactUpdateBody(
   const customFields: Array<{ id: string; field_value: string }> = []
   const missing: string[] = []
 
-  const custom = (field: SyncedProfileField, value: string) => {
+  const custom = (field: keyof typeof PROFILE_CUSTOM_FIELD_KEYS, value: string) => {
     const key = PROFILE_CUSTOM_FIELD_KEYS[field]
     const id = idByKey.get(key)
     if (id) customFields.push({ id, field_value: value })
     else missing.push(key)
   }
 
-  if ('business_name' in changes) {
-    const v = (changes.business_name ?? '').trim()
-    body.companyName = v
-    custom('business_name', v)
-  }
+  if ('business_name' in changes) body.companyName = (changes.business_name ?? '').trim()
   if ('role_title' in changes) custom('role_title', (changes.role_title ?? '').trim())
   if ('linkedin_url' in changes) custom('linkedin_url', (changes.linkedin_url ?? '').trim())
   if ('nonprofits' in changes) {
