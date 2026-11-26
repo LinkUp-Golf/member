@@ -196,6 +196,17 @@ export async function addTagToContact(contactId: string, tag: string): Promise<b
   }
 }
 
+// Like addTagToContact / removeTagFromContact, but several tags at once and
+// throwing on failure — for the profile sync, which must refuse a member's save
+// rather than let GHL and the app disagree.
+export async function addContactTagsStrict(contactId: string, tags: string[]): Promise<void> {
+  if (tags.length) await getClient().contacts.addTags({ contactId }, { tags })
+}
+
+export async function removeContactTagsStrict(contactId: string, tags: string[]): Promise<void> {
+  if (tags.length) await getClient().contacts.removeTags({ contactId }, { tags })
+}
+
 export async function removeTagFromContact(contactId: string, tag: string): Promise<boolean> {
   try {
     await getClient().contacts.removeTags({ contactId }, { tags: [tag] })

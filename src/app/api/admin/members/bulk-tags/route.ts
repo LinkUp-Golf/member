@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/with-auth'
 import { createAdminClient } from '@/lib/supabase-server'
 import { addTagToContact, removeTagFromContact } from '@/lib/ghl/client'
+import { withoutGenderTags } from '@/lib/ghl/profile-fields'
 import type { AuthContext } from '@/lib/auth/types'
 
 export const POST = withAuth(
@@ -49,7 +50,8 @@ export const POST = withAuth(
         ? currentTags.includes(tag) ? currentTags : [...currentTags, tag]
         : currentTags.filter(t => t !== tag)
 
-      await admin.from('members').update({ ghl_tags: nextTags }).eq('id', member.id)
+      // Gender tags are private and never kept on members.ghl_tags (see member.sync).
+      await admin.from('members').update({ ghl_tags: withoutGenderTags(nextTags) }).eq('id', member.id)
       succeeded++
     }
 

@@ -217,9 +217,13 @@ export type Skill = (typeof SKILLS)[number]['value']
 // ---- Describe Yourself: about you ---------------------------
 
 /** Optional: not answering is how a member keeps it to themselves. */
+// "Prefer not to say" (2026-11-26, the GHL tag gender-pns) is an answer of its
+// own, kept so a save of the survey can't erase it. For matching it reads like
+// a blank: it fits only members with no gender preference (mutualFit).
 export const GENDERS = [
-  { value: 'male',   label: 'Male' },
-  { value: 'female', label: 'Female' },
+  { value: 'male',       label: 'Male' },
+  { value: 'female',     label: 'Female' },
+  { value: 'prefer_not', label: 'Prefer not to say' },
 ] as const satisfies readonly Option[]
 export type Gender = (typeof GENDERS)[number]['value']
 
@@ -502,7 +506,7 @@ export function validateSurvey(body: unknown): SurveyValidation {
   if (!skill) errors.push('Choose your golf skill')
 
   const gender = optionalOne(b.gender, GENDERS)
-  if (gender === undefined) errors.push('Choose Male or Female, or leave your gender blank')
+  if (gender === undefined) errors.push('Choose Male, Female or Prefer not to say, or leave your gender blank')
 
   const prefGender = pickOne(b.pref_gender, PREF_GENDERS)
   if (!prefGender) errors.push('Answer "Do you have a gender preference"')

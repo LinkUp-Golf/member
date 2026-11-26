@@ -8,8 +8,57 @@ import { getCache } from '@/lib/cache'
 import { MEMBER_DETAIL_NS, memberDetailKey } from '@/lib/cache/keys'
 import { GHL_CONTACT_FIELDS } from '@/lib/constants'
 import { parseNonprofits, MAX_NONPROFITS } from '@/lib/profile/nonprofits'
+import { dobFromGhl, genderFromTags } from '@/lib/ghl/profile-fields'
+import { loadPrivateFields, savePrivateFields, type PrivateFields } from '@/lib/members/private-fields'
+import { pushGenderToGhl } from './profile.push'
 import type { GHLContact } from '@/types'
 import type { SyncContext } from './types'
+
+/**
+ * Gender (from the gender-* tags) and date of birth (standard field) into the
+ * member's private fields, by the same rule as the rest of the profile: GHL
+ * wins where it says something, and a blank in GHL never clears the app.
+ * "No gender tag" is a blank, so is "two gender tags" — that one is logged for
+ * an admin, since it can only be a mistake made in GHL.
+ */
+async function syncPrivateFieldsFromGhl(params: {
+  userId: string
+  contact: GHLContact
+  ctx: SyncContext
+  log: ReturnType<typeof logger.child>
+}): Promise<void> {
+  const { userId, contact, ctx, log } = params
+  const { gender, conflict } = genderFromTags(contact.tags ?? [])
+  const dob = dobFromGhl(contact.dateOfBirth)
+  if (conflict) {
+    log.warn('GHL contact has more than one gender tag — gender left as it was', {
+      metadata: { ghlContactId: contact.id, tags: (contact.tags ?? []).filter(t => /^gender-/i.test(t)) },
+    })
+  }
+  try {
+    const current = await loadPrivateFields(ctx.supabase, userId)
+
+    // The backfill (2026-11-26): gender answered in the app before GHL had
+    // gender tags reaches GHL here, at the member's next sync. Only when the
+    // contact has no gender tag at all — a tag set in GHL always wins.
+    if (!gender && !conflict && current.gender) {
+      await pushGenderToGhl(contact.id, current.gender).catch(err =>
+        log.warn('Gender tag backfill failed', { errorMessage: String(err) }),
+      )
+    }
+
+    if (!gender && !dob) return
+    const updates: Partial<PrivateFields> = {}
+    if (gender && gender !== current.gender) updates.gender = gender
+    if (dob && dob !== current.date_of_birth) {
+      updates.date_of_birth = dob
+      updates.dob_prefer_not = false
+    }
+    await savePrivateFields(ctx.supabase, userId, updates)
+  } catch (err) {
+    log.warn('Private field sync failed', { errorMessage: String(err) })
+  }
+}
 
 // GHL contact custom-field object key → member_profiles column.
 //
@@ -71,6 +120,16 @@ export async function syncProfileFromGhl(params: {
     // GHL and the id can't, so this survives that rename.
     const rawNonprofits =
       values[NONPROFITS_FIELD_KEY] || getContactCustomFieldValueById(contact, GHL_CONTACT_FIELDS.NONPROFITS)
+
+    // Organization is GHL's built-in Business Name (companyName). Its merge key
+    // reads contact.company_name, but it isn't a custom field, so the lookup
+    // above never finds it — it's slotted in under that key here. The custom
+    // duplicates ("Business Name", "Company") were cleaned up 2026-11-26.
+    const standardCompany = typeof contact.companyName === 'string' ? contact.companyName.trim() : ''
+    if (standardCompany) values['contact.company_name'] = standardCompany
+
+    // Private fields (gender, date of birth) go to member_match_profiles, not here.
+    await syncPrivateFieldsFromGhl({ userId, contact, ctx, log })
 
     if (Object.keys(values).length === 0 && !rawNonprofits) return
 
