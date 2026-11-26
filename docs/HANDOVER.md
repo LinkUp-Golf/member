@@ -40,13 +40,13 @@ The main flows, each with its own section in `CLAUDE.md`:
 
 | Environment | URL | Hosting | Database | Notes |
 | --- | --- | --- | --- | --- |
-| **Production** | https://app.linkup.golf | Vercel, deployed from `main` | Supabase production project: **FILL IN** project ref | Real members. Vercel runs the crons in `vercel.json`. |
+| **Production** | https://app.linkup.golf | Vercel, deployed from `main` | Supabase production project, ref `zbsxjtlhzqxlbdsvckbs` | Real members. Vercel runs the crons in `vercel.json`. |
+| **Staging** | https://app-dev.linkup.golf | Vercel, deployed from `develop` | Supabase `linkupgolf-dev`, ref `jxmculznmsmyfxiaehqa` (confirmed in Vercel, 2026-11-25) | Where a change is checked live before it's released. |
 | **Development** | http://localhost:3000 | `npm run dev` | Supabase `linkupgolf-dev`, ref `jxmculznmsmyfxiaehqa` | Contains test data, including synthetic survey answers for about 66 members, seeded 2026-11-05 to test matchmaking. Never copy dev data to production. |
-| **Preview** | **FILL IN** (Vercel preview URLs, if enabled) | Vercel | **FILL IN** which Supabase project previews use | |
 
-**Branches.**
-- Work happens on `develop`. Releases are a pull request from `develop` into `main` (PRs #43–#47 so far), and merging to `main` deploys production.
-- **FILL IN:** confirm the production branch in Vercel → Project → Settings → Git.
+**Branches.** (Confirmed by the previous developer, 2026-11-25.)
+- `main` is production and `develop` is staging; Vercel deploys each.
+- Work happens on `develop`. A change is deployed there first and checked live, and only then released with a pull request from `develop` into `main`.
 - There is no CI. Run `npm run lint`, `npm test` and `npm run build` before pushing.
 
 **The repository.** `github.com/LinkUp-Golf/member` (the remote may be configured as `git@github-linkup-golf:LinkUp-Golf/member.git`, an SSH host alias on the previous developer's machine).
@@ -64,7 +64,7 @@ Every service the code talks to, what it's for, and what has to be set up in tha
 | **Resend** | The email half of every notification | `src/lib/email/`, `src/lib/notify.ts` | Sending domain verified in DNS (sender `EMAIL_FROM`). Webhook to `POST /api/webhooks/resend` for `email.bounced` and `email.complained`: bounces, complaints and unsubscribes go on a suppression list. | Email is skipped, push still sends |
 | **Web Push** (VAPID) | Push notifications to installed apps | `src/lib/push.ts`, `src/lib/push/`, `src/hooks/usePushNotifications.ts`, `worker/`, `public/sw-custom.js` | No account. A key pair made with `npm run generate-vapid`. Changing the keys invalidates every existing push subscription. | No push |
 | **Upstash Redis** (optional) | Shared cache across server instances | `src/lib/cache/` | A Redis database (REST URL and token) | Falls back to an in-memory cache per instance |
-| **DNS / domain** `linkup.golf` | `app.` points to Vercel; email DNS for Resend | — | **FILL IN** the registrar and DNS host | — |
+| **DNS / domain** `linkup.golf` | `app.` points to Vercel; email DNS for Resend | — | Registered and hosted at GoDaddy, in the owner's (Greg Lipper's) own account. Nothing to hand over. | — |
 
 Other domains that appear in the code are not services of their own. `linkupgolf-services.com` hosts the GHL checkout pages where rounds are paid for (one per venue, stored as `courses.payment_url` and set by admins); see section 3.1. `maps.google.com` is only used for links.
 
@@ -207,15 +207,17 @@ npm run lint && npm test && npm run build
 - Make one with `npm run db:migration <name>`. Files are `supabase/migrations/YYYYMMDDHHMMSS_name.sql`.
 - Start each with a comment saying why. Keep them additive. Don't edit a migration that has already been applied; write a new one.
 - `npm run db:push` applies pending migrations to whichever project the Supabase CLI is linked to. Check with `supabase projects list` (the linked one is marked) before pushing.
-- To ship a change: link production (`supabase link --project-ref <prod ref>`), push, then link dev again.
+- `db:push` sends the migration files of the branch you have checked out to the project you linked last. Staging: `npx supabase link --project-ref jxmculznmsmyfxiaehqa`, then `npm run db:push`. Production: `npx supabase link --project-ref zbsxjtlhzqxlbdsvckbs`, then `npm run db:push`. It asks before applying anything new and says so when the project is up to date.
+- Re-link the dev project straight after pushing to production, so a later `db:push` from `develop` can't reach production by accident.
 - **Apply a migration to production before merging the code that reads it.** Otherwise the deployed code queries columns that don't exist yet.
 - New tables get row-level security. Server routes use the service-role client only behind `withAuth` / `withAdminAuth`, a webhook signature, or `CRON_SECRET`.
 
 **Ship.**
-1. Push `develop`.
-2. Open a PR from `develop` into `main`.
-3. Apply that release's migrations to production.
-4. Merge. Vercel deploys.
+1. Apply any new migrations to the dev project, then push `develop`. Vercel deploys staging.
+2. Check the change works on staging.
+3. Open a PR from `develop` into `main`.
+4. Apply that release's migrations to production. Do it from `develop`, before merging: `main` doesn't have the new migration files until the merge, and the merged code would otherwise go live before its columns exist.
+5. Merge. Vercel deploys production.
 
 Then do any dashboard steps the commit messages list (webhook events, env vars). Each feature commit's message ends with what has to happen before deploying.
 
@@ -256,11 +258,11 @@ Then do any dashboard steps the commit messages list (webhook events, env vars).
 - Set up the Stripe webhook and `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` in Vercel (section 3.2).
 - Delete `STRIPE_PUBLISHABLE_KEY` from Vercel.
 
-Why #47 was reverted isn't recorded here. If the reason still holds, #49 brings it back.
+**Why #47 was reverted** (previous developer, 2026-11-25): cancelling asked members for card details. The fix was invoicing instead of collecting a card (`bf72529`), which #49 shipped, so the reason no longer holds.
 
 **Not yet checked in a browser:** the invoice flow end to end (cancel → email → pay on Stripe → marked paid) and the Curated Introductions page. Both pass type-checks and the unit tests, and the Stripe invoice calls were exercised against Stripe's test mode.
 
-**Production migration status: FILL IN.** Run `supabase migration list` against production to see which of the 129 migrations it has.
+**Production migration status:** every committed migration is applied, per the previous developer on 2026-11-25, including the five listed above. To check, link production and run `supabase migration list`.
 
 ## 7. Open questions and known gaps
 
