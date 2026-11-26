@@ -977,6 +977,10 @@ export interface GHLContact {
   phone: string
   tags: string[]
   customFields: Array<{ id: string; value: string }>
+  /** Standard "Business Name" field (Contact info). The custom field contact.company_name is the other one. */
+  companyName?: string | null
+  /** Standard Date of Birth field; a date, a timestamp or epoch ms depending on the endpoint (dobFromGhl reads all three). */
+  dateOfBirth?: string | number | null
 }
 
 export interface GHLBookingSlot {

@@ -97,6 +97,7 @@ export default function MemberProfilePage() {
   if (!member) return null;
 
   const p = member.profile;
+  const community = (member as { community?: string | null }).community ?? null;
 
   return (
     <AppShell
@@ -128,8 +129,10 @@ export default function MemberProfilePage() {
           {p?.industry_category && (
             <span className="profile-tag">{p.industry_category}</span>
           )}
-          {member.home_course?.city && (
-            <span className="profile-tag">{member.home_course.city}</span>
+          {/* The community comes from the membership tag (worked out on the
+              server); the course's city is the fallback for anyone outside one. */}
+          {(community ?? member.home_course?.city) && (
+            <span className="profile-tag">{community ?? member.home_course?.city}</span>
           )}
           {playedTogether && (
             <span className="profile-tag flex items-center gap-1">

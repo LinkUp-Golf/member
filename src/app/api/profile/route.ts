@@ -8,7 +8,12 @@ import { createRouteHandlerClient } from '@/lib/supabase-server'
 import { getCache } from '@/lib/cache'
 import { MEMBER_DETAIL_NS, memberDetailKey } from '@/lib/cache/keys'
 import { parseNonprofits, MAX_NONPROFITS } from '@/lib/profile/nonprofits'
+import { syncedChanges } from '@/lib/ghl/profile-fields'
+import { pushProfileToGhl, GhlProfileSyncError } from '@/lib/sync/profile.push'
 import type { AuthContext } from '@/lib/auth/types'
+
+/** Shown when GoHighLevel can't take the change: nothing was saved, so trying again is safe. */
+const GHL_SAVE_ERROR = "Your changes couldn't be saved just now. Nothing was changed — please try again in a minute."
 
 export const GET = withAuth(async (_req: NextRequest, ctx: AuthContext) => {
   const supabase = createRouteHandlerClient(cookies())
@@ -57,6 +62,26 @@ export const PATCH = withAuth(async (req: NextRequest, ctx: AuthContext) => {
       )
     }
     updates.nonprofits = parsed
+  }
+
+  // Organization, title, LinkedIn and non-profits are held in GoHighLevel too.
+  // Write a change there first: if it can't be written, refuse the save, since
+  // the next GHL → app sync would otherwise put the old value back.
+  const [current, member] = await Promise.all([
+    supabase.from('member_profiles')
+      .select('business_name, role_title, linkedin_url, nonprofits')
+      .eq('id', ctx.userId).single(),
+    supabase.from('members').select('ghl_contact_id').eq('id', ctx.userId).single(),
+  ])
+  const changes = syncedChanges(current.data ?? {}, updates)
+  const contactId = member.data?.ghl_contact_id as string | null | undefined
+  if (contactId && Object.keys(changes).length > 0) {
+    try {
+      await pushProfileToGhl(contactId, changes)
+    } catch (err) {
+      if (err instanceof GhlProfileSyncError) return NextResponse.json({ error: GHL_SAVE_ERROR }, { status: 502 })
+      throw err
+    }
   }
 
   const { data, error } = await supabase

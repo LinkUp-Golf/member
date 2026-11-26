@@ -14,6 +14,8 @@
 // member_profiles later stays private until someone adds it here on purpose.
 // ============================================================
 
+import { communityFromTags } from '@/lib/ghl/profile-fields'
+
 /** The columns read. Everything the profile page and profile sheet show, plus the two switches that decide what's shown. */
 export const PUBLIC_MEMBER_SELECT =
   'id, first_name, last_name, ' +
@@ -23,7 +25,9 @@ export const PUBLIC_MEMBER_SELECT =
     'handicap_index, show_handicap, preferred_play_times, play_frequency, open_to_golf_travel, ' +
     'profile_visible' +
   '), ' +
-  'home_course:courses!members_home_course_id_fkey(id, name, city)'
+  'home_course:courses!members_home_course_id_fkey(id, name, city), ' +
+  // Read only to work out the community (communityFromTags); never returned.
+  'ghl_tags'
 
 /**
  * What another member reads as the Golfer Summary of someone who hasn't
@@ -45,6 +49,7 @@ export interface PublicProfileRow {
   last_name: string | null
   profile: Record<string, unknown> | Record<string, unknown>[] | null
   home_course: Record<string, unknown> | Record<string, unknown>[] | null
+  ghl_tags?: unknown
 }
 
 export interface PublicMember {
@@ -53,6 +58,8 @@ export interface PublicMember {
   last_name: string
   profile: Record<string, unknown> | null
   home_course: Record<string, unknown> | null
+  /** From the membership tag ("San Diego"); null for someone outside every community. */
+  community: string | null
 }
 
 const one = <T>(v: T | T[] | null): T | null => (Array.isArray(v) ? v[0] ?? null : v)
@@ -74,6 +81,9 @@ export function publicMember(row: PublicProfileRow, viewer: { isSelf: boolean; i
     first_name: row.first_name ?? '',
     last_name: row.last_name ?? '',
     home_course: one(row.home_course),
+    community: communityFromTags(
+      Array.isArray(row.ghl_tags) ? row.ghl_tags.filter((t): t is string => typeof t === 'string') : [],
+    ),
   }
 
   if (!raw) return { ...base, profile: null }

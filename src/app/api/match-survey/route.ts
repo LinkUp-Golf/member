@@ -25,6 +25,7 @@ import { logActivity } from '@/lib/activity/log'
 import { logger } from '@/lib/logger'
 import { eligibleForIntroductions, roleFromTitle, toMatchProfile, toMatchRow, validateSurvey } from '@/lib/matching/survey'
 import { skillFromHandicap } from '@/lib/matching/rules'
+import { GhlProfileSyncError, pushGenderToGhl } from '@/lib/sync/profile.push'
 import type { AuthContext } from '@/lib/auth/types'
 
 // Guests are let through so the page gets an answer ("not eligible") rather
@@ -96,11 +97,29 @@ export const PUT = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   const admin = createAdminClient()
   const { data: existing, error: readError } = await admin
     .from('member_match_profiles')
-    .select('completed_at')
+    .select('completed_at, gender')
     .eq('member_id', ctx.userId)
     .maybeSingle()
   if (readError) {
     return NextResponse.json({ error: 'Could not save your answers. Please try again.' }, { status: 500 })
+  }
+
+  // Gender is held in GoHighLevel too, as a gender-* tag. A change is written
+  // there first, and the save refused if it can't be (see profile.push.ts).
+  const nextGender = result.match.gender ?? null
+  if (nextGender !== ((existing?.gender as string | null | undefined) ?? null)) {
+    const { data: member } = await admin.from('members').select('ghl_contact_id').eq('id', ctx.userId).single()
+    if (member?.ghl_contact_id) {
+      try {
+        await pushGenderToGhl(member.ghl_contact_id, nextGender)
+      } catch (err) {
+        if (!(err instanceof GhlProfileSyncError)) throw err
+        return NextResponse.json(
+          { error: "Your answers couldn't be saved just now. Nothing was changed — please try again in a minute." },
+          { status: 502 },
+        )
+      }
+    }
   }
 
   const now = new Date().toISOString()

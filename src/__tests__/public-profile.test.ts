@@ -38,15 +38,22 @@ const other = { isSelf: false, isAdmin: false }
 
 describe('publicMember', () => {
   it('never reads private member columns', () => {
-    for (const col of ['email', 'phone', 'ghl_tags', 'ghl_contact_id', 'is_admin', 'membership_status', '*']) {
+    // ghl_tags is read, to work out the community, but never returned (below).
+    for (const col of ['email', 'phone', 'ghl_contact_id', 'is_admin', 'membership_status', '*']) {
       expect(PUBLIC_MEMBER_SELECT).not.toMatch(new RegExp(`(^|[\\s,(])${col.replace('*', '\\*')}([\\s,)]|$)`))
     }
   })
 
   it('returns only the public shape', () => {
     const m = publicMember(row(visible), other)
-    expect(Object.keys(m).sort()).toEqual(['first_name', 'home_course', 'id', 'last_name', 'profile'])
+    expect(Object.keys(m).sort()).toEqual(['community', 'first_name', 'home_course', 'id', 'last_name', 'profile'])
     expect(m.home_course).toEqual({ id: 'c1', name: 'Aviara', city: 'Carlsbad' })
+  })
+
+  it('gives the community, never the tags it came from', () => {
+    const m = publicMember({ ...row(visible), ghl_tags: ['member-active-SD', 'gender-female', 'host'] }, other)
+    expect(m.community).toBe('San Diego')
+    expect(JSON.stringify(m)).not.toMatch(/gender|member-active|host/i)
   })
 
   it('hides a handicap the member hides, from other members only', () => {

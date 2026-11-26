@@ -11,6 +11,7 @@ import { INDUSTRY_CATEGORIES } from '@/types'
 import Select from '@/components/ui/Select'
 import InfoBubble from '@/components/ui/InfoBubble'
 import { parseNonprofits, formatNonprofits, MAX_NONPROFITS } from '@/lib/profile/nonprofits'
+import { communityFromTags } from '@/lib/ghl/profile-fields'
 import type { MemberProfile } from '@/types'
 
 export default function MyProfilePage() {
@@ -26,6 +27,10 @@ export default function MyProfilePage() {
   const [avatarError, setAvatarError] = useState('')
   const [saveError, setSaveError] = useState('')
   const avatarInputRef = useRef<HTMLInputElement>(null)
+  // Gender and date of birth: private, used only for Curated Introductions,
+  // saved through their own route (member_match_profiles, service role).
+  const [privateSaved, setPrivateSaved] = useState<PrivateDetailsValue | null>(null)
+  const [privateForm, setPrivateForm] = useState<PrivateDetailsValue>(EMPTY_PRIVATE)
 
   useEffect(() => {
     if (profile?.profile) {
@@ -33,6 +38,15 @@ export default function MyProfilePage() {
       setNonprofitsText(formatNonprofits(profile.profile.nonprofits))
     }
   }, [profile])
+
+  useEffect(() => {
+    apiClient.get<PrivateDetailsValue>('/api/profile/private').then(res => {
+      if (res.data) {
+        setPrivateSaved(res.data)
+        setPrivateForm(res.data)
+      }
+    })
+  }, [])
 
   async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -98,12 +112,26 @@ export default function MyProfilePage() {
       profile_visible: form.profile_visible ?? true,
     })
 
-    if (!response.error) {
-      await refetch()
-      setEditing(false)
-    } else {
+    if (response.error) {
       setSaveError(response.error.message || 'Failed to save. Please try again.')
+      setSaving(false)
+      return
     }
+
+    if (privateSaved && !samePrivate(privateForm, privateSaved)) {
+      const priv = await apiClient.patch<PrivateDetailsValue>('/api/profile/private', privateForm)
+      if (priv.error || !priv.data) {
+        await refetch()
+        setSaveError(priv.error?.message || 'Your gender and date of birth were not saved. Please try again.')
+        setSaving(false)
+        return
+      }
+      setPrivateSaved(priv.data)
+      setPrivateForm(priv.data)
+    }
+
+    await refetch()
+    setEditing(false)
     setSaving(false)
   }
 
@@ -177,8 +205,8 @@ export default function MyProfilePage() {
           <p className="text-sm text-white/50 mt-1">{headline}</p>
         )}
         <div className="flex gap-2 justify-center flex-wrap mt-3">
-          {m.home_course?.city && (
-            <span className="profile-tag">{m.home_course.city}</span>
+          {(communityFromTags(m.ghl_tags ?? []) ?? m.home_course?.city) && (
+            <span className="profile-tag">{communityFromTags(m.ghl_tags ?? []) ?? m.home_course?.city}</span>
           )}
           {m.membership_start_date && (
             <span className="profile-tag">
@@ -204,6 +232,8 @@ export default function MyProfilePage() {
                   setEditing(false)
                   setForm(m.profile ?? {})
                   setNonprofitsText(formatNonprofits(m.profile?.nonprofits))
+                  if (privateSaved) setPrivateForm(privateSaved)
+                  setSaveError('')
                 }}
                 className="btn btn-outline flex-1 justify-center"
                 disabled={saving}
@@ -342,6 +372,14 @@ export default function MyProfilePage() {
             the client's request (2026-11-25): they're managed on More → Focus
             LinkUps, and a section you can't change from here was noise. */}
 
+        {privateSaved && (
+          <PrivateDetails
+            editing={editing}
+            value={editing ? privateForm : privateSaved}
+            onChange={setPrivateForm}
+          />
+        )}
+
         {/* Privacy */}
         {editing && (
           <div className="px-5 py-4">
@@ -453,6 +491,108 @@ function Field({
         ) : (
           <p className="text-sm text-green-900/30 italic">Not set — tap Edit to add</p>
         )
+      )}
+    </div>
+  )
+}
+
+// ---- Private details ----------------------------------------
+//
+// Gender and date of birth. Asked because they're golf-relevant (men and
+// women play from different tees and at different paces, and some members
+// prefer same-gender rounds), used only for Curated Introductions matching,
+// and never shown to another member. Both allow "Prefer not to say".
+
+interface PrivateDetailsValue {
+  gender: 'male' | 'female' | 'prefer_not' | null
+  date_of_birth: string | null
+  dob_prefer_not: boolean
+}
+
+const EMPTY_PRIVATE: PrivateDetailsValue = { gender: null, date_of_birth: null, dob_prefer_not: false }
+
+const GENDER_LABELS: Record<NonNullable<PrivateDetailsValue['gender']>, string> = {
+  male: 'Male',
+  female: 'Female',
+  prefer_not: 'Prefer not to say',
+}
+
+function samePrivate(a: PrivateDetailsValue, b: PrivateDetailsValue) {
+  return a.gender === b.gender && a.date_of_birth === b.date_of_birth && a.dob_prefer_not === b.dob_prefer_not
+}
+
+function formatDob(dob: string) {
+  return formatInTimeZone(new Date(`${dob}T00:00:00Z`), 'UTC', 'd MMMM yyyy')
+}
+
+function PrivateDetails({
+  editing, value, onChange,
+}: {
+  editing: boolean
+  value: PrivateDetailsValue
+  onChange: (v: PrivateDetailsValue) => void
+}) {
+  const dobText = value.dob_prefer_not ? 'Prefer not to say' : value.date_of_birth ? formatDob(value.date_of_birth) : null
+  return (
+    <div className="px-5 py-4 border-b border-green-900/08 space-y-3">
+      <div>
+        <p className="text-xs uppercase tracking-widest text-green-900/40">Private details</p>
+        <p className="text-xs text-green-900/45 mt-1">
+          Only used to match you for Curated Introductions. Never shown to other members.
+        </p>
+      </div>
+      {editing ? (
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block min-w-0">
+            <span className="block text-xs text-green-900/60 mb-1">Gender</span>
+            <select
+              id="profile-gender"
+              className="input"
+              value={value.gender ?? ''}
+              onChange={e => onChange({ ...value, gender: (e.target.value || null) as PrivateDetailsValue['gender'] })}
+            >
+              <option value="">Not set</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="prefer_not">Prefer not to say</option>
+            </select>
+          </label>
+          <div className="min-w-0">
+            <label className="block">
+              <span className="block text-xs text-green-900/60 mb-1">Date of birth</span>
+              <input
+                id="profile-dob"
+                type="date"
+                className="input"
+                disabled={value.dob_prefer_not}
+                value={value.dob_prefer_not ? '' : value.date_of_birth ?? ''}
+                onChange={e => onChange({ ...value, date_of_birth: e.target.value || null })}
+              />
+            </label>
+            <label className="flex items-center gap-2 mt-2 text-xs text-green-900/70">
+              <input
+                id="profile-dob-prefer-not"
+                type="checkbox"
+                checked={value.dob_prefer_not}
+                onChange={e => onChange({ ...value, dob_prefer_not: e.target.checked, date_of_birth: e.target.checked ? null : value.date_of_birth })}
+              />
+              Prefer not to say
+            </label>
+          </div>
+        </div>
+      ) : (
+        <dl className="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <dt className="text-xs text-green-900/60">Gender</dt>
+            <dd className={value.gender ? 'text-green-900' : 'text-green-900/30 italic'}>
+              {value.gender ? GENDER_LABELS[value.gender] : 'Not set'}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-green-900/60">Date of birth</dt>
+            <dd className={dobText ? 'text-green-900' : 'text-green-900/30 italic'}>{dobText ?? 'Not set'}</dd>
+          </div>
+        </dl>
       )}
     </div>
   )

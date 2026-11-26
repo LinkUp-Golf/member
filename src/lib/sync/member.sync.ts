@@ -4,6 +4,7 @@
 
 import { logger } from '@/lib/logger'
 import { hasMembershipTag } from '@/lib/ghl/tags'
+import { withoutGenderTags } from '@/lib/ghl/profile-fields'
 import type { GHLContact } from '@/types'
 import type { SyncContext, SyncResult } from './types'
 
@@ -38,7 +39,10 @@ export async function upsertMember({
     first_name: contact.firstName ?? '',
     last_name: contact.lastName ?? '',
     phone: contact.phone ?? null,
-    ghl_tags: contact.tags ?? [],
+    // Without the gender-* tags: this copy reaches other members' devices in
+    // places, and gender is private (it's kept in member_match_profiles by
+    // syncProfileFromGhl instead).
+    ghl_tags: withoutGenderTags(contact.tags ?? []),
     updated_at: new Date().toISOString(),
   }
 
