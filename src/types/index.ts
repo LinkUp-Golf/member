@@ -218,6 +218,8 @@ export interface MemberProfile {
   value_offered: string | null
   value_sought: string | null
   non_golf_hobbies: string | null
+  /** "Golfer Summary" — the member describing themselves as a golfer. */
+  golfer_description: string | null
   /** Non-profits this member supports, max 3. Never null — the column defaults to '{}'. */
   nonprofits: string[]
   linkedin_url: string | null

@@ -11,6 +11,7 @@ import { Spinner } from "@/components/ui/Loading";
 import AppShell from "@/components/layout/AppShell";
 import { RateLimitBanner } from "@/components/ui/RateLimitModal";
 import type { MemberWithProfile, HostedEvent } from "@/types";
+import { golferSummaryText } from "@/lib/members/public-profile";
 
 export default function MemberProfilePage() {
   const { id } = useParams<{ id: string }>();
@@ -230,11 +231,19 @@ export default function MemberProfilePage() {
           </div>
         </div>
 
-        {/* Hobbies */}
+        {/* Personal and Golfer Summary — the labels a member now writes them
+            under on More → Profile (2026-11-25). */}
         <div className="px-5 py-4 border-b border-green-900/08">
-          <p className="text-xs uppercase tracking-widest text-green-900/40 mb-2">Hobbies</p>
+          <p className="text-xs uppercase tracking-widest text-green-900/40 mb-2">Personal Summary</p>
           <p className="text-sm text-green-900 leading-relaxed">
             {p?.non_golf_hobbies ?? <span className="text-green-900/25 italic">Not filled in</span>}
+          </p>
+        </div>
+
+        <div className="px-5 py-4 border-b border-green-900/08">
+          <p className="text-xs uppercase tracking-widest text-green-900/40 mb-2">Golfer Summary</p>
+          <p className="text-sm text-green-900 leading-relaxed">
+            {golferSummaryText(p?.golfer_description)}
           </p>
         </div>
 
