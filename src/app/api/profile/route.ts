@@ -10,6 +10,7 @@ import { MEMBER_DETAIL_NS, memberDetailKey } from '@/lib/cache/keys'
 import { parseNonprofits, MAX_NONPROFITS } from '@/lib/profile/nonprofits'
 import { syncedChanges } from '@/lib/ghl/profile-fields'
 import { pushProfileToGhl, GhlProfileSyncError } from '@/lib/sync/profile.push'
+import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 
 /** Shown when GoHighLevel can't take the change: nothing was saved, so trying again is safe. */
@@ -67,14 +68,20 @@ export const PATCH = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   // Organization, title, LinkedIn and non-profits are held in GoHighLevel too.
   // Write a change there first: if it can't be written, refuse the save, since
   // the next GHL → app sync would otherwise put the old value back.
-  const [current, member] = await Promise.all([
-    supabase.from('member_profiles')
-      .select('business_name, role_title, linkedin_url, nonprofits')
-      .eq('id', ctx.userId).single(),
-    supabase.from('members').select('ghl_contact_id').eq('id', ctx.userId).single(),
-  ])
+  // The contact id comes from the auth context, which withAuth already loaded
+  // through the service role. Reading it here through the member's own session
+  // could come back empty under RLS, and an empty id used to skip GHL silently
+  // while the save went ahead (2026-11-26: a title change never reached GHL).
+  const current = await supabase.from('member_profiles')
+    .select('business_name, role_title, linkedin_url, nonprofits')
+    .eq('id', ctx.userId).single()
   const changes = syncedChanges(current.data ?? {}, updates)
-  const contactId = member.data?.ghl_contact_id as string | null | undefined
+  const contactId = ctx.ghlContactId
+  if (!contactId && Object.keys(changes).length > 0) {
+    logger.warn('Profile fields changed for a member with no GHL contact — not synced', {
+      action: 'ghl_profile_push', userId: ctx.userId, metadata: { fields: Object.keys(changes) },
+    })
+  }
   if (contactId && Object.keys(changes).length > 0) {
     try {
       await pushProfileToGhl(contactId, changes)

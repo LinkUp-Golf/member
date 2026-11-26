@@ -50,8 +50,7 @@ export const PATCH = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
   if (Object.keys(next).length === 0) return NextResponse.json(current)
 
-  const { data: member } = await admin.from('members').select('ghl_contact_id').eq('id', ctx.userId).single()
-  const contactId = member?.ghl_contact_id as string | null | undefined
+  const contactId = ctx.ghlContactId
   if (contactId) {
     try {
       if ('gender' in next) await pushGenderToGhl(contactId, next.gender ?? null)

@@ -108,10 +108,9 @@ export const PUT = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   // there first, and the save refused if it can't be (see profile.push.ts).
   const nextGender = result.match.gender ?? null
   if (nextGender !== ((existing?.gender as string | null | undefined) ?? null)) {
-    const { data: member } = await admin.from('members').select('ghl_contact_id').eq('id', ctx.userId).single()
-    if (member?.ghl_contact_id) {
+    if (ctx.ghlContactId) {
       try {
-        await pushGenderToGhl(member.ghl_contact_id, nextGender)
+        await pushGenderToGhl(ctx.ghlContactId, nextGender)
       } catch (err) {
         if (!(err instanceof GhlProfileSyncError)) throw err
         return NextResponse.json(
