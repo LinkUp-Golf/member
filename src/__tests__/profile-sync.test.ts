@@ -69,12 +69,22 @@ describe('syncProfileFromGhl', () => {
   it('overwrites a stored value that disagrees with GHL', async () => {
     // The point of the change: GHL is the source of truth, so a correction
     // made there has to land even though the column is already populated.
-    mockedValues.mockResolvedValue({ 'contact.company_name': 'Ridgeline Capital' })
+    mockedValues.mockResolvedValue({ 'contact.title': 'Managing Partner' })
 
-    const calls = await run({ ...blank, business_name: 'Ridgeline Captial' })
+    const calls = await run({ ...blank, role_title: 'Managing Parnter' })
 
     expect(calls.updates).toHaveLength(1)
-    expect(calls.updates[0]).toMatchObject({ business_name: 'Ridgeline Capital' })
+    expect(calls.updates[0]).toMatchObject({ role_title: 'Managing Partner' })
+  })
+
+  it('keeps an organization the member typed (temporary, until the import)', async () => {
+    mockedValues.mockResolvedValue({ 'contact.company_name': 'Ridgeline Capital' })
+
+    const kept = await run({ ...blank, business_name: 'Ridgeline Capital Partners' })
+    expect(kept.updates).toHaveLength(0)
+
+    const filled = await run(blank)
+    expect(filled.updates[0]).toMatchObject({ business_name: 'Ridgeline Capital' })
   })
 
   it('still fills a blank column', async () => {

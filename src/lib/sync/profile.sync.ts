@@ -151,6 +151,12 @@ export async function syncProfileFromGhl(params: {
       // Compare before writing: re-syncs are frequent (every login, every
       // webhook, nightly), and an unchanged value shouldn't move updated_at or
       // evict the member's cache entry.
+      // TEMPORARY (2026-11-26): organization only fills a blank. Until today
+      // the sync never read GHL's built-in Business Name, so members' own
+      // typed organizations were never overwritten; now it does, and the
+      // client wants what members typed kept. Remove this once the one-time
+      // import has reconciled the app and GHL (app wins, blanks filled from GHL).
+      if (column === 'business_name' && (current.business_name ?? '').trim()) continue
       if (incoming && incoming !== (current[column] ?? '')) {
         updates[column] = incoming
       }
