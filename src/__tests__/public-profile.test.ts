@@ -1,5 +1,29 @@
 import { describe, it, expect } from 'vitest'
-import { PUBLIC_MEMBER_SELECT, publicMember, type PublicProfileRow } from '@/lib/members/public-profile'
+import {
+  DEFAULT_GOLFER_DESCRIPTION,
+  PUBLIC_MEMBER_SELECT,
+  golferSummaryText,
+  publicMember,
+  type PublicProfileRow,
+} from '@/lib/members/public-profile'
+
+describe('golferSummaryText', () => {
+  it("shows the member's own words when they wrote some", () => {
+    expect(golferSummaryText('Early riser, walks every round')).toBe('Early riser, walks every round')
+  })
+
+  it('shows the default for a blank Golfer Summary', () => {
+    for (const blank of [null, undefined, '', '   ']) expect(golferSummaryText(blank)).toBe(DEFAULT_GOLFER_DESCRIPTION)
+  })
+
+  it('never puts the default into the profile data itself', () => {
+    const m = publicMember(
+      { id: 'm1', first_name: 'A', last_name: 'B', profile: { golfer_description: null }, home_course: null },
+      { isSelf: false, isAdmin: false },
+    )
+    expect(m.profile?.golfer_description).toBeNull()
+  })
+})
 
 const row = (profile: Record<string, unknown> | null): PublicProfileRow => ({
   id: 'm1',

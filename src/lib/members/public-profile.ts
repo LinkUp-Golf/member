@@ -19,11 +19,25 @@ export const PUBLIC_MEMBER_SELECT =
   'id, first_name, last_name, ' +
   'profile:member_profiles(' +
     'display_name, avatar_url, business_name, role_title, industry_category, business_description, ' +
-    'value_offered, value_sought, non_golf_hobbies, nonprofits, linkedin_url, ' +
+    'value_offered, value_sought, non_golf_hobbies, golfer_description, nonprofits, linkedin_url, ' +
     'handicap_index, show_handicap, preferred_play_times, play_frequency, open_to_golf_travel, ' +
     'profile_visible' +
   '), ' +
   'home_course:courses!members_home_course_id_fkey(id, name, city)'
+
+/**
+ * What another member reads as the Golfer Summary of someone who hasn't
+ * written one (client's wording, 2026-11-25). Shown only — never saved, and
+ * never sent as the field's value — so Introduce Me and Curated Introductions,
+ * which ask for a real one before they start, still see it as blank.
+ */
+export const DEFAULT_GOLFER_DESCRIPTION =
+  'A golfer who embraces moments of celebration and ponders moments of reflection.'
+
+/** The Golfer Summary to show: the member's own words, or the default. */
+export function golferSummaryText(description: unknown): string {
+  return typeof description === 'string' && description.trim() ? description : DEFAULT_GOLFER_DESCRIPTION
+}
 
 export interface PublicProfileRow {
   id: string

@@ -6,6 +6,7 @@ Each entry gives the date, who decided (**client** means the LinkUp Golf owner; 
 
 ## Cancellation fees
 
+- **2026-11-25 · client. Invoiced by hand in Stripe for now.** Late cancellations are few, so the client invoices them manually from the Stripe dashboard. Setting up `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` in Vercel is deferred. While `STRIPE_SECRET_KEY` is unset the in-app policy is off: the app shows, records and invoices no fee. That's intended, not a missing setup. Revisit if volume grows.
 - **2026-11-12 · client. Invoices, not a card on file.** The client asked to stop collecting card details. A late cancellation is issued as a Stripe invoice, due in 7 days, and the member pays on Stripe's invoice page. The card-on-file version (a card saved at booking and charged automatically) existed from 2026-11-03 to 2026-11-12 and was removed whole.
 - **2026-11-12 · default. "Once the payment was received."** The client's message cut off after these words. They were read as: mark the fee paid, and send the member a receipt (`cancellationFeePaid`). If the intent was something else, such as holding the seat until it's paid, that's a different design.
 - **2026-11-12 · default. Our email, not Stripe's.** The app sends its own email linking Stripe's invoice page, and doesn't call Stripe's `sendInvoice`. That keeps it to one message in the app's template, and it also arrives in Stripe test mode, where Stripe emails nobody.
@@ -14,6 +15,14 @@ Each entry gives the date, who decided (**client** means the LinkUp Golf owner; 
 - **2026-11-03 · client. Tiers.** Free up to 2 days before; 50% the day before; 100% on the day. These are percentages of each seat's own price, so a new event at a new price needs no setup.
 - **2026-11-03 · client. Already-paid rounds are ignored.** "Payment is paid to the shop as of now." Nothing refunds or credits a paid round that's cancelled.
 - **2026-11-03 · default.** The person who cancels pays. Seats booked before the policy existed are exempt. Unanswered invitations and unconfirmed requests are free to cancel. "Day" is the venue's calendar day, not a 24-hour count.
+
+## Profile
+
+- **2026-11-25 · client. Three summaries, named like the introduction email.** On More → Profile, "Intro message" is now **Professional Summary** and "Hobbies" is now **Personal Summary**, directly below it. A new **Golfer Summary** ("describe yourself as a golfer", `member_profiles.golfer_description`) follows. The columns keep their old names (`business_description`, `non_golf_hobbies`). Default: Golfer Summary was placed after Personal Summary to match the order of the Introduce Me email.
+- **2026-11-25 · client. A blank Golfer Summary reads as a default line.** Other members see "A golfer who embraces moments of celebration and ponders moments of reflection." (`DEFAULT_GOLFER_DESCRIPTION`) instead of "Not filled in". Default: it's shown only, never saved, so Introduce Me and Curated Introductions still see the field as blank and ask for a real one, and the member's own Profile screen still shows it empty.
+- **2026-11-25 · client. Golfer Summary is optional on the profile.** It becomes required only when a member uses Introduce Me or Curated Introductions. Those services are how members are moved to complete their profiles.
+- **2026-11-25 · client. Title and Organization aren't repeated.** The header under the photo already shows "Title · Organization", so the two rows below it were removed when viewing. In edit mode they sit side by side at the top. Default: the header now shows either half on its own; before, it showed nothing for a member with an organization but no title.
+- **2026-11-25 · client. Focus LinkUps groups are off the own-profile screen.** They're managed on More → Focus LinkUps. Default: the member profile page other members see, and the profile sheet, still list them.
 
 ## Curated Introductions (matching)
 

@@ -22,7 +22,6 @@ export default function MyProfilePage() {
   // means a half-typed line or a trailing newline survives editing instead of
   // being normalised away under the cursor.
   const [nonprofitsText, setNonprofitsText] = useState('')
-  const [focusGroups, setFocusGroups] = useState<string[]>([])
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [avatarError, setAvatarError] = useState('')
   const [saveError, setSaveError] = useState('')
@@ -34,18 +33,6 @@ export default function MyProfilePage() {
       setNonprofitsText(formatNonprofits(profile.profile.nonprofits))
     }
   }, [profile])
-
-  useEffect(() => {
-    apiClient.get<{ subscriptions: { industry_focus: string; custom_label: string | null; status: string }[] }>('/api/focus-linkups').then(res => {
-      if (res.data?.subscriptions) {
-        setFocusGroups(
-          res.data.subscriptions
-            .filter(s => s.status === 'approved')
-            .map(s => s.industry_focus === 'Other' && s.custom_label ? s.custom_label : s.industry_focus)
-        )
-      }
-    })
-  }, [])
 
   async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -103,6 +90,7 @@ export default function MyProfilePage() {
       value_offered: form.value_offered,
       value_sought: form.value_sought,
       non_golf_hobbies: form.non_golf_hobbies,
+      golfer_description: form.golfer_description,
       // Raw text — the server parses it, so the split/trim/dedupe rules can't
       // drift between here and the GHL sync.
       nonprofits: nonprofitsText,
@@ -128,6 +116,11 @@ export default function MyProfilePage() {
   // duplicates don't cost the member one of their three.
   const nonprofits = parseNonprofits(nonprofitsText)
   const tooManyNonprofits = nonprofits.length > MAX_NONPROFITS
+
+  const headline = [m.profile?.role_title, m.profile?.business_name]
+    .map(s => s?.trim())
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <AppShell title="Profile" description="Your member details">
@@ -177,10 +170,11 @@ export default function MyProfilePage() {
         <h1 className="font-sans font-black text-2xl text-white capitalize">
           {m.first_name} {m.last_name}
         </h1>
-        {m.profile?.role_title && (
-          <p className="text-sm text-white/50 mt-1">
-            {m.profile.role_title}{m.profile.business_name ? ` · ${m.profile.business_name}` : ''}
-          </p>
+        {/* Either half alone still shows: this line is the only place title
+            and organization appear outside edit mode, and it used to vanish
+            for a member with an organization but no title. */}
+        {headline && (
+          <p className="text-sm text-white/50 mt-1">{headline}</p>
         )}
         <div className="flex gap-2 justify-center flex-wrap mt-3">
           {m.home_course?.city && (
@@ -239,29 +233,63 @@ export default function MyProfilePage() {
 
       {/* Profile fields */}
       <div className="pb-8">
+        {/* Title and organization: edited here, side by side, but not repeated
+            while viewing — the header under the photo already reads
+            "Title · Organization", and a second copy two inches below it was
+            the same line twice. */}
+        {editing && (
+          <div className="px-5 py-4 border-b border-green-900/08 grid grid-cols-2 gap-3">
+            <label className="block min-w-0">
+              <span className="block text-xs uppercase tracking-widest text-green-900/40 mb-2">Title</span>
+              <input
+                className="input"
+                placeholder="e.g. CEO"
+                value={form.role_title ?? ''}
+                onChange={e => set('role_title', e.target.value)}
+              />
+            </label>
+            <label className="block min-w-0">
+              <span className="block text-xs uppercase tracking-widest text-green-900/40 mb-2">Organization</span>
+              <input
+                className="input"
+                placeholder="e.g. McKenna Infrastructure Group"
+                value={form.business_name ?? ''}
+                onChange={e => set('business_name', e.target.value)}
+              />
+            </label>
+          </div>
+        )}
+
+        {/* Professional / Personal / Golfer Summary: the client's labels
+            (2026-11-25), and the same three headings an Introduce Me email
+            prints, so a member filling these in is writing their introduction.
+            The columns keep their old names — business_description was "Intro
+            message", non_golf_hobbies was "Hobbies". */}
         <Field
-          label="Intro message"
+          label="Professional Summary"
           value={form.business_description}
           editing={editing}
           multiline
-          placeholder="Share a brief intro — who you are, what you do, and what makes you distinctive…"
+          placeholder="Who you are, what you do, and what makes you distinctive…"
           onChange={v => set('business_description', v)}
         />
 
         <Field
-          label="Title"
-          value={form.role_title}
+          label="Personal Summary"
+          value={form.non_golf_hobbies}
           editing={editing}
-          placeholder="e.g. CEO"
-          onChange={v => set('role_title', v)}
+          multiline
+          placeholder="Your interests, family, and life outside of work…"
+          onChange={v => set('non_golf_hobbies', v)}
         />
 
         <Field
-          label="Organization"
-          value={form.business_name}
+          label="Golfer Summary"
+          value={form.golfer_description}
           editing={editing}
-          placeholder="e.g. McKenna Infrastructure Group"
-          onChange={v => set('business_name', v)}
+          multiline
+          placeholder="Describe yourself as a golfer — how you play, how often, what you enjoy about the game…"
+          onChange={v => set('golfer_description', v)}
         />
 
         <Field
@@ -303,15 +331,6 @@ export default function MyProfilePage() {
           onChange={v => set('value_sought', v)}
         />
 
-        <Field
-          label="Hobbies"
-          value={form.non_golf_hobbies}
-          editing={editing}
-          multiline
-          placeholder="Your hobbies, interests, and life outside of work…"
-          onChange={v => set('non_golf_hobbies', v)}
-        />
-
         <NonprofitsField
           editing={editing}
           text={nonprofitsText}
@@ -319,21 +338,9 @@ export default function MyProfilePage() {
           onChange={setNonprofitsText}
         />
 
-        {/* Focus LinkUps groups */}
-        <div className="px-5 py-4 border-b border-green-900/08">
-          <p className="text-xs uppercase tracking-widest text-green-900/40 mb-3">Focus LinkUps groups</p>
-          {focusGroups.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {focusGroups.map(g => (
-                <span key={g} className="text-xs bg-green-50 text-green-900 px-2.5 py-1 rounded-full border border-green-900/10">
-                  {g}
-                </span>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-green-900/30 italic">Not subscribed to any groups — manage in Focus LinkUps</p>
-          )}
-        </div>
+        {/* Focus LinkUps groups were listed here, read-only, and removed at
+            the client's request (2026-11-25): they're managed on More → Focus
+            LinkUps, and a section you can't change from here was noise. */}
 
         {/* Privacy */}
         {editing && (
