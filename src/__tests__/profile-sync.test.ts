@@ -77,14 +77,13 @@ describe('syncProfileFromGhl', () => {
     expect(calls.updates[0]).toMatchObject({ role_title: 'Managing Partner' })
   })
 
-  it('keeps an organization the member typed (temporary, until the import)', async () => {
+  it('overwrites an organization that disagrees with GHL', async () => {
+    // The import (2026-11-26) reconciled app and GHL; since then the sync is
+    // "latest change wins" for organization too.
     mockedValues.mockResolvedValue({ 'contact.company_name': 'Ridgeline Capital' })
 
-    const kept = await run({ ...blank, business_name: 'Ridgeline Capital Partners' })
-    expect(kept.updates).toHaveLength(0)
-
-    const filled = await run(blank)
-    expect(filled.updates[0]).toMatchObject({ business_name: 'Ridgeline Capital' })
+    const calls = await run({ ...blank, business_name: 'Ridgeline Captial' })
+    expect(calls.updates[0]).toMatchObject({ business_name: 'Ridgeline Capital' })
   })
 
   it('still fills a blank column', async () => {
