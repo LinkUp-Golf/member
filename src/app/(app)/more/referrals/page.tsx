@@ -56,7 +56,7 @@ export default function ReferralsPage() {
           <Step n={1} text="You refer someone you believe would be a great fit for the community." />
           <Step n={2} text="They receive a personal invitation email with your name on it." />
           <Step n={3} text="They go through a brief interview to ensure alignment." />
-          <Step n={4} text="If approved, their first round is on us — and you're invited to play with them." />
+          <Step n={4} text="If approved, their first month membership is free." />
         </div>
 
         {/* Refer button */}
