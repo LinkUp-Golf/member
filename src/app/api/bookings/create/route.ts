@@ -28,7 +28,8 @@ import { linkGuestToMember, provisionNonMemberGuest } from '@/lib/bookings/non-m
 import type { ProvisionedGuest } from '@/lib/bookings/non-member-guest'
 import { sendBookingInvitations } from '@/lib/bookings/send-invitations'
 import { NotificationTemplates } from '@/lib/push'
-import { notifyMember } from '@/lib/notify'
+import { kept, notifyMember } from '@/lib/notify'
+import { sendEmailToAdmins, sendEmailToMember } from '@/lib/email/send'
 import { validateEmail, validateString, sanitiseText, validateUUID } from '@/lib/validation'
 import { findPendingPaymentBookings, findMembersWithPendingPayment, pendingPaymentBlockMessage } from '@/lib/bookings/pending-payment'
 import { buildCustomSlots, loadForcedOpenDays, NON_HOLDING_STATUSES, slotsForDate } from '@/lib/bookings/availability'
@@ -52,7 +53,7 @@ import {
   type PaymentOption,
 } from '@/lib/bookings/payment-options'
 import { format } from 'date-fns'
-import { formatTeeTime, titleCaseName } from '@/lib/utils'
+import { formatTeeTime, nameOrEmail, titleCaseName } from '@/lib/utils'
 import type { AdditionalPlayer, Course } from '@/types'
 
 // Total players per booking is capped at 4 (mirrors validateBookingPayload),
@@ -892,6 +893,47 @@ export async function POST(request: NextRequest) {
       ),
     ).catch(() => {})
   }
+
+  // The booking confirmations, member and admins. GHL used to send both from
+  // the appointment, and its templates arrived with the venue, date and tee
+  // time blank; createBooking now tells GHL not to. Email only, not notify*:
+  // the member is looking at the confirmation screen as this sends, and admins
+  // never had a push for every booking — this replaces two emails like for like.
+  // Never awaited for its result and never fails the booking.
+  const playerNames = [
+    nameOrEmail(`${member.first_name ?? ''} ${member.last_name ?? ''}`, member.email),
+    ...memberPlayers.map((p) => {
+      const row = p.memberId ? memberRowById[p.memberId] : undefined
+      return row
+        ? nameOrEmail(`${row.first_name ?? ''} ${row.last_name ?? ''}`, row.email)
+        : nameOrEmail([p.firstName, p.lastName].filter(Boolean).join(' '), p.email)
+    }),
+    ...nonMemberPlayers.map((p) =>
+      nameOrEmail([p.firstName, p.lastName].filter(Boolean).join(' '), p.email),
+    ),
+  ].filter(Boolean)
+  const venueName = courseForResponse?.name ?? eventCourseName
+  const teeTimeLabel = formatTeeTime(timeNormalized)
+  const payAtClub = paymentMethod === PAY_AT_CLUB
+  if (!bookedByAdminId) {
+    void kept(sendEmailToMember(
+      bookerId,
+      NotificationTemplates.bookingConfirmed(venueName, displayDate, teeTimeLabel, {
+        players: playerNames,
+        address: eventAddress,
+        payAtClub,
+      }),
+    )).catch(() => {})
+  }
+  void kept(sendEmailToAdmins(
+    NotificationTemplates.bookingCreatedForAdmins(
+      playerNames[0] ?? member.email,
+      venueName,
+      displayDate,
+      teeTimeLabel,
+      { players: playerNames, payAtClub, bookedByAdmin: !!bookedByAdminId },
+    ),
+  )).catch(() => {})
 
   // Availability was checked against the course's GHL calendar before any of
   // this ran, so there is nothing left to confirm — the round opens with

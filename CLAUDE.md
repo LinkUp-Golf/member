@@ -195,9 +195,18 @@ out to both: `notifyMember()`, `notifyMembers()`, `notifyAdmins()`.
 
 - **Every template has an email counterpart**, so `notify*` is the default way
   to send one. `notifyCourse()` / `notifyFocusMembers()` cover the broadcast
-  audiences. Two call sites deliberately don't use it, and say why in place:
-  booking reminders — GHL already emails and SMSes those, and a second would be
-  a duplicate from a system that doesn't know about the first.
+  audiences. Booking reminders use it too since 2026-11-27 (push + our email,
+  no text); before that GHL emailed and texted them.
+- **Booking confirmations are the app's, email only** (2026-11-27). GHL used
+  to send them from the calendar appointment, and its templates arrived with
+  the venue, date and tee time blank. `POST /api/bookings/create` now emails
+  the booker `bookingConfirmed` (venue, date, tee time, players, address,
+  how it's paid) and every admin `bookingCreatedForAdmins`, through
+  `sendEmailToMember` / `sendEmailToAdmins` rather than `notify*` — the member
+  is on the confirmation screen as it sends, and admins never had a push per
+  booking. `createBooking` sends GHL `toNotify: false` so GHL's copy stops. A
+  round an admin books for a member still sends that member
+  `bookingMadeForYou` instead.
 - **Nothing is throttled, and one thing is suppressed.** If a notification was
   worth pushing, every reachable recipient gets the email, however many that is:
   no cooldown, no daily cap, no send log. Membership status isn't consulted
@@ -473,7 +482,7 @@ fit a member, and the admin chooses who to recommend, with a note.
 ### Scheduled Jobs (Vercel Cron)
 
 Configured in `vercel.json`:
-- `/api/cron/booking-reminders`: every 15 minutes — fires push + SMS reminders 7 days, 3 days, and 6 hours before each booking's tee time
+- `/api/cron/booking-reminders`: every 15 minutes — reminds every player (`playingMemberId`, so invited members too) of booked tee times **and** hosted-round reservations, by push and email (`notifyMember`; no SMS, no GHL webhook since 2026-11-27): 7 days and 3 days before, and 8 PM the night before (venue time). Nothing on the morning of the round — the client judged the night before enough. The night-before reminder replaced a 6-hours-before one; `bookings.reminder_6h_sent` is no longer read. One wording for all, the client's. Rules and copy in `src/lib/bookings/reminders.ts` (tested); a reminder is sent from 8 minutes before its moment to 30 after, never later, so nothing stale goes out. Flags: `reminder_{7d,3d,evening}_sent` on `bookings` and `hosted_event_registrations` (`20261127000003`, which also clears the evening flag in `move_booking_group`)
 - `/api/cron/hosted-events-complete`: daily at 08:00 UTC — moves past-dated `upcoming` hosted events to `completed`
 - `/api/cron/booking-surveys`: every 15 minutes — sends the post-round satisfaction survey push once a round has finished. Guarded by `bookings.survey_prompt_sent`. The in-app prompt (`useBookingSurvey`) fires on its own timer for members with the app open; this reaches everyone else.
 - `/api/cron/booking-invite-expiry`: every 15 minutes — expires an added player's invitation nobody answered by 5 hours before tee time (venue timezone): `invite_status = 'expired'`, the row cancelled to free the seat, its GHL appointment cancelled, and the booker told. Rule in `src/lib/bookings/invitations.ts` (`inviteExpiresAt`); the invitation screen refuses a late answer on its own, so the cron only decides when the seat comes back.

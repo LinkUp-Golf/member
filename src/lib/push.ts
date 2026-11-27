@@ -21,6 +21,13 @@ import { titleCaseName } from '@/lib/utils'
 import { MY_BOOKINGS_PATH } from '@/lib/constants'
 import type { PayoutMethod } from '@/types'
 
+/** "A", "A and B", "A, B and C" — names as they read in a sentence. */
+export function listNames(names: string[]): string {
+  const clean = names.map(n => n.trim()).filter(Boolean)
+  if (clean.length <= 1) return clean[0] ?? ''
+  return `${clean.slice(0, -1).join(', ')} and ${clean[clean.length - 1]}`
+}
+
 // ---- sendPushToCourse ---------------------------------------
 // Fetches all active member IDs for a course, then dispatches.
 // Kept here because it needs a Supabase query that doesn't
@@ -385,6 +392,58 @@ export const NotificationTemplates = {
     subject: `You're booked in at ${courseName} on ${date}`,
     cta:   'View the tee time',
   }),
+
+  // The booker's own confirmation, emailed when they book. GHL used to send
+  // this from the calendar appointment, and its template arrived with the
+  // venue, date and tee time blank. Here they come from the booking itself, so
+  // they can't. `players` is everyone on the tee time, booker first.
+  bookingConfirmed: (
+    courseName: string,
+    date: string,
+    time: string,
+    details: { players: string[]; address?: string | null; payAtClub: boolean },
+  ): PushPayload => ({
+    title: "You're booked in",
+    body: [
+      `Your tee time at ${courseName} on ${date} at ${time} is booked.`,
+      details.players.length > 1 ? `Players: ${listNames(details.players)}.` : '',
+      details.address ? `Address: ${details.address}.` : '',
+      details.payAtClub
+        ? "You'll pay at the club on the day."
+        : 'Payment is due to secure your spot.',
+    ].filter(Boolean).join(' '),
+    url:   MY_BOOKINGS_PATH,
+    tag:   'booking-confirmed',
+    subject: `Booking confirmed: ${courseName}, ${date} at ${time}`,
+    cta:   'View my booking',
+  }),
+
+  // Admins hear about every new booking — the email GHL used to send them,
+  // with the details it left out.
+  bookingCreatedForAdmins: (
+    bookerName: string,
+    courseName: string,
+    date: string,
+    time: string,
+    details: { players: string[]; payAtClub: boolean; bookedByAdmin: boolean },
+  ): PushPayload => {
+    const booker = titleCaseName(bookerName)
+    const count = details.players.length
+    return {
+      title: `New booking at ${courseName}`,
+      body: [
+        details.bookedByAdmin
+          ? `An admin booked ${booker} at ${courseName} on ${date} at ${time}.`
+          : `${booker} booked ${courseName} on ${date} at ${time}.`,
+        `${count} ${count === 1 ? 'player' : 'players'}: ${listNames(details.players)}.`,
+        details.payAtClub ? 'Paying at club.' : 'Payment due on the app.',
+      ].join(' '),
+      url:   '/admin/bookings',
+      tag:   'booking-created-admin',
+      subject: `New booking: ${booker} at ${courseName}, ${date} at ${time}`,
+      cta:   'Open bookings',
+    }
+  },
 
   // An admin moved a round to another day or tee time — every player on it
   // hears, since the old date is the one already in their calendar.

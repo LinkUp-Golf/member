@@ -4,18 +4,22 @@ export const dynamic = 'force-dynamic'
 // GET /api/cron/booking-reminders
 // Runs every 15 minutes (vercel.json: "*/15 * * * *").
 //
-// For each upcoming non-cancelled booking, reminders fire at:
-//   • teeTime - 7 days   (7-day reminder)
-//   • teeTime - 3 days   (3-day reminder)
-//   • teeTime - 6 hours  (6-hour reminder)
+// Reminds every member playing a round: 7 days and 3 days before the tee
+// time, and at 8 PM the night before. Covers booked tee times and hosted
+// rounds alike. When each one goes out, and its wording, are
+// src/lib/bookings/reminders.ts — read that before changing the timing.
 //
-// The cron runs every 15 minutes; any booking whose reminder
-// target falls within ±8 minutes of now will be triggered.
-// This means each member's reminder arrives within ~8 minutes
-// of their booking's actual 7-day / 3-day / 6-hour mark.
+// Push and email, both from the app (notifyMember). The email and text used
+// to come from a GHL workflow the app triggered by webhook; the client
+// dropped the text and moved the email to the app (2026-11-27), so that
+// webhook is no longer called.
 //
-// The reminder_*_sent flags prevent duplicate sends even if
-// the cron overlaps a boundary.
+// Who is reminded on a booking: whoever the row seats (playingMemberId) —
+// the booker, each member they added, and a non-member guest once they're
+// linked to their account. It used to read only rows with no guest_name, so
+// nobody invited onto someone else's booking was ever reminded.
+//
+// The reminder_*_sent flags stop a second send.
 //
 // Test locally:
 //   curl -H "Authorization: Bearer <CRON_SECRET>" \
@@ -24,57 +28,45 @@ export const dynamic = 'force-dynamic'
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
+import { format, addDays, subDays } from 'date-fns'
 import { createAdminClient } from '@/lib/supabase-server'
-// Deliberately push, not notify. A reminder already reaches the member by
-// email and SMS through triggerBookingReminderWebhook below — GHL owns that
-// side. Routing it through notify* as well would mean two emails about one
-// tee time, from two systems, neither aware of the other.
-import { sendPushToMember } from '@/lib/push'
-import { triggerBookingReminderWebhook } from '@/lib/ghl/client'
-import { bookingToLocalDate } from '@/lib/utils'
-import { format, subDays, subHours, addDays } from 'date-fns'
+import { notifyMember } from '@/lib/notify'
+import { playingMemberId } from '@/lib/bookings/players'
+import {
+  dueReminders,
+  REMINDER_FLAGS,
+  reminderBody,
+  reminderSubject,
+  reminderTitle,
+  type ReminderKind,
+} from '@/lib/bookings/reminders'
+import { formatTeeTime } from '@/lib/utils'
+import { AVIARA_TIMEZONE, MY_BOOKINGS_PATH } from '@/lib/constants'
 import { logger } from '@/lib/logger'
 
-// Half the cron cadence + small buffer. Cron runs every 15 min → ±8 min window.
-// Any booking whose reminder target is within 8 min of now will fire.
-const WINDOW_MS = 8 * 60 * 1000
+type Flags = Record<'reminder_7d_sent' | 'reminder_3d_sent' | 'reminder_evening_sent', boolean | null>
 
-type ReminderType = '7d' | '3d' | '6h'
-
-interface Reminder {
-  type:        ReminderType
-  flag:        'reminder_7d_sent' | 'reminder_3d_sent' | 'reminder_6h_sent'
-  // Returns the exact UTC moment this reminder should fire for a given tee time
-  targetFn:    (teeTime: Date) => Date
-  label:       string
-  // "type" field sent in the GHL webhook payload — a slightly different
-  // format than the push notification's label (no "in " prefix).
-  webhookType: '7 days' | '3 days' | '6 hours'
+function sentFlags(row: Flags): Partial<Record<ReminderKind, boolean>> {
+  return {
+    '7d': !!row.reminder_7d_sent,
+    '3d': !!row.reminder_3d_sent,
+    evening: !!row.reminder_evening_sent,
+  }
 }
 
-const REMINDERS: Reminder[] = [
-  {
-    type:        '7d',
-    flag:        'reminder_7d_sent',
-    targetFn:    (tee) => subDays(tee, 7),
-    label:       'in 7 days',
-    webhookType: '7 days',
-  },
-  {
-    type:        '3d',
-    flag:        'reminder_3d_sent',
-    targetFn:    (tee) => subDays(tee, 3),
-    label:       'in 3 days',
-    webhookType: '3 days',
-  },
-  {
-    type:        '6h',
-    flag:        'reminder_6h_sent',
-    targetFn:    (tee) => subHours(tee, 6),
-    label:       'in 6 hours',
-    webhookType: '6 hours',
-  },
-]
+/** One round to remind one member about. */
+interface Round {
+  table: 'bookings' | 'hosted_event_registrations'
+  rowId: string
+  memberId: string
+  courseId: string
+  date: string
+  teeTime: string
+  sent: Partial<Record<ReminderKind, boolean>>
+  url: string
+}
+
+const FLAG_COLUMNS = 'reminder_7d_sent, reminder_3d_sent, reminder_evening_sent'
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get('authorization')
@@ -82,34 +74,23 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
   }
 
-  const now   = new Date()
+  const now = new Date()
   const admin = createAdminClient()
 
-  // Fetch upcoming bookings in the relevant window.
-  // We need bookings up to 7 days + 8 min ahead (furthest reminder target)
-  // and from 6 hours - 8 min ago (nearest target for the 6h reminder).
-  const fetchFrom = format(subHours(now, 1),    'yyyy-MM-dd')
-  const fetchTo   = format(addDays(now, 8),     'yyyy-MM-dd')
+  // Every round whose furthest reminder (7 days) or nearest (the night before)
+  // could fall on this run. A day either side covers any venue's timezone.
+  const fetchFrom = format(subDays(now, 1), 'yyyy-MM-dd')
+  const fetchTo = format(addDays(now, 8), 'yyyy-MM-dd')
 
+  const rounds: Round[] = []
+
+  // ---- Booked tee times --------------------------------------
   const { data: bookings, error: bookingsError } = await admin
     .from('bookings')
-    .select(`
-      id,
-      booking_date,
-      tee_time,
-      member_id,
-      player_member_id,
-      guest_name,
-      course_id,
-      status,
-      reminder_7d_sent,
-      reminder_3d_sent,
-      reminder_6h_sent
-    `)
+    .select(`id, booking_date, tee_time, member_id, player_member_id, guest_name, course_id, ${FLAG_COLUMNS}`)
     .not('status', 'in', '("cancelled","waitlist")')
     .gte('booking_date', fetchFrom)
     .lte('booking_date', fetchTo)
-    .is('guest_name', null)
 
   if (bookingsError) {
     logger.error('booking-reminders: failed to fetch bookings', {
@@ -119,103 +100,124 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: bookingsError.message }, { status: 500 })
   }
 
-  // Fetch course names/timezones — each course's own timezone drives both
-  // the reminder-window math (7d/3d/6h before the booking's own local tee
-  // time) and the "on {date} at {time}" text in the notification.
-  const courseIds = [...new Set((bookings ?? []).map(b => b.course_id))]
-  const courseMap = new Map<string, { name: string; city: string; timezone: string }>()
+  for (const b of bookings ?? []) {
+    const memberId = playingMemberId(b)
+    if (!memberId || !b.tee_time) continue
+    rounds.push({
+      table: 'bookings',
+      rowId: b.id,
+      memberId,
+      courseId: b.course_id,
+      date: b.booking_date,
+      teeTime: b.tee_time,
+      sent: sentFlags(b as unknown as Flags),
+      url: MY_BOOKINGS_PATH,
+    })
+  }
+
+  // ---- Hosted rounds -----------------------------------------
+  // Only a published round with a tee time: there is nothing to count back
+  // from without one.
+  const { data: events, error: eventsError } = await admin
+    .from('hosted_events')
+    .select('id, course_id, event_date, tee_time')
+    .eq('status', 'upcoming')
+    .not('tee_time', 'is', null)
+    .gte('event_date', fetchFrom)
+    .lte('event_date', fetchTo)
+
+  if (eventsError) {
+    // The bookings above still get their reminders.
+    logger.error('booking-reminders: failed to fetch hosted rounds', {
+      action: 'cron.booking_reminders',
+      errorMessage: eventsError.message,
+    })
+  }
+
+  const eventById = new Map((events ?? []).map(e => [e.id as string, e]))
+  if (eventById.size > 0) {
+    const { data: registrations, error: regError } = await admin
+      .from('hosted_event_registrations')
+      .select(`id, hosted_event_id, member_id, ${FLAG_COLUMNS}`)
+      .eq('status', 'reserved')
+      .in('hosted_event_id', [...eventById.keys()])
+
+    if (regError) {
+      logger.error('booking-reminders: failed to fetch hosted-round reservations', {
+        action: 'cron.booking_reminders',
+        errorMessage: regError.message,
+      })
+    }
+
+    for (const r of registrations ?? []) {
+      const event = eventById.get(r.hosted_event_id)
+      if (!event?.tee_time) continue
+      rounds.push({
+        table: 'hosted_event_registrations',
+        rowId: r.id,
+        memberId: r.member_id,
+        courseId: event.course_id,
+        date: event.event_date,
+        teeTime: event.tee_time,
+        sent: sentFlags(r as unknown as Flags),
+        // Where hosted rounds are listed — the same place their other
+        // notifications open.
+        url: '/book',
+      })
+    }
+  }
+
+  // ---- Venues ------------------------------------------------
+  const courseIds = [...new Set(rounds.map(r => r.courseId))]
+  const courseMap = new Map<string, { name: string; timezone: string | null }>()
   if (courseIds.length > 0) {
     const { data: courses } = await admin
       .from('courses')
-      .select('id, name, city, timezone')
+      .select('id, name, timezone')
       .in('id', courseIds)
     courses?.forEach(c => courseMap.set(c.id, c))
   }
 
-  // Fetch recipient email/first name — needed for the GHL webhook payload
-  const recipientIds = [...new Set(
-    (bookings ?? [])
-      .map(b => b.player_member_id ?? b.member_id)
-      .filter((id): id is string => Boolean(id))
-  )]
-  const memberMap = new Map<string, { email: string; first_name: string | null }>()
-  if (recipientIds.length > 0) {
-    const { data: members } = await admin
-      .from('members')
-      .select('id, email, first_name')
-      .in('id', recipientIds)
-    members?.forEach(m => memberMap.set(m.id, m))
-  }
+  const results = { checked: rounds.length, sent: 0, errors: 0 }
 
-  const results = { checked: bookings?.length ?? 0, sent: 0, errors: 0 }
+  for (const round of rounds) {
+    const course = courseMap.get(round.courseId)
+    const timezone = course?.timezone || AVIARA_TIMEZONE
+    const due = dueReminders(round.date, round.teeTime, timezone, round.sent, now)
+    if (due.length === 0) continue
 
-  for (const booking of bookings ?? []) {
-    const recipientId: string | null = booking.player_member_id ?? booking.member_id ?? null
-    if (!recipientId) continue
+    // Read off the stored venue-local date and time, never off a Date object:
+    // formatted on the server, a Date prints in UTC, which put every reminder's
+    // tee time hours out.
+    const venue = course?.name ?? 'the course'
+    const dateStr = format(new Date(`${round.date.slice(0, 10)}T12:00:00`), 'EEEE, MMMM d')
+    const timeStr = formatTeeTime(round.teeTime)
 
-    const course  = courseMap.get(booking.course_id)
-    const teeDate = bookingToLocalDate(booking.booking_date, booking.tee_time, course?.timezone)
-    const member  = memberMap.get(recipientId)
-    const dateStr = format(teeDate, 'EEEE, MMMM d')
-    const timeStr = format(teeDate, 'h:mm a')
-    const venue   = course?.name ?? 'the course'
+    // When a cron run finds two due at once, one message says it.
+    const kind = due[due.length - 1] as ReminderKind
 
-    for (const reminder of REMINDERS) {
-      // Skip if already sent
-      if (booking[reminder.flag]) continue
+    try {
+      await notifyMember(round.memberId, {
+        title: reminderTitle(kind),
+        body: reminderBody(venue, dateStr, timeStr),
+        url: round.url,
+        tag: `booking-reminder-${round.rowId}-${kind}`,
+        subject: reminderSubject(kind, venue, dateStr, timeStr),
+        cta: 'View my round',
+      })
 
-      // Compute the exact moment this reminder should fire
-      const reminderAt = reminder.targetFn(teeDate)
-      const diff = Math.abs(now.getTime() - reminderAt.getTime())
-      if (diff > WINDOW_MS) continue
+      const update = Object.fromEntries(due.map(k => [REMINDER_FLAGS[k], true]))
+      await admin.from(round.table).update(update).eq('id', round.rowId)
 
-      const title = `Tee time ${reminder.label} 🏌️`
-      const body  = `You're playing at ${venue} on ${dateStr} at ${timeStr}`
-
-      try {
-        await sendPushToMember(recipientId, {
-          title,
-          body,
-          url: '/book',
-          tag: `booking-reminder-${booking.id}-${reminder.type}`,
-        })
-
-        // Best-effort — triggerBookingReminderWebhook catches its own errors
-        // and returns false rather than throwing, so a GHL-side failure here
-        // never blocks the push notification or the reminder_*_sent flag.
-        if (member?.email) {
-          await triggerBookingReminderWebhook({
-            type: reminder.webhookType,
-            email: member.email,
-            firstName: member.first_name?.trim() || member.email,
-            content: body,
-          })
-        }
-
-        await admin.from('notification_log').insert({
-          member_id: recipientId,
-          type:      'booking_reminder',
-          title,
-          body,
-          data:      { booking_id: booking.id, reminder: reminder.type },
-          url:       '/book',
-        })
-
-        await admin
-          .from('bookings')
-          .update({ [reminder.flag]: true })
-          .eq('id', booking.id)
-
-        results.sent++
-        console.log(`[cron/booking-reminders] sent ${reminder.type} → member ${recipientId} booking ${booking.id}`)
-      } catch (err) {
-        results.errors++
-        logger.error('booking-reminders: failed to send', {
-          action: 'cron.booking_reminders',
-          metadata: { booking_id: booking.id, reminder: reminder.type, recipient: recipientId },
-          errorMessage: err instanceof Error ? err.message : String(err),
-        })
-      }
+      results.sent++
+      console.log(`[cron/booking-reminders] sent ${kind} → member ${round.memberId} ${round.table} ${round.rowId}`)
+    } catch (err) {
+      results.errors++
+      logger.error('booking-reminders: failed to send', {
+        action: 'cron.booking_reminders',
+        metadata: { table: round.table, row_id: round.rowId, reminder: kind, recipient: round.memberId },
+        errorMessage: err instanceof Error ? err.message : String(err),
+      })
     }
   }
 

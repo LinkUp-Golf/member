@@ -712,7 +712,12 @@ export async function createBooking(params: {
         appointmentStatus: 'confirmed',
         ignoreFreeSlotValidation: true,
         ignoreDateRange: true,
-        toNotify: true,
+        // GHL's own "booked" emails arrived with the venue, date and tee time
+        // blank. The app sends its own confirmations now (bookingConfirmed /
+        // bookingCreatedForAdmins, from POST /api/bookings/create), so GHL's
+        // would only be a second, emptier copy. Reminders are unaffected: they
+        // run through GHL workflows the app triggers by webhook.
+        toNotify: false,
         source: GHL_OPPORTUNITY_SOURCE,
         channel: 'web_app',
         calendarProviderId: GHL_CALENDAR_PROVIDER_ID,
