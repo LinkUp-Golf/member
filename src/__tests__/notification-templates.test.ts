@@ -34,6 +34,8 @@ describe('coverage of the template set', () => {
     NotificationTemplates.bookingMoved('Aviara', 'Sat', '1:30pm'),
     NotificationTemplates.bookingMadeForYou('Aviara', 'Sat', '1:30pm'),
     NotificationTemplates.bookingPaymentReady('Sat', '1:30pm'),
+    NotificationTemplates.bookingConfirmed('Aviara', 'Sat', '1:30pm', { players: ['Dana'], payAtClub: false }),
+    NotificationTemplates.bookingCreatedForAdmins('Dana', 'Aviara', 'Sat', '1:30pm', { players: ['Dana'], payAtClub: false, bookedByAdmin: false }),
     NotificationTemplates.roundSurvey('Aviara', 'b1'),
     NotificationTemplates.groupChatInvite('Dana', 'Finance', 'c1'),
     NotificationTemplates.memberEventRejected('Event', 'no'),
@@ -75,6 +77,41 @@ describe('coverage of the template set', () => {
     expect(lazy).toEqual([])
   })
 
+})
+
+describe('booking confirmations', () => {
+  // GHL's versions of these arrived with the venue, date and tee time blank —
+  // the whole reason the app sends them. Each one must carry all three.
+  const details = { players: ['Greg Lipper', 'Dana Smith', 'sam@example.com'], payAtClub: false }
+
+  it("puts the venue, date, tee time and players in the member's email", () => {
+    const p = NotificationTemplates.bookingConfirmed('Park Hyatt Aviara', 'Saturday, December 6', '8:30 AM', {
+      ...details,
+      address: '7100 Aviara Resort Dr, Carlsbad',
+    })
+    expect(p.subject).toBe('Booking confirmed: Park Hyatt Aviara, Saturday, December 6 at 8:30 AM')
+    expect(p.body).toContain('Park Hyatt Aviara on Saturday, December 6 at 8:30 AM')
+    expect(p.body).toContain('Players: Greg Lipper, Dana Smith and sam@example.com.')
+    expect(p.body).toContain('Address: 7100 Aviara Resort Dr, Carlsbad.')
+    expect(p.body).toContain('Payment is due')
+  })
+
+  it('leaves out a players line for a solo round, and says when the club is paid', () => {
+    const p = NotificationTemplates.bookingConfirmed('Aviara', 'Sat', '8:30 AM', { players: ['Greg'], payAtClub: true })
+    expect(p.body).not.toContain('Players:')
+    expect(p.body).toContain('pay at the club')
+  })
+
+  it("puts the venue, date, tee time and players in the admins' email", () => {
+    const p = NotificationTemplates.bookingCreatedForAdmins('greg lipper', 'Park Hyatt Aviara', 'Saturday, December 6', '8:30 AM', {
+      ...details,
+      bookedByAdmin: false,
+    })
+    expect(p.subject).toBe('New booking: Greg Lipper at Park Hyatt Aviara, Saturday, December 6 at 8:30 AM')
+    expect(p.body).toContain('Greg Lipper booked Park Hyatt Aviara on Saturday, December 6 at 8:30 AM.')
+    expect(p.body).toContain('3 players: Greg Lipper, Dana Smith and sam@example.com.')
+    expect(p.url).toBe('/admin/bookings')
+  })
 })
 
 describe('names in subject lines', () => {

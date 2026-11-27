@@ -198,6 +198,16 @@ out to both: `notifyMember()`, `notifyMembers()`, `notifyAdmins()`.
   audiences. Two call sites deliberately don't use it, and say why in place:
   booking reminders — GHL already emails and SMSes those, and a second would be
   a duplicate from a system that doesn't know about the first.
+- **Booking confirmations are the app's, email only** (2026-11-27). GHL used
+  to send them from the calendar appointment, and its templates arrived with
+  the venue, date and tee time blank. `POST /api/bookings/create` now emails
+  the booker `bookingConfirmed` (venue, date, tee time, players, address,
+  how it's paid) and every admin `bookingCreatedForAdmins`, through
+  `sendEmailToMember` / `sendEmailToAdmins` rather than `notify*` — the member
+  is on the confirmation screen as it sends, and admins never had a push per
+  booking. `createBooking` sends GHL `toNotify: false` so GHL's copy stops. A
+  round an admin books for a member still sends that member
+  `bookingMadeForYou` instead.
 - **Nothing is throttled, and one thing is suppressed.** If a notification was
   worth pushing, every reachable recipient gets the email, however many that is:
   no cooldown, no daily cap, no send log. Membership status isn't consulted
