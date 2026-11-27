@@ -19,6 +19,7 @@ import { decryptOverrides } from 'flags'
 import { DEFAULT_LANDING_PATH } from '@/lib/constants'
 import { isGuestOnly } from '@/lib/ghl/tags'
 import { BECOME_A_MEMBER_PATH, isOpenToGuests } from '@/lib/auth/guest-paths'
+import { FORMER_MEMBER_LANDING_PATH, isClosedToFormerMember, isFormerMember } from '@/lib/auth/former-member'
 
 const PUBLIC_ROUTES = [
   '/login',
@@ -139,11 +140,22 @@ export async function middleware(request: NextRequest) {
     ) {
       const { data: member } = await supabase
         .from('members')
-        .select('is_admin, ghl_tags')
+        .select('is_admin, ghl_tags, membership_status')
         .eq('id', user.id)
         .single()
 
-      if (member && !member.is_admin && isGuestOnly(member.ghl_tags ?? [])) {
+      // A former member isn't a guest: they keep the member app, less its
+      // members-only pages, while they have a round ahead. When they have none
+      // the first API call the page makes signs them out (withAuth answers
+      // 403 MEMBERSHIP_REVOKED), so the middleware doesn't query bookings on
+      // every page load to find that out first.
+      if (isFormerMember(member)) {
+        if (isClosedToFormerMember(pathname, request.nextUrl.searchParams.get('tab'))) {
+          const redirectResponse = NextResponse.redirect(new URL(FORMER_MEMBER_LANDING_PATH, request.url))
+          redirectResponse.headers.set('X-Request-Id', requestId)
+          return redirectResponse
+        }
+      } else if (member && !member.is_admin && isGuestOnly(member.ghl_tags ?? [])) {
         const redirectResponse = NextResponse.redirect(new URL(BECOME_A_MEMBER_PATH, request.url))
         redirectResponse.headers.set('X-Request-Id', requestId)
         return redirectResponse

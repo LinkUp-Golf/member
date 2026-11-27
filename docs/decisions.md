@@ -4,6 +4,11 @@ Why the app works the way it does, where the code alone doesn't say. Most entrie
 
 Each entry gives the date, who decided (**client** means the LinkUp Golf owner; **default** means a developer's call, flagged at the time and never confirmed), and the decision. Newest areas first.
 
+## Membership and access
+
+- **2026-11-27 · client. Removing the membership tag ends access, after the member's last round.** Before, a member whose `member-active-SD` tag was removed became a guest who could still sign in, and stayed in the member directory until the nightly sync. Now they become a **former member** (`members.membership_status = 'cancelled'`, `src/lib/auth/former-member.ts`): off the directory and every active-members list straight away. While they still have a round ahead (a booking seat or a hosted-round reservation, dated today or later) they keep the app except booking a new round, member chat, Refer a Member and Curated Introductions. After the day of their last round they have no access: sign-in is refused and an open session is signed out. Default: a contact who was never a member (a prospect) still signs in as a guest, as since 2026-10-23, and someone left holding another access or role tag (`member-guest`, `nbd client`, `host`, `referral-partner`) isn't a former member. Default: "last pending booking" counts any seat not cancelled or waitlisted, confirmed or not.
+- **2026-11-27 · default. The contact webhook takes a shared secret.** `POST /api/webhooks/ghl` only accepted an HMAC signature, which a GHL workflow can't produce, so tag changes reached the app only at sign-in or the nightly sync. It now also accepts the header `x-linkup-secret: <GHL_WEBHOOK_SECRET>`, like the bookings webhook. Separately, every signed-in request already re-checks the member's tags in GHL (cached up to 15 minutes); when they show a membership began or ended, the member row is now re-synced on the spot.
+
 ## Cancellation fees
 
 - **2026-11-25 · client. Invoiced by hand in Stripe for now.** Late cancellations are few, so the client invoices them manually from the Stripe dashboard. Setting up `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` in Vercel is deferred. While `STRIPE_SECRET_KEY` is unset the in-app policy is off: the app shows, records and invoices no fee. That's intended, not a missing setup. Revisit if volume grows.

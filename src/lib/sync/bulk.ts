@@ -18,6 +18,7 @@ import { createAdminClient } from '@/lib/supabase-server'
 import { listContactsByTag } from '@/lib/ghl/client'
 import { ALL_LOGIN_TAGS, hasAnyAccessTag } from '@/lib/ghl/tags'
 import { logger } from '@/lib/logger'
+import { FORMER_MEMBER_STATUS } from '@/lib/auth/former-member'
 import { syncMember, refreshMembersFromGhl } from './index'
 
 export interface BulkGhlSyncResult {
@@ -144,23 +145,30 @@ export async function runBulkGhlSync(
   )
 
   if (stale.length) {
-    const staleIds = stale.map(m => m.id)
+    // Already-former members are re-checked too (a tag put back makes them
+    // active again) but aren't counted as deactivated a second time.
+    const newlyCheckedIds = stale
+      .filter(m => m.membership_status !== FORMER_MEMBER_STATUS)
+      .map(m => m.id)
     const { failed } = await refreshMembersFromGhl(
       stale.map(m => ({ id: m.id, ghl_contact_id: m.ghl_contact_id })),
       { supabase: adminClient, requestId }
     )
 
     // Count what actually got deactivated rather than inferring it: none of
-    // the stale set was suspended before this run (we excluded suspended
-    // above), so any now-suspended row was deactivated by this reconcile.
+    // these was suspended or former before this run, so any that is now was
+    // made so by this reconcile — a removed tag makes a former member
+    // (@/lib/auth/former-member), a deleted contact a suspended one.
     // refreshMembersFromGhl leaves still-tagged members active, so this
     // doesn't overcount a member a stale fetch happened to miss.
-    const { count } = await adminClient
-      .from('members')
-      .select('id', { count: 'exact', head: true })
-      .in('id', staleIds)
-      .eq('membership_status', 'suspended')
-    deactivated = count ?? 0
+    if (newlyCheckedIds.length) {
+      const { count } = await adminClient
+        .from('members')
+        .select('id', { count: 'exact', head: true })
+        .in('id', newlyCheckedIds)
+        .in('membership_status', ['suspended', FORMER_MEMBER_STATUS])
+      deactivated = count ?? 0
+    }
 
     if (failed) errors.push(`${failed} member(s) could not be reconciled — GHL lookup failed`)
   }

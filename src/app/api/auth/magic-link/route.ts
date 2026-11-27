@@ -17,6 +17,7 @@ import { validateEmail } from '@/lib/validation'
 import { logger, auditLog } from '@/lib/logger'
 import { hasPartnerTag, hasHostTag } from '@/lib/ghl/tags'
 import { createAdminClient } from '@/lib/supabase-server'
+import { becomesFormerMember, formerMemberShutOut, FORMER_MEMBER_STATUS } from '@/lib/auth/former-member'
 
 // Intentionally vague — prevents email enumeration
 const GENERIC_OK = { allowed: true }
@@ -63,7 +64,7 @@ export async function POST(request: NextRequest) {
     // Skip the GHL gate and generate a silent OTP — no email sent.
     const { data: existingMember } = await adminClient
       .from('members')
-      .select('id, membership_status')
+      .select('id, membership_status, membership_start_date, is_admin')
       .eq('email', normalizedEmail)
       .maybeSingle()
 
@@ -90,6 +91,20 @@ export async function POST(request: NextRequest) {
 
       if (!hasAccess) {
         auditLog('LOGIN_DENIED', { requestId, metadata: { reason: 'ghl_contact_missing_returning_member' } })
+        return NextResponse.json(
+          { allowed: false, revoked: true },
+          { headers: { 'X-Request-Id': requestId } }
+        )
+      }
+
+      // A former member — every access tag removed in GHL — is let in only
+      // while they still have a round ahead. Read from the live tags, since
+      // the row may not have been synced since the tag came off.
+      const former = !existingMember.is_admin && becomesFormerMember(tags, existingMember)
+      if (former && await formerMemberShutOut(adminClient, existingMember.id, {
+        membership_status: FORMER_MEMBER_STATUS,
+      })) {
+        auditLog('LOGIN_DENIED', { requestId, metadata: { reason: 'membership_ended', memberId: existingMember.id } })
         return NextResponse.json(
           { allowed: false, revoked: true },
           { headers: { 'X-Request-Id': requestId } }

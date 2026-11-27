@@ -2,16 +2,29 @@ export const dynamic = 'force-dynamic'
 
 // ============================================================
 // POST /api/webhooks/ghl
-// Receives GHL webhooks for contact changes.
-// Secured by webhook secret. Delegates all sync logic to
-// the shared sync orchestrator in src/lib/sync.
+// Receives GHL contact changes: an access tag added or removed, a profile
+// field edited. Delegates all sync logic to the shared sync orchestrator in
+// src/lib/sync.
+//
+// GHL WORKFLOW SETUP (one workflow covers it)
+//   Triggers : Contact Tag (added or removed), Contact Changed
+//   Action   : Webhook (or Custom Webhook), POST
+//   URL      : https://app.linkup.golf/api/webhooks/ghl
+//   Header   : x-linkup-secret: <GHL_WEBHOOK_SECRET>
+//   Body     : the standard payload works (it carries contact_id), or
+//              {"contactId": "{{contact.id}}"}
+// Accepted headers and bodies are in @/lib/ghl/contact-webhook.
+//
+// Without it, a removed tag reaches the app when the member next makes a
+// request (withAuth re-checks GHL and re-syncs), or at the nightly reconcile.
 // ============================================================
 
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
-import crypto, { randomUUID } from 'crypto'
+import { randomUUID } from 'crypto'
 import { createAdminClient } from '@/lib/supabase-server'
 import { getContactById } from '@/lib/ghl/client'
+import { contactIdFromWebhook, verifyContactWebhook } from '@/lib/ghl/contact-webhook'
 import { syncMemberByContactId, type SyncContext } from '@/lib/sync'
 import { invalidateMembershipCache } from '@/lib/auth/ghl-validator'
 import { getCache } from '@/lib/cache'
@@ -22,69 +35,52 @@ export async function POST(request: NextRequest) {
   const requestId = randomUUID()
   const log = logger.child({ requestId, action: 'ghl_webhook' })
 
-  const signature = request.headers.get('x-ghl-signature')
   const body = await request.text()
 
-  if (!verifyWebhookSignature(body, signature)) {
-    log.warn('Invalid webhook signature')
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+  const verified = verifyContactWebhook({
+    body,
+    sharedSecretHeader: request.headers.get('x-linkup-secret'),
+    signatureHeader: request.headers.get('x-ghl-signature'),
+    secret: process.env.GHL_WEBHOOK_SECRET,
+  })
+  if (!verified) {
+    log.warn('Invalid webhook secret or signature')
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  let payload: { type?: string; contactId?: string } = {}
+  let payload: unknown
   try {
     payload = JSON.parse(body)
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const { type, contactId } = payload
-
+  const contactId = contactIdFromWebhook(payload)
   if (!contactId) {
+    log.debug('Webhook names no contact change — ignored')
     return NextResponse.json({ received: true })
   }
 
-  log.info('GHL webhook received', { metadata: { type, contactId } })
+  log.info('GHL contact webhook received', { metadata: { contactId } })
 
-  const ctx: SyncContext = {
-    supabase: createAdminClient(),
-    requestId,
-  }
+  const contact = await getContactById(contactId)
+  if (!contact) return NextResponse.json({ received: true })
 
-  switch (type) {
-    case 'contact.created':
-    case 'contact.updated':
-    case 'contact.tag.added':
-    case 'contact.tag.removed': {
-      const contact = await getContactById(contactId)
-      if (!contact) break
+  const ctx: SyncContext = { supabase: createAdminClient(), requestId }
 
-      // Tag added or removed, the row follows GHL: an access tag makes them an
-      // active member, none makes them a non-member who can still sign in as a
-      // guest. A removed tag no longer suspends — that's an admin's call.
-      // syncMemberByContactId skips a contact nobody has signed in as yet.
-      const result = await syncMemberByContactId({ contact, ctx })
-      // withAuth reads tags from two caches (GHL's, 15 min; the member row's,
-      // 5 min). Clear both, so a guest who has just become a member isn't kept
-      // to guest pages until they expire — nor a lapsed member kept out of them.
-      if (result.userId) {
-        await invalidateMembershipCache(result.userId)
-        await getCache(MEMBER_ROW_NS).delete(memberRowKey(result.userId)).catch(() => {})
-      }
-      break
-    }
+  // The row follows GHL: an access tag makes them an active member. Losing
+  // every access tag after being a member makes them a former member
+  // (@/lib/auth/former-member), off the directory at once; anyone else
+  // without one is a non-member guest. syncMemberByContactId skips a contact
+  // nobody has signed in as yet.
+  const result = await syncMemberByContactId({ contact, ctx })
 
-    default:
-      log.debug('Unhandled webhook event type', { metadata: { type } })
+  // withAuth reads tags from two caches (GHL's, 15 min; the member row's,
+  // 5 min). Clear both, so a change takes effect on the member's next request.
+  if (result.userId) {
+    await invalidateMembershipCache(result.userId)
+    await getCache(MEMBER_ROW_NS).delete(memberRowKey(result.userId)).catch(() => {})
   }
 
   return NextResponse.json({ received: true })
-}
-
-function verifyWebhookSignature(body: string, signature: string | null): boolean {
-  if (!signature || !process.env.GHL_WEBHOOK_SECRET) return false
-  const expected = crypto
-    .createHmac('sha256', process.env.GHL_WEBHOOK_SECRET)
-    .update(body)
-    .digest('hex')
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
 }
