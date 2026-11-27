@@ -114,7 +114,8 @@ export async function getContactByIdStrict(contactId: string): Promise<GHLContac
 export async function createContact(params: {
   firstName: string
   lastName: string
-  email: string
+  /** Optional: an admin can add a player by name alone (see @/lib/bookings/admin-players). */
+  email?: string | null
   phone?: string | null
 }): Promise<string> {
   try {
@@ -124,7 +125,7 @@ export async function createContact(params: {
         locationId: GHL_LOCATION_ID,
         firstName: params.firstName,
         lastName: params.lastName,
-        email: params.email,
+        ...(params.email ? { email: params.email } : {}),
         ...(params.phone ? { phone: params.phone } : {}),
       }),
     })
@@ -700,7 +701,9 @@ export async function createBooking(params: {
         contactId: params.contact.id,
         contact: {
           id: params.contact.id,
-          email: params.contact.email,
+          // Absent rather than '' for a contact with no address — an admin
+          // can add a player by name alone.
+          ...(params.contact.email ? { email: params.contact.email } : {}),
           phone: params.contact.phone ?? null,
         },
         title: params.title,

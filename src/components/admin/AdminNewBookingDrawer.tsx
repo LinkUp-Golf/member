@@ -1,16 +1,12 @@
 'use client'
 
-// An admin making a booking on a member's behalf.
+// An admin putting players on a tee time — a new one, or one already booked
+// (opened from a tee time on the list, with its venue, day and time filled in).
 //
-// The same steps a member takes — venue, day, tee time, then any added players
-// — ending in the same POST /api/bookings/create, with onBehalfOfMemberId
-// naming the member. The server holds it to every rule a member's own booking
-// meets, so this form only has to offer what that route will accept:
-//
-//   • non-member guests only where the venue allows them, and no more per
-//     booking than it takes (courses.allow_non_member_guests and
-//     max_non_member_guests — see @/lib/bookings/guest-policy);
-//   • who pays for each added player, required (@/lib/bookings/invitations).
+// A name is all each player needs; email and phone are optional. Nothing here
+// asks whether someone is a member or a guest, and nothing limits how many
+// players, the day, or the time — POST /api/admin/bookings decides what to do
+// with each person (see @/lib/bookings/admin-players).
 
 import { useEffect, useState } from 'react'
 import { format } from 'date-fns'
@@ -18,94 +14,67 @@ import { createClient } from '@/lib/supabase'
 import Select from '@/components/ui/Select'
 import { formatTeeTime } from '@/lib/utils'
 import { validateEmail } from '@/lib/validation'
-import {
-  allowsNonMemberGuests,
-  maxNonMemberGuests,
-  nonMemberGuestLimitMessage,
-  withinNonMemberGuestLimit,
-} from '@/lib/bookings/guest-policy'
-import { PAID_BY_OPTIONS, type PaidBy } from '@/lib/bookings/invitations'
 import { slotWallTime, useVenueSlots } from '@/hooks/useVenueSlots'
-import type { AdditionalPlayer } from '@/types'
-
-export interface BookableMember {
-  id: string
-  first_name: string
-  last_name: string
-  email: string
-}
 
 interface VenueOption {
   id: string
   name: string
-  timezone: string | null
-  allow_non_member_guests: boolean
-  max_non_member_guests: number
 }
-
-type PlayerKind = 'member' | 'non_member'
 
 interface PlayerDraft {
   key: string
-  kind: PlayerKind
-  memberId: string
-  firstName: string
-  lastName: string
+  name: string
   email: string
-  mobile: string
-  paidBy: PaidBy | null
+  phone: string
 }
 
-// A booking is at most four players: the member and three more.
-const MAX_ADDITIONAL = 3
-
-function memberLabel(m: BookableMember): string {
-  const name = `${m.first_name ?? ''} ${m.last_name ?? ''}`.trim()
-  return name ? `${name} · ${m.email}` : m.email
-}
-
-function slotTime(iso: string): string {
-  return formatTeeTime(`${slotWallTime(iso)}:00`)
+/** A tee time the drawer opens on, from the list. */
+export interface AddPlayersPreset {
+  courseId: string
+  /** 'YYYY-MM-DD' */
+  date: string
+  /** 'HH:MM' or 'HH:MM:SS' */
+  teeTime: string
 }
 
 function newPlayer(): PlayerDraft {
-  return {
-    key: `${Date.now()}-${Math.random()}`,
-    kind: 'member',
-    memberId: '',
-    firstName: '',
-    lastName: '',
-    email: '',
-    mobile: '',
-    paidBy: null,
-  }
+  return { key: `${Date.now()}-${Math.random()}`, name: '', email: '', phone: '' }
+}
+
+function playerError(p: PlayerDraft): string | null {
+  if (!p.name.trim()) return 'Enter a name.'
+  if (p.email.trim() && !validateEmail(p.email.trim()).valid) return 'That email isn’t valid.'
+  if (p.phone.trim() && p.phone.replace(/\D/g, '').length < 7) return 'That phone number looks too short.'
+  return null
 }
 
 export default function AdminNewBookingDrawer({
-  members,
   defaultCourseId,
+  preset,
   onClose,
   onBooked,
 }: {
-  members: BookableMember[]
   /** Pre-selects the venue when the page is already scoped to one. */
   defaultCourseId?: string | null
+  /** Opens on an existing tee time. */
+  preset?: AddPlayersPreset | null
   onClose: () => void
-  onBooked: (message: string) => void
+  onBooked: (message: string, ok: boolean) => void
 }) {
   const [venues, setVenues] = useState<VenueOption[]>([])
-  const [memberId, setMemberId] = useState('')
-  const [courseId, setCourseId] = useState(defaultCourseId ?? '')
-  const [date, setDate] = useState('')
-  const [slotStart, setSlotStart] = useState('')
-  const [players, setPlayers] = useState<PlayerDraft[]>([])
+  const [courseId, setCourseId] = useState(preset?.courseId ?? defaultCourseId ?? '')
+  const [date, setDate] = useState(preset?.date ?? '')
+  // 'HH:MM' at the venue — picked from the open tee times, or typed.
+  const [teeTime, setTeeTime] = useState(preset ? preset.teeTime.slice(0, 5) : '')
+  const [players, setPlayers] = useState<PlayerDraft[]>([newPlayer()])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [showErrors, setShowErrors] = useState(false)
 
   useEffect(() => {
     createClient()
       .from('courses')
-      .select('id, name, timezone, allow_non_member_guests, max_non_member_guests')
+      .select('id, name')
       .eq('active', true)
       .eq('approval_status', 'active')
       .not('ghl_calendar_id', 'is', null)
@@ -114,110 +83,51 @@ export default function AdminNewBookingDrawer({
   }, [])
 
   const venue = venues.find(v => v.id === courseId) ?? null
-  const nonMembersAllowed = allowsNonMemberGuests(venue)
-  const nonMemberLimit = maxNonMemberGuests(venue)
 
-  // The same tee times a member booking is offered — see useVenueSlots.
+  // The tee times the calendar has open, offered as shortcuts. Any other time
+  // can be typed — a full tee time is no longer on this list.
   const { openSlots, loading: loadingSlots } = useVenueSlots(courseId, date)
-  const slot = openSlots.find(s => s.startTime === slotStart) ?? null
-  const maxAdditional = Math.min(MAX_ADDITIONAL, Math.max(0, (slot?.spotsOpen ?? 1) - 1))
-
-  // A venue that doesn't take non-members takes those rows back to members, and
-  // one that takes fewer than are entered takes back the ones past its number.
-  const nonMembersKept = nonMembersAllowed ? nonMemberLimit : 0
-  useEffect(() => {
-    setPlayers(ps => {
-      let seen = 0
-      return ps.map(p => {
-        if (p.kind !== 'non_member') return p
-        seen += 1
-        return seen <= nonMembersKept ? p : { ...newPlayer(), key: p.key, paidBy: p.paidBy }
-      })
-    })
-  }, [nonMembersKept])
-
-  // Fewer seats at the new tee time drops the extra rows.
-  useEffect(() => {
-    setPlayers(ps => (ps.length > maxAdditional ? ps.slice(0, maxAdditional) : ps))
-  }, [maxAdditional])
+  const openTimes = openSlots.map(s => ({ time: slotWallTime(s.startTime), spotsOpen: s.spotsOpen }))
 
   function updatePlayer(key: string, patch: Partial<PlayerDraft>) {
     setPlayers(ps => ps.map(p => (p.key === key ? { ...p, ...patch } : p)))
   }
 
-  const memberOptions = members
-    .filter(m => m.id !== memberId)
-    .map(m => ({ value: m.id, label: memberLabel(m) }))
-
-  function playerError(p: PlayerDraft): string | null {
-    if (!p.paidBy) return 'Choose who pays.'
-    if (p.kind === 'member') return p.memberId ? null : 'Pick a member.'
-    if (!validateEmail(p.email).valid) return 'Enter a valid email.'
-    if (p.mobile.replace(/\D/g, '').length < 7) return 'Enter a phone number.'
-    return null
-  }
-
-  // As many non-members as the venue takes per booking — once that many rows
-  // are, the rest can only be members.
-  const nonMemberLimitReached = !withinNonMemberGuestLimit(
-    players.filter(p => p.kind === 'non_member').length,
-    1,
-    nonMemberLimit,
-  )
-
-  const pickedTwice = new Set(
-    players.filter(p => p.kind === 'member' && p.memberId).map(p => p.memberId),
-  ).size !== players.filter(p => p.kind === 'member' && p.memberId).length
-
-  const ready =
-    !!memberId && !!courseId && !!slot && !pickedTwice && players.every(p => playerError(p) === null)
+  const ready = !!courseId && !!date && !!teeTime && players.length > 0 && players.every(p => playerError(p) === null)
 
   async function submit() {
-    if (!ready || !slot) return
+    if (!ready) {
+      setShowErrors(true)
+      setError(!courseId || !date || !teeTime ? 'Choose a venue, a date and a tee time.' : '')
+      return
+    }
     setSubmitting(true)
     setError('')
-    const additionalPlayers: AdditionalPlayer[] = players.map(p => {
-      if (p.kind === 'member') {
-        const m = members.find(x => x.id === p.memberId)
-        return {
-          firstName: m?.first_name ?? '',
-          lastName: m?.last_name ?? '',
-          email: m?.email ?? '',
-          mobile: '',
-          memberId: p.memberId,
-          isNonMember: false,
-          paidBy: p.paidBy ?? undefined,
-        }
-      }
-      return {
-        firstName: p.firstName.trim(),
-        lastName: p.lastName.trim(),
-        email: p.email.trim(),
-        mobile: p.mobile.trim(),
-        isNonMember: true,
-        paidBy: p.paidBy ?? undefined,
-      }
-    })
     try {
-      const res = await fetch('/api/bookings/create', {
+      const res = await fetch('/api/admin/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          startTime: slot.startTime,
           courseId,
-          additionalPlayers,
-          onBehalfOfMemberId: memberId,
+          date,
+          teeTime,
+          players: players.map(p => ({
+            name: p.name.trim(),
+            email: p.email.trim() || null,
+            phone: p.phone.trim() || null,
+          })),
         }),
       })
-      const json = await res.json().catch(() => ({}))
+      const json = (await res.json().catch(() => ({}))) as { error?: string; added?: number; warnings?: string[] }
       if (!res.ok) {
-        setError(json.error ?? 'Failed to create the booking.')
+        setError(json.error ?? 'Failed to add the players.')
         return
       }
-      const booker = members.find(m => m.id === memberId)
-      onBooked(
-        `Booked ${booker ? `${booker.first_name} ${booker.last_name}`.trim() || booker.email : 'the member'} at ${venue?.name ?? 'the venue'} on ${format(new Date(`${date}T12:00:00`), 'EEE, MMM d')} at ${slotTime(slot.startTime)}.`,
-      )
+      const n = json.added ?? players.length
+      const when = `${format(new Date(`${date}T12:00:00`), 'EEE, MMM d')} at ${formatTeeTime(`${teeTime}:00`)}`
+      const done = `Added ${n} player${n === 1 ? '' : 's'} at ${venue?.name ?? 'the venue'} on ${when}.`
+      const warnings = json.warnings ?? []
+      onBooked(warnings.length ? `${done} ${warnings.join(' ')}` : done, warnings.length === 0)
     } catch {
       setError('Network error. Please try again.')
     } finally {
@@ -235,8 +145,8 @@ export default function AdminNewBookingDrawer({
       <div className="relative bg-white w-full max-w-lg h-full overflow-y-auto shadow-2xl flex flex-col">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <div>
-            <h2 className="text-base font-bold text-gray-900">New booking</h2>
-            <p className="text-xs text-gray-500">Book a tee time on a member&apos;s behalf.</p>
+            <h2 className="text-base font-bold text-gray-900">{preset ? 'Add players' : 'New booking'}</h2>
+            <p className="text-xs text-gray-500">Put anyone on a tee time — a name is all that’s needed.</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close" className="w-8 h-8 rounded-full flex items-center justify-center bg-gray-100 text-gray-500">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -246,30 +156,13 @@ export default function AdminNewBookingDrawer({
         </div>
 
         <div className="px-5 py-5 space-y-5 flex-1">
-          {/* Member */}
-          <div className="flex flex-col gap-1">
-            <span className={label}>Member</span>
-            <Select
-              value={memberId}
-              onChange={v => {
-                setMemberId(v)
-                setPlayers(ps => ps.map(p => (p.memberId === v ? { ...p, memberId: '' } : p)))
-              }}
-              options={members.map(m => ({ value: m.id, label: memberLabel(m) }))}
-              placeholder="Choose a member"
-              searchPlaceholder="Search members…"
-              className="w-full"
-              triggerClassName={trigger}
-            />
-          </div>
-
           {/* Venue + day */}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1 min-w-0">
               <span className={label}>Venue</span>
               <Select
                 value={courseId}
-                onChange={v => { setCourseId(v); setSlotStart('') }}
+                onChange={v => { setCourseId(v); setTeeTime('') }}
                 options={venues.map(v => ({ value: v.id, label: v.name }))}
                 placeholder="Choose a venue"
                 searchPlaceholder="Search venues…"
@@ -282,8 +175,7 @@ export default function AdminNewBookingDrawer({
               <input
                 type="date"
                 value={date}
-                min={format(new Date(), 'yyyy-MM-dd')}
-                onChange={e => { setDate(e.target.value); setSlotStart('') }}
+                onChange={e => { setDate(e.target.value); setTeeTime('') }}
                 className={input}
               />
             </label>
@@ -295,47 +187,51 @@ export default function AdminNewBookingDrawer({
               <span className={label}>Tee time</span>
               {loadingSlots ? (
                 <p className="text-xs text-gray-400">Loading tee times…</p>
-              ) : openSlots.length === 0 ? (
-                <p className="text-xs text-gray-500">No tee times open at this venue on this day.</p>
-              ) : (
+              ) : openTimes.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
-                  {openSlots.map(s => (
+                  {openTimes.map(s => (
                     <button
-                      key={s.startTime}
+                      key={s.time}
                       type="button"
-                      onClick={() => setSlotStart(s.startTime)}
+                      onClick={() => setTeeTime(s.time)}
                       className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${
-                        slotStart === s.startTime
+                        teeTime === s.time
                           ? 'bg-green-900 text-white border-green-900'
                           : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                       }`}
                     >
-                      {slotTime(s.startTime)}
+                      {formatTeeTime(`${s.time}:00`)}
                       <span className="font-normal opacity-70"> · {s.spotsOpen} open</span>
                     </button>
                   ))}
                 </div>
-              )}
+              ) : null}
+              <label className="flex items-center gap-2 text-xs text-gray-500">
+                <span className="whitespace-nowrap">{openTimes.length > 0 ? 'Or any time:' : 'Time:'}</span>
+                <input
+                  type="time"
+                  value={teeTime}
+                  onChange={e => setTeeTime(e.target.value.slice(0, 5))}
+                  className={`${input} max-w-[10rem]`}
+                />
+              </label>
             </div>
           )}
 
-          {/* Added players */}
-          {slot && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className={label}>Players</span>
-                <span className="text-[11px] text-gray-400">{1 + players.length} / {1 + maxAdditional} spots</span>
-              </div>
-              {!nonMembersAllowed && (
-                <p className="text-[11px] text-gray-400">This venue doesn&apos;t take non-member guests — LinkUp members only.</p>
-              )}
+          {/* Players */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className={label}>Players</span>
+              <span className="text-[11px] text-gray-400">{players.length}</span>
+            </div>
 
-              {players.map((p, i) => {
-                const err = playerError(p)
-                return (
-                  <div key={p.key} className="rounded-xl border border-gray-100 p-3 space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs font-semibold text-gray-700">Player {i + 2}</p>
+            {players.map((p, i) => {
+              const err = showErrors ? playerError(p) : null
+              return (
+                <div key={p.key} className="rounded-xl border border-gray-100 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-gray-700">Player {i + 1}</p>
+                    {players.length > 1 && (
                       <button
                         type="button"
                         onClick={() => setPlayers(ps => ps.filter(x => x.key !== p.key))}
@@ -343,88 +239,32 @@ export default function AdminNewBookingDrawer({
                       >
                         Remove
                       </button>
-                    </div>
-
-                    {nonMembersAllowed && (
-                      <div className="flex gap-1 p-1 rounded-lg bg-gray-100">
-                        {(['member', 'non_member'] as PlayerKind[]).map(k => (
-                          <button
-                            key={k}
-                            type="button"
-                            disabled={k === 'non_member' && p.kind !== k && nonMemberLimitReached}
-                            onClick={() => updatePlayer(p.key, { ...newPlayer(), key: p.key, paidBy: p.paidBy, kind: k })}
-                            className={`flex-1 py-1.5 text-xs font-semibold rounded-md disabled:opacity-40 disabled:cursor-not-allowed ${p.kind === k ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
-                          >
-                            {k === 'member' ? 'Member' : 'Non-member'}
-                          </button>
-                        ))}
-                      </div>
                     )}
-                    {nonMembersAllowed && p.kind === 'member' && nonMemberLimitReached && (
-                      <p className="text-[11px] text-gray-400">{nonMemberGuestLimitMessage(nonMemberLimit)}</p>
-                    )}
-
-                    {p.kind === 'member' ? (
-                      <Select
-                        value={p.memberId}
-                        onChange={v => updatePlayer(p.key, { memberId: v })}
-                        options={memberOptions.filter(o => o.value === p.memberId || !players.some(x => x.memberId === o.value))}
-                        placeholder="Choose a member"
-                        searchPlaceholder="Search members…"
-                        className="w-full"
-                        triggerClassName={trigger}
-                      />
-                    ) : (
-                      <div className="space-y-2">
-                        <div className="grid grid-cols-2 gap-2">
-                          <input className={input} placeholder="First name (optional)" value={p.firstName} maxLength={100} onChange={e => updatePlayer(p.key, { firstName: e.target.value })} />
-                          <input className={input} placeholder="Last name (optional)" value={p.lastName} maxLength={100} onChange={e => updatePlayer(p.key, { lastName: e.target.value })} />
-                        </div>
-                        <input className={input} type="tel" placeholder="Phone number (required)" value={p.mobile} onChange={e => updatePlayer(p.key, { mobile: e.target.value })} />
-                        <input className={input} type="email" placeholder="Email (required)" value={p.email} onChange={e => updatePlayer(p.key, { email: e.target.value })} />
-                      </div>
-                    )}
-
-                    {/* Who pays — required, no default. */}
-                    <div>
-                      <p className="text-[11px] font-semibold text-gray-500 mb-1">
-                        Who pays for this player? <span className={p.paidBy ? 'text-gray-400' : 'text-red-500'}>(required)</span>
-                      </p>
-                      <div className="flex gap-1 p-1 rounded-lg bg-gray-100" role="radiogroup" aria-label="Who pays for this player">
-                        {PAID_BY_OPTIONS.map(o => (
-                          <button
-                            key={o.value}
-                            type="button"
-                            role="radio"
-                            aria-checked={p.paidBy === o.value}
-                            onClick={() => updatePlayer(p.key, { paidBy: o.value })}
-                            className={`flex-1 py-1.5 text-xs font-semibold rounded-md ${p.paidBy === o.value ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
-                          >
-                            {/* Said from the booking member's side, as they'd say it. */}
-                            {o.value === 'booker' ? 'Member pays' : o.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {err && <p className="text-[11px] text-gray-400">{err}</p>}
                   </div>
-                )
-              })}
+                  <input
+                    className={input}
+                    placeholder="Name (required)"
+                    value={p.name}
+                    maxLength={100}
+                    onChange={e => updatePlayer(p.key, { name: e.target.value })}
+                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input className={input} type="email" placeholder="Email (optional)" value={p.email} onChange={e => updatePlayer(p.key, { email: e.target.value })} />
+                    <input className={input} type="tel" placeholder="Phone (optional)" value={p.phone} onChange={e => updatePlayer(p.key, { phone: e.target.value })} />
+                  </div>
+                  {err && <p className="text-[11px] text-red-600">{err}</p>}
+                </div>
+              )
+            })}
 
-              {pickedTwice && <p className="text-xs text-red-600">The same member is added twice.</p>}
-
-              {players.length < maxAdditional && (
-                <button
-                  type="button"
-                  onClick={() => setPlayers(ps => [...ps, newPlayer()])}
-                  className="w-full py-2.5 rounded-xl border-2 border-dashed border-gray-200 text-sm font-medium text-gray-500 hover:bg-gray-50"
-                >
-                  + Add a player
-                </button>
-              )}
-            </div>
-          )}
+            <button
+              type="button"
+              onClick={() => setPlayers(ps => [...ps, newPlayer()])}
+              className="w-full py-2.5 rounded-xl border-2 border-dashed border-gray-200 text-sm font-medium text-gray-500 hover:bg-gray-50"
+            >
+              + Add another player
+            </button>
+          </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
@@ -433,13 +273,13 @@ export default function AdminNewBookingDrawer({
           <button
             type="button"
             onClick={submit}
-            disabled={!ready || submitting}
+            disabled={submitting}
             className="w-full py-3 rounded-xl bg-green-900 text-white font-semibold hover:bg-green-800 disabled:opacity-50 transition-colors"
           >
-            {submitting ? 'Booking…' : `Book${players.length ? ` · ${1 + players.length} players` : ''}`}
+            {submitting ? 'Adding…' : `Add ${players.length} player${players.length === 1 ? '' : 's'}`}
           </button>
           <p className="text-[11px] text-gray-400 text-center mt-2">
-            The member is notified, and any added players get an invitation.
+            Anyone with an email gets the round in their app, and the reminders.
           </p>
         </div>
       </div>

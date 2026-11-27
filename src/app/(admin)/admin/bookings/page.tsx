@@ -10,7 +10,7 @@ import { formatTeeTime, titleCaseName } from '@/lib/utils'
 import { tagsOverlap } from '@/lib/ghl/tags'
 import { settlingAtClub, PAY_AT_CLUB_LABEL } from '@/lib/bookings/payment-options'
 import { inviteStatusLabel } from '@/lib/bookings/invitations'
-import AdminNewBookingDrawer from '@/components/admin/AdminNewBookingDrawer'
+import AdminNewBookingDrawer, { type AddPlayersPreset } from '@/components/admin/AdminNewBookingDrawer'
 import { slotWallTime, useVenueSlots } from '@/hooks/useVenueSlots'
 import type { AdditionalPlayer } from '@/types'
 
@@ -39,6 +39,8 @@ interface BookingRow {
   ghl_opportunity_id: string | null
   /** The venue's playing host's free seat — see @/lib/bookings/playing-host. */
   playing_host?: boolean
+  /** An admin put this player here by name — see @/lib/bookings/admin-players. */
+  added_by_admin_id?: string | null
   member: { first_name: string; last_name: string; email: string } | null
   player?: { id: string; first_name: string; last_name: string; email: string } | null
   course?: { name: string; id?: string } | null
@@ -153,7 +155,12 @@ function isBookerRow(b: BookingRow): boolean {
 function groupBySlot(bookings: BookingRow[]): TeeSlot[] {
   const map = new Map<string, BookingRow[]>()
   for (const b of bookings) {
-    const key = `${b.member_id}_${b.created_at}_${b.booking_date}_${b.tee_time}`
+    // A player an admin added is a box of their own: each is their own round,
+    // and Move moves one booking's rows (member + created_at) — see
+    // @/lib/bookings/admin-players.
+    const key = b.added_by_admin_id
+      ? `admin_${b.id}`
+      : `${b.member_id}_${b.created_at}_${b.booking_date}_${b.tee_time}`
     const arr = map.get(key) ?? []
     arr.push(b)
     map.set(key, arr)
@@ -202,6 +209,15 @@ function groupByTeeTime(slots: TeeSlot[]): TeeTimeGroup[] {
 // title-cased here rather than trusted. The contact line is left as it is: an
 // email address has to stay as written to be recognised.
 function playerInfo(b: BookingRow): { name: string; sub: string; badge?: string } {
+  // Added by an admin: the name, and how to reach them if we were told —
+  // nothing that says member or guest.
+  if (b.added_by_admin_id) {
+    if (b.guest_name) {
+      const p = b.additional_players?.[0]
+      return { name: titleCaseName(b.guest_name.trim()), sub: [p?.email, p?.mobile].filter(Boolean).join(' · ') }
+    }
+    return { name: titleCaseName(`${b.member?.first_name ?? ''} ${b.member?.last_name ?? ''}`.trim()), sub: b.member?.email ?? '' }
+  }
   if (b.guest_name) {
     const guest = b.additional_players?.[0]
     const contact = [guest?.email, guest?.mobile].filter(Boolean).join(' · ')
@@ -259,6 +275,7 @@ type RowActions = {
   onRequestDelete: (b: BookingRow) => void
   onMove: (slot: TeeSlot) => void
   onReplaceHost: (b: BookingRow) => void
+  onAddPlayers: (preset: AddPlayersPreset) => void
 }
 
 function TeeTimeCard({ group, showCourseName, actions }: { group: TeeTimeGroup; showCourseName: boolean; actions: RowActions }) {
@@ -268,6 +285,7 @@ function TeeTimeCard({ group, showCourseName, actions }: { group: TeeTimeGroup; 
   const allPaid = activeRows.length > 0 && paidCount === activeRows.length
   const totalAmount = rows.reduce((sum, b) => sum + Number(b.amount_charged), 0)
   const hasAttention = rows.some(b => ['awaiting_approval', 'tentative'].includes(b.status))
+  const venueId = rows[0]?.course_id
   const courseName = rows[0]?.course?.name
 
   // Status breakdown for the slot header
@@ -323,6 +341,16 @@ function TeeTimeCard({ group, showCourseName, actions }: { group: TeeTimeGroup; 
 
         {/* Amount + count */}
         <div className="flex-shrink-0 flex flex-wrap items-center justify-end gap-x-1.5 gap-y-1 text-right">
+          {venueId && (
+            <button
+              type="button"
+              onClick={() => actions.onAddPlayers({ courseId: venueId, date: group.booking_date, teeTime: group.tee_time })}
+              title="Add players to this tee time"
+              className="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50 whitespace-nowrap"
+            >
+              + Add player
+            </button>
+          )}
           <span className="text-xs font-semibold text-green-700">${totalAmount.toFixed(0)}</span>
           <span className="text-[10px] text-gray-400">· {rows.length}p</span>
           {activeRows.length > 0 && (
@@ -657,6 +685,8 @@ export default function AdminBookingsPage() {
   const [moveTarget, setMoveTarget] = useState<TeeSlot | null>(null)
   const [replaceHostTarget, setReplaceHostTarget] = useState<BookingRow | null>(null)
   const [showNewBooking, setShowNewBooking] = useState(false)
+  // Set when the drawer opens on an existing tee time ("+ Add player").
+  const [addPlayersPreset, setAddPlayersPreset] = useState<AddPlayersPreset | null>(null)
   const noteRef = useRef<HTMLTextAreaElement>(null)
 
   const [activeTab, setActiveTab] = useState<'bookings' | 'access'>('bookings')
@@ -745,7 +775,7 @@ export default function AdminBookingsPage() {
 
     if (matchingCourseIds.length === 0) { setBookings([]); setLoading(false); return }
 
-    const SELECT = 'id, member_id, created_at, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, payment_method, paid_by_booker, invite_status, ghl_opportunity_id, playing_host, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name)'
+    const SELECT = 'id, member_id, created_at, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, payment_method, paid_by_booker, invite_status, ghl_opportunity_id, playing_host, added_by_admin_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name)'
     const SELECT_NO_DINNER = SELECT.replace('dinner_rsvp, ', '')
 
     function buildQuery(select: string) {
@@ -766,6 +796,15 @@ export default function AdminBookingsPage() {
     }
 
     let { data, error } = await buildQuery(SELECT)
+
+    // Before 20261128000001 has run there's no such column; the list still
+    // loads, and admin-added players just read like any other row.
+    if (error?.message?.includes('added_by_admin_id')) {
+      const fallback = await buildQuery(SELECT.replace('added_by_admin_id, ', ''))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      data = fallback.data as any
+      error = fallback.error
+    }
 
     // Before the playing-host migration (20261127000001) has run there's no
     // such column; the list still loads, just without the Host seats marked.
@@ -1056,7 +1095,7 @@ export default function AdminBookingsPage() {
       const info = playerInfo(b)
       const coupon = b.credit_coupon
       return [
-        b.course?.name ?? '', info.name, info.sub, info.badge ?? 'Booker',
+        b.course?.name ?? '', info.name, info.sub, info.badge ?? (b.added_by_admin_id ? 'Added by admin' : 'Booker'),
         b.booking_date, b.tee_time, b.status,
         coupon ? 'Credits' : 'Cash',
         coupon?.code ?? '',
@@ -1078,6 +1117,7 @@ export default function AdminBookingsPage() {
     deletingBookingId, onRequestDelete: setDeleteTarget,
     onMove: setMoveTarget,
     onReplaceHost: setReplaceHostTarget,
+    onAddPlayers: preset => { setAddPlayersPreset(preset); setShowNewBooking(true) },
   }
 
   // Shared between the desktop inline grid and the mobile drawer — id suffix
@@ -1235,13 +1275,15 @@ export default function AdminBookingsPage() {
 
       {showNewBooking && (
         <AdminNewBookingDrawer
-          members={allMembers}
           defaultCourseId={courseFilter !== 'all' ? courseFilter : null}
-          onClose={() => setShowNewBooking(false)}
-          onBooked={msg => {
+          preset={addPlayersPreset}
+          onClose={() => { setShowNewBooking(false); setAddPlayersPreset(null) }}
+          onBooked={(msg, ok) => {
             setShowNewBooking(false)
-            setRequestToast({ msg, ok: true })
-            setTimeout(() => setRequestToast(null), 4000)
+            setAddPlayersPreset(null)
+            setRequestToast({ msg, ok })
+            // Longer when something needs reading — a seat GHL didn't take.
+            setTimeout(() => setRequestToast(null), ok ? 4000 : 10000)
             loadBookings()
           }}
         />
@@ -1287,7 +1329,7 @@ export default function AdminBookingsPage() {
         <div className="flex flex-col sm:flex-row items-end sm:items-start gap-2 flex-shrink-0">
         <button
           type="button"
-          onClick={() => setShowNewBooking(true)}
+          onClick={() => { setAddPlayersPreset(null); setShowNewBooking(true) }}
           className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold rounded-[10px] bg-green-900 text-white hover:bg-green-800 transition-colors whitespace-nowrap"
         >
           + New booking
