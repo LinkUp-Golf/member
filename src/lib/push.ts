@@ -194,47 +194,22 @@ export const NotificationTemplates = {
     cta:   'Book your spot',
   }),
 
-  // An admin's recommendation (POST /api/admin/matching/[memberId]). The note
-  // is the admin's own words on why; it opens Members, where "Recommended for
-  // you" leads.
-  playSuggestion: (otherMemberName: string, note?: string | null): PushPayload => {
-    const other = titleCaseName(otherMemberName)
-    return {
-      title: `Play with ${other}?`,
-      body:  note?.trim() || `The LinkUp team thinks you and ${other} should play a round together.`,
-      url:   '/members',
-      // Lower-cased on purpose: the tag is a dedup key, not copy.
-      tag:   `suggestion-${otherMemberName.toLowerCase().replace(' ', '-')}`,
-      subject: `The LinkUp team recommends a round with ${other}`,
-      cta:   'See why',
-    }
-  },
-
-  // The same, when an admin sends several at once: one notification, not one
-  // per pick. The tag keeps the `suggestion-` prefix so the bell files it as a
-  // play suggestion rather than "general".
-  playSuggestions: (count: number): PushPayload => ({
-    title: `${count} playing partners for you`,
-    body:  `The LinkUp team picked ${count} members for you to play with.`,
-    url:   '/members',
-    tag:   'suggestion-batch',
-    subject: `${count} playing partners the LinkUp team picked for you`,
-    cta:   'See who',
+  // A new Curated Introduction (POST /api/admin/matching/[memberId]), sent to
+  // both members of every match. No name and no reason, by design (client,
+  // 2026-11-24): members judge each other from the profile, so the message
+  // only says there's someone new and opens the queue. `count` covers an
+  // admin sending several to one member at once. The `suggestion-` tag prefix
+  // files it under introductions in the notification bell.
+  curatedIntroduction: (count = 1): PushPayload => ({
+    title: count > 1 ? `${count} new Curated Introductions` : 'New Curated Introduction',
+    body:  count > 1
+      ? `You have ${count} new matches in your Curated Introductions.`
+      : 'You have a new match in your Curated Introductions.',
+    url:   '/more/match-profile',
+    tag:   'suggestion-new',
+    subject: count > 1 ? `You have ${count} new Curated Introductions` : 'You have a new Curated Introduction match',
+    cta:   count > 1 ? 'See your matches' : 'See your match',
   }),
-
-  // The other side of a recommendation: the player who was recommended, told
-  // who to expect a message from.
-  recommendedToMember: (memberName: string, memberId: string): PushPayload => {
-    const member = titleCaseName(memberName)
-    return {
-      title: `You've been recommended to ${member}`,
-      body:  `The LinkUp team thinks you and ${member} should play a round together. Say hello, or expect a message.`,
-      url:   `/members/${memberId}`,
-      tag:   `suggestion-to-${memberId}`,
-      subject: `The LinkUp team recommended you to ${member}`,
-      cta:   'See their profile',
-    }
-  },
 
   guestAccessApproved: (courseName: string, from: string, until: string): PushPayload => ({
     title: 'Guest access approved',

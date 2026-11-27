@@ -443,19 +443,24 @@ fit a member, and the admin chooses who to recommend, with a note.
   role, and shown only on the admin screen — never on a profile, never in a
   note or chip (`rules.ts` builds those from the business and golf answers
   alone, and a test pins it).
-- **A recommendation is a `play_suggestions` row** with `recommended_by` and
-  `note`; members may only read their own (`20261104000002` replaced the old
-  for-all policy). Not now sets `dismissed` and keeps the pair off the list for
-  `DISMISS_COOLDOWN_DAYS` (90) — a Not now from either side hides the pair.
-  A pair sent either way stays listed but locked (`recommendedAt` /
-  `suggestedAt`), and the send route refuses it. Sends notify both sides:
-  `playSuggestion` / `playSuggestions` to the member, `recommendedToMember`
-  to each recommended player.
-- Member-side, everything reads one store, `useRecommendations()`: the
-  Recommended for you cards, the member list's `SuggestedTag` (hover on a
-  mouse, tap on touch, portalled because the list card clips), and the
-  Suggested tab in both Add player flows on /book (`PlayerKind` "suggested"
-  is a member everywhere downstream).
+- **An introduction is two-sided** (2026-11-24, Phase 1 of the open-ended
+  redesign in `docs/proposals/curated-introductions-open-ended.html`): the send
+  writes a `play_suggestions` row for the member **and** one for each
+  recommended player, and both get the same `curatedIntroduction` push + email
+  ("You have a new match in your Curated Introductions" — no name, no reason).
+  Members may only read their own rows (`20261104000002`). The admin's `note`
+  is optional and internal: `GET /api/recommendations` never returns it, nor
+  `sharedChips`. Not now sets `dismissed` on the member's own row and keeps the
+  pair off the admin's list for `DISMISS_COOLDOWN_DAYS` (90) — a Not now from
+  either side hides the pair. A pair sent either way stays listed but locked
+  (`recommendedAt` / `suggestedAt`), and the send route refuses it.
+- Member-side, everything reads one store, `useRecommendations()`: the queue
+  at the top of More → Curated Introductions (`RecommendedPartners variant="queue"`,
+  where the notification opens; on a computer it's in the sidebar, which lists
+  every More item), the same cards on Members and Home, the member list's
+  `SuggestedTag` (a plain "Introduced" label), and the Suggested tab in both
+  Add player flows on /book (`PlayerKind` "suggested" is a member everywhere
+  downstream). None of them shows a reason; members judge from the profile.
 - The admin lists page by `MATCHING_PAGE_SIZE` (20): `?offset=&limit=` on
   both `/api/admin/matching` routes. The candidate list is scored whole and
   sliced, because ranking needs everyone.

@@ -2,8 +2,9 @@
 
 // Matchmaking — an admin picks a member, the app lists the players who fit
 // them (preferred introductions applied both ways, then ranked by score), and the
-// admin chooses who to recommend, with a note on why. Nothing is suggested to
-// a member without an admin sending it. See docs/playing-partner-matching.md.
+// admin chooses who to introduce. Every introduction is two-sided and carries
+// no reason to either member; the note is optional and admin-only. Nothing is
+// suggested to a member without an admin sending it. See docs/playing-partner-matching.md.
 //
 // Both long lists load MATCHING_PAGE_SIZE at a time and fetch the next page
 // as they scroll: the queue inside its own card, which is sized to the screen
@@ -361,7 +362,7 @@ function CandidateRow({
       </label>
       {picked && (
         <div className="mt-3 ml-7">
-          <label htmlFor={`note-${c.id}`} className="text-xs text-gray-500">Note to the member on why</label>
+          <label htmlFor={`note-${c.id}`} className="text-xs text-gray-500">Internal note on why (optional; members never see it)</label>
           <textarea
             id={`note-${c.id}`}
             rows={2}
@@ -483,7 +484,6 @@ function MemberMatching({ memberId, onSent }: { memberId: string; onSent: () => 
   if (!detail) return <ContentLoader />
 
   const { member, candidates, total, ruledOut, sent } = detail
-  const emptyNote = [...picks.values()].some(n => !n.trim())
   const memberFirstName = member.firstName || member.name
 
   return (
@@ -534,15 +534,17 @@ function MemberMatching({ memberId, onSent }: { memberId: string; onSent: () => 
           )}
           <div className="sticky bottom-0 bg-white rounded-b-xl flex flex-wrap items-center justify-between gap-3 px-4 sm:px-5 py-4 border-t border-gray-100">
             <p className={cn('text-sm', result ? (result.ok ? 'text-green-700' : 'text-red-500') : 'text-gray-400')}>
-              {result?.text ?? (picks.size >= MAX_PICKS ? `Up to ${MAX_PICKS} at a time.` : 'Tick a player, check the note, send.')}
+              {result?.text ?? (picks.size >= MAX_PICKS
+                ? `Up to ${MAX_PICKS} at a time.`
+                : 'Tick a player and send. Both members get the introduction and a notification, with no reason given.')}
             </p>
             <button
               type="button"
               onClick={send}
-              disabled={picks.size === 0 || emptyNote || sending}
+              disabled={picks.size === 0 || sending}
               className="btn btn-primary btn-sm disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {sending ? <Spinner className="w-4 h-4" /> : picks.size === 1 ? 'Send 1 recommendation' : `Send ${picks.size} recommendations`}
+              {sending ? <Spinner className="w-4 h-4" /> : picks.size === 1 ? 'Send 1 introduction' : `Send ${picks.size} introductions`}
             </button>
           </div>
         </div>

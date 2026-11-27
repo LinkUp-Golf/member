@@ -34,6 +34,8 @@ Each entry gives the date, who decided (**client** means the LinkUp Golf owner; 
 
 ## Curated Introductions (matching)
 
+- **2026-11-24 · client. Two-sided matches, no reasons shown.** Both members of a match get it in their queue and the same "new Curated Introduction" notification, with no name and no reason; they judge each other from the profile and LinkedIn. The admin's note is optional and internal. The queue lives at the top of More → Curated Introductions (the sidebar on a computer). Shipped as Phase 1 of the open-ended redesign (`docs/proposals/curated-introductions-open-ended.html`). Default: matches sent before this stay one-sided; nothing back-fills the other side.
+
 - **2026-11-20 · client. Two steps.** "Describe Yourself" (your business, your golf, about you), then "Describe Your Ideal Match" (what you're looking for, who you'd like to meet, who you'd like to play with), with step indicators, Back and Continue, and Submit at the end.
   - Default: "Describe any solutions, services or resources you seek" moved to step 2, since it says what the member wants. "Describe your offering" stays in step 1.
   - Default: where the profile already says something, the survey starts from it. Industry, role (from a job title that says one role plainly, such as "CFO"), golf skill (from the handicap), offering and seeking are pre-selected, and the member can change them.
