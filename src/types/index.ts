@@ -139,6 +139,9 @@ export interface Course {
   // How many of them one booking may bring (1–3), while the above is on.
   max_non_member_guests: number
 
+  /** Plays in the first foursome of every day here — see @/lib/bookings/playing-host. */
+  playing_host_member_id?: string | null
+
   // Optional description shown in the admin and used as the GHL group description
   description: string | null
 
@@ -281,6 +284,8 @@ export interface Booking {
   admin_notes?: string | null
   /** 'pay_at_club' once the member chose to settle with the club; null = checkout. */
   payment_method?: 'pay_at_club' | null
+  /** The venue's playing host's free seat — see @/lib/bookings/playing-host. */
+  playing_host?: boolean
   /** The booker covers this added player's seat. */
   paid_by_booker?: boolean
   /** An added player's answer to their invitation; null on the booker's own row. */

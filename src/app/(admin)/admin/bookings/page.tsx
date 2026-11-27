@@ -37,6 +37,8 @@ interface BookingRow {
   /** An added player's answer to their invitation; null on older rows and the booker's own. */
   invite_status?: 'pending' | 'accepted' | 'declined' | 'expired' | null
   ghl_opportunity_id: string | null
+  /** The venue's playing host's free seat — see @/lib/bookings/playing-host. */
+  playing_host?: boolean
   member: { first_name: string; last_name: string; email: string } | null
   player?: { id: string; first_name: string; last_name: string; email: string } | null
   course?: { name: string; id?: string } | null
@@ -256,6 +258,7 @@ type RowActions = {
   deletingBookingId: string | null
   onRequestDelete: (b: BookingRow) => void
   onMove: (slot: TeeSlot) => void
+  onReplaceHost: (b: BookingRow) => void
 }
 
 function TeeTimeCard({ group, showCourseName, actions }: { group: TeeTimeGroup; showCourseName: boolean; actions: RowActions }) {
@@ -365,14 +368,14 @@ function TeeTimeCard({ group, showCourseName, actions }: { group: TeeTimeGroup; 
 function PlayerRow({ b, slot, isFirst, inGroup, actions }: { b: BookingRow; slot: TeeSlot; isFirst: boolean; inGroup: boolean; actions: RowActions }) {
   const {
     editingNote, noteValues, onEditNote, onNoteChange, onSaveNote,
-    savingNote, noteRef, deletingBookingId, onRequestDelete, onMove,
+    savingNote, noteRef, deletingBookingId, onRequestDelete, onMove, onReplaceHost,
   } = actions
   const info = playerInfo(b)
   const daysLeftLabel = paymentDaysLeftLabel(b)
   const atClub = settlingAtClub(b)
   const canMove = isFirst && slot.rows.some(r => r.status !== 'cancelled')
   // In a group the booker is worth naming; alone, they're the only one there.
-  const badge = info.badge ?? (inGroup && isBookerRow(b) ? 'Booker' : undefined)
+  const badge = b.playing_host ? 'Host' : info.badge ?? (inGroup && isBookerRow(b) ? 'Booker' : undefined)
   const chip = 'text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 whitespace-nowrap'
 
   return (
@@ -454,6 +457,21 @@ function PlayerRow({ b, slot, isFirst, inGroup, actions }: { b: BookingRow; slot
               <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
             </svg>
           </button>
+          {/* The host's seat can be handed to an alternate host. Removing
+              them outright is Delete: the day stays decided either way. */}
+          {b.playing_host && b.status !== 'cancelled' && (
+            <button
+              type="button"
+              onClick={() => onReplaceHost(b)}
+              title="Replace the host with another member"
+              aria-label="Replace the host with another member"
+              className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+              </svg>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onRequestDelete(b)}
@@ -637,6 +655,7 @@ export default function AdminBookingsPage() {
   const [deletingBookingId, setDeletingBookingId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<BookingRow | null>(null)
   const [moveTarget, setMoveTarget] = useState<TeeSlot | null>(null)
+  const [replaceHostTarget, setReplaceHostTarget] = useState<BookingRow | null>(null)
   const [showNewBooking, setShowNewBooking] = useState(false)
   const noteRef = useRef<HTMLTextAreaElement>(null)
 
@@ -726,7 +745,7 @@ export default function AdminBookingsPage() {
 
     if (matchingCourseIds.length === 0) { setBookings([]); setLoading(false); return }
 
-    const SELECT = 'id, member_id, created_at, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, payment_method, paid_by_booker, invite_status, ghl_opportunity_id, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name)'
+    const SELECT = 'id, member_id, created_at, booking_date, tee_time, players, guest_name, player_member_id, additional_players, status, amount_charged, dinner_rsvp, admin_notes, payment_method, paid_by_booker, invite_status, ghl_opportunity_id, playing_host, course_id, member:members!bookings_member_id_fkey(first_name, last_name, email), course:courses!bookings_course_id_fkey(name)'
     const SELECT_NO_DINNER = SELECT.replace('dinner_rsvp, ', '')
 
     function buildQuery(select: string) {
@@ -747,6 +766,15 @@ export default function AdminBookingsPage() {
     }
 
     let { data, error } = await buildQuery(SELECT)
+
+    // Before the playing-host migration (20261127000001) has run there's no
+    // such column; the list still loads, just without the Host seats marked.
+    if (error?.message?.includes('playing_host')) {
+      const fallback = await buildQuery(SELECT.replace('playing_host, ', ''))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      data = fallback.data as any
+      error = fallback.error
+    }
 
     // Fallback without dinner_rsvp if column doesn't exist yet — the dinner
     // filter itself can't be enforced in that (legacy) case.
@@ -1049,6 +1077,7 @@ export default function AdminBookingsPage() {
     onSaveNote: saveNote, savingNote, noteRef,
     deletingBookingId, onRequestDelete: setDeleteTarget,
     onMove: setMoveTarget,
+    onReplaceHost: setReplaceHostTarget,
   }
 
   // Shared between the desktop inline grid and the mobile drawer — id suffix
@@ -1211,6 +1240,20 @@ export default function AdminBookingsPage() {
           onClose={() => setShowNewBooking(false)}
           onBooked={msg => {
             setShowNewBooking(false)
+            setRequestToast({ msg, ok: true })
+            setTimeout(() => setRequestToast(null), 4000)
+            loadBookings()
+          }}
+        />
+      )}
+
+      {replaceHostTarget && (
+        <ReplaceHostModal
+          seat={replaceHostTarget}
+          members={allMembers}
+          onClose={() => setReplaceHostTarget(null)}
+          onReplaced={msg => {
+            setReplaceHostTarget(null)
             setRequestToast({ msg, ok: true })
             setTimeout(() => setRequestToast(null), 4000)
             loadBookings()
@@ -1673,6 +1716,102 @@ function MoveBookingModal({
             className="flex-1 py-2.5 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 disabled:opacity-50 transition-colors"
           >
             {saving ? 'Moving…' : 'Move booking'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---- Replace the playing host ---------------------------------------------
+
+/**
+ * Hands the host's seat to another member — an alternate host taking the first
+ * foursome on a day the usual one isn't playing. Same seat, same tee time, still
+ * free; only the person changes, and they're notified. See
+ * POST /api/admin/bookings/[id]/playing-host.
+ */
+function ReplaceHostModal({
+  seat,
+  members,
+  onClose,
+  onReplaced,
+}: {
+  seat: BookingRow
+  members: AccessMemberRow[]
+  onClose: () => void
+  onReplaced: (msg: string) => void
+}) {
+  const [memberId, setMemberId] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const current = playerInfo(seat).name
+
+  async function submit() {
+    if (!memberId) return
+    setSaving(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/admin/bookings/${seat.id}/playing-host`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ memberId }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) { setError(json.error ?? 'Failed to replace the host.'); return }
+      onReplaced(json.message ?? 'Host replaced.')
+    } catch {
+      setError('Network error. Please try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
+      <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 className="text-sm font-bold text-gray-800">Replace host</h2>
+        <p className="text-xs text-gray-500 mt-1">
+          {seat.course?.name ? `${seat.course.name} · ` : ''}
+          {format(new Date(`${seat.booking_date}T12:00:00`), 'EEE, MMM d')} at {formatTeeTime(seat.tee_time)}.
+          {' '}{current || 'The host'} comes off this seat and the member you pick plays instead, free, and is notified.
+        </p>
+
+        <div className="mt-4">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Play instead</p>
+          <Select
+            value={memberId}
+            onChange={setMemberId}
+            options={members
+              .filter(m => m.id !== seat.member_id)
+              .map(m => {
+                const name = titleCaseName(`${m.first_name ?? ''} ${m.last_name ?? ''}`.trim())
+                return { value: m.id, label: name ? `${name} · ${m.email}` : m.email }
+              })}
+            placeholder="Choose a member"
+            searchPlaceholder="Search members…"
+            className="w-full"
+          />
+        </div>
+
+        {error && <p className="text-xs text-red-600 mt-3">{error}</p>}
+
+        <div className="flex gap-2 mt-5">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={saving || !memberId}
+            className="flex-1 py-2.5 rounded-xl bg-green-900 text-white text-sm font-semibold hover:bg-green-800 disabled:opacity-50 transition-colors"
+          >
+            {saving ? 'Replacing…' : 'Replace host'}
           </button>
         </div>
       </div>

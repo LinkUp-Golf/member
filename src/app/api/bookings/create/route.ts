@@ -36,6 +36,7 @@ import { offersGroupTable, teeTimesOnDay } from '@/lib/bookings/group-table'
 import { formatInTimeZone } from 'date-fns-tz'
 import { isInsideJoinOnlyWindow, joinOnlyWindowMessage, openDayKey } from '@/lib/bookings/lead-time'
 import { bookingAmountDue } from '@/lib/bookings/price'
+import { seatPlayingHost } from '@/lib/bookings/playing-host'
 import {
   allowsNonMemberGuests,
   maxNonMemberGuests,
@@ -326,7 +327,7 @@ export async function POST(request: NextRequest) {
 
   const { data: course } = await adminSupabase
     .from('courses')
-    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, cost_per_player, allow_non_member_guests, max_non_member_guests, custom_slots_enabled')
+    .select('id, ghl_calendar_id, ghl_calendar_user_id, timezone, name, address, city, state, payment_url, payment_options, meeting_duration_mins, cost_per_player, allow_non_member_guests, max_non_member_guests, custom_slots_enabled, playing_host_member_id')
     .eq('id', courseId || resolvedCourseId)
     .eq('approval_status', 'active')
     .single()
@@ -835,6 +836,20 @@ export async function POST(request: NextRequest) {
       })
   )
 
+  // The venue's playing host goes out with the day's first foursome — this one,
+  // when it's the first booked that day. Awaited so it isn't cut off when the
+  // response is sent; it never fails the booking. A host who is on this booking
+  // already (booked it, or was added) is recognised there and not seated twice.
+  // See @/lib/bookings/playing-host.
+  const hostSeat = await seatPlayingHost(adminSupabase, {
+    courseId: resolvedCourseId,
+    hostMemberId: course?.playing_host_member_id,
+    bookingDate,
+    teeTime: timeNormalized,
+    capacity: maxPlayersPerDay,
+    appointment: bookingParams,
+  })
+
   const primaryBookingId = primaryBooking.id
 
   const displayDate = format(new Date(`${bookingDate}T12:00:00`), 'EEEE, MMMM d')
@@ -888,6 +903,9 @@ export async function POST(request: NextRequest) {
   const bookingsWithCourse = Array.isArray(insertedBookings) && courseForResponse
     ? insertedBookings.map((b: Record<string, unknown>) => ({
         ...b,
+        // The host booked this themselves and it became their free Host seat
+        // after the insert — the confirmation must say so, not quote a price.
+        ...(hostSeat && hostSeat.id === b.id ? hostSeat : {}),
         course: courseForResponse,
         non_member_guest: nonMemberSeatIds.has(b.id as string),
       }))

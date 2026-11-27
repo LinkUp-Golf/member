@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
   // ── Find primary booking by GHL appointment ID ─────────────
   const { data: primary, error: findError } = await supabase
     .from('bookings')
-    .select('id, member_id, ghl_booking_id, status, payment_method')
+    .select('id, member_id, ghl_booking_id, status, payment_method, playing_host')
     .eq('ghl_booking_id', ghlBookingId)
     .maybeSingle()
 
@@ -149,7 +149,8 @@ export async function POST(request: NextRequest) {
   // they fire on their own pipeline, which doesn't know how the round is being
   // paid — would move the round backwards and chase the member for money we
   // aren't owed. Acknowledged and dropped.
-  if (event === 'availability_confirmed' && isPayAtClub(primary)) {
+  // Nor is the playing host's seat, which is free (see @/lib/bookings/playing-host).
+  if (event === 'availability_confirmed' && (isPayAtClub(primary) || primary.playing_host)) {
     logger.info('GHL booking webhook: ignored payment-due stage on a pay-at-club round', {
       action: 'ghl_booking_webhook',
       metadata: { bookingId: primary.id, status: primary.status },
