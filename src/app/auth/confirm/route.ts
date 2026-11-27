@@ -26,6 +26,7 @@ import { logActivity } from '@/lib/activity/log'
 import { getContactByEmail } from '@/lib/ghl/client'
 import { hasPartnerTag, hasHostTag } from '@/lib/ghl/tags'
 import { workspaceLandingPath } from '@/lib/auth/landing'
+import { formerMemberShutOut } from '@/lib/auth/former-member'
 import { syncMember } from '@/lib/sync'
 import { safeRedirectPath } from '@/lib/utils'
 import { logger, auditLog } from '@/lib/logger'
@@ -114,7 +115,7 @@ export async function GET(request: NextRequest) {
   // ---- Suspension check --------------------------------------
   const { data: memberRecord } = await adminClient
     .from('members')
-    .select('membership_status, home_course_id')
+    .select('membership_status, home_course_id, is_admin')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -128,6 +129,14 @@ export async function GET(request: NextRequest) {
     auditLog('LOGIN_DENIED', { requestId, userId: user.id, metadata: { reason: 'account_suspended' } })
     await supabase.auth.signOut()
     return NextResponse.redirect(new URL('/auth/error?reason=suspended', request.url))
+  }
+
+  // A former member gets in only while they still have a round ahead.
+  if (await formerMemberShutOut(adminClient, user.id, memberRecord)) {
+    reqLog.info('Former member with no round ahead attempted login — destroying session', { userId: user.id })
+    auditLog('LOGIN_DENIED', { requestId, userId: user.id, metadata: { reason: 'membership_ended' } })
+    await supabase.auth.signOut()
+    return NextResponse.redirect(new URL('/membership-required', request.url))
   }
 
   await adminClient

@@ -33,10 +33,11 @@ export async function syncMember(params: {
   const log = logger.child({ requestId: ctx.requestId, userId, action: 'sync_member' })
   const tags = contact.tags ?? []
 
-  // A golf member carries a course tag. Anyone else — a referral partner or
-  // host with no membership, or a contact with no access tag at all — becomes
-  // a course-less non-member. They can still sign in; isGuestOnly decides what
-  // they reach.
+  // A golf member carries a course tag. A member left with no access or role
+  // tag at all becomes a former member (@/lib/auth/former-member, decided in
+  // upsertMember). Anyone else — a referral partner or host with no
+  // membership, or a contact who was never a member — becomes a course-less
+  // non-member. They can still sign in; isGuestOnly decides what they reach.
   const isMember = hasCourseAccessTag(tags)
   let homeCourseId: string | null = null
 
@@ -151,9 +152,9 @@ export async function refreshMembersFromGhl(
         continue
       }
 
-      // Losing a membership tag makes them a non-member, not a suspended
-      // account: they can still sign in, as a guest. 'suspended' is left to
-      // mean what an admin means by it.
+      // Losing every access tag makes them a former member (or, for someone
+      // who was never a member, a non-member guest), not a suspended account.
+      // 'suspended' is left to mean what an admin means by it.
       const result = await syncMember({ contact, userId: m.id, ctx })
       if (!result.success) { failed++; continue }
       refreshed++
