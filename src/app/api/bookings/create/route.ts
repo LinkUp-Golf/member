@@ -841,7 +841,7 @@ export async function POST(request: NextRequest) {
   // response is sent; it never fails the booking. A host who is on this booking
   // already (booked it, or was added) is recognised there and not seated twice.
   // See @/lib/bookings/playing-host.
-  await seatPlayingHost(adminSupabase, {
+  const hostSeat = await seatPlayingHost(adminSupabase, {
     courseId: resolvedCourseId,
     hostMemberId: course?.playing_host_member_id,
     bookingDate,
@@ -903,6 +903,9 @@ export async function POST(request: NextRequest) {
   const bookingsWithCourse = Array.isArray(insertedBookings) && courseForResponse
     ? insertedBookings.map((b: Record<string, unknown>) => ({
         ...b,
+        // The host booked this themselves and it became their free Host seat
+        // after the insert — the confirmation must say so, not quote a price.
+        ...(hostSeat && hostSeat.id === b.id ? hostSeat : {}),
         course: courseForResponse,
         non_member_guest: nonMemberSeatIds.has(b.id as string),
       }))

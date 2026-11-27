@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { showsCalendarHost } from '@/lib/bookings/playing-host'
+import { bookingAmountDue } from '@/lib/bookings/price'
+
+describe('bookingAmountDue for the host seat', () => {
+  it('is free, rather than falling back to the venue rate', () => {
+    expect(bookingAmountDue({ playing_host: true, amount_charged: 0, cost_per_player: 160 })).toBe(0)
+    // Even a booking of the host's own that still carries its old price.
+    expect(bookingAmountDue({ playing_host: true, amount_charged: 160, cost_per_player: 160 })).toBe(0)
+  })
+
+  it('leaves every other seat priced as before', () => {
+    expect(bookingAmountDue({ amount_charged: 0, cost_per_player: 150 })).toBe(150)
+  })
+})
 
 describe('showsCalendarHost', () => {
   it('drops the calendar host line at a venue with a playing host', () => {

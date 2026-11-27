@@ -190,6 +190,8 @@ export default function BookPage() {
     // More than one foursome that day — the only days the group table after
     // golf is reserved, so the only days the dinner question is asked.
     groupTable: boolean;
+    // The venue's playing host's own seat: free, nothing to pay.
+    hostSeat?: boolean;
   } | null>(null);
 
   // My bookings tab
@@ -379,11 +381,13 @@ export default function BookPage() {
           // Only a day with more than one foursome reserves the group table.
           // Anything but an explicit false asks, as it did before.
           groupTable: data.groupTable !== false,
+          hostSeat: ownRow?.playing_host === true,
           paymentOptions: coursePaymentOptions(ownRow?.course ?? selectedEvent),
           // The venue's green fee. amount_charged is written from it at
           // booking time, so it answers first; the course row behind it covers
           // a response we couldn't read a row out of.
           amountDue: bookingAmountDue({
+            playing_host: ownRow?.playing_host,
             amount_charged: ownRow?.amount_charged,
             cost_per_player:
               ownRow?.course?.cost_per_player ?? selectedEvent?.cost_per_player,
@@ -2033,6 +2037,8 @@ function SuccessScreen({
     amountDue: number;
     /** More than one foursome that day, so the group table is reserved. */
     groupTable: boolean;
+    /** The venue's playing host's own seat — free, so nothing to pay or choose. */
+    hostSeat?: boolean;
   };
   onDone: () => void;
   onUpdateBooking: (bookingId: string, updates: Partial<Booking>) => void;
@@ -2050,11 +2056,11 @@ function SuccessScreen({
   // Which ways this venue takes payment. Pay on App is the checkout link (and
   // the only place credit can be spent); Pay at club marks the round and is done.
   const venue = { payment_options: booking.paymentOptions };
-  const payNow = offersPayNow(venue);
+  const payNow = !booking.hostSeat && offersPayNow(venue);
   // A venue that takes nothing but club payment has already had the round
   // created that way — see the payment_method the create route writes. There is
   // no choice to offer and nothing to press: this screen only says so.
-  const clubOnly = !payNow && offersPayAtClub(venue);
+  const clubOnly = !booking.hostSeat && !payNow && offersPayAtClub(venue);
   // The button, for the venue that takes both. Here the club IS a choice, and
   // it's the member's to make.
   const canChooseClub = payNow && offersPayAtClub(venue) && !!booking.bookingId;
@@ -2163,7 +2169,9 @@ function SuccessScreen({
               or it doesn't, and if it doesn't there was never a third thing to
               ask. A venue that takes both starts on the Pay on App line and
               switches once the member picks the club. */}
-          {settlingAtClub
+          {booking.hostSeat
+            ? "You're hosting this round — your seat is free, there's nothing to pay."
+            : settlingAtClub
             ? "This round is settled with the club — pay them on the day, there's nothing to do here."
             : "The slot is yours to pay for — your round is confirmed once payment is complete."}
         </p>

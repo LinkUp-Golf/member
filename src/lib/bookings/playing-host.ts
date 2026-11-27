@@ -42,6 +42,13 @@ export interface HostAppointment {
   address: string
 }
 
+/** The host's seat as the SQL function returns it — a whole bookings row. */
+export interface HostSeat {
+  id: string
+  ghl_booking_id: string | null
+  [column: string]: unknown
+}
+
 /**
  * Whether a venue's tee sheet should still draw the calendar's GHL user as
  * "Host". Not where the venue has a playing host: they're on the sheet as a
@@ -54,10 +61,13 @@ export function showsCalendarHost(course: { playing_host_member_id?: string | nu
 
 /**
  * Seats the venue's playing host in the tee time just booked, if the day needs
- * them. Never throws and never fails the booking that called it: the member's
- * round is made either way, and an admin can add the host by hand.
+ * them. Where the host booked it themselves, their own booking becomes the seat
+ * instead of gaining a second one. Never throws and never fails the booking that
+ * called it: the member's round is made either way, and an admin can add the
+ * host by hand.
  *
- * Returns the new seat's id, or null when nobody was seated.
+ * Returns the seat as it now stands (new, or the host's own booking converted),
+ * or null when nobody was seated.
  */
 export async function seatPlayingHost(
   admin: AdminClient,
@@ -69,7 +79,7 @@ export async function seatPlayingHost(
     capacity: number
     appointment: HostAppointment
   },
-): Promise<string | null> {
+): Promise<HostSeat | null> {
   const { courseId, hostMemberId, bookingDate, teeTime, capacity, appointment } = args
   if (!hostMemberId) return null
 
@@ -85,17 +95,20 @@ export async function seatPlayingHost(
     })
     if (error) throw new Error(error.message)
 
-    const seat = (data as Array<{ id: string }> | null)?.[0]
+    const seat = (data as HostSeat[] | null)?.[0]
     if (!seat) return null
 
-    // The seat is held on our side; now the appointment on GHL's, so the
-    // calendar's own seat count agrees. Best-effort, like a guest's: the seat
-    // stands without it, and an admin can see it's missing.
-    const { data: host } = await admin
-      .from('members')
-      .select('ghl_contact_id, email, phone')
-      .eq('id', hostMemberId)
-      .single()
+    // A booking of the host's own that became the seat already has its
+    // appointment. A new seat is held on our side; now the appointment on GHL's,
+    // so the calendar's own seat count agrees. Best-effort, like a guest's: the
+    // seat stands without it, and an admin can see it's missing.
+    const { data: host } = seat.ghl_booking_id
+      ? { data: null }
+      : await admin
+          .from('members')
+          .select('ghl_contact_id, email, phone')
+          .eq('id', hostMemberId)
+          .single()
     if (host?.ghl_contact_id) {
       try {
         const ghlId = await createBooking({
@@ -103,6 +116,7 @@ export async function seatPlayingHost(
           contact: { id: host.ghl_contact_id, email: host.email, phone: host.phone ?? null },
         })
         await admin.from('bookings').update({ ghl_booking_id: ghlId }).eq('id', seat.id)
+        seat.ghl_booking_id = ghlId
       } catch (err) {
         logger.warn('Playing host seated, but their GHL appointment failed', {
           action: 'playing_host.ghl_failed',
@@ -116,7 +130,7 @@ export async function seatPlayingHost(
       action: 'playing_host.seated',
       metadata: { bookingId: seat.id, courseId, bookingDate, teeTime },
     })
-    return seat.id
+    return seat
   } catch (err) {
     logger.error('Could not seat the playing host', {
       action: 'playing_host.failed',

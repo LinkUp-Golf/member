@@ -284,6 +284,8 @@ export interface Booking {
   admin_notes?: string | null
   /** 'pay_at_club' once the member chose to settle with the club; null = checkout. */
   payment_method?: 'pay_at_club' | null
+  /** The venue's playing host's free seat — see @/lib/bookings/playing-host. */
+  playing_host?: boolean
   /** The booker covers this added player's seat. */
   paid_by_booker?: boolean
   /** An added player's answer to their invitation; null on the booker's own row. */

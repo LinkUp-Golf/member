@@ -24,7 +24,10 @@ import { BOOKING_PRICE_USD } from '@/lib/constants'
 export function bookingAmountDue(row: {
   amount_charged?: number | string | null
   cost_per_player?: number | string | null
+  /** The playing host's seat is free — see @/lib/bookings/playing-host. */
+  playing_host?: boolean | null
 }): number {
+  if (row.playing_host) return 0
   const charged = Number(row.amount_charged)
   if (Number.isFinite(charged) && charged > 0) return charged
   const rate = Number(row.cost_per_player)
