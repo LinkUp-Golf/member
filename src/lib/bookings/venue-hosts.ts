@@ -25,6 +25,7 @@ import { getCalendarBookingRules, listGHLUsers } from '@/lib/ghl/client'
 import { getCache, withCache } from '@/lib/cache'
 import { GHL_USERS_NS, GHL_USERS_TTL_MS, ghlUsersKey } from '@/lib/cache/keys'
 import { logger } from '@/lib/logger'
+import { showsCalendarHost } from './playing-host'
 import type { createAdminClient } from '@/lib/supabase-server'
 
 type AdminClient = ReturnType<typeof createAdminClient>
@@ -112,9 +113,13 @@ export function hostDisplayName(
  */
 export async function loadVenueHosts(
   admin: AdminClient,
-  courses: Array<{ id: string; ghl_calendar_id?: string | null }>,
+  courses: Array<{ id: string; ghl_calendar_id?: string | null; playing_host_member_id?: string | null }>,
 ): Promise<Record<string, VenueHost>> {
-  const withCalendar = courses.filter(c => !!c.ghl_calendar_id?.trim())
+  // A venue with a playing host has no calendar host line: the host is on the
+  // sheet as a player, in the foursome they're actually in. Drawing the calendar
+  // user as well is what put "Greg 2" at the head of every Aviara tee time —
+  // see @/lib/bookings/playing-host.
+  const withCalendar = courses.filter(c => !!c.ghl_calendar_id?.trim() && showsCalendarHost(c))
   if (withCalendar.length === 0) return {}
 
   // Who staffs each calendar. pickCalendarAssignee inside this is the

@@ -85,6 +85,7 @@ Each entry gives the date, who decided (**client** means the LinkUp Golf owner; 
 - **2026-08-14 · client. The GHL `host` tag still creates a host**, but no longer grants every venue: an admin grants venues.
 - **Creating a round publishes it**, at a venue already on LinkUp. Only a club proposed through "New LinkUp" waits for admin review.
 - **Hosts can't edit or cancel a listed round from the app.** Members reserve against its date and time. The edit code is still there, so restoring it means re-adding the buttons.
+- **2026-11-27. Aviara's host is a player in the day's first foursome, not a name above every tee time.** The Who's-playing sheet used to put the venue's GHL calendar user at the head of each tee time as "Host"; at Aviara that was "Greg 2", a GHL user who isn't a member and doesn't play. Greg Lipper (`courses.playing_host_member_id`) now gets a real, free booking row (`bookings.playing_host`) in the first foursome booked each day, so members see 3 spots open and a fifth can't book in. Decided with Greg: the seat holds a place (not a name only); once placed it doesn't move if someone later books an earlier tee time; each venue-day is decided once (`playing_host_days`), so an admin's Delete or Replace isn't overruled by the next booking; a full first foursome passes him to the next one booked. Days already booked when this shipped count as decided, because Greg had added himself by hand. Code: `src/lib/bookings/playing-host.ts`.
 
 ## Notifications and email
 

@@ -139,6 +139,9 @@ export interface Course {
   // How many of them one booking may bring (1–3), while the above is on.
   max_non_member_guests: number
 
+  /** Plays in the first foursome of every day here — see @/lib/bookings/playing-host. */
+  playing_host_member_id?: string | null
+
   // Optional description shown in the admin and used as the GHL group description
   description: string | null
 
