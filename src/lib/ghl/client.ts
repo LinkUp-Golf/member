@@ -15,6 +15,7 @@ import { logger } from '@/lib/logger'
 import { GHL_BASE_URL, GHL_API_VERSION, GHL_OPPORTUNITY_SOURCE, GHL_DEFAULT_ASSIGNEE_ID, GHL_CALENDAR_PROVIDER_ID, GHL_CALENDAR_RULES, GHL_CALENDAR_APPOINTMENTS_PER_SLOT, GHL_CALENDAR_EVENT_TITLE, GHL_CALENDAR_LOCATION, GHL_CALENDAR_FORM_ID, GHL_CALENDAR_REDIRECT_URL, GHL_CALENDAR_THANKS_MESSAGE, GHL_BOOKING_REMINDER_WEBHOOK_PATH, GHL_PAYMENT_REMINDER_WEBHOOK_PATH, GHL_HOSTED_EVENT_TAKEDOWN_WEBHOOK_PATH } from '@/lib/constants'
 import { getCache, withCache } from '@/lib/cache'
 import { GHL_CAL_RULES_NS, GHL_CAL_RULES_TTL_MS, ghlCalendarRulesKey } from '@/lib/cache/keys'
+import { remindersToSwitchOff, type GHLCalendarNotification } from './calendar-notifications'
 
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID ?? ''
 // Agency-level. Only the user endpoints need it — creating a sub-account user
@@ -721,8 +722,9 @@ export async function createBooking(params: {
         // GHL's own "booked" emails arrived with the venue, date and tee time
         // blank. The app sends its own confirmations now (bookingConfirmed /
         // bookingCreatedForAdmins, from POST /api/bookings/create), so GHL's
-        // would only be a second, emptier copy. Reminders are unaffected: they
-        // run through GHL workflows the app triggers by webhook.
+        // would only be a second, emptier copy. Reminders are the app's too
+        // (cron/booking-reminders); GHL's own calendar reminder is switched off
+        // (switchOffGHLCalendarReminders), and toNotify doesn't reach it.
         toNotify: false,
         source: GHL_OPPORTUNITY_SOURCE,
         channel: 'web_app',
@@ -1245,7 +1247,35 @@ export async function createGHLCalendar(params: {
       teamMembers: teamMembers.map(m => m.userId),
     },
   })
+  await switchOffGHLCalendarReminders(id)
   return id
+}
+
+// GHL gives a new calendar its own reminder email, 10 minutes before the
+// appointment; the app sends the reminders (see ./calendar-notifications).
+// Best-effort: the calendar is made and the venue usable either way, so a
+// failure is logged for someone to switch it off in GHL by hand.
+export async function switchOffGHLCalendarReminders(calendarId: string): Promise<void> {
+  try {
+    const notifications = await ghlFetch<GHLCalendarNotification[]>(`/calendars/${calendarId}/notifications`)
+    const ids = remindersToSwitchOff(Array.isArray(notifications) ? notifications : [])
+    for (const notificationId of ids) {
+      await ghlFetch(`/calendars/${calendarId}/notifications/${notificationId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ isActive: false }),
+      })
+    }
+    logger.info('GHL calendar reminders switched off', {
+      action: 'ghl_calendar_reminders_off',
+      metadata: { calendarId, switchedOff: ids.length },
+    })
+  } catch (err) {
+    logger.warn('Could not switch off GHL calendar reminders', {
+      action: 'ghl_calendar_reminders_off.failed',
+      errorMessage: String(err),
+      metadata: { calendarId },
+    })
+  }
 }
 
 export async function createCalendarGroup(params: {

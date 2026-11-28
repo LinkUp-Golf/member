@@ -21,6 +21,7 @@ import { notifyMember } from '@/lib/notify'
 import { MAX_PINNED_COURSES } from '@/lib/constants'
 import { canTakePayment, coursePaymentOptions, parsePaymentOptions } from '@/lib/bookings/payment-options'
 import { MAX_NON_MEMBER_GUESTS_INVALID_MESSAGE, parseMaxNonMemberGuests } from '@/lib/bookings/guest-policy'
+import { invalidEmails, parseEmailList, parseNoticeNumber } from '@/lib/venues/slot-release-notice'
 import { logger } from '@/lib/logger'
 import type { AuthContext } from '@/lib/auth/types'
 import type { Course } from '@/types'
@@ -459,6 +460,8 @@ export const PATCH = withAuth(
       'meeting_duration_mins', 'seats_per_class', 'max_players_per_day',
       'custom_slots_enabled', 'pinned', 'payment_options', 'allow_non_member_guests',
       'max_non_member_guests',
+      'slot_release_notice_enabled', 'slot_release_notice_to', 'slot_release_notice_cc',
+      'slot_release_notice_hours', 'slot_release_notice_min_players', 'slot_release_notice_body',
     ]
     const updates: Record<string, unknown> = {}
     for (const key of allowed) {
@@ -469,6 +472,37 @@ export const PATCH = withAuth(
     if ('allow_non_member_guests' in updates) {
       updates.allow_non_member_guests = updates.allow_non_member_guests === true
     }
+    // Slot-release notice (src/lib/venues/slot-release-notice.ts). Checked
+    // here, not only on the form: a bad address is a notice that silently
+    // never reaches the club.
+    if ('slot_release_notice_enabled' in updates) {
+      updates.slot_release_notice_enabled = updates.slot_release_notice_enabled === true
+    }
+    for (const key of ['slot_release_notice_to', 'slot_release_notice_cc'] as const) {
+      if (!(key in updates)) continue
+      const raw = typeof updates[key] === 'string' ? (updates[key] as string).trim() : ''
+      const bad = invalidEmails(raw)
+      if (bad.length) {
+        return NextResponse.json({ error: `Not an email address: ${bad.join(', ')}` }, { status: 400 })
+      }
+      updates[key] = raw || null
+    }
+    if (updates.slot_release_notice_enabled === true && !parseEmailList(updates.slot_release_notice_to as string | null).length) {
+      return NextResponse.json({ error: 'Enter the club’s email address for the open-slots email' }, { status: 400 })
+    }
+    for (const [key, max] of [['slot_release_notice_hours', 720], ['slot_release_notice_min_players', 100]] as const) {
+      if (!(key in updates)) continue
+      const n = parseNoticeNumber(updates[key], 1, max)
+      if (n === null) {
+        return NextResponse.json({ error: `The open-slots email needs a whole number from 1 to ${max}` }, { status: 400 })
+      }
+      updates[key] = n
+    }
+    if ('slot_release_notice_body' in updates) {
+      const body = typeof updates.slot_release_notice_body === 'string' ? updates.slot_release_notice_body.trim() : ''
+      updates.slot_release_notice_body = body ? body.slice(0, 5000) : null
+    }
+
     // Refused rather than clamped, so what's saved is what the admin picked.
     if ('max_non_member_guests' in updates) {
       const max = parseMaxNonMemberGuests(updates.max_non_member_guests)

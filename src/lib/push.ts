@@ -329,7 +329,7 @@ export const NotificationTemplates = {
   memberActivated: (firstName: string): PushPayload => ({
     title: `Welcome to LinkUp Golf, ${titleCaseName(firstName)}!`,
     body:  'Your membership is now active. Explore the community, book a tee time, and connect with members.',
-    url:   '/home',
+    url:   '/book',
     tag:   'member-activated',
     subject: `Welcome to LinkUp Golf, ${titleCaseName(firstName)}`,
     cta:   'Open LinkUp',

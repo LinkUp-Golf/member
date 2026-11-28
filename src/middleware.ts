@@ -35,6 +35,12 @@ const PUBLIC_ROUTES = [
   '/api/version',                 // which build is deployed (UpdateWatcher); a commit hash, nothing more
   '/api/webhooks',                // GHL and Resend webhooks: secured by signature, not session
   '/api/email/unsubscribe',       // reached from an inbox; the signed token is the only credential
+  // Vercel calls crons with `Authorization: Bearer <CRON_SECRET>` and no
+  // session, so a cron behind the sign-in redirect never runs. The route checks
+  // the secret itself. Only this one so far: the other crons have been behind
+  // the redirect all along, and opening them at once changes what production
+  // does (see docs/decisions.md, 2026-11-28).
+  '/api/cron/slot-release-notices',
   '/api/.well-known/vercel/flags', // Vercel toolbar flag discovery (public by design)
   '/.well-known/vercel/flags',    // RFC 8615 path the toolbar actually fetches
 ]

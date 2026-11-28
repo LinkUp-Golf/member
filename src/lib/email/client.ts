@@ -45,6 +45,14 @@ export interface EmailMessage {
    * into an unsubscribe rather than a spam complaint — see ./unsubscribe.
    */
   headers?: Record<string, string>
+  /**
+   * Copied openly. Only for a message to one business address with our own
+   * people copied (a club's slot-release notice) — never for members, who go
+   * in bcc so nobody is handed anyone else's address.
+   */
+  cc?: string[]
+  /** Overrides EMAIL_REPLY_TO for this message. */
+  replyTo?: string[]
 }
 
 export interface EmailSendResult {
@@ -145,7 +153,10 @@ export async function sendEmail(message: EmailMessage): Promise<EmailSendResult>
       // member's email off another's screen.
       to: single ? recipients : [from()],
       ...(single ? {} : { bcc: recipients }),
-      ...(replyTo() ? { replyTo: replyTo() as string } : {}),
+      ...(message.cc?.length ? { cc: message.cc } : {}),
+      ...(message.replyTo?.length
+        ? { replyTo: message.replyTo }
+        : replyTo() ? { replyTo: replyTo() as string } : {}),
       ...(message.headers ? { headers: message.headers } : {}),
       subject: message.subject,
       html: message.html,
