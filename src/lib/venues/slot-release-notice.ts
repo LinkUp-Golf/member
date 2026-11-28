@@ -12,10 +12,15 @@
 // form. The cron is /api/cron/slot-release-notices; one notice per tee time,
 // claimed in `slot_release_notices` before it's sent.
 //
+// Which tee times: every tee time with bookings, and on a day nobody has booked,
+// the tee time the club holds for us anyway (unbookedHeldTeeTimes) — the club
+// needs to hear about an empty foursome most of all.
+//
 // Who counts: every seat held at that tee time, i.e. every booking row there
 // that isn't cancelled or waitlisted — members, non-member guests and the
 // playing host alike (Greg: "the count includes the host"). The same count the
-// booking functions enforce capacity against.
+// booking functions enforce capacity against. On an unbooked day, the playing
+// host alone.
 
 import { venueInstant, SEND_EARLY_MS, SEND_LATE_MS } from '@/lib/bookings/reminders'
 import { playingMemberId } from '@/lib/bookings/players'
@@ -117,6 +122,55 @@ export function groupTeeTimes(rows: NoticeSeatRow[]): NoticeTeeTime[] {
   return [...groups.values()]
     .map(({ firstAt: _firstAt, ...g }) => g)
     .sort((a, b) => `${a.date} ${a.teeTime}`.localeCompare(`${b.date} ${b.teeTime}`))
+}
+
+/**
+ * The tee time a club holds for us on a day nobody has booked yet.
+ *
+ * Aviara holds one foursome for us every day on its own tee sheet, whether or
+ * not a member has signed up (Greg, 2026-11-28: "the booking already exists on
+ * the Aviara tee sheet, so we must notify them to release it"). Until the
+ * community calendar replaces it, the app's only record of that foursome is the
+ * tee time the venue's calendar offers members that day: usually exactly one,
+ * but some days the calendar still offers a range, so the first is taken — the
+ * club holds one foursome a day, not one per slot. A day the calendar offers
+ * nothing (Greg took it off) has no held tee time and no notice.
+ *
+ * The playing host counts as a player there (Greg: "they just care that I am
+ * taking one of the 4 available slots"); their seat isn't a booking row until
+ * the first member books.
+ *
+ * `offered` is each unbooked date's calendar start times, offset-bearing ISO
+ * ("2027-01-23T12:08:00-08:00") or 'HH:MM[:SS]'. Dates with bookings are
+ * ignored here: their booked tee times are the held ones.
+ */
+export function unbookedHeldTeeTimes(
+  booked: NoticeTeeTime[],
+  offered: Record<string, string[]>,
+  playingHostId: string | null,
+): NoticeTeeTime[] {
+  const bookedDates = new Set(booked.map(g => g.date))
+  const held: NoticeTeeTime[] = []
+  for (const [date, starts] of Object.entries(offered)) {
+    if (bookedDates.has(date)) continue
+    const times = starts.map(clockOf).filter((t): t is string => !!t).sort()
+    const first = times[0]
+    if (!first) continue
+    held.push({
+      date,
+      teeTime: first,
+      players: playingHostId ? 1 : 0,
+      hostMemberId: playingHostId,
+      firstBookerId: playingHostId ?? '',
+    })
+  }
+  return held.sort((a, b) => `${a.date} ${a.teeTime}`.localeCompare(`${b.date} ${b.teeTime}`))
+}
+
+/** 'HH:MM:SS' from an ISO start time or a bare clock time; null if neither. */
+function clockOf(start: string): string | null {
+  const m = /(?:T|^)(\d{1,2}:\d{2}(?::\d{2})?)/.exec(start)
+  return m?.[1] ? normaliseTeeTime(m[1]) : null
 }
 
 /**

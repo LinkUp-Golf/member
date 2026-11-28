@@ -12,6 +12,7 @@ import {
   noticeSubject,
   parseEmailList,
   parseNoticeNumber,
+  unbookedHeldTeeTimes,
   type NoticeSeatRow,
 } from '@/lib/venues/slot-release-notice'
 
@@ -84,6 +85,38 @@ describe('groupTeeTimes', () => {
   it('takes a host seat booked for someone else as that person', () => {
     const [g] = groupTeeTimes([seat({ member_id: 'admin', player_member_id: 'jim', playing_host: true })])
     expect(g!.hostMemberId).toBe('jim')
+  })
+})
+
+describe('unbookedHeldTeeTimes', () => {
+  const booked = groupTeeTimes([seat({ booking_date: '2027-01-23' })])
+
+  it('takes the calendar tee time on a day nobody booked, with the host counted', () => {
+    const held = unbookedHeldTeeTimes(booked, { '2027-01-24': ['2027-01-24T12:08:00-08:00'] }, 'greg')
+    expect(held).toEqual([
+      { date: '2027-01-24', teeTime: '12:08:00', players: 1, hostMemberId: 'greg', firstBookerId: 'greg' },
+    ])
+    expect(noticeHostId(held[0]!, 'greg')).toBe('greg')
+  })
+
+  it('leaves a booked day to its bookings', () => {
+    expect(unbookedHeldTeeTimes(booked, { '2027-01-23': ['2027-01-23T13:30:00-08:00'] }, 'greg')).toEqual([])
+  })
+
+  it('takes only the first tee time when the calendar offers a range', () => {
+    const held = unbookedHeldTeeTimes([], {
+      '2027-01-24': ['2027-01-24T13:00:00-08:00', '2027-01-24T12:10:00-08:00', '12:30'],
+    }, 'greg')
+    expect(held.map(h => h.teeTime)).toEqual(['12:10:00'])
+  })
+
+  it('has nothing for a day the calendar offers nothing', () => {
+    expect(unbookedHeldTeeTimes([], { '2027-01-24': [] }, 'greg')).toEqual([])
+  })
+
+  it('counts nobody where the venue has no playing host', () => {
+    const [held] = unbookedHeldTeeTimes([], { '2027-01-24': ['12:08:00'] }, null)
+    expect(held!.players).toBe(0)
   })
 })
 

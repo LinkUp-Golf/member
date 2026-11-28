@@ -11,6 +11,10 @@ export const dynamic = 'force-dynamic'
 // threshold and wording are on its admin form (courses.slot_release_notice_*).
 // When it's due, who counts and the wording: src/lib/venues/slot-release-notice.ts.
 //
+// Which tee times: each one with bookings, and on a day nobody has booked, the
+// first tee time the venue's calendar offers — the club holds that foursome
+// for us anyway, so it needs the notice most (unbookedHeldTeeTimes).
+//
 // One notice per tee time. The tee time is claimed in slot_release_notices
 // (unique per venue, date and tee time) before the email is sent, and the
 // claim is released again if the send fails, so a later run in the window
@@ -42,8 +46,11 @@ import {
   noticeRecipients,
   noticeSubject,
   parseEmailList,
+  unbookedHeldTeeTimes,
   type NoticeSeatRow,
 } from '@/lib/venues/slot-release-notice'
+import { slotsForDate } from '@/lib/bookings/availability'
+import type { Course } from '@/types'
 import { nameOrEmail } from '@/lib/utils'
 import { AVIARA_TIMEZONE } from '@/lib/constants'
 import { logger } from '@/lib/logger'
@@ -78,10 +85,8 @@ export async function GET(request: NextRequest) {
 
   const { data: venues, error: venuesError } = await admin
     .from('courses')
-    .select(
-      'id, name, timezone, playing_host_member_id, slot_release_notice_to, slot_release_notice_cc, ' +
-        'slot_release_notice_hours, slot_release_notice_min_players, slot_release_notice_body',
-    )
+    // The whole row: slotsForDate reads the venue's calendar settings.
+    .select('*')
     .eq('slot_release_notice_enabled', true)
 
   if (venuesError) {
@@ -132,9 +137,29 @@ export async function GET(request: NextRequest) {
       continue
     }
 
-    const due = groupTeeTimes((seats ?? []) as NoticeSeatRow[]).filter(
-      g => isNoticeDue(g.date, g.teeTime, timezone, hours, now),
-    )
+    const booked = groupTeeTimes((seats ?? []) as NoticeSeatRow[])
+
+    // A day nobody has booked still has a foursome on the club's tee sheet:
+    // read the tee time the venue's calendar offers that day.
+    const bookedDates = new Set(booked.map(g => g.date))
+    const offered: Record<string, string[]> = {}
+    for (let d = new Date(`${fetchFrom}T12:00:00Z`); format(d, 'yyyy-MM-dd') <= fetchTo; d = addDays(d, 1)) {
+      const date = format(d, 'yyyy-MM-dd')
+      if (bookedDates.has(date)) continue
+      try {
+        offered[date] = (await slotsForDate(admin, venue as unknown as Course, date)).map(s => s.startTime)
+      } catch (err) {
+        results.errors++
+        logger.error('slot-release-notices: failed to read the calendar', {
+          action: 'cron.slot_release_notices',
+          metadata: { course_id: venue.id, date },
+          errorMessage: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
+    const held = unbookedHeldTeeTimes(booked, offered, venue.playing_host_member_id)
+
+    const due = [...booked, ...held].filter(g => isNoticeDue(g.date, g.teeTime, timezone, hours, now))
     results.checked += due.length
 
     for (const group of due) {
