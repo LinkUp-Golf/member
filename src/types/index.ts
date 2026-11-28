@@ -142,6 +142,16 @@ export interface Course {
   /** Plays in the first foursome of every day here — see @/lib/bookings/playing-host. */
   playing_host_member_id?: string | null
 
+  // Slot-release notice to the club — see @/lib/venues/slot-release-notice.
+  slot_release_notice_enabled?: boolean
+  /** Comma-separated addresses. */
+  slot_release_notice_to?: string | null
+  slot_release_notice_cc?: string | null
+  slot_release_notice_hours?: number
+  slot_release_notice_min_players?: number
+  /** Null = the default wording. */
+  slot_release_notice_body?: string | null
+
   // Optional description shown in the admin and used as the GHL group description
   description: string | null
 

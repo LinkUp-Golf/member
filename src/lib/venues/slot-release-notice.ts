@@ -1,0 +1,218 @@
+// Slot-release notice: when a club is told that a tee time we hold there isn't
+// full, and what the email says. Pure, so it's tested.
+//
+// Agreed between Greg and Aviara management (2026-11-28). 72 hours before every
+// Aviara foursome with fewer than four players signed up, the golf shop gets an
+// email saying so, copied to Greg: the club may then release the open places to
+// its own players. Later sign-ups are not emailed; Greg adds them to the club's
+// tee sheet himself.
+//
+// The address, the hours, the threshold and the wording are columns on the
+// venue (`courses.slot_release_notice_*`, 20261128000002), edited on its admin
+// form. The cron is /api/cron/slot-release-notices; one notice per tee time,
+// claimed in `slot_release_notices` before it's sent.
+//
+// Who counts: every seat held at that tee time, i.e. every booking row there
+// that isn't cancelled or waitlisted — members, non-member guests and the
+// playing host alike (Greg: "the count includes the host"). The same count the
+// booking functions enforce capacity against.
+
+import { venueInstant, SEND_EARLY_MS, SEND_LATE_MS } from '@/lib/bookings/reminders'
+import { playingMemberId } from '@/lib/bookings/players'
+import { formatTeeTime } from '@/lib/utils'
+
+export const DEFAULT_NOTICE_HOURS = 72
+export const DEFAULT_NOTICE_MIN_PLAYERS = 4
+
+/**
+ * Greg's wording, as agreed with Aviara. The bracketed names are filled in per
+ * tee time (fillNoticeBody); an admin editing the text keeps them to have them
+ * filled.
+ */
+export const DEFAULT_NOTICE_BODY = `This is an automated email from LinkUp Golf.
+[Host name] currently has a foursome booking on [event date] at [tee time]. We currently have [number of confirmed players] players confirmed.
+
+The event is still available to our members, but Aviara may release the remaining slots for individual sign ups. We will add any new signups to the tee sheet as they come in.
+
+As always, thanks for your support.`
+
+/** The placeholders the body may use, for the admin form's hint. */
+export const NOTICE_PLACEHOLDERS = ['[Host name]', '[event date]', '[tee time]', '[number of confirmed players]'] as const
+
+/** When the notice for this tee time is due. */
+export function noticeDueAt(date: string, teeTime: string, timezone: string, hoursBefore: number): Date {
+  return new Date(venueInstant(date, teeTime, timezone).getTime() - hoursBefore * 60 * 60 * 1000)
+}
+
+/**
+ * Whether this cron run should send it. The same window as the round
+ * reminders: from 8 minutes before the moment to 30 minutes after, so one
+ * missed run doesn't lose it, and a tee time first booked inside the window's
+ * far side isn't told about late.
+ */
+export function isNoticeDue(
+  date: string,
+  teeTime: string,
+  timezone: string,
+  hoursBefore: number,
+  now: Date,
+): boolean {
+  const at = noticeDueAt(date, teeTime, timezone, hoursBefore).getTime()
+  const t = now.getTime()
+  return t >= at - SEND_EARLY_MS && t <= at + SEND_LATE_MS
+}
+
+/** A booking row, as much of one as the count needs. */
+export interface NoticeSeatRow {
+  booking_date: string
+  tee_time: string | null
+  member_id: string
+  player_member_id: string | null
+  guest_name: string | null
+  playing_host: boolean | null
+  created_at?: string | null
+}
+
+export interface NoticeTeeTime {
+  date: string
+  /** 'HH:MM:SS' */
+  teeTime: string
+  players: number
+  /** Who holds the host seat at this tee time, when someone does. */
+  hostMemberId: string | null
+  /** The earliest booker at this tee time — the fallback for the host's name. */
+  firstBookerId: string
+}
+
+/** 'HH:MM' and 'HH:MM:SS' read as the same tee time. */
+export function normaliseTeeTime(time: string): string {
+  const [h = '00', m = '00', s = '00'] = time.split(':')
+  return `${h.padStart(2, '0')}:${m.padStart(2, '0')}:${s.slice(0, 2).padStart(2, '0')}`
+}
+
+/**
+ * The venue's held seats, one entry per date and tee time. Rows must already
+ * exclude cancelled and waitlisted seats; rows with no tee time are skipped.
+ */
+export function groupTeeTimes(rows: NoticeSeatRow[]): NoticeTeeTime[] {
+  const groups = new Map<string, NoticeTeeTime & { firstAt: string }>()
+  for (const row of rows) {
+    if (!row.tee_time) continue
+    const date = row.booking_date.slice(0, 10)
+    const teeTime = normaliseTeeTime(row.tee_time)
+    const key = `${date} ${teeTime}`
+    const createdAt = row.created_at ?? ''
+    let g = groups.get(key)
+    if (!g) {
+      g = { date, teeTime, players: 0, hostMemberId: null, firstBookerId: row.member_id, firstAt: createdAt }
+      groups.set(key, g)
+    }
+    g.players++
+    if (row.playing_host) g.hostMemberId = playingMemberId(row) ?? row.member_id
+    if (createdAt && (!g.firstAt || createdAt < g.firstAt)) {
+      g.firstAt = createdAt
+      g.firstBookerId = row.member_id
+    }
+  }
+  return [...groups.values()]
+    .map(({ firstAt: _firstAt, ...g }) => g)
+    .sort((a, b) => `${a.date} ${a.teeTime}`.localeCompare(`${b.date} ${b.teeTime}`))
+}
+
+/**
+ * Whose name the notice gives: the host seated at that tee time, else the
+ * venue's playing host (the club holds the foursome under their name), else
+ * whoever booked it first.
+ */
+export function noticeHostId(group: NoticeTeeTime, venuePlayingHostId: string | null): string {
+  return group.hostMemberId ?? venuePlayingHostId ?? group.firstBookerId
+}
+
+/** "Saturday, January 23, 2027" from 'YYYY-MM-DD', with no timezone involved. */
+export function formatNoticeDate(date: string): string {
+  const d = new Date(`${date.slice(0, 10)}T12:00:00Z`)
+  return d.toLocaleDateString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC',
+  })
+}
+
+/** "12:08 PM" */
+export function formatNoticeTime(teeTime: string): string {
+  return formatTeeTime(teeTime).toUpperCase()
+}
+
+export interface NoticeValues {
+  hostName: string
+  date: string
+  teeTime: string
+  players: number
+}
+
+/** The body with its placeholders filled. Placeholders match in any case. */
+export function fillNoticeBody(template: string | null | undefined, v: NoticeValues): string {
+  const body = template?.trim() ? template : DEFAULT_NOTICE_BODY
+  const values: Record<string, string> = {
+    'host name': v.hostName,
+    'event date': formatNoticeDate(v.date),
+    'tee time': formatNoticeTime(v.teeTime),
+    'number of confirmed players': String(v.players),
+  }
+  return body.replace(/\[([^\]]+)\]/g, (whole, name: string) => values[name.trim().toLowerCase()] ?? whole)
+}
+
+export function noticeSubject(venueName: string, v: NoticeValues): string {
+  const players = `${v.players} ${v.players === 1 ? 'player' : 'players'}`
+  return `LinkUp Golf at ${venueName}: ${formatNoticeDate(v.date)} at ${formatNoticeTime(v.teeTime)}, ${players} confirmed`
+}
+
+/** Addresses from a comma-, semicolon- or space-separated list. Invalid ones are dropped. */
+export function parseEmailList(value: string | null | undefined): string[] {
+  if (!value) return []
+  const out: string[] = []
+  for (const part of value.split(/[\s,;]+/)) {
+    const address = part.trim()
+    if (address && EMAIL_RE.test(address) && !out.some(a => a.toLowerCase() === address.toLowerCase())) {
+      out.push(address)
+    }
+  }
+  return out
+}
+
+/** The entries of a list that aren't addresses — for the admin form's error. */
+export function invalidEmails(value: string | null | undefined): string[] {
+  if (!value) return []
+  return value.split(/[\s,;]+/).map(p => p.trim()).filter(p => p && !EMAIL_RE.test(p))
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+export interface NoticeRecipients {
+  to: string[]
+  cc: string[]
+  /** True when this deployment held the club back and sent only the copy. */
+  heldBack: boolean
+}
+
+/**
+ * Who a notice goes to. Only production writes to the club: staging and local
+ * development run against test bookings, and a test notice in a real golf
+ * shop's inbox is the one mistake this feature can't take back. Anywhere else
+ * the copy addresses receive it alone, and nobody does if there are none.
+ */
+export function noticeRecipients(to: string[], cc: string[], isProduction: boolean): NoticeRecipients {
+  if (isProduction) return { to, cc: cc.filter(a => !to.includes(a)), heldBack: false }
+  return { to: cc, cc: [], heldBack: true }
+}
+
+/** The production app's address. Anything else is a test deployment. */
+export const PRODUCTION_APP_URL = 'https://app.linkup.golf'
+
+export function isProductionApp(appUrl: string | undefined): boolean {
+  return (appUrl ?? '').replace(/\/+$/, '').toLowerCase() === PRODUCTION_APP_URL
+}
+
+/** A form value for the hours or threshold, or null if it isn't one. */
+export function parseNoticeNumber(value: unknown, min: number, max: number): number | null {
+  const n = typeof value === 'string' && value.trim() ? Number(value) : value
+  return typeof n === 'number' && Number.isInteger(n) && n >= min && n <= max ? n : null
+}

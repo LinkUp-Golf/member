@@ -17,6 +17,13 @@ import {
   type PaymentOption,
 } from '@/lib/bookings/payment-options'
 import { maxNonMemberGuests } from '@/lib/bookings/guest-policy'
+import {
+  DEFAULT_NOTICE_BODY,
+  DEFAULT_NOTICE_HOURS,
+  DEFAULT_NOTICE_MIN_PLAYERS,
+  NOTICE_PLACEHOLDERS,
+  invalidEmails,
+} from '@/lib/venues/slot-release-notice'
 import { daysUntil } from '@/lib/bookings/lead-time'
 import { MAX_PINNED_COURSES } from '@/lib/constants'
 import type { Course, CourseApprovalStatus } from '@/types'
@@ -1179,6 +1186,12 @@ type CourseFormValues = {
   custom_slots_enabled: boolean
   allow_non_member_guests: boolean
   max_non_member_guests: number
+  slot_release_notice_enabled: boolean
+  slot_release_notice_to: string
+  slot_release_notice_cc: string
+  slot_release_notice_hours: number
+  slot_release_notice_min_players: number
+  slot_release_notice_body: string
 }
 
 function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onManageSlots }: {
@@ -1222,6 +1235,13 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
       // Off unless an admin turns it on — see src/lib/bookings/guest-policy.ts.
       allow_non_member_guests: editingCourse?.allow_non_member_guests ?? false,
       max_non_member_guests: maxNonMemberGuests(editingCourse),
+      slot_release_notice_enabled: editingCourse?.slot_release_notice_enabled ?? false,
+      slot_release_notice_to: editingCourse?.slot_release_notice_to ?? '',
+      slot_release_notice_cc: editingCourse?.slot_release_notice_cc ?? '',
+      slot_release_notice_hours: editingCourse?.slot_release_notice_hours ?? DEFAULT_NOTICE_HOURS,
+      slot_release_notice_min_players: editingCourse?.slot_release_notice_min_players ?? DEFAULT_NOTICE_MIN_PLAYERS,
+      // The saved wording, or the default to start from.
+      slot_release_notice_body: editingCourse?.slot_release_notice_body || DEFAULT_NOTICE_BODY,
     },
   })
 
@@ -1229,6 +1249,7 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
   const watchedCalendarId = watch('ghl_calendar_id')
   const watchCustomSlots = watch('custom_slots_enabled')
   const watchAllowNonMembers = watch('allow_non_member_guests')
+  const watchSlotNotice = watch('slot_release_notice_enabled')
   // Whether the payment link is required — it is only the Pay on App checkout
   // that needs one. Watched rather than read at submit so the label, the hint
   // and the rule all change the moment the option is ticked.
@@ -1286,6 +1307,17 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
           max_non_member_guests: Number.isInteger(data.max_non_member_guests)
             ? data.max_non_member_guests
             : undefined,
+          // Left out when emptied (only possible while switched off), so the
+          // venue keeps its number.
+          slot_release_notice_hours: Number.isInteger(data.slot_release_notice_hours)
+            ? data.slot_release_notice_hours
+            : undefined,
+          slot_release_notice_min_players: Number.isInteger(data.slot_release_notice_min_players)
+            ? data.slot_release_notice_min_players
+            : undefined,
+          // The default wording is stored as null, so it isn't frozen into the row.
+          slot_release_notice_body:
+            data.slot_release_notice_body.trim() === DEFAULT_NOTICE_BODY.trim() ? null : data.slot_release_notice_body,
           createCalendar: false,
         }),
       })
@@ -1783,6 +1815,125 @@ function CreateCourseDrawer({ editingCourse, onClose, onCreated, onError, onMana
                   Save changes to enable the date &amp; slot editor for this course.
                 </p>
               )
+            )}
+
+            {/* Slot-release notice — see src/lib/venues/slot-release-notice.ts.
+                Edit only: the create route doesn't take these. */}
+            {isEdit && (
+              <>
+                <label className="mt-4 flex items-start gap-3 rounded-xl border border-gray-100 px-4 py-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-green-700 focus:ring-green-600"
+                    {...register('slot_release_notice_enabled')}
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-gray-700">Email the club about open slots</span>
+                    <span className={infoText}>
+                      Before each tee time booked here, if fewer players than the number below are signed up,
+                      the club is emailed so it can release the open slots. Sent once per tee time.
+                    </span>
+                  </span>
+                </label>
+
+                {watchSlotNotice && (
+                  <div className="mt-2 rounded-xl border border-gray-100 px-4 py-3 space-y-3">
+                    <div>
+                      <label htmlFor="course-notice-to" className="block text-sm font-medium text-gray-700">Club email</label>
+                      <input
+                        id="course-notice-to"
+                        type="text"
+                        className={`mt-1 ${field(!!errors.slot_release_notice_to)}`}
+                        placeholder="golfshop@club.com"
+                        {...register('slot_release_notice_to', {
+                          validate: v => {
+                            if (!getValues('slot_release_notice_enabled')) return true
+                            if (!v.trim()) return 'Enter the club’s email address'
+                            const bad = invalidEmails(v)
+                            return bad.length === 0 || `Not an email address: ${bad.join(', ')}`
+                          },
+                        })}
+                      />
+                      {errors.slot_release_notice_to && <p className={errMsg}>{errors.slot_release_notice_to.message}</p>}
+                    </div>
+                    <div>
+                      <label htmlFor="course-notice-cc" className="block text-sm font-medium text-gray-700">Copy to</label>
+                      <input
+                        id="course-notice-cc"
+                        type="text"
+                        className={`mt-1 ${field(!!errors.slot_release_notice_cc)}`}
+                        placeholder="you@linkup.golf"
+                        {...register('slot_release_notice_cc', {
+                          validate: v => {
+                            const bad = invalidEmails(v)
+                            return bad.length === 0 || `Not an email address: ${bad.join(', ')}`
+                          },
+                        })}
+                      />
+                      {errors.slot_release_notice_cc && <p className={errMsg}>{errors.slot_release_notice_cc.message}</p>}
+                      <p className={infoText}>
+                        Separate several addresses with commas. The club&rsquo;s replies go to these addresses.
+                        Test copies of the app (staging) email only these, never the club.
+                      </p>
+                    </div>
+                    <div className="flex gap-3">
+                      <div className="w-1/2">
+                        <label htmlFor="course-notice-hours" className="block text-sm font-medium text-gray-700">Hours before</label>
+                        <input
+                          id="course-notice-hours"
+                          type="number"
+                          min="1"
+                          max="720"
+                          step="1"
+                          inputMode="numeric"
+                          className={`mt-1 ${field(!!errors.slot_release_notice_hours)}`}
+                          {...register('slot_release_notice_hours', {
+                            valueAsNumber: true,
+                            validate: v =>
+                              !getValues('slot_release_notice_enabled') ||
+                              (Number.isInteger(v) && v >= 1 && v <= 720) ||
+                              'A whole number from 1 to 720',
+                          })}
+                        />
+                        {errors.slot_release_notice_hours && <p className={errMsg}>{errors.slot_release_notice_hours.message}</p>}
+                      </div>
+                      <div className="w-1/2">
+                        <label htmlFor="course-notice-min" className="block text-sm font-medium text-gray-700">When fewer than</label>
+                        <input
+                          id="course-notice-min"
+                          type="number"
+                          min="1"
+                          max="100"
+                          step="1"
+                          inputMode="numeric"
+                          className={`mt-1 ${field(!!errors.slot_release_notice_min_players)}`}
+                          {...register('slot_release_notice_min_players', {
+                            valueAsNumber: true,
+                            validate: v =>
+                              !getValues('slot_release_notice_enabled') ||
+                              (Number.isInteger(v) && v >= 1 && v <= 100) ||
+                              'A whole number from 1 to 100',
+                          })}
+                        />
+                        {errors.slot_release_notice_min_players && <p className={errMsg}>{errors.slot_release_notice_min_players.message}</p>}
+                        <p className={infoText}>players, the host included</p>
+                      </div>
+                    </div>
+                    <div>
+                      <label htmlFor="course-notice-body" className="block text-sm font-medium text-gray-700">Email text</label>
+                      <textarea
+                        id="course-notice-body"
+                        rows={9}
+                        className={`mt-1 ${field(false)}`}
+                        {...register('slot_release_notice_body')}
+                      />
+                      <p className={infoText}>
+                        Filled in for each tee time: {NOTICE_PLACEHOLDERS.join(', ')}.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </section>
 
