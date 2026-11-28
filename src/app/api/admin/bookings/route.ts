@@ -186,6 +186,9 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
             const ghlId = await createBooking({
               ...appt,
               contact: { id: r.contactId, email: r.player.email ?? '', phone: r.player.phone },
+              // The contact as GHL holds it — never rewritten with what was
+              // typed here, which can clash with another contact.
+              sendContactDetails: false,
             })
             await admin.from('bookings').update({ ghl_booking_id: ghlId }).eq('id', rowId)
           } catch (err) {

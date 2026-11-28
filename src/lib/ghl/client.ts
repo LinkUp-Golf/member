@@ -681,6 +681,8 @@ async function resolveAppointmentAssignee(calendarId: string): Promise<string | 
 export async function createBooking(params: {
   calendarId: string
   contact: { id: string; email: string; phone?: string | null }
+  /** false: name the contact by id only (admin-added players). Default true. */
+  sendContactDetails?: boolean
   startTime: string   // "YYYY-MM-DDTHH:MM:SS±HHMM"
   endTime: string     // "YYYY-MM-DDTHH:MM:SS±HHMM"
   title: string
@@ -699,11 +701,12 @@ export async function createBooking(params: {
         calendarId: params.calendarId,
         locationId: GHL_LOCATION_ID,
         contactId: params.contact.id,
-        // The contact's details ride along only where there's an address. An
-        // admin can add a player by name alone, and GHL refused the appointment
-        // for a contact object with no email; contactId alone names them, and
-        // GHL reads the rest from the contact it already holds.
-        ...(params.contact.email
+        // contactId alone names the contact; GHL reads the rest from the record
+        // it holds. The details ride along only where asked for and there's
+        // an address. An admin adding a player asks for none: what they typed
+        // can clash with another contact (GHL refuses a duplicate email or
+        // phone), and the contact is GHL's record, not ours to rewrite.
+        ...(params.contact.email && params.sendContactDetails !== false
           ? { contact: { id: params.contact.id, email: params.contact.email, phone: params.contact.phone ?? null } }
           : {}),
         title: params.title,
