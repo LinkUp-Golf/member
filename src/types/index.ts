@@ -87,6 +87,21 @@ export const INDUSTRY_CATEGORIES: IndustryCategory[] = [
 
 export type CourseApprovalStatus = 'pending' | 'active' | 'rejected' | 'archived'
 
+/** A community — San Diego today. See @/lib/communities/permissions. */
+export interface Community {
+  id: string
+  name: string
+  slug: string
+  timezone: string
+  /** The GHL membership tag that puts a member in this community. */
+  membership_tag: string | null
+  captain_member_id: string | null
+  captain_venue_id: string | null
+  active: boolean
+  created_at: string
+  updated_at: string
+}
+
 export interface Course {
   id: string
   name: string
@@ -141,6 +156,9 @@ export interface Course {
 
   /** Plays in the first foursome of every day here — see @/lib/bookings/playing-host. */
   playing_host_member_id?: string | null
+
+  /** The community this venue belongs to (20261128000003). */
+  community_id?: string | null
 
   // Slot-release notice to the club — see @/lib/venues/slot-release-notice.
   slot_release_notice_enabled?: boolean
