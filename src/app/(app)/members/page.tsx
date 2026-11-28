@@ -15,6 +15,7 @@ import SuggestedTag from "@/components/matching/SuggestedTag";
 import { useRecommendations, type Recommendation } from "@/hooks/useRecommendations";
 import { INDUSTRY_CATEGORIES } from "@/types";
 import type { MemberWithProfile } from "@/types";
+import CommunityFilter from "@/components/communities/CommunityFilter";
 
 const FILTER_ALL = "All";
 
@@ -118,6 +119,11 @@ export default function MembersPage() {
             </button>
           )}
         </div>
+      </div>
+
+      {/* Community — greyed out until there's a second one. */}
+      <div className="px-5 pt-3.5 overflow-x-auto hide-scrollbar">
+        <CommunityFilter layout="inline" />
       </div>
 
       {/* Filter chips */}

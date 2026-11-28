@@ -81,6 +81,7 @@ import type {
 } from "@/types";
 import { AVIARA_TIMEZONE, MY_BOOKINGS_TAB } from "@/lib/constants";
 import { validateEmail } from "@/lib/validation";
+import CommunityFilter from "@/components/communities/CommunityFilter";
 
 // "suggested" is a member too — one the LinkUp team recommended, picked from
 // a short list instead of by name. Everything downstream treats it as a member.
@@ -4719,6 +4720,8 @@ function EventFiltersDrawer({
               paddingBottom: "max(2rem, calc(2rem + env(safe-area-inset-bottom)))",
             }}
           >
+            <CommunityFilter />
+
             <div className="mb-6">
               <p
                 className="text-xs font-semibold mb-2.5"
