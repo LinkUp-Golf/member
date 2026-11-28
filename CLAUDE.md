@@ -196,7 +196,10 @@ out to both: `notifyMember()`, `notifyMembers()`, `notifyAdmins()`.
 - **Every template has an email counterpart**, so `notify*` is the default way
   to send one. `notifyCourse()` / `notifyFocusMembers()` cover the broadcast
   audiences. Booking reminders use it too since 2026-11-27 (push + our email,
-  no text); before that GHL emailed and texted them.
+  no text); before that GHL emailed and texted them. GHL's own calendar
+  "Reminder" email (10 minutes before) is switched off on every calendar, and
+  `createGHLCalendar` switches it off on new ones
+  (`src/lib/ghl/calendar-notifications.ts`).
 - **Booking confirmations are the app's, email only** (2026-11-27). GHL used
   to send them from the calendar appointment, and its templates arrived with
   the venue, date and tee time blank. `POST /api/bookings/create` now emails
