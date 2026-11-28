@@ -2023,8 +2023,6 @@ function SuccessScreen({
   booking,
   onDone,
   onUpdateBooking,
-  onChosePayAtClub,
-  wallet,
 }: {
   booking: {
     date: string;
@@ -2049,57 +2047,12 @@ function SuccessScreen({
   // changed, the record the admin reads did not.
   const [dinnerRsvp, setDinnerRsvp] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [payingWithCredit, setPayingWithCredit] = useState(false);
   const showDinner =
     !!booking.bookingId && isAviaraEvent(booking.eventName) && booking.groupTable;
-
-  // Which ways this venue takes payment. Pay on App is the checkout link (and
-  // the only place credit can be spent); Pay at club marks the round and is done.
-  const venue = { payment_options: booking.paymentOptions };
-  const payNow = !booking.hostSeat && offersPayNow(venue);
-  // A venue that takes nothing but club payment has already had the round
-  // created that way — see the payment_method the create route writes. There is
-  // no choice to offer and nothing to press: this screen only says so.
-  const clubOnly = !booking.hostSeat && !payNow && offersPayAtClub(venue);
-  // The button, for the venue that takes both. Here the club IS a choice, and
-  // it's the member's to make.
-  const canChooseClub = payNow && offersPayAtClub(venue) && !!booking.bookingId;
-  const [choseClub, setChoseClub] = useState(false);
-  const [markingAtClub, setMarkingAtClub] = useState(false);
-  const [atClubError, setAtClubError] = useState("");
-  /** However they got there: this round is being settled at the club. */
-  const settlingAtClub = clubOnly || choseClub;
-
-  async function handlePayAtClub() {
-    if (!booking.bookingId || markingAtClub) return;
-    setMarkingAtClub(true);
-    setAtClubError("");
-    const error = await markPayAtClub(booking.bookingId);
-    setMarkingAtClub(false);
-    if (error) {
-      setAtClubError(error);
-      return;
-    }
-    setChoseClub(true);
-    onChosePayAtClub(booking.bookingId);
-  }
-  // Something to pay still on screen — the Back button steps down to outline.
-  const hasPayCta = !settlingAtClub && ((payNow && !!booking.paymentUrl) || canChooseClub);
-
-  // Credit the member could put toward this round. Same rules as the payment
-  // banner: a code is issued against a booking row, and only when the balance
-  // covers the round in full — a part-paying code is refused at the checkout.
-  const heldCoupon = booking.bookingId
-    ? (wallet?.couponForBooking(booking.bookingId) ?? null)
-    : null;
-  const creditBalance = wallet?.balance ?? 0;
-  const creditCovers =
-    !!booking.bookingId && !!wallet?.coversBill(booking.amountDue);
-  // How far a real-but-insufficient balance falls short. Zero when there's no
-  // credit to speak of, so the shortfall line stays off for most members.
-  const creditShortfall = wallet?.canPayWithCredit
-    ? Math.max(0, booking.amountDue - creditBalance)
-    : 0;
+  // Every round is paid at the pro shop (client's policy, 2026-11), so this
+  // screen has one thing to say about payment and no payment controls. The
+  // Pay on App / credit / choose-the-club variants were removed; the props that
+  // fed them are still passed but no longer read.
 
   async function handleDone() {
     // Sent either way, as it was when the member had to pick one of three:
@@ -2154,132 +2107,14 @@ function SuccessScreen({
         </p>
       )}
       {booking.players <= 1 && <div className="mb-8" />}
-      <div className="card p-5 w-full max-w-sm mb-4 text-left space-y-2">
-        <p
-          className="text-xs uppercase tracking-widest mb-3"
-          style={{ color: "rgba(0,38,105,0.35)", letterSpacing: "0.14em" }}
-        >
-          What&apos;s next
-        </p>
+      <div className="card p-5 w-full max-w-sm mb-4 text-left">
         <p
           className="text-sm leading-relaxed"
           style={{ color: "rgba(0,38,105,0.6)" }}
         >
-          {/* Two answers, not three: this venue either takes payment on the app
-              or it doesn't, and if it doesn't there was never a third thing to
-              ask. A venue that takes both starts on the Pay on App line and
-              switches once the member picks the club. */}
-          {booking.hostSeat
-            ? "You're hosting this round — your seat is free, there's nothing to pay."
-            : settlingAtClub
-            ? "This round is settled with the club — pay them on the day, there's nothing to do here."
-            : "The slot is yours to pay for — your round is confirmed once payment is complete."}
+          Please pay at the pro shop when you arrive. Introductions begin 15
+          minutes prior to tee time.
         </p>
-        {booking.players > 1 && (
-          <p
-            className="text-sm leading-relaxed"
-            style={{ color: "rgba(0,38,105,0.6)" }}
-          >
-            Each player pays for their own round. The payment banner on the
-            booking screen lists every one still outstanding.
-          </p>
-        )}
-        {/* Payment happens on the venue's own checkout page — each one takes
-            its money separately, so this is that course's link and not a
-            house-wide one. New tab, so this screen (and an unsaved dinner
-            RSVP with it) survives the trip. */}
-        {/* A statement, not a control. It carries the amount because the button
-            it replaces did, and what they owe at the counter is the one thing
-            they still need from this screen.
-
-            The wording is whatever My Bookings will say about the same round, so
-            the two screens can't disagree — and it's the same wording whichever
-            way the round got here, because the app never learns that the club was
-            paid. Amber, not green: this is money still owed. */}
-        {settlingAtClub ? (
-          <p
-            className="!mt-4 text-sm font-semibold rounded-xl px-3 py-2.5 text-center"
-            style={{ background: "rgba(234,179,8,0.08)", color: "#92640a" }}
-          >
-            {PAY_AT_CLUB_LABEL} · {formatUsd(booking.amountDue)}
-          </p>
-        ) : payNow ? (
-          booking.paymentUrl ? (
-            <a
-              href={booking.paymentUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn-gold btn-full !mt-4"
-            >
-              Pay {formatUsd(booking.amountDue)} on App →
-            </a>
-          ) : (
-            /* Every bookable course is required to have a payment link, so this
-               is the belt-and-braces case: say what happens instead of showing a
-               dead button. */
-            <p className="text-sm leading-relaxed" style={{ color: "#92640a" }}>
-              We&apos;ll email your payment link for this round.
-            </p>
-          )
-        ) : null}
-        {/* The other way this venue takes payment, where that's a choice. It
-            sits under Pay on App, which is the only case it appears in — a venue
-            with no checkout has nothing for this button to be an alternative
-            to, and says so above instead. */}
-        {!settlingAtClub && canChooseClub && (
-          <button
-            type="button"
-            onClick={handlePayAtClub}
-            disabled={markingAtClub}
-            className="btn btn-outline btn-full disabled:opacity-50"
-          >
-            {markingAtClub ? "Saving…" : `Pay ${formatUsd(booking.amountDue)} at club`}
-          </button>
-        )}
-        {atClubError && (
-          <p className="text-xs" style={{ color: "#b91c1c" }}>
-            {atClubError}
-          </p>
-        )}
-        {/* Credit is the second way to settle the same bill — the code is a
-            discount typed into the venue's checkout, not a separate way to
-            pay — so it sits under the Pay button rather than replacing it. */}
-        {!payNow || settlingAtClub ? null : heldCoupon ? (
-          <>
-            <button
-              type="button"
-              onClick={() => setPayingWithCredit(true)}
-              className="btn btn-outline btn-full"
-            >
-              🎟 {formatUsd(Number(heldCoupon.amount))} credit ready · view code
-            </button>
-            {/* A code on its own is inert until it reaches the checkout, and
-                nothing else here says so. */}
-            <p className="text-xs leading-relaxed" style={{ color: "#92640a" }}>
-              Copy the code, then paste it into the coupon field at checkout —
-              the discount comes off there, not here.
-            </p>
-          </>
-        ) : creditCovers ? (
-          <button
-            type="button"
-            onClick={() => setPayingWithCredit(true)}
-            className="btn btn-outline btn-full"
-          >
-            Pay with credits · {formatUsd(booking.amountDue)}
-          </button>
-        ) : creditShortfall > 0 ? (
-          /* There's credit, just not enough to cover the round. Saying how far
-             off they are beats silently hiding an option they know they have. */
-          <p
-            className="text-xs leading-relaxed"
-            style={{ color: "rgba(0,38,105,0.45)" }}
-          >
-            You have {formatUsd(creditBalance)} in credits —{" "}
-            {formatUsd(creditShortfall)} short of covering this round, so this
-            one has to be paid in full.
-          </p>
-        ) : null}
       </div>
       {/* One checkbox, not a three-way answer: the venue either holds a seat
           at the group table or it doesn't. Leaving it alone is a complete
@@ -2305,30 +2140,10 @@ function SuccessScreen({
       <button
         onClick={handleDone}
         disabled={submitting}
-        className={cn(
-          "btn disabled:opacity-40 disabled:cursor-not-allowed",
-          // Paying is the action that matters here, so it keeps the gold. This
-          // steps back to an outline rather than competing with it.
-          hasPayCta ? "btn-outline" : "btn-primary",
-        )}
+        className="btn btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
       >
         {submitting ? "Saving…" : "Back to booking"}
       </button>
-
-      {payingWithCredit && booking.bookingId && (
-        <CreditCouponModal
-          target={{ kind: "booking", bookingId: booking.bookingId }}
-          // The same figure the server sizes the code to (bookingAmountDue),
-          // so what the member is shown and what they get can't disagree.
-          price={booking.amountDue}
-          balance={creditBalance}
-          paymentUrl={booking.paymentUrl}
-          roundLabel={`${booking.eventName} on ${booking.date}`}
-          existing={heldCoupon}
-          onIssued={() => wallet?.refetch()}
-          onClose={() => setPayingWithCredit(false)}
-        />
-      )}
     </div>
   );
 }
