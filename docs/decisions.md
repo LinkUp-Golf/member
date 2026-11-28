@@ -112,6 +112,8 @@ Each entry gives the date, who decided (**client** means the LinkUp Golf owner; 
 
 ## Known debt, recorded on purpose
 
+- **2026-11-28 · found, not yet decided. The sign-in redirect blocks every cron.** Vercel calls a cron with `Authorization: Bearer <CRON_SECRET>` and no session; `src/middleware.ts` sends any session-less request outside `PUBLIC_ROUTES` to `/login`, and `/api/cron` was never in that list. `GET https://app.linkup.golf/api/cron/booking-reminders` answers 307 → `/login`, so the seven crons in `vercel.json` (reminders, invite expiry, surveys, proof reminders, hosted-event completion, GHL member sync, credit coupons) have most likely never run in production. Only `/api/cron/slot-release-notices` was opened (each cron route checks the secret itself). Opening the rest at once switches on behaviour production has never had — members deactivated by the nightly sync, invitations expired and their GHL appointments cancelled, a backlog of reminders — so it waits for the client to choose which, and in what order.
+
 - **Host names and descriptions are HTML-escaped on save** (`Fritz&#x27;s Golf`). The fix needs a migration to unescape existing rows in the same change.
 - **Pay-at-club rounds never get the post-round survey**, unless an admin moves their status.
 - **`/api/host/bookings`** offers any member's booking at any course, with no venue filter. This is longstanding and arguably intended.
