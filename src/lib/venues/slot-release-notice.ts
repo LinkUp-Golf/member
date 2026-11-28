@@ -35,14 +35,14 @@ export const DEFAULT_NOTICE_MIN_PLAYERS = 4
  * filled.
  */
 export const DEFAULT_NOTICE_BODY = `This is an automated email from LinkUp Golf.
-[Host name] currently has a foursome booking on [event date] at [tee time]. We currently have [number of confirmed players] players confirmed.
+[Host name] currently has a foursome booking on [event date] at [tee time]. We currently have [number of confirmed players] players confirmed and [open slots] slots open.
 
 The event is still available to our members, but Aviara may release the remaining slots for individual sign ups. We will add any new signups to the tee sheet as they come in.
 
 As always, thanks for your support.`
 
 /** The placeholders the body may use, for the admin form's hint. */
-export const NOTICE_PLACEHOLDERS = ['[Host name]', '[event date]', '[tee time]', '[number of confirmed players]'] as const
+export const NOTICE_PLACEHOLDERS = ['[Host name]', '[event date]', '[tee time]', '[number of confirmed players]', '[open slots]'] as const
 
 /** When the notice for this tee time is due. */
 export function noticeDueAt(date: string, teeTime: string, timezone: string, hoursBefore: number): Date {
@@ -125,47 +125,69 @@ export function groupTeeTimes(rows: NoticeSeatRow[]): NoticeTeeTime[] {
 }
 
 /**
- * The tee time a club holds for us on a day nobody has booked yet.
+ * The tee times a club holds for us that no member has booked yet.
  *
- * Aviara holds one foursome for us every day on its own tee sheet, whether or
- * not a member has signed up (Greg, 2026-11-28: "the booking already exists on
- * the Aviara tee sheet, so we must notify them to release it"). Until the
- * community calendar replaces it, the app's only record of that foursome is the
- * tee time the venue's calendar offers members that day: usually exactly one,
- * but some days the calendar still offers a range, so the first is taken — the
- * club holds one foursome a day, not one per slot. A day the calendar offers
- * nothing (Greg took it off) has no held tee time and no notice.
+ * Aviara holds our foursomes on its own tee sheet whether or not a member has
+ * signed up (Greg, 2026-11-28: "the booking already exists on the Aviara tee
+ * sheet, so we must notify them to release it"), and an empty one needs the
+ * notice most. Until the community calendar replaces it, the app's record of
+ * those foursomes is the tee times the venue's calendar offers members: a full
+ * tee time drops out of the calendar and is in `booked` instead, so the two
+ * together are what the club holds. Greg fills the earlier tee times first, so
+ * on a busy day only the last one or two are short and those are the ones
+ * notified; full ones never are.
  *
- * The playing host counts as a player there (Greg: "they just care that I am
- * taking one of the 4 available slots"); their seat isn't a booking row until
- * the first member books.
+ * Some days the GHL calendar still offers an un-narrowed range (every 5 minutes
+ * for two hours) rather than the tee times held. More tee times than the day's
+ * cap can fill (`maxTeeTimes`) is read as such a range: a booked day then keeps
+ * only its booked tee times, and an unbooked day takes the first — the club
+ * holds at least that one.
  *
- * `offered` is each unbooked date's calendar start times, offset-bearing ISO
- * ("2027-01-23T12:08:00-08:00") or 'HH:MM[:SS]'. Dates with bookings are
- * ignored here: their booked tee times are the held ones.
+ * On a day nobody has booked, the playing host counts as a player in its first
+ * tee time (Greg: "they just care that I am taking one of the 4 available
+ * slots"); their seat isn't a booking row until the first member books. A day
+ * the calendar offers nothing (taken off by an admin) has nothing held.
+ *
+ * `offered` is each date's calendar start times, offset-bearing ISO
+ * ("2027-01-23T12:08:00-08:00") or 'HH:MM[:SS]'. Returns only the tee times
+ * not already in `booked`.
  */
-export function unbookedHeldTeeTimes(
+export function heldTeeTimes(
   booked: NoticeTeeTime[],
   offered: Record<string, string[]>,
   playingHostId: string | null,
+  maxTeeTimes: number,
 ): NoticeTeeTime[] {
-  const bookedDates = new Set(booked.map(g => g.date))
   const held: NoticeTeeTime[] = []
   for (const [date, starts] of Object.entries(offered)) {
-    if (bookedDates.has(date)) continue
-    const times = starts.map(clockOf).filter((t): t is string => !!t).sort()
-    const first = times[0]
-    if (!first) continue
-    held.push({
-      date,
-      teeTime: first,
-      players: playingHostId ? 1 : 0,
-      hostMemberId: playingHostId,
-      firstBookerId: playingHostId ?? '',
+    const bookedTimes = new Set(booked.filter(g => g.date === date).map(g => g.teeTime))
+    const dayBooked = bookedTimes.size > 0
+    const all = [...new Set(starts.map(clockOf).filter((t): t is string => !!t))].sort()
+    const unbooked = all.filter(t => !bookedTimes.has(t))
+
+    const isRange = new Set([...all, ...bookedTimes]).size > maxTeeTimes
+    const picked = isRange ? (dayBooked ? [] : unbooked.slice(0, 1)) : unbooked
+
+    picked.forEach((teeTime, i) => {
+      const hostHere = !dayBooked && i === 0 && !!playingHostId
+      held.push({
+        date,
+        teeTime,
+        players: hostHere ? 1 : 0,
+        hostMemberId: hostHere ? playingHostId : null,
+        firstBookerId: playingHostId ?? '',
+      })
     })
   }
   return held.sort((a, b) => `${a.date} ${a.teeTime}`.localeCompare(`${b.date} ${b.teeTime}`))
 }
+
+/** How many tee times a day's player cap can fill, a foursome to each. */
+export function maxTeeTimesForCap(maxPlayersPerDay: number): number {
+  return Math.max(1, Math.ceil(maxPlayersPerDay / FOURSOME))
+}
+
+export const FOURSOME = 4
 
 /** 'HH:MM:SS' from an ISO start time or a bare clock time; null if neither. */
 function clockOf(start: string): string | null {
@@ -202,6 +224,11 @@ export interface NoticeValues {
   players: number
 }
 
+/** Slots left in the foursome. */
+export function openSlots(players: number): number {
+  return Math.max(0, FOURSOME - players)
+}
+
 /** The body with its placeholders filled. Placeholders match in any case. */
 export function fillNoticeBody(template: string | null | undefined, v: NoticeValues): string {
   const body = template?.trim() ? template : DEFAULT_NOTICE_BODY
@@ -210,13 +237,15 @@ export function fillNoticeBody(template: string | null | undefined, v: NoticeVal
     'event date': formatNoticeDate(v.date),
     'tee time': formatNoticeTime(v.teeTime),
     'number of confirmed players': String(v.players),
+    'open slots': String(openSlots(v.players)),
   }
   return body.replace(/\[([^\]]+)\]/g, (whole, name: string) => values[name.trim().toLowerCase()] ?? whole)
 }
 
 export function noticeSubject(venueName: string, v: NoticeValues): string {
-  const players = `${v.players} ${v.players === 1 ? 'player' : 'players'}`
-  return `LinkUp Golf at ${venueName}: ${formatNoticeDate(v.date)} at ${formatNoticeTime(v.teeTime)}, ${players} confirmed`
+  const open = openSlots(v.players)
+  const slots = `${open} ${open === 1 ? 'slot' : 'slots'} open`
+  return `LinkUp Golf at ${venueName}: ${formatNoticeDate(v.date)} at ${formatNoticeTime(v.teeTime)}, ${slots}`
 }
 
 /** Addresses from a comma-, semicolon- or space-separated list. Invalid ones are dropped. */

@@ -12,7 +12,8 @@ import {
   noticeSubject,
   parseEmailList,
   parseNoticeNumber,
-  unbookedHeldTeeTimes,
+  heldTeeTimes,
+  maxTeeTimesForCap,
   type NoticeSeatRow,
 } from '@/lib/venues/slot-release-notice'
 
@@ -88,35 +89,45 @@ describe('groupTeeTimes', () => {
   })
 })
 
-describe('unbookedHeldTeeTimes', () => {
-  const booked = groupTeeTimes([seat({ booking_date: '2027-01-23' })])
+describe('heldTeeTimes', () => {
+  const MAX = maxTeeTimesForCap(15) // 4
 
   it('takes the calendar tee time on a day nobody booked, with the host counted', () => {
-    const held = unbookedHeldTeeTimes(booked, { '2027-01-24': ['2027-01-24T12:08:00-08:00'] }, 'greg')
+    const held = heldTeeTimes([], { '2027-01-24': ['2027-01-24T12:08:00-08:00'] }, 'greg', MAX)
     expect(held).toEqual([
       { date: '2027-01-24', teeTime: '12:08:00', players: 1, hostMemberId: 'greg', firstBookerId: 'greg' },
     ])
     expect(noticeHostId(held[0]!, 'greg')).toBe('greg')
   })
 
-  it('leaves a booked day to its bookings', () => {
-    expect(unbookedHeldTeeTimes(booked, { '2027-01-23': ['2027-01-23T13:30:00-08:00'] }, 'greg')).toEqual([])
+  it('on a busy day adds only the held tee times nobody booked, at zero', () => {
+    // 12:08, 12:17, 12:25 full (gone from the calendar); 12:34 has one; 12:42 has none.
+    const rows = ['12:08', '12:17', '12:25'].flatMap(t => Array.from({ length: 4 }, () => seat({ tee_time: t })))
+    const booked = groupTeeTimes([...rows, seat({ tee_time: '12:34' })])
+    const held = heldTeeTimes(booked, { '2027-01-23': ['2027-01-23T12:34:00-08:00', '2027-01-23T12:42:00-08:00'] }, 'greg', 5)
+    expect(held.map(h => [h.teeTime, h.players])).toEqual([['12:42:00', 0]])
+    expect(noticeHostId(held[0]!, 'greg')).toBe('greg')
   })
 
-  it('takes only the first tee time when the calendar offers a range', () => {
-    const held = unbookedHeldTeeTimes([], {
-      '2027-01-24': ['2027-01-24T13:00:00-08:00', '2027-01-24T12:10:00-08:00', '12:30'],
-    }, 'greg')
-    expect(held.map(h => h.teeTime)).toEqual(['12:10:00'])
+  it('reads more tee times than the cap can fill as an un-narrowed range', () => {
+    const range = Array.from({ length: 25 }, (_, i) => `2027-01-24T${String(12 + Math.floor((10 + i * 5) / 60)).padStart(2, '0')}:${String((10 + i * 5) % 60).padStart(2, '0')}:00-08:00`)
+    expect(heldTeeTimes([], { '2027-01-24': range }, 'greg', MAX).map(h => h.teeTime)).toEqual(['12:10:00'])
+    const booked = groupTeeTimes([seat({ booking_date: '2027-01-24', tee_time: '12:10' })])
+    expect(heldTeeTimes(booked, { '2027-01-24': range }, 'greg', MAX)).toEqual([])
   })
 
   it('has nothing for a day the calendar offers nothing', () => {
-    expect(unbookedHeldTeeTimes([], { '2027-01-24': [] }, 'greg')).toEqual([])
+    expect(heldTeeTimes([], { '2027-01-24': [] }, 'greg', MAX)).toEqual([])
   })
 
   it('counts nobody where the venue has no playing host', () => {
-    const [held] = unbookedHeldTeeTimes([], { '2027-01-24': ['12:08:00'] }, null)
+    const [held] = heldTeeTimes([], { '2027-01-24': ['12:08:00'] }, null, MAX)
     expect(held!.players).toBe(0)
+  })
+
+  it('gives a 15-player cap four tee times', () => {
+    expect(maxTeeTimesForCap(15)).toBe(4)
+    expect(maxTeeTimesForCap(0)).toBe(1)
   })
 })
 
@@ -144,7 +155,7 @@ describe('the email', () => {
     const body = fillNoticeBody(null, values)
     expect(body).toContain('This is an automated email from LinkUp Golf.')
     expect(body).toContain(
-      'Greg Lipper currently has a foursome booking on Saturday, January 23, 2027 at 12:08 PM. We currently have 3 players confirmed.',
+      'Greg Lipper currently has a foursome booking on Saturday, January 23, 2027 at 12:08 PM. We currently have 3 players confirmed and 1 slots open.',
     )
     expect(body).toContain('Aviara may release the remaining slots for individual sign ups.')
     expect(body).not.toMatch(/\[[^\]]+\]/)
@@ -160,9 +171,9 @@ describe('the email', () => {
 
   it('names the venue, date, time and count in the subject', () => {
     expect(noticeSubject('Park Hyatt Aviara Golf Club', values)).toBe(
-      'LinkUp Golf at Park Hyatt Aviara Golf Club: Saturday, January 23, 2027 at 12:08 PM, 3 players confirmed',
+      'LinkUp Golf at Park Hyatt Aviara Golf Club: Saturday, January 23, 2027 at 12:08 PM, 1 slot open',
     )
-    expect(noticeSubject('Aviara', { ...values, players: 1 })).toContain('1 player confirmed')
+    expect(noticeSubject('Aviara', { ...values, players: 1 })).toContain('3 slots open')
   })
 
   it('shows an afternoon time as PM', () => {
