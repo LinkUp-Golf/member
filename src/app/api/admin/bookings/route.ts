@@ -56,6 +56,7 @@ import { notifyMember } from '@/lib/notify'
 import { sanitiseText, validateDate, validateUUID } from '@/lib/validation'
 import { formatTeeTime } from '@/lib/utils'
 import { logger } from '@/lib/logger'
+import { GHLError } from '@/lib/errors/app-error'
 import {
   AVIARA_ADDRESS,
   AVIARA_TIMEZONE,
@@ -193,7 +194,8 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
               errorMessage: String(err),
               metadata: { bookingId: rowId },
             })
-            warnings.push(`${r.player.name} is on the tee time, but GHL didn't take the appointment.`)
+            const reason = ghlReason(err)
+            warnings.push(`${r.player.name} is on the tee time, but GHL didn't take the appointment${reason ? ` (GHL said: ${reason})` : ''}.`)
           }
         }),
       )
@@ -223,6 +225,19 @@ export const POST = withAuth(async (req: NextRequest, ctx: AuthContext) => {
 
   return NextResponse.json({ added: inserted.length, warnings })
 }, { requireAdmin: true })
+
+/**
+ * GHL's own words for a refusal, shown to the admin so a seat that missed the
+ * calendar says why — the server log isn't somewhere an admin can look.
+ */
+function ghlReason(err: unknown): string | null {
+  if (!(err instanceof GHLError)) return null
+  const body = err.context?.body as { message?: unknown } | undefined
+  const msg = Array.isArray(body?.message) ? body.message.join('; ') : body?.message
+  const status = err.context?.statusCode
+  const text = typeof msg === 'string' && msg.trim() ? msg.trim() : null
+  return text ? text.slice(0, 200) : typeof status === 'number' ? `error ${status}` : null
+}
 
 /**
  * Finds or makes the account and GHL contact for one player. Never throws: a

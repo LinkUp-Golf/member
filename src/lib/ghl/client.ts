@@ -699,13 +699,13 @@ export async function createBooking(params: {
         calendarId: params.calendarId,
         locationId: GHL_LOCATION_ID,
         contactId: params.contact.id,
-        contact: {
-          id: params.contact.id,
-          // Absent rather than '' for a contact with no address — an admin
-          // can add a player by name alone.
-          ...(params.contact.email ? { email: params.contact.email } : {}),
-          phone: params.contact.phone ?? null,
-        },
+        // The contact's details ride along only where there's an address. An
+        // admin can add a player by name alone, and GHL refused the appointment
+        // for a contact object with no email; contactId alone names them, and
+        // GHL reads the rest from the contact it already holds.
+        ...(params.contact.email
+          ? { contact: { id: params.contact.id, email: params.contact.email, phone: params.contact.phone ?? null } }
+          : {}),
         title: params.title,
         calendarNotes: '',
         internalNote: '',
