@@ -114,7 +114,8 @@ export async function getContactByIdStrict(contactId: string): Promise<GHLContac
 export async function createContact(params: {
   firstName: string
   lastName: string
-  email: string
+  /** Optional: an admin can add a player by name alone (see @/lib/bookings/admin-players). */
+  email?: string | null
   phone?: string | null
 }): Promise<string> {
   try {
@@ -124,7 +125,7 @@ export async function createContact(params: {
         locationId: GHL_LOCATION_ID,
         firstName: params.firstName,
         lastName: params.lastName,
-        email: params.email,
+        ...(params.email ? { email: params.email } : {}),
         ...(params.phone ? { phone: params.phone } : {}),
       }),
     })
@@ -680,6 +681,8 @@ async function resolveAppointmentAssignee(calendarId: string): Promise<string | 
 export async function createBooking(params: {
   calendarId: string
   contact: { id: string; email: string; phone?: string | null }
+  /** false: name the contact by id only (admin-added players). Default true. */
+  sendContactDetails?: boolean
   startTime: string   // "YYYY-MM-DDTHH:MM:SS±HHMM"
   endTime: string     // "YYYY-MM-DDTHH:MM:SS±HHMM"
   title: string
@@ -698,11 +701,14 @@ export async function createBooking(params: {
         calendarId: params.calendarId,
         locationId: GHL_LOCATION_ID,
         contactId: params.contact.id,
-        contact: {
-          id: params.contact.id,
-          email: params.contact.email,
-          phone: params.contact.phone ?? null,
-        },
+        // contactId alone names the contact; GHL reads the rest from the record
+        // it holds. The details ride along only where asked for and there's
+        // an address. An admin adding a player asks for none: what they typed
+        // can clash with another contact (GHL refuses a duplicate email or
+        // phone), and the contact is GHL's record, not ours to rewrite.
+        ...(params.contact.email && params.sendContactDetails !== false
+          ? { contact: { id: params.contact.id, email: params.contact.email, phone: params.contact.phone ?? null } }
+          : {}),
         title: params.title,
         calendarNotes: '',
         internalNote: '',

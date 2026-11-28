@@ -9,6 +9,7 @@ import { coursePaymentOptions } from '@/lib/bookings/payment-options'
 import { findNonMemberSeats } from '@/lib/bookings/non-member-guest'
 import { maxNonMemberGuests } from '@/lib/bookings/guest-policy'
 import { nameOrEmail } from '@/lib/utils'
+import { isSeatAdminRecordedForOthers } from '@/lib/bookings/admin-players'
 import type { AuthContext } from '@/lib/auth/types'
 
 // GET /api/bookings
@@ -37,7 +38,9 @@ export const GET = withAuth(async (req: NextRequest, ctx: AuthContext) => {
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  let rows = data ?? []
+  // A seat an admin recorded for someone with no account is booked under the
+  // admin's id only because a row must name a booker — it isn't their round.
+  let rows = (data ?? []).filter(b => !isSeatAdminRecordedForOthers(b, ctx.userId))
 
   // For rows where the user is an invited player, fetch the full sibling group
   // (all other booking rows for that same slot) so the card can show all players.
